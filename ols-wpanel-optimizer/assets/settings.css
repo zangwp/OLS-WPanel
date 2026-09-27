@@ -1,0 +1,1349 @@
+/*
+ * OLS WPanel Optimizer — 设置页样式
+ *
+ * 设计取向：直角、细线、克制配色。层次依靠栅格对齐、字号对比与留白建立，
+ * 不使用圆角、渐变色块或外部资源。图标仅用 WordPress 自带 Dashicons。
+ */
+
+.olsw-settings *,
+.olsw-settings *::before,
+.olsw-settings *::after {
+    border-radius: 0 !important;
+    box-sizing: border-box;
+}
+
+.olsw-settings {
+    --olsw-ink: #0d1622;
+    --olsw-ink-soft: #1b2634;
+    --olsw-text: #1f2933;
+    --olsw-muted: #4b5560;
+    --olsw-line: #d5dae1;
+    --olsw-line-soft: #e7eaee;
+    --olsw-surface: #fff;
+    --olsw-surface-alt: #f7f8f9;
+    --olsw-accent: #1d4ed8;
+    --olsw-accent-deep: #14368f;
+    --olsw-accent-wash: #eef3ff;
+    --olsw-ok: #0b6b4f;
+    --olsw-warn: #8a5a00;
+    --olsw-risk: #a4231c;
+    --olsw-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    color: var(--olsw-text);
+    font-variant-numeric: tabular-nums;
+    margin: 0;
+    max-width: 1180px;
+    padding-top: 4px;
+}
+
+/* ---------- 页头 ---------- */
+
+.olsw-settings .olsw-masthead {
+    align-items: stretch;
+    background: var(--olsw-ink);
+    border-top: 2px solid var(--olsw-accent);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    justify-content: space-between;
+    margin: 16px 0 0;
+}
+
+.olsw-settings .olsw-masthead__brand {
+    align-items: center;
+    display: flex;
+    gap: 14px;
+    min-width: 0;
+    padding: 20px 22px;
+}
+
+.olsw-settings .olsw-masthead__mark {
+    align-items: center;
+    border: 1px solid rgba(255, 255, 255, .28);
+    color: #fff;
+    display: flex;
+    flex: 0 0 auto;
+    height: 42px;
+    justify-content: center;
+    width: 42px;
+}
+
+.olsw-settings .olsw-masthead__mark img {
+    display: block;
+    height: 32px;
+    object-fit: contain;
+    width: 32px;
+}
+
+.olsw-settings .olsw-masthead__eyebrow {
+    color: #8fa3bd;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    margin: 0 0 4px;
+}
+
+.olsw-settings .olsw-masthead h1 {
+    color: #fff;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    line-height: 1.25;
+    margin: 0;
+    padding: 0;
+}
+
+.olsw-settings .olsw-masthead__lead {
+    color: #b7c4d6;
+    font-size: 13.5px;
+    margin: 6px 0 0;
+}
+
+.olsw-settings .olsw-masthead__meta {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.olsw-settings .olsw-masthead__item {
+    border-left: 1px solid rgba(255, 255, 255, .14);
+    padding: 16px 20px;
+}
+
+.olsw-settings .olsw-masthead__label {
+    color: #8fa3bd;
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    margin-bottom: 4px;
+}
+
+.olsw-settings .olsw-masthead__value {
+    color: #fff;
+    display: block;
+    font-family: var(--olsw-mono);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.olsw-settings .olsw-masthead__action {
+    margin: 0 18px 0 0;
+}
+
+/* ---------- 状态读数条 ---------- */
+
+.olsw-settings .olsw-readout {
+    background: var(--olsw-surface);
+    border: 1px solid var(--olsw-line);
+    border-top: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    margin: 0;
+}
+
+.olsw-settings .olsw-readout__item {
+    border-left: 1px solid var(--olsw-line-soft);
+    min-width: 0;
+    padding: 12px 16px;
+}
+
+.olsw-settings .olsw-readout__item:first-child {
+    border-left: 0;
+}
+
+.olsw-settings .olsw-readout__label {
+    color: var(--olsw-muted);
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+.olsw-settings .olsw-readout__value {
+    align-items: center;
+    display: flex;
+    font-size: 15px;
+    font-weight: 600;
+    gap: 8px;
+}
+
+.olsw-settings .olsw-readout__value code {
+    font-family: var(--olsw-mono);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+/* 状态方块：直角实心小块，替代圆点与胶囊徽章 */
+
+.olsw-settings .olsw-flag {
+    flex: 0 0 auto;
+    height: 8px;
+    width: 8px;
+}
+
+.olsw-settings .olsw-flag--ok { background: var(--olsw-ok); }
+.olsw-settings .olsw-flag--warn { background: var(--olsw-warn); }
+.olsw-settings .olsw-flag--risk { background: var(--olsw-risk); }
+.olsw-settings .olsw-flag--idle { background: #9aa5b1; }
+.olsw-settings .olsw-flag--info { background: var(--olsw-accent); }
+
+.olsw-settings .is-ok { color: var(--olsw-ok); }
+.olsw-settings .is-warn { color: var(--olsw-warn); }
+.olsw-settings .is-risk { color: var(--olsw-risk); }
+.olsw-settings .is-idle { color: var(--olsw-muted); }
+
+.olsw-settings .olsw-component-update {
+    align-items: center;
+    background: #fff8e8;
+    border: 1px solid #d6a94b;
+    display: flex;
+    gap: 18px;
+    justify-content: space-between;
+    margin: 16px 0 0;
+    padding: 14px 16px;
+}
+
+.olsw-settings .olsw-component-update p { margin: 4px 0 0; }
+.olsw-settings #olsw-component-update-msg { min-width: 180px; }
+
+/* ---------- 标签导航 ---------- */
+
+.olsw-settings .olsw-tabs {
+    border-bottom: 1px solid var(--olsw-line);
+    display: flex;
+    flex-wrap: wrap;
+    margin: 22px 0 0;
+    padding: 0;
+}
+
+.olsw-settings .olsw-tabs .nav-tab {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: #8b949e;
+    display: inline-flex;
+    font-size: 14px;
+    font-weight: 500;
+    gap: 8px;
+    margin: 0;
+    padding: 12px 18px;
+}
+
+.olsw-settings .olsw-tabs .nav-tab:hover {
+    background: var(--olsw-surface-alt);
+    color: var(--olsw-text);
+}
+
+.olsw-settings .olsw-tabs .nav-tab:focus-visible {
+    outline: 2px solid var(--olsw-accent);
+    outline-offset: -2px;
+}
+
+.olsw-settings .olsw-tabs .nav-tab-active,
+.olsw-settings .olsw-tabs .nav-tab-active:hover {
+    background: var(--olsw-accent);
+    border-bottom-color: var(--olsw-accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.olsw-settings .olsw-tabs .nav-tab-active .dashicons {
+    color: #fff;
+}
+
+.olsw-settings .olsw-tabs .nav-tab .dashicons {
+    font-size: 16px;
+    height: 16px;
+    width: 16px;
+}
+
+/* ---------- 面板与分区 ---------- */
+
+.olsw-settings .olsw-tab-panel {
+    background: #eceff2;
+    border: 1px solid var(--olsw-line);
+    border-top: 0;
+    margin: 0;
+    padding: 18px;
+}
+
+.olsw-settings .olsw-section {
+    background: var(--olsw-surface);
+    border: 1px solid var(--olsw-line);
+    margin: 0 0 16px;
+}
+
+.olsw-settings .olsw-section:last-child {
+    margin-bottom: 0;
+}
+
+.olsw-settings .olsw-section__head {
+    background: var(--olsw-surface-alt);
+    border-bottom: 1px solid var(--olsw-line-soft);
+    padding: 12px 22px;
+}
+
+.olsw-settings .olsw-section__title {
+    align-items: center;
+    color: var(--olsw-ink);
+    display: flex;
+    font-size: 15px;
+    font-weight: 600;
+    gap: 9px;
+    margin: 0;
+}
+
+.olsw-settings .olsw-section__title .dashicons {
+    color: var(--olsw-accent);
+    font-size: 16px;
+    height: 16px;
+    width: 16px;
+}
+
+.olsw-settings .olsw-section__desc {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin: 6px 0 0;
+}
+
+.olsw-settings .olsw-section__body {
+    padding: 4px 22px 20px;
+}
+
+/* ---------- 字段行 ---------- */
+
+.olsw-settings .olsw-field {
+    border-bottom: 1px solid var(--olsw-line-soft);
+    display: grid;
+    gap: 6px 32px;
+    grid-template-columns: 250px minmax(0, 1fr);
+    padding: 20px 0;
+}
+
+.olsw-settings .olsw-field:last-child {
+    border-bottom: 0;
+}
+
+.olsw-settings .olsw-field__title {
+    color: var(--olsw-ink);
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.olsw-settings .olsw-field__body {
+    max-width: 800px;
+    min-width: 0;
+}
+
+.olsw-settings .olsw-field__note {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    line-height: 1.7;
+    margin: 9px 0 0;
+}
+
+.olsw-settings .olsw-field__note strong {
+    color: var(--olsw-text);
+}
+
+.olsw-settings .olsw-field__note code {
+    background: var(--olsw-surface-alt);
+    border: 1px solid var(--olsw-line-soft);
+    font-family: var(--olsw-mono);
+    font-size: 12.5px;
+    padding: 1px 5px;
+}
+
+/* 只读状态行：用于由面板托管、插件内不可编辑的项 */
+
+.olsw-settings .olsw-locked {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.olsw-settings .olsw-locked__value {
+    font-size: 14.5px;
+    font-weight: 600;
+}
+
+.olsw-settings .olsw-locked__hint {
+    color: var(--olsw-muted);
+    font-size: 13px;
+}
+
+/* ---------- 输入框 ---------- */
+
+.olsw-settings .olsw-input {
+    background: #fff;
+    border: 1px solid #c3ccd5;
+    color: var(--olsw-text);
+    font-size: 14px;
+    min-height: 40px;
+    padding: 5px 11px;
+    width: 100%;
+}
+
+.olsw-settings .olsw-input--num {
+    font-family: var(--olsw-mono);
+    max-width: 180px;
+}
+
+.olsw-settings .olsw-input--short {
+    max-width: 120px;
+}
+
+.olsw-settings .olsw-input:focus {
+    border-color: var(--olsw-accent);
+    box-shadow: 0 0 0 1px var(--olsw-accent);
+    outline: 0;
+}
+
+.olsw-settings .olsw-input:disabled {
+    background: var(--olsw-surface-alt);
+    color: var(--olsw-muted);
+}
+
+.olsw-settings .olsw-input-group {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+}
+
+.olsw-settings .olsw-input-group__item {
+    align-items: center;
+    display: flex;
+    gap: 7px;
+}
+
+.olsw-settings .olsw-input-group__item label {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    white-space: nowrap;
+}
+
+/* ---------- 开关（直角） ---------- */
+
+.olsw-settings .olsw-switch {
+    align-items: center;
+    cursor: pointer;
+    display: inline-flex;
+    gap: 10px;
+    min-height: 24px;
+    position: relative;
+}
+
+.olsw-settings .olsw-switch input[type="checkbox"] {
+    height: 26px;
+    left: 0;
+    margin: 0;
+    opacity: 0;
+    position: absolute;
+    top: 0;
+    width: 48px;
+}
+
+.olsw-settings .olsw-switch__track {
+    background: #c0c9d3;
+    display: block;
+    flex: 0 0 auto;
+    height: 26px;
+    position: relative;
+    transition: background .15s ease;
+    width: 48px;
+}
+
+.olsw-settings .olsw-switch__thumb {
+    background: #fff;
+    display: block;
+    height: 20px;
+    left: 3px;
+    position: absolute;
+    top: 3px;
+    transition: transform .15s ease;
+    width: 20px;
+}
+
+.olsw-settings .olsw-switch input:checked + .olsw-switch__track {
+    background: var(--olsw-accent);
+}
+
+.olsw-settings .olsw-switch input:checked + .olsw-switch__track .olsw-switch__thumb {
+    transform: translateX(22px);
+}
+
+.olsw-settings .olsw-switch input:focus-visible + .olsw-switch__track {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--olsw-accent);
+}
+
+.olsw-settings .olsw-switch input:disabled + .olsw-switch__track {
+    background: #dde2e7;
+}
+
+.olsw-settings .olsw-switch__text {
+    font-size: 14.5px;
+    font-weight: 500;
+}
+
+/* ---------- 单选块（直角） ---------- */
+
+.olsw-settings .olsw-choice {
+    display: grid;
+    gap: 10px;
+    max-width: 800px;
+}
+
+.olsw-settings .olsw-choice__item {
+    align-items: flex-start;
+    background: #fff;
+    border: 1px solid var(--olsw-line);
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    padding: 13px 16px;
+    transition: background .15s ease, border-color .15s ease;
+}
+
+.olsw-settings .olsw-choice__item:hover {
+    border-color: #b3bdc8;
+}
+
+.olsw-settings .olsw-choice__item:has(input:checked) {
+    background: var(--olsw-accent-wash);
+    border-color: var(--olsw-accent);
+    box-shadow: inset 3px 0 0 var(--olsw-accent);
+}
+
+.olsw-settings .olsw-choice__item:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: .6;
+}
+
+.olsw-settings .olsw-choice__item input[type="radio"] {
+    accent-color: var(--olsw-accent);
+    flex: 0 0 auto;
+    height: 16px;
+    margin: 3px 0 0;
+    width: 16px;
+}
+
+.olsw-settings .olsw-choice__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.olsw-settings .olsw-choice + .olsw-input-group {
+    margin-top: 12px;
+}
+
+/* ---------- 任务状态 ---------- */
+
+.olsw-settings .olsw-task-status {
+    align-items: center;
+    display: inline-flex;
+    font-size: 15px;
+    font-weight: 600;
+    gap: 8px;
+    min-height: 22px;
+}
+
+.olsw-settings .olsw-choice__label {
+    display: block;
+    font-size: 14.5px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.olsw-settings .olsw-choice__desc {
+    color: var(--olsw-muted);
+    display: block;
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin-top: 4px;
+}
+
+/* ---------- 指标读数 ---------- */
+
+.olsw-settings .olsw-stats {
+    border: 1px solid var(--olsw-line-soft);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    margin: 14px 0 0;
+}
+
+.olsw-settings .olsw-stats__item {
+    border-left: 1px solid var(--olsw-line-soft);
+    min-width: 0;
+    padding: 11px 14px;
+}
+
+.olsw-settings .olsw-stats__item:first-child {
+    border-left: 0;
+}
+
+.olsw-settings .olsw-stats__label {
+    color: var(--olsw-muted);
+    display: block;
+    font-size: 12px;
+    margin-bottom: 5px;
+}
+
+.olsw-settings .olsw-stats__value {
+    color: var(--olsw-ink);
+    display: block;
+    font-family: var(--olsw-mono);
+    font-size: 21px;
+    font-weight: 600;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+/* ---------- 进度条（直角） ---------- */
+
+.olsw-settings .olsw-meter {
+    background: var(--olsw-line-soft);
+    height: 6px;
+    margin: 12px 0 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.olsw-settings .olsw-meter__fill {
+    background: var(--olsw-accent);
+    height: 100%;
+    width: 0;
+}
+
+/* ---------- 操作区 ---------- */
+
+.olsw-settings .olsw-ops {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 18px 0 0;
+}
+
+.olsw-settings .olsw-ops form {
+    margin: 0;
+}
+
+.olsw-settings .olsw-ops__note {
+    color: var(--olsw-muted);
+    flex: 1 1 240px;
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin: 0;
+    min-width: 0;
+}
+
+.olsw-settings .olsw-actions {
+    align-items: center;
+    background: var(--olsw-surface-alt);
+    border: 1px solid var(--olsw-line);
+    border-top: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 22px;
+}
+
+.olsw-settings .olsw-actions__hint {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    margin: 0;
+}
+
+/* ---------- 按钮 ---------- */
+
+.olsw-settings .button {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--olsw-line);
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--olsw-text);
+    display: inline-flex;
+    font-size: 14px;
+    font-weight: 500;
+    gap: 7px;
+    height: 40px;
+    line-height: 1;
+    padding: 0 18px;
+}
+
+.olsw-settings .button:hover:not(:disabled) {
+    background: #e8eef3;
+    border-color: var(--olsw-ink);
+    color: var(--olsw-ink);
+}
+
+.olsw-settings .button:focus-visible {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--olsw-accent);
+    outline: 0;
+}
+
+.olsw-settings .button .dashicons {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 16px;
+    height: 16px;
+    justify-content: center;
+    line-height: 1;
+    width: 16px;
+}
+
+.olsw-settings .button-primary,
+.olsw-settings .button-primary:focus:not(:disabled) {
+    background: var(--olsw-ink);
+    border-color: var(--olsw-ink);
+    color: #fff;
+}
+
+.olsw-settings .button-primary:hover:not(:disabled) {
+    background: var(--olsw-accent-deep);
+    border-color: var(--olsw-accent-deep);
+    color: #fff;
+}
+
+.olsw-settings .button:disabled {
+    cursor: not-allowed;
+    opacity: .45;
+}
+
+.olsw-settings .olsw-managed-action {
+    margin-top: 12px;
+}
+
+/* ---------- 提示条 ---------- */
+
+.olsw-settings .olsw-page-feedback:empty {
+    display: none;
+}
+
+.olsw-settings .olsw-page-notice {
+    background: #fff;
+    border: 1px solid var(--olsw-line);
+    border-left-width: 3px;
+    border-radius: 0;
+    box-shadow: none;
+    margin: 14px 0 0;
+    padding: 1px 14px;
+}
+
+.olsw-settings .olsw-page-notice p {
+    font-size: 13.5px;
+    line-height: 1.7;
+    margin: 11px 0;
+}
+
+.olsw-settings .olsw-page-notice--success { border-left-color: var(--olsw-ok); }
+.olsw-settings .olsw-page-notice--warning { border-left-color: var(--olsw-warn); }
+.olsw-settings .olsw-page-notice--error { border-left-color: var(--olsw-risk); }
+.olsw-settings .olsw-page-notice--info { border-left-color: var(--olsw-accent); }
+
+/* ---------- 关于页 ---------- */
+
+.olsw-settings .olsw-about-lead {
+    color: var(--olsw-muted);
+    font-size: 14px;
+    line-height: 1.75;
+    margin: 0 0 6px;
+}
+
+.olsw-settings .olsw-grid {
+    display: grid;
+    gap: 18px;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+/* ---------- 缓存操作 ---------- */
+
+.olsw-settings .olsw-cache-actions {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 18px;
+}
+
+.olsw-settings .olsw-cache-action {
+    background: var(--olsw-surface-alt);
+    border: 1px solid var(--olsw-line-soft);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 14px;
+}
+
+.olsw-settings .olsw-cache-action form {
+    margin: 0;
+}
+
+.olsw-settings .olsw-cache-action .button {
+    justify-content: center;
+    width: 100%;
+}
+
+.olsw-settings .olsw-cache-action p {
+    color: var(--olsw-muted);
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 10px 0 0;
+}
+
+.olsw-settings .olsw-cache-action p.is-warn {
+    color: #8a5a00;
+}
+
+.olsw-settings .olsw-panel-card {
+    border: 1px solid var(--olsw-line);
+    min-width: 0;
+}
+
+.olsw-settings .olsw-panel-card__head {
+    align-items: center;
+    background: var(--olsw-surface-alt);
+    border-bottom: 1px solid var(--olsw-line-soft);
+    display: flex;
+    gap: 8px;
+    padding: 11px 16px;
+}
+
+.olsw-settings .olsw-panel-card__head h3 {
+    color: var(--olsw-ink);
+    font-size: 14.5px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.olsw-settings .olsw-panel-card__head .dashicons {
+    color: var(--olsw-accent);
+    font-size: 16px;
+    height: 16px;
+    width: 16px;
+}
+
+.olsw-settings .olsw-panel-card__body {
+    padding: 14px 16px 16px;
+}
+
+.olsw-settings .olsw-panel-card p {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    line-height: 1.75;
+    margin: 0 0 10px;
+}
+
+.olsw-settings .olsw-panel-card p:last-child {
+    margin-bottom: 0;
+}
+
+.olsw-settings .olsw-dl {
+    margin: 0 0 14px;
+}
+
+.olsw-settings .olsw-dl__row {
+    border-bottom: 1px solid var(--olsw-line-soft);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    justify-content: space-between;
+    padding: 8px 0;
+}
+
+.olsw-settings .olsw-dl__row:last-child {
+    border-bottom: 0;
+}
+
+.olsw-settings .olsw-dl dt {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+}
+
+.olsw-settings .olsw-dl dd {
+    font-family: var(--olsw-mono);
+    font-size: 13.5px;
+    margin: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
+.olsw-settings .olsw-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* 面板内部回环地址属于运维信息，用小号等宽字呈现，不与主信息争视觉权重 */
+
+.olsw-settings .olsw-endpoint {
+    color: var(--olsw-muted);
+    font-family: var(--olsw-mono);
+    font-size: 11.5px;
+    margin: 10px 0 0;
+    overflow-wrap: anywhere;
+}
+
+/* ---------- 缓存操作面板 ---------- */
+
+.olsw-settings .olsw-cache-status {
+    border-top: 1px solid var(--olsw-line);
+    margin-top: 16px;
+}
+
+.olsw-settings .olsw-cache-status .olsw-section {
+    margin-bottom: 0;
+}
+
+/* ---------- 最近清除记录 ---------- */
+
+.olsw-settings .olsw-log {
+    border: 1px solid var(--olsw-line-soft);
+    margin: 16px 0 0;
+    max-width: 100%;
+}
+
+.olsw-settings .olsw-log table {
+    border: 0;
+    border-collapse: collapse;
+    margin: 0;
+    width: 100%;
+}
+
+.olsw-settings .olsw-log th {
+    background: var(--olsw-surface-alt);
+    border-bottom: 1px solid var(--olsw-line-soft);
+    color: var(--olsw-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.olsw-settings .olsw-log td {
+    border-bottom: 1px solid var(--olsw-line-soft);
+    font-size: 12.5px;
+    padding: 8px 12px;
+}
+
+.olsw-settings .olsw-log tr:last-child td {
+    border-bottom: 0;
+}
+
+.olsw-settings .olsw-log td:first-child {
+    font-family: var(--olsw-mono);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+/* ---------- 字段头与一句话摘要 ---------- */
+
+.olsw-settings .olsw-field__head {
+    min-width: 0;
+}
+
+.olsw-settings .olsw-field__summary {
+    color: var(--olsw-muted);
+    display: block;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-top: 5px;
+}
+
+/* ---------- 要点列表：把长段落拆成可扫读的短句 ---------- */
+
+.olsw-settings .olsw-points {
+    list-style: none;
+    margin: 11px 0 0;
+    padding: 0;
+}
+
+.olsw-settings .olsw-points li {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    line-height: 1.7;
+    padding: 5px 0 5px 13px;
+    position: relative;
+}
+
+.olsw-settings .olsw-points li::before {
+    background: #c2cbd4;
+    bottom: 9px;
+    content: "";
+    left: 0;
+    position: absolute;
+    top: 9px;
+    width: 3px;
+}
+
+.olsw-settings .olsw-points li.is-warn::before { background: var(--olsw-warn); }
+.olsw-settings .olsw-points li.is-risk::before { background: var(--olsw-risk); }
+.olsw-settings .olsw-points li.is-ok::before { background: var(--olsw-ok); }
+
+.olsw-settings .olsw-points li strong {
+    color: var(--olsw-ink);
+}
+
+.olsw-settings .olsw-points__label {
+    color: var(--olsw-ink);
+    font-weight: 600;
+    margin-right: 8px;
+}
+
+.olsw-settings .olsw-points code {
+    background: var(--olsw-surface-alt);
+    border: 1px solid var(--olsw-line-soft);
+    font-family: var(--olsw-mono);
+    font-size: 12.5px;
+    padding: 1px 5px;
+}
+
+/* ---------- 前置提示：说明"为什么不能/不会生效" ---------- */
+
+.olsw-settings .olsw-hint {
+    align-items: flex-start;
+    background: var(--olsw-accent-wash);
+    border: 1px solid #cddcfb;
+    border-left: 3px solid var(--olsw-accent);
+    color: #2b3f5c;
+    display: flex;
+    font-size: 13.5px;
+    gap: 8px;
+    line-height: 1.65;
+    margin: 12px 0 0;
+    padding: 10px 13px;
+}
+
+.olsw-settings .olsw-hint .dashicons {
+    color: var(--olsw-accent);
+    flex: 0 0 auto;
+    font-size: 16px;
+    height: 16px;
+    margin-top: 2px;
+    width: 16px;
+}
+
+.olsw-settings .olsw-hint strong {
+    color: var(--olsw-ink);
+}
+
+/* ---------- 边界与风险提示 ---------- */
+
+.olsw-settings .olsw-callout {
+    align-items: flex-start;
+    background: #fdf8ed;
+    border: 1px solid #ecdcb8;
+    border-left: 3px solid var(--olsw-warn);
+    color: #5c4415;
+    display: flex;
+    font-size: 13.5px;
+    gap: 9px;
+    line-height: 1.7;
+    margin: 12px 0 0;
+    padding: 11px 14px;
+}
+
+.olsw-settings .olsw-callout .dashicons {
+    color: var(--olsw-warn);
+    flex: 0 0 auto;
+    font-size: 17px;
+    height: 17px;
+    margin-top: 2px;
+    width: 17px;
+}
+
+.olsw-settings .olsw-callout strong {
+    color: #3f2f0d;
+}
+
+/* ---------- 更多说明：原生 details 折叠，不依赖 JS ---------- */
+
+.olsw-settings .olsw-more {
+    border-top: 1px solid var(--olsw-line-soft);
+    margin: 12px 0 0;
+    padding-top: 8px;
+}
+
+.olsw-settings .olsw-more summary {
+    align-items: center;
+    color: var(--olsw-accent);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 13px;
+    gap: 6px;
+    list-style: none;
+    padding: 3px 0;
+}
+
+.olsw-settings .olsw-more summary::-webkit-details-marker {
+    display: none;
+}
+
+.olsw-settings .olsw-more summary::after {
+    content: "+";
+    font-family: var(--olsw-mono);
+    font-size: 14px;
+}
+
+.olsw-settings .olsw-more[open] summary::after {
+    content: "\2212";
+}
+
+.olsw-settings .olsw-more summary:focus-visible {
+    outline: 2px solid var(--olsw-accent);
+    outline-offset: 2px;
+}
+
+.olsw-settings .olsw-more__body {
+    padding: 6px 0 2px;
+}
+
+.olsw-settings .olsw-more__body p {
+    color: var(--olsw-muted);
+    font-size: 13.5px;
+    line-height: 1.7;
+    margin: 0 0 7px;
+}
+
+.olsw-settings .olsw-more__body p:last-child {
+    margin-bottom: 0;
+}
+
+.olsw-settings .olsw-more__body code {
+    background: var(--olsw-surface-alt);
+    border: 1px solid var(--olsw-line-soft);
+    font-family: var(--olsw-mono);
+    font-size: 12.5px;
+    padding: 1px 5px;
+}
+
+/* ---------- 小节标题 ---------- */
+
+.olsw-settings .olsw-subhead {
+    color: var(--olsw-ink);
+    font-size: 14.5px;
+    font-weight: 600;
+    margin: 22px 0 0;
+}
+
+/* ---------- 首屏重点模块 ---------- */
+
+.olsw-settings .olsw-section--featured {
+    border-color: #b9cdf7;
+    box-shadow: inset 3px 0 0 var(--olsw-accent);
+}
+
+.olsw-settings .olsw-section--featured > .olsw-section__head {
+    background: var(--olsw-accent-wash);
+    border-bottom-color: #d3e0fb;
+}
+
+.olsw-settings .olsw-section__titlerow {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.olsw-settings .olsw-section__badge {
+    background: var(--olsw-accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    padding: 3px 8px;
+    white-space: nowrap;
+}
+
+/* ---------- 推荐值高亮 ---------- */
+
+.olsw-settings .olsw-key {
+    color: var(--olsw-accent);
+    font-family: var(--olsw-mono);
+    font-weight: 700;
+}
+
+/* ---------- 按钮与原因绑定 ---------- */
+
+.olsw-settings .olsw-ops__group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.olsw-settings .olsw-ops__reason {
+    color: var(--olsw-muted);
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin: 0;
+    max-width: 260px;
+}
+
+.olsw-settings .olsw-ops__reason.is-warn {
+    color: var(--olsw-warn);
+    font-weight: 500;
+}
+
+/* ---------- 结果化状态面板 ---------- */
+
+.olsw-settings .olsw-stats__item.is-ok .olsw-stats__value { color: var(--olsw-ok); }
+.olsw-settings .olsw-stats__item.is-risk .olsw-stats__value { color: var(--olsw-risk); }
+.olsw-settings .olsw-stats__item.is-info .olsw-stats__value { color: var(--olsw-accent); }
+.olsw-settings .olsw-stats__item.is-idle .olsw-stats__value { color: var(--olsw-muted); }
+
+.olsw-settings .olsw-statusline {
+    align-items: center;
+    background: var(--olsw-surface-alt);
+    border: 1px solid var(--olsw-line-soft);
+    border-left: 3px solid #aab3bd;
+    color: var(--olsw-text);
+    display: flex;
+    font-size: 13.5px;
+    gap: 9px;
+    margin: 0;
+    padding: 10px 13px;
+}
+
+.olsw-settings .olsw-statusline.is-active {
+    background: var(--olsw-accent-wash);
+    border-left-color: var(--olsw-accent);
+}
+
+.olsw-settings .olsw-statusline.is-warning {
+    background: #fff8e5;
+    border-color: #f0d58c;
+    border-left-color: var(--olsw-warn);
+}
+
+.olsw-settings .olsw-statusline .dashicons {
+    color: var(--olsw-muted);
+    flex: 0 0 auto;
+    font-size: 17px;
+    height: 17px;
+    width: 17px;
+}
+
+.olsw-settings .olsw-statusline.is-active .dashicons {
+    color: var(--olsw-accent);
+}
+
+.olsw-settings .olsw-statusline.is-warning .dashicons {
+    color: var(--olsw-warn);
+}
+
+/* ---------- 移动端 ---------- */
+
+@media screen and (max-width: 782px) {
+    .olsw-settings {
+        padding-top: 0;
+    }
+
+    .olsw-settings .olsw-tab-panel {
+        padding: 12px;
+    }
+
+    .olsw-settings .olsw-section {
+        margin-bottom: 12px;
+    }
+
+    .olsw-settings .olsw-masthead {
+        flex-direction: column;
+    }
+
+    .olsw-settings .olsw-masthead__brand {
+        padding: 16px;
+    }
+
+    .olsw-settings .olsw-masthead__meta {
+        border-top: 1px solid rgba(255, 255, 255, .14);
+    }
+
+    .olsw-settings .olsw-masthead__item {
+        flex: 1 1 50%;
+        padding: 12px 16px;
+    }
+
+    .olsw-settings .olsw-masthead__item:first-child {
+        border-left: 0;
+    }
+
+    .olsw-settings .olsw-masthead__action {
+        justify-content: center;
+        margin: 12px 16px 16px;
+        width: calc(100% - 32px);
+    }
+
+    .olsw-settings .olsw-readout {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .olsw-settings .olsw-readout__item {
+        border-top: 1px solid var(--olsw-line-soft);
+    }
+
+    .olsw-settings .olsw-readout__item:nth-child(-n+2) {
+        border-top: 0;
+    }
+
+    .olsw-settings .olsw-readout__item:nth-child(odd) {
+        border-left: 0;
+    }
+
+    .olsw-settings .olsw-tabs {
+        gap: 0;
+    }
+
+    .olsw-settings .olsw-tabs .nav-tab {
+        flex: 1 1 50%;
+        justify-content: center;
+        padding: 10px 8px;
+    }
+
+    .olsw-settings .olsw-field {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    /* 单列化，避免 minmax 下限在窄屏撑破容器造成横向溢出 */
+    .olsw-settings .olsw-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .olsw-settings .olsw-cache-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .olsw-settings .olsw-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .olsw-settings .olsw-stats__item:nth-child(odd) {
+        border-left: 0;
+    }
+
+    .olsw-settings .olsw-section__head,
+    .olsw-settings .olsw-section__body {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .olsw-settings .olsw-actions {
+        padding: 14px;
+    }
+
+    .olsw-settings .olsw-dl dd {
+        text-align: left;
+    }
+
+    .olsw-settings .olsw-log td:first-child {
+        white-space: normal;
+    }
+}
