@@ -1452,7 +1452,9 @@ LITESPEEDSOURCEEOF
 	apt-get update
 
 	local package=""
-	for package in openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl lsphp83-gd lsphp83-mbstring lsphp83-xml lsphp83-zip lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick; do
+	# LiteSpeed's PHP 8.3 build includes GD, mbstring, XML and ZIP in the
+	# lsphp83 base package. They are not published as separate Debian packages.
+	for package in openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick; do
 		apt_package_available "$package" || log_error "LiteSpeed 仓库缺少 ${package}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	done
 }
@@ -2005,10 +2007,15 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     configure_litespeed_repository
     apt-get install -y --no-install-recommends \
         openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl \
-        lsphp83-gd lsphp83-mbstring lsphp83-xml lsphp83-zip lsphp83-intl \
-        lsphp83-redis lsphp83-opcache lsphp83-imagick
+        lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick
     /usr/local/lsws/bin/openlitespeed -v
     /usr/local/lsws/lsphp83/bin/lsphp -v
+    LSPHP_MODULES="$INSTALL_WORKDIR/lsphp83-modules.txt"
+    /usr/local/lsws/lsphp83/bin/lsphp -m > "$LSPHP_MODULES"
+    for module in curl dom exif fileinfo gd intl mbstring mysqli openssl redis SimpleXML xml xmlreader xmlwriter zip "Zend OPcache"; do
+        grep -Fxq "$module" "$LSPHP_MODULES" || \
+            log_error "LSPHP 8.3 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
+    done
     # Validate the same plain-text constructs emitted by the installer and Go
     # vhost renderer. The container is disposable, so replacing the vendor
     # sample config here cannot affect a user system.
@@ -2405,12 +2412,8 @@ apt-get install -y \
     lsphp83-common \
     lsphp83-mysql \
     lsphp83-curl \
-    lsphp83-gd \
     jpegoptim \
     optipng \
-    lsphp83-mbstring \
-    lsphp83-xml \
-    lsphp83-zip \
     lsphp83-intl \
     lsphp83-redis \
     lsphp83-opcache \
