@@ -1459,6 +1459,32 @@ LITESPEEDSOURCEEOF
 	done
 }
 
+enable_lsphp_wordpress_modules() {
+	local php_root="/usr/local/lsws/lsphp83/etc/php/8.3"
+	local available_dir="$php_root/mods-available"
+	local conf_dir="$php_root/litespeed/conf.d"
+	local module=""
+	local source=""
+	local priority=""
+	local target=""
+
+	# The LiteSpeed packages install module INI files in mods-available. On the
+	# supported Debian/Ubuntu releases, the vendor phpenmod helper may not create
+	# the LSPHP-specific conf.d links, so manage the exact required set directly.
+	install -d -o root -g root -m 0755 "$conf_dir"
+	for module in opcache curl intl mysqli pdo_mysql igbinary redis imagick; do
+		source="$available_dir/${module}.ini"
+		[[ -f "$source" ]] || log_error "LSPHP 模块配置不存在: ${source}"
+		priority=$(sed -n 's/^[[:space:]]*;[[:space:]]*priority[[:space:]]*=[[:space:]]*//p' "$source" | head -n 1)
+		[[ "$priority" =~ ^[0-9]+$ ]] || priority=20
+		target="$conf_dir/${priority}-${module}.ini"
+		if [[ -e "$target" ]] && [[ ! -L "$target" ]]; then
+			log_error "LSPHP 模块目标不是符号链接，拒绝覆盖: ${target}"
+		fi
+		ln -sfn "$source" "$target"
+	done
+}
+
 configure_debian_source() {
     local source_id="$1"
     local codename="$2"
@@ -2008,6 +2034,7 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     apt-get install -y --no-install-recommends \
         openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl \
         lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick
+    enable_lsphp_wordpress_modules
     /usr/local/lsws/bin/openlitespeed -v
     /usr/local/lsws/lsphp83/bin/lsphp -v
     LSPHP_MODULES="$INSTALL_WORKDIR/lsphp83-modules.txt"
@@ -2418,6 +2445,8 @@ apt-get install -y \
     lsphp83-redis \
     lsphp83-opcache \
     lsphp83-imagick
+
+enable_lsphp_wordpress_modules
 
 log_info "基础组件安装完成"
 else
