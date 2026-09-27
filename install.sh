@@ -2052,7 +2052,8 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     /usr/local/lsws/bin/openlitespeed -v
     /usr/local/lsws/lsphp83/bin/lsphp -v
     LSPHP_MODULES="$INSTALL_WORKDIR/lsphp83-modules.txt"
-    /usr/local/lsws/lsphp83/bin/lsphp -m > "$LSPHP_MODULES"
+    /usr/local/lsws/lsphp83/bin/lsphp --ini
+    /usr/local/lsws/lsphp83/bin/lsphp -m | tee "$LSPHP_MODULES"
     for module in curl dom exif fileinfo gd intl mbstring mysqli openssl redis SimpleXML xml xmlreader xmlwriter zip "Zend OPcache"; do
         grep -Fxq "$module" "$LSPHP_MODULES" || \
             log_error "LSPHP 8.3 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
