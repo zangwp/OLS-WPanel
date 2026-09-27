@@ -1467,6 +1467,7 @@ enable_lsphp_wordpress_modules() {
 	local source=""
 	local priority=""
 	local target=""
+	local candidate=""
 
 	# The LiteSpeed packages install module INI files in mods-available. On the
 	# supported Debian/Ubuntu releases, the vendor phpenmod helper may not create
@@ -1474,8 +1475,21 @@ enable_lsphp_wordpress_modules() {
 	install -d -o root -g root -m 0755 "$conf_dir"
 	for module in opcache curl intl mysqli pdo_mysql igbinary redis imagick; do
 		source="$available_dir/${module}.ini"
+		if [[ ! -f "$source" ]]; then
+			source=""
+			for candidate in "$available_dir"/*-"${module}.ini"; do
+				if [[ -f "$candidate" ]]; then
+					[[ -z "$source" ]] || log_error "LSPHP 模块配置不唯一: ${module}"
+					source="$candidate"
+				fi
+			done
+		fi
 		[[ -f "$source" ]] || log_error "LSPHP 模块配置不存在: ${source}"
-		priority=$(sed -n 's/^[[:space:]]*;[[:space:]]*priority[[:space:]]*=[[:space:]]*//p' "$source" | head -n 1)
+		if [[ "$(basename "$source")" =~ ^([0-9]+)- ]]; then
+			priority="${BASH_REMATCH[1]}"
+		else
+			priority=$(sed -n 's/^[[:space:]]*;[[:space:]]*priority[[:space:]]*=[[:space:]]*//p' "$source" | head -n 1)
+		fi
 		[[ "$priority" =~ ^[0-9]+$ ]] || priority=20
 		target="$conf_dir/${priority}-${module}.ini"
 		if [[ -e "$target" ]] && [[ ! -L "$target" ]]; then
