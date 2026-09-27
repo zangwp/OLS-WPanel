@@ -1996,7 +1996,11 @@ fi
 if $CHECK_OLS_PACKAGES_ONLY; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl
+    # Minimal Debian/Ubuntu container images omit systemctl/systemd-analyze,
+    # while the production installer deliberately requires both before it
+    # creates a private work directory. Install the command package here so
+    # the package probe exercises the same fail-closed preflight.
+    apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl systemd
     init_install_workdir
     configure_litespeed_repository
     apt-get install -y --no-install-recommends \
