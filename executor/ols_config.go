@@ -38,6 +38,7 @@ type olsRuntimePaths struct {
 	managed      string
 	binary       string
 	lsphp        string
+	lsphpCLI     string
 	listenerCert string
 	listenerKey  string
 }
@@ -56,6 +57,7 @@ func currentOLSRuntimePaths() olsRuntimePaths {
 		managed:      "/usr/local/lsws/conf/ols-wpanel/sites.conf",
 		binary:       "/usr/local/lsws/bin/openlitespeed",
 		lsphp:        "/usr/local/lsws/lsphp83/bin/lsphp",
+		lsphpCLI:     "/usr/local/lsws/lsphp83/bin/php",
 		listenerCert: "/usr/local/lsws/conf/ols-wpanel/default.crt",
 		listenerKey:  "/usr/local/lsws/conf/ols-wpanel/default.key",
 	}
@@ -78,6 +80,9 @@ func currentOLSRuntimePaths() olsRuntimePaths {
 	if strings.TrimSpace(cfg.LSPHPBinary) != "" {
 		paths.lsphp = filepath.Clean(cfg.LSPHPBinary)
 	}
+	if strings.TrimSpace(cfg.LSPHPCLI) != "" {
+		paths.lsphpCLI = filepath.Clean(cfg.LSPHPCLI)
+	}
 	if strings.TrimSpace(cfg.OLSListenerCert) != "" {
 		paths.listenerCert = filepath.Clean(cfg.OLSListenerCert)
 	}
@@ -87,9 +92,9 @@ func currentOLSRuntimePaths() olsRuntimePaths {
 	return paths
 }
 
-// LSPHPBinaryPath exposes the configured LiteSpeed PHP runtime to jobs and
-// handlers without duplicating installation paths.
-func LSPHPBinaryPath() string { return currentOLSRuntimePaths().lsphp }
+// LSPHPBinaryPath exposes the configured PHP CLI built with the same LSPHP
+// version and modules as the OpenLiteSpeed worker runtime.
+func LSPHPBinaryPath() string { return currentOLSRuntimePaths().lsphpCLI }
 
 // OpenLiteSpeedBinaryPath exposes the configured server binary for diagnostics.
 func OpenLiteSpeedBinaryPath() string { return currentOLSRuntimePaths().binary }

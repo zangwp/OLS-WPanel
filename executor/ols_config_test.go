@@ -54,6 +54,23 @@ func TestRenderOLSVHostIncludesLSPHPAndLiteSpeedCache(t *testing.T) {
 	}
 }
 
+func TestLSPHPServerAndCLIPathsRemainSeparate(t *testing.T) {
+	oldCfg := config.AppConfig
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{
+		LSPHPBinary: "/opt/ols/bin/lsphp",
+		LSPHPCLI:    "/opt/ols/bin/php",
+	}}
+	t.Cleanup(func() { config.AppConfig = oldCfg })
+
+	if got := LSPHPBinaryPath(); got != "/opt/ols/bin/php" {
+		t.Fatalf("CLI PHP path = %q", got)
+	}
+	content := mustRenderOLSVHost(t, testOLSVHostData(t.TempDir()))
+	if !strings.Contains(content, "path                   /opt/ols/bin/lsphp") {
+		t.Fatalf("vhost did not retain LSAPI server binary:\n%s", content)
+	}
+}
+
 func TestRenderOLSVHostGenericPHPDoesNotEnableLSCache(t *testing.T) {
 	data := testOLSVHostData(t.TempDir())
 	data.SiteType = "php"

@@ -1459,43 +1459,14 @@ LITESPEEDSOURCEEOF
 	done
 }
 
-enable_lsphp_wordpress_modules() {
-	local php_root="/usr/local/lsws/lsphp83/etc/php/8.3"
-	local available_dir="$php_root/mods-available"
-	local conf_dir="$php_root/litespeed/conf.d"
+validate_lsphp_wordpress_modules() {
+	local modules_file="$INSTALL_WORKDIR/lsphp83-modules.txt"
 	local module=""
-	local source=""
-	local priority=""
-	local target=""
-	local candidate=""
 
-	# The LiteSpeed packages install module INI files in mods-available. On the
-	# supported Debian/Ubuntu releases, the vendor phpenmod helper may not create
-	# the LSPHP-specific conf.d links, so manage the exact required set directly.
-	install -d -o root -g root -m 0755 "$conf_dir"
-	for module in opcache curl intl mysqli pdo_mysql igbinary redis imagick; do
-		source="$available_dir/${module}.ini"
-		if [[ ! -f "$source" ]]; then
-			source=""
-			for candidate in "$available_dir"/*-"${module}.ini"; do
-				if [[ -f "$candidate" ]]; then
-					[[ -z "$source" ]] || log_error "LSPHP 模块配置不唯一: ${module}"
-					source="$candidate"
-				fi
-			done
-		fi
-		[[ -f "$source" ]] || log_error "LSPHP 模块配置不存在: ${source}"
-		if [[ "$(basename "$source")" =~ ^([0-9]+)- ]]; then
-			priority="${BASH_REMATCH[1]}"
-		else
-			priority=$(sed -n 's/^[[:space:]]*;[[:space:]]*priority[[:space:]]*=[[:space:]]*//p' "$source" | head -n 1)
-		fi
-		[[ "$priority" =~ ^[0-9]+$ ]] || priority=20
-		target="$conf_dir/${priority}-${module}.ini"
-		if [[ -e "$target" ]] && [[ ! -L "$target" ]]; then
-			log_error "LSPHP 模块目标不是符号链接，拒绝覆盖: ${target}"
-		fi
-		ln -sfn "$source" "$target"
+	/usr/local/lsws/lsphp83/bin/php -m > "$modules_file"
+	for module in curl dom exif fileinfo gd imagick igbinary intl mbstring mysqli openssl pdo_mysql redis SimpleXML xml xmlreader xmlwriter zip "Zend OPcache"; do
+		grep -Fxq "$module" "$modules_file" || \
+			log_error "LSPHP 8.3 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	done
 }
 
@@ -2048,16 +2019,11 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     apt-get install -y --no-install-recommends \
         openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl \
         lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick
-    enable_lsphp_wordpress_modules
     /usr/local/lsws/bin/openlitespeed -v
     /usr/local/lsws/lsphp83/bin/lsphp -v
-    LSPHP_MODULES="$INSTALL_WORKDIR/lsphp83-modules.txt"
-    /usr/local/lsws/lsphp83/bin/lsphp --ini
-    /usr/local/lsws/lsphp83/bin/lsphp -m | tee "$LSPHP_MODULES"
-    for module in curl dom exif fileinfo gd intl mbstring mysqli openssl redis SimpleXML xml xmlreader xmlwriter zip "Zend OPcache"; do
-        grep -Fxq "$module" "$LSPHP_MODULES" || \
-            log_error "LSPHP 8.3 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
-    done
+    /usr/local/lsws/lsphp83/bin/php --ini
+    validate_lsphp_wordpress_modules
+    cat "$INSTALL_WORKDIR/lsphp83-modules.txt"
     # Validate the same plain-text constructs emitted by the installer and Go
     # vhost renderer. The container is disposable, so replacing the vendor
     # sample config here cannot affect a user system.
@@ -2461,7 +2427,7 @@ apt-get install -y \
     lsphp83-opcache \
     lsphp83-imagick
 
-enable_lsphp_wordpress_modules
+validate_lsphp_wordpress_modules
 
 log_info "基础组件安装完成"
 else
@@ -2928,6 +2894,7 @@ cat > "$CONFIG_FILE" << CONFIGEOF
     "ols_managed_config": "/usr/local/lsws/conf/ols-wpanel/sites.conf",
     "ols_binary": "/usr/local/lsws/bin/openlitespeed",
     "lsphp_binary": "/usr/local/lsws/lsphp83/bin/lsphp",
+    "lsphp_cli": "/usr/local/lsws/lsphp83/bin/php",
     "ols_listener_cert": "/usr/local/lsws/conf/ols-wpanel/default.crt",
     "ols_listener_key": "/usr/local/lsws/conf/ols-wpanel/default.key",
     "nginx_sites_available": "/usr/local/lsws/conf/ols-wpanel/sites-available",

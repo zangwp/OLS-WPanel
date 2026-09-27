@@ -54,6 +54,7 @@ type PathsConfig struct {
 	OLSManagedConfig    string `json:"ols_managed_config"`
 	OLSBinary           string `json:"ols_binary"`
 	LSPHPBinary         string `json:"lsphp_binary"`
+	LSPHPCLI            string `json:"lsphp_cli"`
 	OLSListenerCert     string `json:"ols_listener_cert"`
 	OLSListenerKey      string `json:"ols_listener_key"`
 	NginxSitesAvailable string `json:"nginx_sites_available"`
