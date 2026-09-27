@@ -53,7 +53,7 @@ func TestGeneratedWPConfigForcesLiteSpeedCacheAndRedisIsolation(t *testing.T) {
 }
 
 func TestEnsureWPConfigCachePrefixesKeepExistingValues(t *testing.T) {
-	content := "<?php\ndefine('WP_REDIS_PREFIX', 'redis.example:');\ndefine('WP_CACHE_KEY_SALT', 'old.example:');\n/* That's all, stop editing! Happy publishing. */\n"
+	content := "<?php\ndefine('LSOC_PREFIX', 'lsoc.example:');\ndefine('WP_REDIS_PREFIX', 'redis.example:');\ndefine('WP_CACHE_KEY_SALT', 'old.example:');\n/* That's all, stop editing! Happy publishing. */\n"
 
 	updated, inserted := ensureWPConfigCachePrefixes(content, "new.example:")
 	if inserted {
@@ -64,6 +64,9 @@ func TestEnsureWPConfigCachePrefixesKeepExistingValues(t *testing.T) {
 	}
 	if !strings.Contains(updated, "old.example:") {
 		t.Fatalf("old cache key salt was not kept:\n%s", updated)
+	}
+	if !strings.Contains(updated, "lsoc.example:") || strings.Count(updated, "LSOC_PREFIX") != 1 {
+		t.Fatalf("old LiteSpeed object cache prefix was not kept:\n%s", updated)
 	}
 	if got := strings.Count(updated, "WP_REDIS_PREFIX"); got != 1 {
 		t.Fatalf("expected one redis prefix definition, got %d:\n%s", got, updated)

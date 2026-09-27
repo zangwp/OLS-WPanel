@@ -151,10 +151,8 @@ func TestUpdateCDNRealIPGroupFail2banFailureRollsBackDB(t *testing.T) {
 		}
 		return nil
 	}
-	applyOLSTrustedProxyList = func() error {
-		t.Fatal("OLS trusted proxy apply should not run after fail2ban failure")
-		return nil
-	}
+	olsApplyCalls := 0
+	applyOLSTrustedProxyList = func() error { olsApplyCalls++; return nil }
 
 	rec := performSecurityRequest(
 		http.MethodPut,
@@ -183,6 +181,9 @@ func TestUpdateCDNRealIPGroupFail2banFailureRollsBackDB(t *testing.T) {
 	}
 	if applyCalls != 2 {
 		t.Fatalf("apply calls = %d, want initial apply and rollback apply", applyCalls)
+	}
+	if olsApplyCalls != 1 {
+		t.Fatalf("OLS trusted proxy apply calls = %d, want rollback state apply", olsApplyCalls)
 	}
 }
 

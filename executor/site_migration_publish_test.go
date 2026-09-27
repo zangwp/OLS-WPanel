@@ -277,7 +277,7 @@ func TestSiteMigrationTargetPublisherBuiltinCDNUsesTargetDefinitionByName(t *tes
 		t.Fatal(err)
 	}
 	group := settings.CDNGroups[0]
-	if group.TargetID <= 0 || group.Provider != "cloudflare" || group.HeaderName != "CF-Connecting-IP" || !group.Enabled || group.Description != "Cloudflare 官方 IP 段由面板自动拉取" {
+	if group.TargetID <= 0 || group.Provider != "cloudflare" || group.HeaderName != "X-Forwarded-For" || !group.Enabled || group.Description != "OpenLiteSpeed 自动识别 Cloudflare 可信代理" {
 		t.Fatalf("resolved builtin=%+v", group)
 	}
 }

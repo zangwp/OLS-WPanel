@@ -30,7 +30,7 @@ func TestSetServiceStateRejectsCommandSuccessWithoutActiveState(t *testing.T) {
 		guardStateWaitTimeout, guardStatePollInterval = oldTimeout, oldPoll
 	})
 
-	err := SetServiceState("nginx", "start")
+	err := SetServiceState("lsws", "start")
 	if err == nil || !strings.Contains(err.Error(), "目标状态") {
 		t.Fatalf("error=%v, want final-state failure", err)
 	}
@@ -66,7 +66,7 @@ func TestSetServiceStateRestoresServiceWhenPauseFileCannotBeSaved(t *testing.T) 
 		service.Paused, service.Running = oldPaused, oldRunning
 	})
 
-	err := SetServiceState("nginx", "stop")
+	err := SetServiceState(service.ServiceName, "stop")
 	if err == nil || !active || service.Paused || !service.Running {
 		t.Fatalf("error=%v active=%v paused=%v running=%v", err, active, service.Paused, service.Running)
 	}
@@ -98,7 +98,7 @@ func TestClassifyServiceFailure(t *testing.T) {
 }
 
 func TestCoreGuardServices(t *testing.T) {
-	for _, service := range []string{"nginx", "php8.3-fpm", "mariadb", "redis-server"} {
+	for _, service := range []string{"lsws", "mariadb", "redis-server"} {
 		if !isCoreGuardService(service) {
 			t.Fatalf("%s should be a core service", service)
 		}

@@ -16,6 +16,16 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
+This is the initial `v1.0.0` release line.
+
+### Minimal images / download failures
+
+If the short command cannot start because the image lacks basic download and TLS tools, install them once and retry:
+
+```bash
+apt-get update && apt-get install -y --no-install-recommends curl wget ca-certificates openssl && curl -fsSL https://ols.zangyubin.top/install | bash
+```
+
 ## What it installs
 
 - OpenLiteSpeed with generated HTTP/HTTPS listeners and one isolated virtual host per site

@@ -114,7 +114,7 @@ func TestSiteMigrationFreezeSourcePersistsMaintenanceOverlay(t *testing.T) {
 		}
 	}
 	custom := executeSaveNginxCustom(&Task{Payload: &SaveNginxCustomPayload{Site: site, Content: "", PreContent: ""}})
-	if custom.Success || !strings.Contains(custom.Message, "迁移维护") {
+	if custom.Success || !strings.Contains(custom.Message, "OpenLiteSpeed v1.0.0") {
 		t.Fatalf("custom config result=%+v", custom)
 	}
 }

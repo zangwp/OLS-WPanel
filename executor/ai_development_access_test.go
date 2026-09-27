@@ -335,7 +335,7 @@ func TestAIDevelopmentHandoffDescribesSiteAndPanelBoundaries(t *testing.T) {
 		LogDir: "/www/wwwlogs/example.com", PHPPoolPath: "/usr/local/lsws/conf/ols-wpanel/lsphp/wp_example.conf",
 		NginxConfPath: "/usr/local/lsws/conf/vhosts/example.com/vhconf.conf",
 	}, "SHA256:test", time.Date(2026, 9, 15, 1, 2, 3, 0, time.UTC))
-	for _, required := range []string{"Panel version:", "Generated at: 2026-09-15T01:02:03Z", "Site: example.com", "WebRoot: /var/www/example", "Site LSPHP runtime config: /usr/local/lsws/conf/ols-wpanel/lsphp/wp_example.conf (read-only, managed by OLS WPanel)", "Site OpenLiteSpeed virtual-host config: /usr/local/lsws/conf/vhosts/example.com/vhconf.conf (read-only, managed by OLS WPanel)", "Site log directory: /www/wwwlogs/example.com", "CLI PHP and the global php.ini", "server-side handoff", "authoritative", "OLS-WPANEL-CAPABILITIES.md", "aaPanel/BT Panel", "cannot coexist", "ask the user to check the documented OLS WPanel page"} {
+	for _, required := range []string{"Panel version:", "Generated at: 2026-09-15T01:02:03Z", "Site: example.com", "WebRoot: /var/www/example", "Site LSPHP runtime config: /usr/local/lsws/conf/ols-wpanel/lsphp/wp_example.conf (read-only, managed by OLS WPanel)", "Site OpenLiteSpeed virtual-host config: /usr/local/lsws/conf/vhosts/example.com/vhconf.conf (read-only, managed by OLS WPanel)", "Site log directory: /www/wwwlogs/example.com", "CLI PHP may use different values", "server-side handoff", "authoritative", "OLS-WPANEL-CAPABILITIES.md", "aaPanel/BT Panel", "cannot coexist", "ask the user to check the documented OLS WPanel page"} {
 		if !strings.Contains(handoff, required) {
 			t.Fatalf("handoff missing %q: %s", required, handoff)
 		}

@@ -662,7 +662,7 @@ jobs:
           fi
           release_notes="See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$RELEASE_COMMIT/CHANGELOG.md) and [the verified upgrade guide](https://github.com/$GITHUB_REPOSITORY/blob/$RELEASE_COMMIT/docs/verified-install.md)."
           if [[ "$RELEASE_TAG" == 'v1.0.0' ]]; then
-            release_notes="Initial OLS WPanel release with OpenLiteSpeed, per-site LSPHP, automatic LiteSpeed Cache and Redis configuration, and signed amd64/arm64 installation for Debian 13 and Ubuntu 24.04 LTS. $release_notes"
+            release_notes="Initial OLS WPanel release with OpenLiteSpeed, per-site LSPHP, automatic LiteSpeed Cache and Redis configuration, and signed amd64/arm64 installation for Debian 13 and Ubuntu 24.04 LTS. Quick install: https://ols.zangyubin.top/install. $release_notes"
           fi
           gh release create "$RELEASE_TAG" "${assets[@]}" \
             --verify-tag \

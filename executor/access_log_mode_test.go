@@ -28,7 +28,7 @@ func withAccessLogModeStubs(t *testing.T) {
 	oldConfig := config.AppConfig
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: t.TempDir()},
-		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir()},
+		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir(), PHPFPMSock: t.TempDir()},
 	}
 	oldPersist, oldApply := persistAccessLogMode, applyAccessLogNginx
 	t.Cleanup(func() {
@@ -58,8 +58,24 @@ func TestSaveAccessLogModeChecksDatabaseResult(t *testing.T) {
 
 func runAccessLogModeTask(t *testing.T, site *models.Website, mode string) TaskResult {
 	t.Helper()
+	root := t.TempDir()
+	if site.WebRoot == "" {
+		site.WebRoot = root
+	}
+	if site.LogDir == "" {
+		site.LogDir = filepath.Join(root, "logs")
+	}
+	if site.SystemUser == "" {
+		site.SystemUser = "wp_example"
+	}
+	if site.SiteType == "" {
+		site.SiteType = "wordpress"
+	}
+	if site.PHPPoolPath == "" {
+		site.PHPPoolPath = filepath.Join(root, "lsphp.conf")
+	}
 	if site.NginxConfPath == "" {
-		site.NginxConfPath = filepath.Join(t.TempDir(), "example.com.conf")
+		site.NginxConfPath = filepath.Join(root, "example.com.conf")
 	}
 	return executeSetAccessLogMode(&Task{Payload: &SetAccessLogModePayload{Site: site, Mode: mode}})
 }

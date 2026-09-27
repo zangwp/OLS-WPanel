@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func TestAIDevelopmentPHPKillArgsTargetsOnlyPHPFPMWorkers(t *testing.T) {
-	want := []string{"-KILL", "-u", "wp_example", "-f", `^php-fpm: pool `}
+func TestAIDevelopmentPHPKillArgsTargetsOnlyLSPHPWorkers(t *testing.T) {
+	want := []string{"-KILL", "-u", "wp_example", "-f", `(^|/)(lsphp|lsphp83)( |$)`}
 	if got := aiDevelopmentPHPKillArgs("KILL", "wp_example"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%q want=%q", got, want)
 	}

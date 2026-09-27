@@ -8,8 +8,8 @@ import (
 
 func TestRepairManagedServiceDropInsUpdatesOnlyLegacyContent(t *testing.T) {
 	root := t.TempDir()
-	writeDropIn(t, root, "nginx", managedServiceDropInLegacyContent)
-	writeDropIn(t, root, "php8.3-fpm", managedServiceDropInFixedContent)
+	writeDropIn(t, root, "lsws", managedServiceDropInLegacyContent)
+	writeDropIn(t, root, "redis-server", managedServiceDropInFixedContent)
 	writeDropIn(t, root, "mariadb", "[Service]\nRestart=on-failure\nRestartSec=2s\nStartLimitIntervalSec=0\n")
 
 	changed, err := repairManagedServiceDropIns(root)
@@ -20,23 +20,23 @@ func TestRepairManagedServiceDropInsUpdatesOnlyLegacyContent(t *testing.T) {
 		t.Fatal("changed = false, want true")
 	}
 
-	if got := readDropIn(t, root, "nginx"); got != managedServiceDropInFixedContent {
-		t.Fatalf("nginx drop-in = %q, want fixed content", got)
+	if got := readDropIn(t, root, "lsws"); got != managedServiceDropInFixedContent {
+		t.Fatalf("lsws drop-in = %q, want fixed content", got)
 	}
-	if got := readDropIn(t, root, "php8.3-fpm"); got != managedServiceDropInFixedContent {
-		t.Fatalf("php drop-in = %q, want fixed content", got)
+	if got := readDropIn(t, root, "redis-server"); got != managedServiceDropInFixedContent {
+		t.Fatalf("redis drop-in = %q, want fixed content", got)
 	}
 	if got := readDropIn(t, root, "mariadb"); got != "[Service]\nRestart=on-failure\nRestartSec=2s\nStartLimitIntervalSec=0\n" {
 		t.Fatalf("custom mariadb drop-in was overwritten: %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, "redis-server.service.d", "ols-wpanel.conf")); !os.IsNotExist(err) {
-		t.Fatalf("missing redis drop-in stat err = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(root, "nginx.service.d", "ols-wpanel.conf")); !os.IsNotExist(err) {
+		t.Fatalf("legacy nginx drop-in stat err = %v, want not exist", err)
 	}
 }
 
 func TestRepairManagedServiceDropInsReportsNoChangeWhenAlreadyFixed(t *testing.T) {
 	root := t.TempDir()
-	for _, svc := range []string{"nginx", "php8.3-fpm", "mariadb", "redis-server"} {
+	for _, svc := range []string{"lsws", "mariadb", "redis-server"} {
 		writeDropIn(t, root, svc, managedServiceDropInFixedContent)
 	}
 

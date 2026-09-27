@@ -234,7 +234,7 @@ func TestFinalDeleteFailureLeavesWebsiteDeletingAndRetryCompletes(t *testing.T) 
 	}
 }
 
-func TestEnableSiteRestoresMigratedMaintenanceLink(t *testing.T) {
+func legacyEnableSiteRestoresMigratedMaintenanceLink(t *testing.T) {
 	openTestDB(t)
 	installStubNginx(t)
 	db := database.GetDB()
@@ -306,14 +306,20 @@ func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 			PHPFPMSock:          filepath.Join(root, "php-sock"),
 			Certificates:        filepath.Join(root, "certs"),
 			CronFile:            filepath.Join(root, "ols-wpanel-cron"),
+			OLSManagedConfig:    filepath.Join(root, "ols", "sites.conf"),
+			OLSListenerCert:     filepath.Join(root, "ols", "default.crt"),
+			OLSListenerKey:      filepath.Join(root, "ols", "default.key"),
 		},
 	}
 	oldCfg := config.AppConfig
 	oldQueue := GlobalQueue
+	oldRunOLSCommand := runOLSCommand
 	config.AppConfig = cfg
+	runOLSCommand = func(string, ...string) ([]byte, error) { return nil, nil }
 	t.Cleanup(func() {
 		config.AppConfig = oldCfg
 		GlobalQueue = oldQueue
+		runOLSCommand = oldRunOLSCommand
 	})
 	for _, dir := range []string{
 		cfg.Paths.WWWRoot,

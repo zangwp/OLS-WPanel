@@ -1547,16 +1547,13 @@ func TestBaseProvidesPersistentLightDarkThemeToggle(t *testing.T) {
 	}
 }
 
-func TestWebsiteCreationUsesFocusedRedisOptionWithoutExtensionCatalog(t *testing.T) {
+func TestWebsiteCreationOmitsExtensionCatalog(t *testing.T) {
 	for _, path := range []string{"../templates/website_new.html", "../templates/websites.html"} {
 		source, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Contains(source, []byte(`enable_redis_cache`)) {
-			t.Fatalf("%s is missing the focused Redis cache option", path)
-		}
-		for _, forbidden := range [][]byte{[]byte(`api('/extensions')`), []byte(`website.install_themes`), []byte(`website.install_plugins`)} {
+		for _, forbidden := range [][]byte{[]byte(`api('/extensions')`), []byte(`website.install_themes`), []byte(`website.install_plugins`), []byte(`enable_redis_cache`)} {
 			if bytes.Contains(source, forbidden) {
 				t.Fatalf("%s still contains removed extension catalog UI %q", path, forbidden)
 			}

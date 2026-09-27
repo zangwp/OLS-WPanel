@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zangwp/OLS-WPanel/config"
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
@@ -71,6 +72,9 @@ func getSitePasswordResetMode(t *testing.T, db *sql.DB) string {
 // TestSetPasswordResetModeTransitionConsistency 验证每次模式切换后，DB 记录与磁盘
 // mu-plugin 文件内容始终一致（allow 移除文件 / all 隐藏链接 / admin 仅限管理员）。
 func TestSetPasswordResetModeTransitionConsistency(t *testing.T) {
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{LSPHPCLI: "/bin/true"}}
+	t.Cleanup(func() { config.AppConfig = oldConfig })
 	webRoot := t.TempDir()
 	db := setupPasswordResetTestSite(t, webRoot, "", "allow")
 	router := newPasswordResetTestRouter()

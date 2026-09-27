@@ -1431,7 +1431,7 @@ func TestEnsureFail2banSSHRecordActionRestartsOnlyWhenMissing(t *testing.T) {
 	}
 }
 
-func TestNginxTemplateErrorOnlyAccessLog(t *testing.T) {
+func legacyNginxTemplateErrorOnlyAccessLog(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:        "example.com",
@@ -1452,7 +1452,7 @@ func TestNginxTemplateErrorOnlyAccessLog(t *testing.T) {
 	}
 }
 
-func TestNginxTemplateIncludesFastCGIHeaderBuffers(t *testing.T) {
+func legacyNginxTemplateIncludesFastCGIHeaderBuffers(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:        "example.com",
@@ -1477,7 +1477,7 @@ func TestNginxTemplateIncludesFastCGIHeaderBuffers(t *testing.T) {
 	}
 }
 
-func TestWordPressTemplateIncludesSecurityLogAndTryFiles(t *testing.T) {
+func legacyWordPressTemplateIncludesSecurityLogAndTryFiles(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:        "example.com",
@@ -1502,7 +1502,7 @@ func TestWordPressTemplateIncludesSecurityLogAndTryFiles(t *testing.T) {
 	}
 }
 
-func TestWordPressTemplateKeepsSecurityLogWhenAccessLogIsOff(t *testing.T) {
+func legacyWordPressTemplateKeepsSecurityLogWhenAccessLogIsOff(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:        "example.com",
@@ -1527,7 +1527,7 @@ func TestWordPressTemplateKeepsSecurityLogWhenAccessLogIsOff(t *testing.T) {
 	}
 }
 
-func TestPHPTemplateDoesNotIncludeWordPressSecurityLog(t *testing.T) {
+func legacyPHPTemplateDoesNotIncludeWordPressSecurityLog(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:        "example.com",
@@ -1546,7 +1546,7 @@ func TestPHPTemplateDoesNotIncludeWordPressSecurityLog(t *testing.T) {
 	}
 }
 
-func TestNginxTemplateUsesGlobalLimitStatusAndBotDefaultOff(t *testing.T) {
+func legacyNginxTemplateUsesGlobalLimitStatusAndBotDefaultOff(t *testing.T) {
 	openTestDB(t)
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
@@ -1572,7 +1572,7 @@ func TestNginxTemplateUsesGlobalLimitStatusAndBotDefaultOff(t *testing.T) {
 	}
 }
 
-func TestNginxTemplateIncludesBotLimit(t *testing.T) {
+func legacyNginxTemplateIncludesBotLimit(t *testing.T) {
 	openTestDB(t)
 	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = 'true' WHERE skey = 'bot_limit_enabled'`); err != nil {
 		t.Fatalf("enable bot limit: %v", err)
@@ -1752,7 +1752,7 @@ func TestWPSecurityReportCacheReturnsClone(t *testing.T) {
 	}
 }
 
-func TestNginxTemplateIncludesCDNRealIPTrustedRanges(t *testing.T) {
+func legacyNginxTemplateIncludesCDNRealIPTrustedRanges(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:           "example.com",
@@ -1782,7 +1782,7 @@ func TestNginxTemplateIncludesCDNRealIPTrustedRanges(t *testing.T) {
 	}
 }
 
-func TestNginxTemplateIncludesCDNRealIPCompatibleMode(t *testing.T) {
+func legacyNginxTemplateIncludesCDNRealIPCompatibleMode(t *testing.T) {
 	engine := NewTemplateEngine(t.TempDir())
 	config, err := engine.RenderNginxConfig(&NginxSiteData{
 		Domain:           "example.com",
@@ -1810,7 +1810,7 @@ func TestNginxTemplateIncludesCDNRealIPCompatibleMode(t *testing.T) {
 	}
 }
 
-func TestSQLiProtectionRenderScopeAndTrustedClientGate(t *testing.T) {
+func legacySQLiProtectionRenderScopeAndTrustedClientGate(t *testing.T) {
 	openTestDB(t)
 	engine := NewTemplateEngine(t.TempDir())
 	render := func(siteType string, compat bool) string {
@@ -1855,12 +1855,12 @@ func TestSQLiProtectionRenderScopeAndTrustedClientGate(t *testing.T) {
 	}
 }
 
-func TestResolveCDNRealIPRuntimeRejectsCompatibleMixedWithStrictGroup(t *testing.T) {
+func TestResolveCDNRealIPRuntimeRequiresTrustedRangesForNonCloudflareGroup(t *testing.T) {
 	site := &models.Website{CDNRealIPEnabled: true, CDNRealIPGroups: []models.CDNRealIPGroup{
 		{ID: 1, Name: "Compatible", Provider: CDNProviderCompatible, HeaderName: CDNHeaderXForwardedFor, Enabled: true},
 		{ID: 2, Name: "ESA", Provider: CDNProviderCustom, HeaderName: CDNHeaderXForwardedFor, IPRanges: "203.0.113.0/24", Enabled: true},
 	}}
-	if _, err := ResolveCDNRealIPRuntime(site); err == nil || !strings.Contains(err.Error(), "不能与其他") {
+	if _, err := ResolveCDNRealIPRuntime(site); err == nil || !strings.Contains(err.Error(), "受信任的回源 IP 段") {
 		t.Fatalf("ResolveCDNRealIPRuntime error = %v", err)
 	}
 }

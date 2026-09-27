@@ -54,9 +54,19 @@ func TestEnsurePHPExifExtensionInstallsAndReloadsWhenMissing(t *testing.T) {
 	binDir := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "calls.log")
 
-	writeStubBinary(t, binDir, "dpkg", 1, marker)      // "not installed"
-	writeStubBinary(t, binDir, "apt-get", 0, marker)   // install succeeds
-	writeStubBinary(t, binDir, "systemctl", 0, marker) // reload succeeds
+	writeStubBinary(t, binDir, "dpkg", 1, marker)    // "not installed"
+	writeStubBinary(t, binDir, "apt-get", 0, marker) // install succeeds
+	oldRunOLSCommand := runOLSCommand
+	runOLSCommand = func(name string, args ...string) ([]byte, error) {
+		line := name + " " + strings.Join(args, " ") + "\n"
+		file, err := os.OpenFile(marker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err == nil {
+			_, _ = file.WriteString(line)
+			_ = file.Close()
+		}
+		return nil, err
+	}
+	t.Cleanup(func() { runOLSCommand = oldRunOLSCommand })
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -67,8 +77,8 @@ func TestEnsurePHPExifExtensionInstallsAndReloadsWhenMissing(t *testing.T) {
 	if !strings.Contains(joined, "apt-get") {
 		t.Fatalf("expected apt-get install to run when extension is missing, calls: %v", calls)
 	}
-	if !strings.Contains(joined, "systemctl") || !strings.Contains(joined, "reload") || !strings.Contains(joined, "php8.3-fpm") {
-		t.Fatalf("expected systemctl reload php8.3-fpm to run after a successful install, calls: %v", calls)
+	if !strings.Contains(joined, "openlitespeed -t") || !strings.Contains(joined, "systemctl restart lsws") {
+		t.Fatalf("expected OpenLiteSpeed validation and restart after a successful install, calls: %v", calls)
 	}
 }
 
@@ -76,9 +86,14 @@ func TestEnsurePHPExifExtensionDoesNotReloadOnInstallFailure(t *testing.T) {
 	binDir := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "calls.log")
 
-	writeStubBinary(t, binDir, "dpkg", 1, marker)      // "not installed"
-	writeStubBinary(t, binDir, "apt-get", 1, marker)   // install fails
-	writeStubBinary(t, binDir, "systemctl", 1, marker) // must not be reached
+	writeStubBinary(t, binDir, "dpkg", 1, marker)    // "not installed"
+	writeStubBinary(t, binDir, "apt-get", 1, marker) // install fails
+	oldRunOLSCommand := runOLSCommand
+	runOLSCommand = func(string, ...string) ([]byte, error) {
+		t.Fatal("OpenLiteSpeed reload must not run when package installation fails")
+		return nil, nil
+	}
+	t.Cleanup(func() { runOLSCommand = oldRunOLSCommand })
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 

@@ -31,7 +31,7 @@ func withDocumentRootStubs(t *testing.T) {
 	database.DB = db
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: t.TempDir()},
-		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir()},
+		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir(), PHPFPMSock: t.TempDir()},
 	}
 	t.Cleanup(func() {
 		persistDocumentRoot, applyDocumentRootNginx = oldPersist, oldApply
@@ -43,9 +43,12 @@ func withDocumentRootStubs(t *testing.T) {
 
 func documentRootTestSite(t *testing.T) *models.Website {
 	t.Helper()
+	root := t.TempDir()
 	return &models.Website{
-		ID: 1, Domain: "example.com", SiteType: "php", WebRoot: t.TempDir(),
-		NginxConfPath: filepath.Join(t.TempDir(), "example.com.conf"),
+		ID: 1, Domain: "example.com", SiteType: "php", WebRoot: root,
+		SystemUser: "wp_example", LogDir: filepath.Join(root, "logs"),
+		PHPPoolPath:   filepath.Join(root, "lsphp.conf"),
+		NginxConfPath: filepath.Join(root, "example.com.conf"),
 	}
 }
 

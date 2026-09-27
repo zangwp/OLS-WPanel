@@ -19,11 +19,14 @@ func setupSoftwareReloadTest(t *testing.T, content string) (string, *gin.Engine)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	oldPath := softwareNginxConfigPath
+	oldPath := softwarePHPRuntimeConfigPath
+	oldRegenerate := softwareRegenerateAllSitesFPM
 	oldRunner := runSoftwareShellCommand
-	softwareNginxConfigPath = path
+	softwarePHPRuntimeConfigPath = func() string { return path }
+	softwareRegenerateAllSitesFPM = func() error { return nil }
 	t.Cleanup(func() {
-		softwareNginxConfigPath = oldPath
+		softwarePHPRuntimeConfigPath = oldPath
+		softwareRegenerateAllSitesFPM = oldRegenerate
 		runSoftwareShellCommand = oldRunner
 	})
 	gin.SetMode(gin.TestMode)
@@ -57,7 +60,7 @@ func setupSoftwarePHPRebuildTest(t *testing.T, content string, regenerate func()
 
 func performSoftwareConfigSave(router *gin.Engine, value string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
-	body := `{"name":"Nginx","key":"client_max_body_size","value":"` + value + `"}`
+	body := `{"name":"PHP","key":"opcache.memory_consumption","value":"` + value + `"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/software/config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, req)
@@ -84,8 +87,8 @@ func softwareResponseMessage(t *testing.T, recorder *httptest.ResponseRecorder) 
 	return response.Message
 }
 
-func TestSoftwareNginxReloadFailureRestoresOldConfig(t *testing.T) {
-	oldContent := "client_max_body_size 64M;\n"
+func TestSoftwareOpenLiteSpeedReloadFailureRestoresOldConfig(t *testing.T) {
+	oldContent := "opcache.memory_consumption = 64\n"
 	path, router := setupSoftwareReloadTest(t, oldContent)
 	call := 0
 	runSoftwareShellCommand = func(command string) ([]byte, error) {
@@ -96,7 +99,7 @@ func TestSoftwareNginxReloadFailureRestoresOldConfig(t *testing.T) {
 		return nil, nil
 	}
 
-	recorder := performSoftwareConfigSave(router, "128M")
+	recorder := performSoftwareConfigSave(router, "128")
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -111,8 +114,8 @@ func TestSoftwareNginxReloadFailureRestoresOldConfig(t *testing.T) {
 	}
 }
 
-func TestSoftwareNginxRecoveryReloadFailureNeverReportsSuccess(t *testing.T) {
-	oldContent := "client_max_body_size 64M;\n"
+func TestSoftwareOpenLiteSpeedRecoveryReloadFailureNeverReportsSuccess(t *testing.T) {
+	oldContent := "opcache.memory_consumption = 64\n"
 	path, router := setupSoftwareReloadTest(t, oldContent)
 	call := 0
 	runSoftwareShellCommand = func(command string) ([]byte, error) {
@@ -123,7 +126,7 @@ func TestSoftwareNginxRecoveryReloadFailureNeverReportsSuccess(t *testing.T) {
 		return nil, nil
 	}
 
-	recorder := performSoftwareConfigSave(router, "128M")
+	recorder := performSoftwareConfigSave(router, "128")
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -135,15 +138,15 @@ func TestSoftwareNginxRecoveryReloadFailureNeverReportsSuccess(t *testing.T) {
 	}
 }
 
-func TestSoftwareNginxSuccessfulReloadKeepsNewConfig(t *testing.T) {
-	path, router := setupSoftwareReloadTest(t, "client_max_body_size 64M;\n")
+func TestSoftwareOpenLiteSpeedSuccessfulReloadKeepsNewConfig(t *testing.T) {
+	path, router := setupSoftwareReloadTest(t, "opcache.memory_consumption = 64\n")
 	runSoftwareShellCommand = func(command string) ([]byte, error) { return nil, nil }
 
-	recorder := performSoftwareConfigSave(router, "128M")
+	recorder := performSoftwareConfigSave(router, "128")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "client_max_body_size 128M;") {
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "opcache.memory_consumption = 128") {
 		t.Fatalf("config=%q", got)
 	}
 }

@@ -23,6 +23,7 @@ func setupWebsiteAliasTest(t *testing.T) *models.Website {
 			NginxSitesAvailable: filepath.Join(root, "available"),
 			NginxSitesEnabled:   filepath.Join(root, "enabled"),
 			PHPFPMSock:          filepath.Join(root, "php"),
+			OLSManagedConfig:    filepath.Join(root, "ols", "managed.conf"),
 		},
 	}
 	t.Cleanup(func() {
@@ -31,12 +32,12 @@ func setupWebsiteAliasTest(t *testing.T) *models.Website {
 	})
 	site := &models.Website{
 		ID: 91, Domain: "example.com", Aliases: "www.example.com", Status: models.StatusActive,
-		SiteType: "wordpress", WebRoot: filepath.Join(root, "www"), LogDir: filepath.Join(root, "logs"),
+		SiteType: "wordpress", SystemUser: "wp_alias", WebRoot: filepath.Join(root, "www"), LogDir: filepath.Join(root, "logs"),
 		NginxConfPath: filepath.Join(root, "available", "example.com.conf"), PHPPoolPath: filepath.Join(root, "php", "example.com.conf"),
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
 		(id,name,domain,aliases,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
-		VALUES (91,'alias','example.com','www.example.com','active','wordpress','u',?,'','db','u',?,?)`,
+		VALUES (91,'alias','example.com','www.example.com','active','wordpress','wp_alias',?,'','db','wp_alias',?,?)`,
 		site.WebRoot, site.PHPPoolPath, site.NginxConfPath); err != nil {
 		t.Fatal(err)
 	}

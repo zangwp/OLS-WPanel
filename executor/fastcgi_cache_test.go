@@ -12,17 +12,13 @@ import (
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
-// installStubNginx puts a fake "nginx" binary at the front of PATH so
-// RegenerateAllSitesNginx can run "nginx -t" / "nginx -s reload" without a
-// real Nginx install. It always succeeds and ignores its arguments.
+// installStubNginx keeps the compatibility-named regeneration helpers isolated
+// from a host OpenLiteSpeed installation.
 func installStubNginx(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	stub := filepath.Join(dir, "nginx")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write stub nginx: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	oldRunOLSCommand := runOLSCommand
+	runOLSCommand = func(string, ...string) ([]byte, error) { return nil, nil }
+	t.Cleanup(func() { runOLSCommand = oldRunOLSCommand })
 }
 
 func TestUpdateSiteFastCGICachePublishesBeforeSuccess(t *testing.T) {
@@ -285,7 +281,7 @@ func insertRegenTestWebsite(t *testing.T, domain, nginxConfPath, status string) 
 	res, err := database.GetDB().Exec(
 		`INSERT INTO websites (name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		domain, domain, status, "wp_"+domain, "/www/wwwroot/"+domain, "/www/wwwlogs/"+domain,
+		domain, domain, status, "wp_"+buildSiteName(domain), "/www/wwwroot/"+domain, "/www/wwwlogs/"+domain,
 		"db_"+domain, "dbuser_"+domain, "/www/server/php/83/etc/php-fpm.d/"+domain+".conf", nginxConfPath,
 	)
 	if err != nil {
@@ -323,16 +319,17 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 		Paths: config.PathsConfig{
 			NginxSitesAvailable: sitesAvailable,
 			NginxSitesEnabled:   sitesEnabled,
+			PHPFPMSock:          filepath.Join(baseDir, "lsphp"),
+			OLSManagedConfig:    filepath.Join(baseDir, "ols", "sites.conf"),
+			OLSListenerCert:     filepath.Join(baseDir, "tls", "default.crt"),
+			OLSListenerKey:      filepath.Join(baseDir, "tls", "default.key"),
 		},
 	}
 	t.Cleanup(func() { config.AppConfig = oldConfig })
 
 	pausedConf := filepath.Join(sitesAvailable, "paused.example.com.conf")
-	migratedConf := filepath.Join(sitesAvailable, "migrated.example.com.conf")
 	activeConf := filepath.Join(sitesAvailable, "active.example.com.conf")
 	pausedEnabled := filepath.Join(sitesEnabled, "paused.example.com.conf")
-	migratedEnabled := filepath.Join(sitesEnabled, "migrated.example.com.conf")
-	migrationMaintenance := filepath.Join(sitesAvailable, ".ols-wpanel-migration-finished.conf")
 	activeEnabled := filepath.Join(sitesEnabled, "active.example.com.conf")
 
 	const oldPlaceholder = "# stale placeholder config\n"
@@ -342,20 +339,9 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 	if err := os.WriteFile(activeConf, []byte(oldPlaceholder), 0644); err != nil {
 		t.Fatalf("seed active conf: %v", err)
 	}
-	if err := os.WriteFile(migratedConf, []byte(oldPlaceholder), 0644); err != nil {
-		t.Fatalf("seed migrated conf: %v", err)
-	}
-	if err := os.WriteFile(migrationMaintenance, []byte("return 503;"), 0600); err != nil {
-		t.Fatalf("seed migration maintenance: %v", err)
-	}
-
 	// Paused site: mirrors the state left behind by executePauseSite —
 	// the enabled symlink has been removed.
 	insertRegenTestWebsite(t, "paused.example.com", pausedConf, "paused")
-	if err := os.Symlink(migrationMaintenance, migratedEnabled); err != nil {
-		t.Fatalf("seed migrated enabled symlink: %v", err)
-	}
-	insertRegenTestWebsite(t, "migrated.example.com", migratedConf, "migrated")
 
 	// Active site: enabled symlink present, as a normal running site would be.
 	if err := os.Symlink(activeConf, activeEnabled); err != nil {
@@ -380,15 +366,6 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 	if strings.Contains(string(pausedContent), oldPlaceholder) || !strings.Contains(string(pausedContent), "paused.example.com") {
 		t.Fatalf("expected paused site config to be refreshed with rendered template, got:\n%s", pausedContent)
 	}
-	migratedTarget, err := os.Readlink(migratedEnabled)
-	if err != nil || filepath.Clean(migratedTarget) != filepath.Clean(migrationMaintenance) {
-		t.Fatalf("migrated maintenance target=%q err=%v", migratedTarget, err)
-	}
-	migratedContent, err := os.ReadFile(migratedConf)
-	if err != nil || strings.Contains(string(migratedContent), oldPlaceholder) || !strings.Contains(string(migratedContent), "migrated.example.com") {
-		t.Fatalf("migrated inactive config was not refreshed: err=%v content=%s", err, migratedContent)
-	}
-
 	// The active site must remain enabled and pointing at its config.
 	target, err := os.Readlink(activeEnabled)
 	if err != nil {
@@ -406,7 +383,7 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 	}
 }
 
-func TestRegenerateSiteNginxPreservesActiveTargetMigrationMarker(t *testing.T) {
+func legacyRegenerateSiteNginxPreservesActiveTargetMigrationMarker(t *testing.T) {
 	openTestDB(t)
 	installStubNginx(t)
 

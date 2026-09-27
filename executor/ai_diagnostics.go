@@ -929,7 +929,7 @@ func aiSystemPrompt() string {
 		"code_suspects 是面板只读扫描当前启用主题、启用插件和少量高价值文件得到的证据。若 code_suspects 中存在 high 且有文件行号，应优先作为可能原因；不要要求用户再手动查同一处证据。",
 		"code_suspects 中 context=conditional_block 的 die/wp_die/exit 表示位于条件代码块内，通常只作为低优先级线索；除非日志或请求条件能直接对应，不要把它写成主要原因。",
 		"当 diagnosis_profile.profile=performance 时，优先分析 performance_summary 中的服务器负载、站点 LSPHP 资源占用、LiteSpeed 页面缓存状态、Redis 对象缓存和活跃插件结构；不要把性能问题默认当成 500 或服务宕机。",
-		"如果 site_summary.fastcgi_cache_enabled=true，表示面板的 LiteSpeed 页面缓存已开启。当前上下文不包含真实命中率；没有探测证据时不得把缓存未命中列为原因。可建议检查面板已有的缓存配置与清理功能，并排查 Redis 对象缓存、主题插件、数据库查询、图片资源和外部请求。",
+		"如果 site_summary.fastcgi_cache_enabled=true，表示面板的 LiteSpeed 页面缓存已开启。不能建议安装其他 WordPress 页面缓存插件。当前上下文不包含真实命中率；没有探测证据时不得把缓存未命中列为原因，也不得要求使用 curl、浏览器开发者工具或“网站监控”查看命中率。可建议检查面板已有的缓存配置与清理功能，并排查 Redis 对象缓存、主题插件、数据库查询、图片资源和外部请求。",
 		"软件管理只能确认服务状态和现有基础配置；当前面板没有 LSPHP worker 饱和历史、慢请求趋势或进程压力监控。没有相应证据时不得断言 worker 耗尽，也不要把调整并发数作为直接操作建议。",
 		"recent_panel_operations 是面板操作审计线索，不是故障原因结论。只有操作类型、时间和日志证据能直接对应时，才可作为可能原因；不要把 CDN 真实 IP、SSL、备份等无直接证据的近期操作表述为原因。",
 		"不要声称已经修改服务器。不要建议任意 shell 命令。不要输出需要 root 权限的操作。",
