@@ -985,6 +985,7 @@ var i18nKeys = []string{
 	"software.syntax_check_failed_with_rollback",
 	"software.unknown_software",
 	"software.unsupported_config_item",
+	"software.update_available_candidate",
 	"software.upload_max_filesize_hint",
 	"software.upload_max_filesize_label",
 	"software.value_no_newline",
