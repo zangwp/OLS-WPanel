@@ -52,7 +52,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 | 每份 SHA-256 清单 | 4 KiB |
 | 每份 Ed25519 签名 | 64 bytes |
 | 第三方许可归档 | 64 MiB |
-| PHP 仓库 keyring `.deb` | 1 MiB |
+| LiteSpeed / MariaDB 仓库公钥 | 1 MiB |
 | WordPress 备用 ZIP | 256 MiB |
 | 公网 IP 文本响应 | 4 KiB |
 
@@ -75,7 +75,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 
 安装器会进行广泛的主机级修改，包括但不限于：
 
-- 配置当前发行版的软件源并安装/启用系统包；Debian 使用经固定 keyring 校验的 PHP 源，Ubuntu 使用 Noble 原生 PHP 8.3；
+- 配置当前发行版软件源和经验证的 LiteSpeed 官方源；显式选择 MariaDB 系列时配置 MariaDB 官方源；
 - 写入 sysctl、文件描述符、Swap 与 systemd 配置；
 - 安装并配置 OpenLiteSpeed、LSPHP、MariaDB、Redis、Fail2ban 与 nftables/UFW 规则；
 - 创建 `/www/ols-wpanel`、网站/日志/证书目录和面板服务；
@@ -112,13 +112,14 @@ openssl x509 -in /www/ols-wpanel/certs/panel.crt -noout -fingerprint -sha256
 | 已签名发布资产 | GitHub Releases | 可使用管理员明确配置的 HTTPS 反代 |
 | Debian 包与元数据 | Debian 官方源或所选镜像 | 部分 APT 镜像 URL 使用 HTTP，完整性依赖 APT 签名链 |
 | Ubuntu 包与元数据 | Ubuntu 官方源或所选镜像 | amd64 使用 Ubuntu archive，arm64 使用 Ubuntu ports；完整性依赖 APT 签名链 |
-| PHP 8.3 仓库 | Debian 使用 packages.sury.org 或所选镜像；Ubuntu 使用 Noble 系统源 | Debian 下载固定版本仓库 keyring 与已签名包 |
+| OpenLiteSpeed / LSPHP 仓库 | `rpms.litespeedtech.com` | 两把仓库公钥均使用发布内固定 SHA-256 校验，支持 LSPHP 8.3/8.4/8.5 |
+| 可选 MariaDB 仓库 | `mirror.mariadb.org`、`supplychain.mariadb.com` | 仅在全新安装显式选择时启用；Ubuntu 24.04 支持 10.11/11.4/11.8，Debian 13 支持 11.8，公钥完整指纹必须匹配 |
 | WordPress 备用包 | wordpress.org | 下载失败时安装可继续，但后续建站仍需网络并可能失败 |
 | 公网地址显示 | ip.sb、ifconfig.me | 仅用于安装完成页；服务会看到连接源 IP |
 
 安装器本身不发送安装遥测。运行时遥测是另一项功能：默认关闭、没有预设端点，只有配置自定义端点并启用后才发送稳定伪匿名 ID 与版本。JSON 不含业务数据或 IP 字段，但接收端仍会看到网络源 IP 与时间。
 
-Debian 的 PHP 仓库引导固定使用 `debsuryorg-archive-keyring` `2025.11.18`，其 `.deb` 的 SHA-256 必须是 `7511384559c9ddf1d5ce5f60be429ae9d4e7d01d9480d6f1b7a30c0810cf8b60`。安装器先核对完整哈希、包名、版本和架构，全部匹配后才允许 `dpkg` 执行；下载失败或任何字段不匹配都会换下一个来源，不会复用未由本次安装验证的本机 keyring。Ubuntu 24.04 不执行该第三方 keyring 包。上游轮换 keyring 时，必须先审计新包并在新的 OLS WPanel 版本中更新这些固定值。
+LiteSpeed 仓库的两把公钥分别按发布内固定 SHA-256 验证，随后才写入 OLS WPanel 专用 keyring。MariaDB 可选仓库使用专用 keyring 路径，并要求公钥完整指纹严格等于 `177F4010FE56CA3336300305F1656F24C74CD1D8`。上游轮换密钥时，必须先审计并在新的 OLS WPanel 版本中更新固定值；运行中的安装器不会自动信任新密钥。
 
 ## 6. repair 的保护与限制
 

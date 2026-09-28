@@ -750,6 +750,13 @@ var upgrades = []Upgrade{
 		Description: "移除不再维护的外部扩展推荐项",
 		Func:        removeDeprecatedExtensionRecommendation,
 	},
+	{
+		Version:     "1.0.67",
+		Description: "新增每站点 LSPHP 版本选择",
+		SQL: []string{
+			`ALTER TABLE websites ADD COLUMN php_version TEXT NOT NULL DEFAULT '8.3'`,
+		},
+	},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

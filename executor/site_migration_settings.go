@@ -34,6 +34,7 @@ type SiteMigrationRuntimeSettings struct {
 	LogRetentionDays            int                            `json:"log_retention_days"`
 	CDNRealIPEnabled            bool                           `json:"cdn_realip_enabled"`
 	LSPHPMaxChildren            int                            `json:"lsphp_max_children"`
+	PHPVersion                  string                         `json:"php_version"`
 	ExpiresAt                   string                         `json:"expires_at"`
 	RemoteBackupReconfigure     bool                           `json:"remote_backup_reconfigure"`
 	CronJobs                    []SiteMigrationCronSetting     `json:"cron_jobs,omitempty"`
@@ -88,7 +89,7 @@ func (s *SiteMigrationSettingsService) SourceSettings(ctx context.Context, migra
 		w.litespeed_cache_enabled,w.litespeed_cache_ttl,w.monitoring_enabled,w.monitoring_interval,w.disable_wp_updates,
 		w.disable_file_editing,w.xmlrpc_enabled,w.disable_application_passwords,w.wp_debug_enabled,w.wp_post_revisions,w.wp_memory_limit,
 		w.file_lock_enabled,w.file_lock_mode,w.password_reset_mode,w.log_retention_days,w.cdn_realip_enabled,
-		w.lsphp_max_children,COALESCE(CAST(w.expires_at AS TEXT),''),ms.settings_snapshot
+		w.lsphp_max_children,COALESCE(NULLIF(w.php_version,''),'8.3'),COALESCE(CAST(w.expires_at AS TEXT),''),ms.settings_snapshot
 		FROM site_migration_sites ms
 		JOIN site_migration_batches mb ON mb.id=ms.batch_id AND mb.direction='source' AND mb.status='active'
 		JOIN site_migration_locks ml ON ml.migration_site_id=ms.id AND ml.site_id=ms.source_site_id AND ml.direction='source' AND ml.status='active'
@@ -98,7 +99,7 @@ func (s *SiteMigrationSettingsService) SourceSettings(ctx context.Context, migra
 		&litespeed, &settings.LiteSpeedCacheTTL, &monitoring, &settings.MonitoringInterval, &disableUpdates,
 		&disableEditing, &xmlrpc, &disableApplicationPasswords, &debug, &settings.WPPostRevisions, &settings.WPMemoryLimit,
 		&fileLock, &settings.FileLockMode, &settings.PasswordResetMode, &settings.LogRetentionDays, &cdn,
-		&settings.LSPHPMaxChildren, &expires, &snapshotRaw)
+		&settings.LSPHPMaxChildren, &settings.PHPVersion, &expires, &snapshotRaw)
 	if err != nil {
 		return SiteMigrationRuntimeSettings{}, errors.New("source migration settings unavailable")
 	}
@@ -225,6 +226,11 @@ func validateSiteMigrationRuntimeSettings(settings *SiteMigrationRuntimeSettings
 	if settings.TemplateVersion == "" {
 		settings.TemplateVersion = "v1.0"
 	}
+	phpVersion, err := normalizeLSPHPVersion(settings.PHPVersion)
+	if err != nil {
+		return errors.New("invalid migration PHP runtime")
+	}
+	settings.PHPVersion = phpVersion
 	if !settings.SSLEnabled {
 		settings.SSLCertSource = ""
 	} else if settings.SSLCertSource == "" {

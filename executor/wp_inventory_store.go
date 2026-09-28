@@ -66,6 +66,7 @@ type wpInventorySiteIdentity struct {
 	SystemUser       string
 	WebRoot          string
 	SiteType         string
+	PHPVersion       string
 	DisableWPUpdates bool
 }
 
@@ -1176,6 +1177,8 @@ func loadWPInventorySiteIdentity(ctx context.Context, queryer wpInventoryQueryer
 		&identity.SystemUser, &identity.WebRoot, &identity.SiteType, &disableWPUpdates)
 	identity.Status = models.WebsiteStatus(status)
 	identity.DisableWPUpdates = disableWPUpdates == 1
+	identity.PHPVersion = DefaultLSPHPVersion
+	_ = queryer.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(php_version,''), '8.3') FROM websites WHERE id = ?`, siteID).Scan(&identity.PHPVersion)
 	return identity, err
 }
 

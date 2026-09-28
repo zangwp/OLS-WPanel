@@ -360,7 +360,7 @@ func TestAIDevelopmentCapabilitiesDescribePanelWorkflowsAndLimits(t *testing.T) 
 		"CDN Real IP",
 		"Request protection and banned IPs",
 		"Managed software and server state",
-		"OpenLiteSpeed, LSPHP 8.3",
+		"OpenLiteSpeed, per-site LSPHP 8.3/8.4/8.5",
 		"OLS WPanel currently has no confirmed entry",
 	} {
 		if !strings.Contains(capabilities, required) {

@@ -177,7 +177,7 @@ func (w *WPInventoryWorker) processOne(ctx context.Context) (bool, bool) {
 	site := &models.Website{
 		ID: identity.ID, Domain: identity.Domain, Status: identity.Status,
 		SystemUser: identity.SystemUser, WebRoot: identity.WebRoot, SiteType: identity.SiteType,
-		DisableWPUpdates: identity.DisableWPUpdates,
+		PHPVersion: identity.PHPVersion, DisableWPUpdates: identity.DisableWPUpdates,
 	}
 	// Scheduled inventory is the source of truth for the fleet overview, so it
 	// must refresh WordPress' update transients just like an explicit manual

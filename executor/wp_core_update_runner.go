@@ -104,7 +104,15 @@ func (r *wpCorePHPRunner) validate(execution wpCoreUpdateExecution) (wpCoreRunne
 	if err1 != nil || err2 != nil || uid <= 0 || gid <= 0 || u.Username != execution.SystemUser {
 		return wpCoreRunnerInput{}, errors.New("invalid site identity")
 	}
-	php, err := validateInventoryBinary(r.opts.phpPath, r.opts.phpDir, r.opts.ownerUID, r.opts.ownerGID)
+	phpCandidate, phpDir := r.opts.phpPath, r.opts.phpDir
+	if strings.TrimSpace(execution.PHPVersion) != "" {
+		runtime, runtimeErr := ResolveLSPHPRuntime(execution.PHPVersion, false)
+		if runtimeErr != nil {
+			return wpCoreRunnerInput{}, runtimeErr
+		}
+		phpCandidate, phpDir = runtime.CLIBinary, filepath.Dir(runtime.CLIBinary)
+	}
+	php, err := validateInventoryBinary(phpCandidate, phpDir, r.opts.ownerUID, r.opts.ownerGID)
 	if err != nil {
 		return wpCoreRunnerInput{}, err
 	}

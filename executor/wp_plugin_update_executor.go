@@ -22,6 +22,7 @@ type wpPluginUpdateExecution struct {
 	SystemUser     string
 	Domain         string
 	DatabaseName   string
+	PHPVersion     string
 	PackagePath    string
 	DatabaseBackup string
 	PluginBackup   string
@@ -623,9 +624,9 @@ func (e *wpPluginUpdateExecutor) loadExecution(ctx context.Context, taskID, owne
 	var execution wpPluginUpdateExecution
 	execution.Task, execution.PackagePath = task, packagePath
 	var lockEnabled int
-	err = e.store.db.QueryRowContext(ctx, `SELECT domain,system_user,web_root,db_name,file_lock_mode,file_lock_enabled
+	err = e.store.db.QueryRowContext(ctx, `SELECT domain,system_user,web_root,db_name,COALESCE(NULLIF(php_version,''),'8.3'),file_lock_mode,file_lock_enabled
 		FROM websites WHERE id=? AND site_type='wordpress' AND status='active'`, task.SiteID).
-		Scan(&execution.Domain, &execution.SystemUser, &execution.WebRoot, &execution.DatabaseName, &execution.FileLockMode, &lockEnabled)
+		Scan(&execution.Domain, &execution.SystemUser, &execution.WebRoot, &execution.DatabaseName, &execution.PHPVersion, &execution.FileLockMode, &lockEnabled)
 	if err != nil || !filepath.IsAbs(execution.WebRoot) {
 		return wpPluginUpdateExecution{}, errors.New("plugin update site is not executable")
 	}

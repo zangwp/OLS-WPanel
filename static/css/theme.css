@@ -20,8 +20,8 @@ html[data-theme="light"] {
     --panel-sidebar: rgba(255, 255, 255, 0.97);
     --panel-border: rgba(15, 23, 42, 0.12);
     --panel-text: #172033;
-    --panel-muted: #475569;
-    --panel-subtle: #64748b;
+    --panel-muted: #3f4d63;
+    --panel-subtle: #526176;
     --panel-accent: #2563eb;
     --panel-accent-soft: rgba(37, 99, 235, 0.09);
     --panel-surface-soft: #f8fafc;
@@ -233,6 +233,12 @@ html[data-theme="light"] .label {
     color: var(--panel-text) !important;
 }
 
+html[data-theme="light"] .table-cell.text-xs,
+html[data-theme="light"] .table-cell.text-sm,
+html[data-theme="light"] td:not([class*="text-"]) {
+    color: #243147 !important;
+}
+
 html[data-theme="light"] .table-header {
     color: var(--panel-muted) !important;
 }
@@ -255,6 +261,13 @@ html[data-theme="light"] .divide-gray-800 > :not([hidden]) ~ :not([hidden]) {
 html[data-theme="light"] [style*="border: 1px solid #1e293b"],
 html[data-theme="light"] [style*="border: 1px solid #334155"] {
     border-color: var(--panel-border) !important;
+}
+
+html[data-theme="light"] [style*="color: #94a3b8"],
+html[data-theme="light"] [style*="color:#94a3b8"],
+html[data-theme="light"] [style*="color: #64748b"],
+html[data-theme="light"] [style*="color:#64748b"] {
+    color: var(--panel-muted) !important;
 }
 
 html[data-theme="light"] table tbody tr:hover,

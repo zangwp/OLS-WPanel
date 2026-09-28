@@ -10,7 +10,7 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
                 <p class="text-xs text-gray-500 mb-1">{{t .Lang "software.runtime_stack"}}</p>
-                <p class="text-white font-medium">OpenLiteSpeed + LSPHP 8.3 + MariaDB + Redis</p>
+                <p class="text-white font-medium">OpenLiteSpeed + LSPHP 8.3/8.4/8.5 + MariaDB + Redis</p>
             </div>
             <div>
                 <p class="text-xs text-gray-500 mb-1">{{t .Lang "software.php_version_policy"}}</p>
@@ -21,6 +21,34 @@
                 <p class="text-gray-300">{{t .Lang "software.wp_cli_not_cron"}}</p>
             </div>
         </div>
+    </div>
+
+    <div class="card mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+            <div>
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "software.php_runtimes"}}</h3>
+                <p class="text-xs text-gray-500 mt-1">{{t .Lang "software.php_runtimes_help"}}</p>
+            </div>
+            <a href="/{{.RandomSuffix}}/websites" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.assign_php_per_site"}}</a>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <template x-for="runtime in phpRuntimes" :key="runtime.version">
+                <div class="runtime-detail rounded border border-gray-700 p-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="font-semibold text-white" x-text="'LSPHP ' + runtime.version"></span>
+                                <span x-show="runtime.recommended" class="badge-success text-xs">{{t .Lang "software.recommended"}}</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2" x-text="t('software.php_runtime_site_count', { count: runtime.active_sites })"></p>
+                        </div>
+                        <span x-show="runtime.installed" class="badge-success text-xs">{{t .Lang "software.installed"}}</span>
+                        <button x-show="!runtime.installed" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <p class="text-xs text-yellow-300 mt-4">{{t .Lang "software.php_runtime_install_notice"}}</p>
     </div>
 
     <div x-show="showHelp" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="showHelp = false">
@@ -163,6 +191,13 @@
 
                 <p x-show="sw.version_policy" class="text-xs text-gray-500 mb-3" x-text="sw.version_policy"></p>
 
+                <div x-show="sw.supported_series && sw.supported_series.length" class="flex flex-wrap items-center gap-2 mb-3 text-xs">
+                    <span class="text-gray-500">{{t .Lang "software.fresh_install_series"}}</span>
+                    <template x-for="series in (sw.supported_series || [])" :key="series">
+                        <span class="runtime-version" x-text="series"></span>
+                    </template>
+                </div>
+
                 <div x-show="sw.update_available" class="software-update-notice mb-3 rounded border p-3">
                     <div class="flex items-center justify-between gap-3">
                         <p class="text-xs text-blue-300" x-text="t('software.update_available_candidate', { version: sw.candidate_version })"></p>
@@ -263,6 +298,7 @@ function processGuard() {
 function softwareManager() {
     return {
         software: [],
+        phpRuntimes: [],
         developmentTools: [],
         showHelp: false,
         clearingOpcache: false,
@@ -279,7 +315,25 @@ function softwareManager() {
                     });
                 }
             } catch(e) {}
+            await this.fetchPHPRuntimes();
             await this.fetchDevelopmentTools();
+        },
+        async fetchPHPRuntimes() {
+            try {
+                const r = await api('/software/php-runtimes');
+                if (r.success) this.phpRuntimes = (r.data || []).map(runtime => ({ ...runtime, _installing: false }));
+            } catch(e) {}
+        },
+        async installPHPRuntime(runtime) {
+            if (!await confirmModal(t('software.php_runtime_install_confirm', { version: runtime.version }))) return;
+            runtime._installing = true;
+            try {
+                const r = await api('/software/php-runtimes/install', { method: 'POST', body: { version: runtime.version }, timeout: 1800000 });
+                showToast(r.data?.message || t('software.php_runtime_installed', { version: runtime.version }), 'success');
+                await this.fetchPHPRuntimes();
+                await this.fetchList();
+            } catch(e) { showToast(e.message, 'error'); }
+            finally { runtime._installing = false; }
         },
         async fetchDevelopmentTools() {
             try {

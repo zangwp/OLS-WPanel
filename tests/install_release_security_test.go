@@ -410,7 +410,7 @@ func TestInstallerPlatformAndArtifactPreflightPrecedeSystemWrites(t *testing.T) 
 		`[[ "$machine" == "$dpkg_arch" ]]`,
 		`PANEL_ASSET_NAME="ols-wpanel-linux-${PLATFORM_ARCH}"`,
 		`select_platform_source`,
-		`配置 OpenLiteSpeed/LSPHP 8.3 软件源`,
+		`配置 OpenLiteSpeed/LSPHP 软件源`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("install.sh missing platform restriction %q", required)
@@ -439,7 +439,7 @@ func TestInstallerUsesSeparateRestorableDistributionSources(t *testing.T) {
 		`DEBIAN_REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/debian"`,
 		`DEBIAN_REPO_URL="https://deb.debian.org/debian"`,
 		`DEBIAN_SECURITY_URL="https://security.debian.org/debian-security"`,
-		`OpenLiteSpeed and LSPHP 8.3 are installed together from LiteSpeed's`,
+		`OpenLiteSpeed and all panel-supported LSPHP branches come from LiteSpeed's`,
 		`# Managed by OLS WPanel`,
 		`assert_managed_source_target /etc/apt/sources.list.d/ols-wpanel-litespeed.sources`,
 		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-debian.sources`,
@@ -461,6 +461,30 @@ func TestInstallerUsesSeparateRestorableDistributionSources(t *testing.T) {
 	}
 	if strings.Contains(script, `> /etc/apt/sources.list.d/php.sources`) {
 		t.Fatal("installer may overwrite a generic third-party php.sources file")
+	}
+}
+
+func TestInstallerPinsSupportedRuntimeRepositories(t *testing.T) {
+	script := readInstallScript(t, installScriptPath)
+	for _, required := range []string{
+		`lsphp84 lsphp84-common lsphp84-mysql`,
+		`lsphp85 lsphp85-common lsphp85-mysql`,
+		`10.11|11.4|11.8) ;;`,
+		`--mariadb-version|--mariadbver)`,
+		`--check-mariadb-packages)`,
+		`[[ "$PLATFORM_ID" == "debian" ]] && [[ "$MARIADB_SERIES" != "11.8" ]]`,
+		`MARIADB_APT_KEY_FINGERPRINT="177F4010FE56CA3336300305F1656F24C74CD1D8"`,
+		`https://supplychain.mariadb.com/mariadb-keyring-2019.gpg`,
+		`https://mirror.mariadb.org/repo/${MARIADB_SERIES}/${PLATFORM_ID}`,
+		`Signed-By: ${keyring}`,
+		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-mariadb.sources`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("install.sh missing runtime repository control %q", required)
+		}
+	}
+	if strings.Contains(script, `curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup |`) {
+		t.Fatal("installer must not pipe an unverified MariaDB setup script to a shell")
 	}
 }
 

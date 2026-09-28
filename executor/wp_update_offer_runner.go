@@ -108,8 +108,8 @@ func (r *wpUpdateOfferRunner) run(ctx context.Context, siteID int, webRoot, comp
 	if !filepath.IsAbs(webRoot) {
 		return wpUpdateOfferEnvelope{}, errWPOfferUnavailable
 	}
-	var systemUser string
-	if err := r.db.QueryRowContext(ctx, `SELECT system_user FROM websites WHERE id=?`, siteID).Scan(&systemUser); err != nil {
+	var systemUser, phpVersion string
+	if err := r.db.QueryRowContext(ctx, `SELECT system_user,COALESCE(NULLIF(php_version,''),'8.3') FROM websites WHERE id=?`, siteID).Scan(&systemUser, &phpVersion); err != nil {
 		return wpUpdateOfferEnvelope{}, errWPOfferUnavailable
 	}
 	if !wpInventoryUserPattern.MatchString(systemUser) {
@@ -127,7 +127,13 @@ func (r *wpUpdateOfferRunner) run(ctx context.Context, siteID int, webRoot, comp
 	if _, err := os.Stat(filepath.Join(webRoot, "wp-load.php")); err != nil {
 		return wpUpdateOfferEnvelope{}, errWPOfferUnavailable
 	}
-	phpPath, err := validateInventoryBinary(r.phpPath, r.phpDir, r.ownerUID, r.ownerGID)
+	phpCandidate, phpDir := r.phpPath, r.phpDir
+	if runtime, runtimeErr := ResolveLSPHPRuntime(phpVersion, false); runtimeErr == nil {
+		phpCandidate, phpDir = runtime.CLIBinary, filepath.Dir(runtime.CLIBinary)
+	} else {
+		return wpUpdateOfferEnvelope{}, errWPOfferUnavailable
+	}
+	phpPath, err := validateInventoryBinary(phpCandidate, phpDir, r.ownerUID, r.ownerGID)
 	if err != nil {
 		return wpUpdateOfferEnvelope{}, errWPOfferUnavailable
 	}

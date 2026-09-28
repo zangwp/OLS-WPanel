@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.0 — 2026-09-28
+
+- Adds independently installable LSPHP 8.3, 8.4, and 8.5 runtimes with per-site selection for new and existing sites.
+- Preserves the selected PHP runtime across SSL renewal, OpenLiteSpeed regeneration, WordPress inventory, administrator management, component updates, and site migration health checks.
+- Adds fresh-install MariaDB series selection (10.11/11.4/11.8 on Ubuntu 24.04; 11.8 on Debian 13) using the official repository only after its signing-key fingerprint is verified; existing databases are never silently downgraded.
+- Shows APT candidate updates for OpenLiteSpeed, LSPHP, MariaDB, Redis, nftables, and Fail2ban while keeping service updates within authenticated package repositories.
+- Strengthens light-theme contrast for muted labels, table content, status values, and inline legacy colors.
+- Adds schema, renderer, architecture, installer, and release-pinning regression coverage for the expanded runtime matrix.
+
 ## v1.0.2 — 2026-09-28
 
 - Fixes WordPress inventory scans on OpenLiteSpeed hosts by trusting the configured LSPHP CLI directory instead of incorrectly requiring `/usr/bin`.

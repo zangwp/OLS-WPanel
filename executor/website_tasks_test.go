@@ -84,6 +84,7 @@ func TestCreateWebsiteInsertOverridesLegacyLogRetentionDefault(t *testing.T) {
 	_, err = db.Exec(`CREATE TABLE websites (
 		name TEXT, domain TEXT, aliases TEXT, status TEXT, system_user TEXT, web_root TEXT,
 		document_root_subdir TEXT, log_dir TEXT, db_name TEXT, db_user TEXT, lsphp_socket_path TEXT,
+		php_version TEXT,
 		ols_vhost_config_path TEXT, site_type TEXT, ssl_enabled INTEGER, ssl_cert_path TEXT,
 		ssl_key_path TEXT, ssl_expires_at DATETIME, ssl_last_error TEXT, ssl_cert_source TEXT, template_version TEXT,
 		access_log_mode TEXT, disable_application_passwords INTEGER,
@@ -95,7 +96,7 @@ func TestCreateWebsiteInsertOverridesLegacyLogRetentionDefault(t *testing.T) {
 
 	_, err = db.Exec(createWebsiteInsertSQL,
 		"legacy-default", "legacy-default.example.com", "", "wp_legacy", "/www/legacy", "", "/logs/legacy",
-		"db_legacy", "user_legacy", "/php/legacy.conf", "/openlitespeed/legacy.conf", "wordpress", 0,
+		"db_legacy", "user_legacy", "/php/legacy.conf", "8.3", "/openlitespeed/legacy.conf", "wordpress", 0,
 		"", "", nil, "", "", defaultSiteLogRetentionDays, 5, nil,
 	)
 	if err != nil {

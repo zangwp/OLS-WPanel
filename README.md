@@ -27,7 +27,17 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 短域名入口固定到已发布的 Release；Cloudflare Worker 会先验证 `bootstrap.sh` 的 Ed25519 签名和 SHA-256。脚本下载后会自动检查并补装 `wget`、`curl`、`ca-certificates`、`openssl` 等引导依赖，再次验签固定版本的 `install.sh`，最后才启动安装。它不会执行 GitHub `main` 分支上的可变脚本。
 
-当前稳定版本：`v1.0.2`。
+当前稳定版本：`v1.1.0`。
+
+### 可选 MariaDB 系列（仅限全新安装）
+
+默认使用当前受支持系统的发行版系列；如果希望在纯净服务器上明确选择 MariaDB 系列，可使用：
+
+```bash
+curl -fsSL https://ols.zangyubin.top/install | bash -s -- --mariadb-version 11.8
+```
+
+Ubuntu 24.04 可选择 `10.11`、`11.4` 或 `11.8`；MariaDB 官方仓库对 Debian 13/Trixie 仅提供 `11.8`，安装器会在下载软件包前拒绝不受支持的组合。该参数不会对已有数据库执行在线降级；已有服务器的跨系列升级必须先完成全量备份、兼容性检查和恢复演练。兼容官方 `--mariadbver` 参数别名。
 
 ### 极简系统 / 下载失败处理
 
@@ -65,7 +75,7 @@ OLS WPanel 只做一件事：**在 VPS 上高效管理 WordPress 网站**。不�
 | **网站异常监测** | 关注管理员账号、内容、重要设置、应用密码和异常文件变化，帮助尽早发现网站被篡改的迹象 |
 | **AI 诊断** | 一键汇总网站日志和服务状态，用对话方式继续追问问题；只提供分析建议，不会自行修改网站 |
 | **告警通知** | 可通过邮件接收资源不足、服务异常、证书到期、网站到期和可用更新等提醒，每类提醒可单独开关 |
-| **软件与运行环境** | 管理 OpenLiteSpeed、LSPHP 8.3、MariaDB 与 Redis，查看日志，并按网站生成隔离的虚拟主机与 LSPHP 进程配置 |
+| **软件与运行环境** | 管理 OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB、Redis、nftables 与 Fail2ban，查看版本和候选更新，并按网站生成隔离的虚拟主机与 LSPHP 进程配置 |
 | **面板安全** | 使用不公开的登录入口和两次登录验证；连续输错密码或频繁扫描错误地址时会自动限制来源 |
 | **安全更新** | 面板和当前 Debian/Ubuntu 系统软件都可检查更新；面板更新会验签并在健康检查失败时尝试回滚 |
 | **备份与异地保存** | 自动备份网站和面板数据，并可把网站备份同步到另一台服务器或对象存储，减少单机故障造成的损失 |
@@ -161,19 +171,19 @@ OLS WPanel 只做一件事：**在 VPS 上高效管理 WordPress 网站**。不�
 
 **为什么锁定 Debian 13 与 Ubuntu 24.04 LTS？**
 
-安装器会配置 LiteSpeed 官方 HTTPS 软件源，并安装 OpenLiteSpeed、LSPHP 8.3、MariaDB、Redis、Fail2ban 与 systemd 服务，因此兼容性必须按发行版版本和架构验证。当前只接受 Debian 13/Trixie 和 Ubuntu 24.04/Noble，不会自动放宽到未经测试的旧版或新版。
+安装器会配置 LiteSpeed 官方 HTTPS 软件源，并安装 OpenLiteSpeed、LSPHP、MariaDB、Redis、Fail2ban 与 systemd 服务，因此兼容性必须按发行版版本和架构验证。当前只接受 Debian 13/Trixie 和 Ubuntu 24.04/Noble，不会自动放宽到未经测试的旧版或新版。
 
-**为什么锁定 PHP 8.3？**
+**PHP 版本如何选择？**
 
-WordPress 官方推荐 PHP 8.3 或更高版本。8.3 在 WordPress 生态中经过了最广泛的生产环境验证，拥有活跃支持周期，性能与安全性持续改进。固定版本意味着所有用户运行相同的 PHP 环境，问题可复现、可排查，避免因 PHP 版本差异导致的兼容性怪病。
+全新安装默认启用兼容性最稳妥的 LSPHP 8.3；软件管理中可按需安装 8.4 或 8.5，再在创建网站或网站详情中逐站选择。切换前应确认主题和插件兼容性，同一台服务器上的不同网站可以并行使用不同版本。
 
 **为什么是 MariaDB 而非 MySQL？**
 
-WordPress 官方推荐 MariaDB 10.6 或更高版本。当前支持的 Debian 与 Ubuntu 系统源提供兼容版本。MariaDB 是由社区驱动的 GPL 分支，兼容 MySQL，并可直接获得发行版软件源提供的安全更新，无需添加第三方数据库仓库。
+WordPress 官方推荐 MariaDB 10.6 或更高版本。Ubuntu 24.04 全新安装支持 10.11、11.4、11.8，Debian 13 因官方仓库兼容范围仅支持 11.8；未指定时使用目标系统发行版系列，显式指定时使用经签名密钥校验的 MariaDB 官方仓库。MariaDB 是由社区驱动的 GPL 分支并兼容 MySQL。已有数据库不会被面板静默跨系列降级。
 
 **服务版本如何更新？**
 
-“系统更新”安装当前 APT 软件源提供的稳定补丁和安全更新：OpenLiteSpeed 来自 LiteSpeed 官方源，MariaDB 与 Redis 来自对应的 Debian/Ubuntu 系统源。LSPHP 当前锁定在经过完整验证的 8.3 主版本。面板不会把“安装补丁”伪装成 PHP 或数据库跨主版本迁移；跨主版本会涉及扩展、站点兼容性、数据库格式、回滚和备份验证，需要单独的迁移流程与测试后才能提供。
+“系统更新”安装当前 APT 软件源提供的稳定补丁和安全更新。OpenLiteSpeed 与 LSPHP 来自 LiteSpeed 官方源；MariaDB 使用安装时选定的发行版或 MariaDB 官方系列；Redis、nftables 与 Fail2ban 使用目标系统仓库。软件管理会同时显示已安装版本和 APT 候选版本。上游项目发布的最新源码版本不等于当前系统已有可验证的软件包，因此面板不会绕过包管理器直接覆盖生产服务。
 
 **为什么没有开放 OpenLiteSpeed WebAdmin 7080？**
 
@@ -189,8 +199,8 @@ OLS WPanel 会生成并维护服务器级与网站级 OpenLiteSpeed 配置，因
 
 | 组件 | 说明 |
 |------|------|
-| LSPHP 8.3 | LiteSpeed 官方 HTTPS 软件源；每个网站使用独立 LSAPI socket、系统用户和进程上限 |
-| MariaDB | 当前发行版系统源 |
+| LSPHP 8.3 / 8.4 / 8.5 | LiteSpeed 官方 HTTPS 软件源；8.3 默认安装，其他版本按需安装；每个网站使用独立 LSAPI socket、系统用户和进程上限 |
+| MariaDB 10.11 / 11.4 / 11.8 | 全新安装可选；Ubuntu 24.04 支持三种系列，Debian 13 支持 11.8；使用目标系统发行版仓库或经验证的 MariaDB 官方仓库 |
 | OpenLiteSpeed | LiteSpeed 官方 HTTPS 软件源；每站点独立虚拟主机，并自动安装官方 LiteSpeed Cache 插件 |
 | Redis | 当前发行版系统源 |
 | Fail2ban + nftables | 当前发行版系统源 |

@@ -92,6 +92,18 @@
 
         <div class="card">
             <h3 class="text-lg font-semibold text-white mb-5">{{t .Lang "website.runtime_configuration"}}</h3>
+            <h4 class="text-base font-medium text-white mb-3">{{t .Lang "website.php_runtime"}}</h4>
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
+                <select x-model="phpVersion" class="input-field text-sm py-1.5 sm:w-48" :disabled="phpRuntimeSaving || installedPHPRuntimes().length === 0">
+                    <template x-for="runtime in installedPHPRuntimes()" :key="runtime.version">
+                        <option :value="runtime.version" x-text="'LSPHP ' + runtime.version"></option>
+                    </template>
+                </select>
+                <button @click="savePHPVersion()" :disabled="phpRuntimeSaving || phpVersion === site.php_version" class="btn-primary text-sm" x-text="phpRuntimeSaving ? t('website.php_runtime_switching') : t('website.php_runtime_switch')"></button>
+                <a href="/{{.RandomSuffix}}/software" class="text-xs text-blue-400 hover:underline">{{t .Lang "website.manage_php_runtimes"}}</a>
+            </div>
+            <p class="text-xs text-gray-500 mb-5">{{t .Lang "website.php_runtime_switch_help"}}</p>
+
             <h4 class="text-base font-medium text-white mb-3">{{t .Lang "website.site_monitoring"}}</h4>
             <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
                 <input type="checkbox" x-model="monitoringEnabled">
@@ -743,6 +755,9 @@ function websiteDetail() {
         monitoringSaving: false,
         documentRootSubdir: '',
         documentRootSaving: false,
+        phpVersion: '8.3',
+        phpRuntimes: [],
+        phpRuntimeSaving: false,
         cdnGroups: [],
         cdnRealIPEnabled: false,
         cdnRealIPGroupIDs: [],
@@ -795,6 +810,7 @@ function websiteDetail() {
                     this.monitoringEnabled = r.data.monitoring_enabled || false;
                     this.monitoringInterval = r.data.monitoring_interval || 5;
                     this.documentRootSubdir = r.data.document_root_subdir || '';
+                    this.phpVersion = r.data.php_version || '8.3';
                     this.cdnRealIPEnabled = r.data.cdn_realip_enabled || false;
                     this.cdnRealIPGroupIDs = (r.data.cdn_realip_groups || []).map(g => g.id);
                     this.sslExportEnabled = r.data.ssl_export_enabled || false;
@@ -806,12 +822,38 @@ function websiteDetail() {
             Promise.allSettled([
                 this.fetchPluginStatus(),
                 this.fetchCDNGroups(),
-                this.fetchAIDevelopment()
+                this.fetchAIDevelopment(),
+                this.fetchPHPRuntimes()
             ]);
             deferTask(() => {
                 this.fetchLogs();
                 this.fetchLogFiles();
             }, 400);
+        },
+        installedPHPRuntimes() {
+            return this.phpRuntimes.filter(runtime => runtime.installed);
+        },
+        async fetchPHPRuntimes() {
+            try {
+                const r = await api('/software/php-runtimes');
+                this.phpRuntimes = r.data || [];
+            } catch (_) {}
+        },
+        async savePHPVersion() {
+            if (!this.site || this.phpRuntimeSaving || this.phpVersion === this.site.php_version) return;
+            if (!await confirmModal(t('website.php_runtime_switch_confirm', { version: this.phpVersion }))) {
+                this.phpVersion = this.site.php_version || '8.3';
+                return;
+            }
+            this.phpRuntimeSaving = true;
+            try {
+                const r = await api('/websites/' + this.site.id + '/php-version', { method: 'PUT', body: { version: this.phpVersion }, timeout: 120000 });
+                this.site.php_version = this.phpVersion;
+                showToast(r.data?.message || t('website.php_runtime_switched'), 'success');
+            } catch (e) {
+                this.phpVersion = this.site.php_version || '8.3';
+                showToast(e.message, 'error');
+            } finally { this.phpRuntimeSaving = false; }
         },
         async fetchAIDevelopment() {
             if (!this.site) return;

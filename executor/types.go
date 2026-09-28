@@ -69,6 +69,7 @@ type CreateSitePayload struct {
 	ExpiresAt          string
 	SiteType           string
 	DocumentRootSubdir string
+	PHPVersion         string
 	CleanDefaults      bool `json:"clean_defaults"`
 	RemoveUnusedThemes bool `json:"remove_unused_themes"`
 	EnableRedisCache   bool `json:"enable_redis_cache"`

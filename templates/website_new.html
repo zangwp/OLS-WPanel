@@ -1,6 +1,6 @@
 {{template "base" .}}
 {{define "websites_new_content"}}
-<div x-data="createWebsite()">
+<div x-data="createWebsite()" x-init="fetchPHPRuntimes()">
     <h2 class="text-xl font-bold text-white mb-6">{{t .Lang "website.create_title"}}</h2>
     <div class="card max-w-2xl">
         <form @submit.prevent="submit">
@@ -20,6 +20,15 @@
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.main_domain"}}</label>
                 <input type="text" x-model="domain" class="input-field" placeholder="example.com" required>
+            </div>
+            <div class="mb-4">
+                <label class="label">{{t .Lang "website.php_runtime"}}</label>
+                <select x-model="phpVersion" class="input-field" :disabled="phpRuntimes.length === 0">
+                    <template x-for="runtime in phpRuntimes" :key="runtime.version">
+                        <option :value="runtime.version" x-text="'LSPHP ' + runtime.version + (runtime.recommended ? ' · ' + t('software.recommended') : '')"></option>
+                    </template>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.php_runtime_create_help"}}</p>
             </div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.aliases_one_per_line"}}</label>
@@ -79,11 +88,22 @@ function createWebsite() {
         expiresAt: '',
         siteType: 'wordpress',
         documentRootSubdir: '',
+        phpVersion: '8.3',
+        phpRuntimes: [],
         loading: false,
         error: '',
         success: '',
         sslWarning: '',
         createdSiteID: null,
+        async fetchPHPRuntimes() {
+            try {
+                const r = await api('/software/php-runtimes');
+                this.phpRuntimes = (r.data || []).filter(runtime => runtime.installed);
+                if (!this.phpRuntimes.some(runtime => runtime.version === this.phpVersion) && this.phpRuntimes.length) {
+                    this.phpVersion = this.phpRuntimes[0].version;
+                }
+            } catch (e) { this.error = e.message; }
+        },
         generatePassword() {
             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
             let pw = '';
@@ -120,7 +140,8 @@ function createWebsite() {
                     db_password: this.dbPassword,
                     ssl_enabled: this.sslEnabled,
                     expires_at: this.expiresAt || null,
-                    site_type: this.siteType
+                    site_type: this.siteType,
+                    php_version: this.phpVersion
                 };
                 if (this.siteType === 'php') {
                     body.document_root_subdir = this.documentRootSubdir;

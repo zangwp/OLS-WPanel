@@ -58,7 +58,7 @@ type WPCoreUpdateService struct {
 
 type wpCoreUpdateCandidate struct {
 	siteID                                                  int
-	domain, webRoot, collectionID                           string
+	domain, webRoot, collectionID, phpVersion               string
 	inventoryVersion, currentVersion, targetVersion, locale string
 	lastSuccess                                             time.Time
 }
@@ -94,7 +94,8 @@ func (s *WPCoreUpdateService) Preview(ctx context.Context, siteID int, username 
 	if wpConfigHasUserFileModsLock(candidate.webRoot) {
 		return models.WPCoreUpdatePreview{}, ErrWPCoreUpdateConflict
 	}
-	phpVersion, mysqlVersion, err := s.versions(ctx)
+	versionCtx := context.WithValue(ctx, wpCorePHPVersionContextKey{}, candidate.phpVersion)
+	phpVersion, mysqlVersion, err := s.versions(versionCtx)
 	if err != nil {
 		log.Printf("核心更新预览失败 site=%d: 读取本机 PHP/MySQL 版本失败: %v", siteID, err)
 		return models.WPCoreUpdatePreview{}, ErrWPCoreUpdateUnavailable
@@ -218,11 +219,11 @@ func (s *WPCoreUpdateService) loadCandidate(ctx context.Context, siteID int) (wp
 	var c wpCoreUpdateCandidate
 	var status, siteType, inventoryStatus, stateLocale, lastSuccess string
 	var multisite, blocked int
-	err = tx.QueryRowContext(ctx, `SELECT w.id,w.domain,w.web_root,w.status,w.site_type,s.status,s.wordpress_version,
+	err = tx.QueryRowContext(ctx, `SELECT w.id,w.domain,w.web_root,w.status,w.site_type,COALESCE(NULLIF(w.php_version,''),'8.3'),s.status,s.wordpress_version,
 		s.wordpress_locale,s.is_multisite,s.collection_id,COALESCE(s.last_success_at,''),
 		(SELECT COUNT(*) FROM wp_update_tasks t WHERE t.site_id=w.id AND (t.status IN ('preparing','queued','running') OR (t.status='interrupted_unknown' AND t.manual_disposition='')))
 		FROM websites w JOIN site_wp_inventory_state s ON s.site_id=w.id WHERE w.id=?`, siteID).
-		Scan(&c.siteID, &c.domain, &c.webRoot, &status, &siteType, &inventoryStatus, &c.currentVersion, &stateLocale, &multisite, &c.collectionID, &lastSuccess, &blocked)
+		Scan(&c.siteID, &c.domain, &c.webRoot, &status, &siteType, &c.phpVersion, &inventoryStatus, &c.currentVersion, &stateLocale, &multisite, &c.collectionID, &lastSuccess, &blocked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrWPCoreUpdateNotFound
 	}
@@ -405,8 +406,18 @@ func defaultWPCoreOfferFetcher(client *http.Client) wpCoreOfferFetcher {
 	}
 }
 
+type wpCorePHPVersionContextKey struct{}
+
 func defaultWPCoreInstalledVersions(ctx context.Context) (string, string, error) {
-	php, err := validateInventoryBinary(LSPHPBinaryPath(), filepath.Dir(LSPHPBinaryPath()), 0, 0)
+	phpCandidate := LSPHPBinaryPath()
+	if version, _ := ctx.Value(wpCorePHPVersionContextKey{}).(string); strings.TrimSpace(version) != "" {
+		runtime, runtimeErr := ResolveLSPHPRuntime(version, false)
+		if runtimeErr != nil {
+			return "", "", runtimeErr
+		}
+		phpCandidate = runtime.CLIBinary
+	}
+	php, err := validateInventoryBinary(phpCandidate, filepath.Dir(phpCandidate), 0, 0)
 	if err != nil {
 		return "", "", err
 	}

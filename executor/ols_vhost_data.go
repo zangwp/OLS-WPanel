@@ -10,6 +10,10 @@ import (
 
 func olsVHostDataFromSiteChecked(site *models.Website) (*OLSVHostData, error) {
 	cfg := config.AppConfig
+	runtime, err := ResolveLSPHPRuntime(site.PHPVersion, false)
+	if err != nil {
+		return nil, err
+	}
 	aliases := splitAliases(site.Aliases)
 	accessLogMode := site.AccessLogMode
 	if accessLogMode == "" {
@@ -36,6 +40,7 @@ func olsVHostDataFromSiteChecked(site *models.Website) (*OLSVHostData, error) {
 		SSLCertPath:    site.SSLCertPath,
 		SSLKeyPath:     site.SSLKeyPath,
 		PHPProxy:       "unix:" + phpSocketPath(cfg, site.LSPHPSocketPath, site.Domain),
+		LSPHPBinary:    runtime.LSAPIBinary,
 		TemplateVer:    templateVer,
 		AccessLogMode:  accessLogMode,
 		LSCacheEnabled: site.LSCacheEnabled,

@@ -171,7 +171,7 @@ func runWPAdminManager(ctx context.Context, site *models.Website, action string,
 	if err != nil {
 		return err
 	}
-	validated, err := runner.validate(wpCoreUpdateExecution{WebRoot: site.WebRoot, SystemUser: site.SystemUser})
+	validated, err := runner.validate(wpCoreUpdateExecution{WebRoot: site.WebRoot, SystemUser: site.SystemUser, PHPVersion: site.PHPVersion})
 	if err != nil {
 		return err
 	}

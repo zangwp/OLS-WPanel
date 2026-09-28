@@ -4,7 +4,7 @@ set -o pipefail
 
 # ============================================================
 # OLS WPanel 安装脚本 — 适用于 Debian 13 / Ubuntu 24.04 LTS，建议使用纯净系统
-# 自动选择当前架构的已签名二进制，并配置 OpenLiteSpeed/LSPHP 8.3 软件源
+# 自动选择当前架构的已签名二进制，并配置 OpenLiteSpeed/LSPHP 软件源
 # ============================================================
 
 RED='\033[0;31m'
@@ -26,6 +26,9 @@ GHPROXY="${OLS_WPANEL_GITHUB_PROXY:-}"
 PREFER_CN=false
 CHECK_PLATFORM_ONLY=false
 CHECK_OLS_PACKAGES_ONLY=false
+CHECK_MARIADB_PACKAGES_ONLY=false
+MARIADB_SERIES="${OLS_WPANEL_MARIADB_VERSION:-}"
+MARIADB_SERIES_EXPLICIT=false
 PLATFORM_ID=""
 PLATFORM_VERSION=""
 PLATFORM_CODENAME=""
@@ -66,6 +69,7 @@ INSTALLER_RELEASE_VERSION="__OLS_WPANEL_RELEASE_VERSION__"
 MIN_PANEL_VERSION="v1.0.0"
 LITESPEED_DEBIAN_KEY_SHA256="b465f0e857d1574ca9e045282a1b8113eebd7a8d2401bdb204803d0e0a9241aa"
 LITESPEED_REPO_KEY_SHA256="186cd78298b9349134c38130f48b015e87fc228b9a9ca9aeb0c65e47630ed2d5"
+MARIADB_APT_KEY_FINGERPRINT="177F4010FE56CA3336300305F1656F24C74CD1D8"
 PANEL_ASSET_MAX_BYTES=$((256 * 1024 * 1024))
 CHECKSUM_ASSET_MAX_BYTES=$((4 * 1024))
 SIGNATURE_ASSET_MAX_BYTES=64
@@ -81,6 +85,7 @@ MCowBQYDK2VwAyEA5rZthMZ8gkeCHSqxa22OlYSpYtTIRY0fBrUtnLvWW9Y=
 if [[ "${OLS_WPANEL_PREFER_CN_MIRROR:-0}" == "1" ]] || [[ "${OLS_WPANEL_PREFER_CN_MIRROR:-}" == "true" ]]; then
     PREFER_CN=true
 fi
+[[ -z "$MARIADB_SERIES" ]] || MARIADB_SERIES_EXPLICIT=true
 
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
@@ -344,6 +349,16 @@ while [[ $# -gt 0 ]]; do
         --check-ols-packages)
             CHECK_OLS_PACKAGES_ONLY=true
             shift
+            ;;
+        --check-mariadb-packages)
+            CHECK_MARIADB_PACKAGES_ONLY=true
+            shift
+            ;;
+        --mariadb-version|--mariadbver)
+            [[ $# -ge 2 ]] || log_error "MariaDB 版本参数缺少版本值（10.11、11.4 或 11.8）"
+            MARIADB_SERIES="$2"
+            MARIADB_SERIES_EXPLICIT=true
+            shift 2
             ;;
         *)
             log_warn "未知参数已忽略: $1"
@@ -1404,12 +1419,67 @@ LITESPEEDSOURCEEOF
 	apt-get update
 
 	local package=""
-	# OpenLiteSpeed and LSPHP 8.3 are installed together from LiteSpeed's
-	# authenticated repository. The LSPHP base package includes GD, mbstring,
-	# XML and ZIP; those modules are not published as separate Debian packages.
-	for package in openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick; do
+	# OpenLiteSpeed and all panel-supported LSPHP branches come from LiteSpeed's
+	# authenticated repository. The base packages include GD, mbstring, XML and
+	# ZIP; those modules are not published as separate Debian packages.
+	for package in openlitespeed \
+		lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick \
+		lsphp84 lsphp84-common lsphp84-mysql lsphp84-curl lsphp84-intl lsphp84-redis lsphp84-opcache lsphp84-imagick \
+		lsphp85 lsphp85-common lsphp85-mysql lsphp85-curl lsphp85-intl lsphp85-redis lsphp85-opcache lsphp85-imagick; do
 		apt_package_available "$package" || log_error "LiteSpeed 仓库缺少 ${package}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	done
+}
+
+resolve_mariadb_series() {
+	if [[ -z "$MARIADB_SERIES" ]]; then
+		case "$PLATFORM_ID" in
+			ubuntu) MARIADB_SERIES="10.11" ;;
+			debian) MARIADB_SERIES="11.8" ;;
+		esac
+	fi
+	case "$MARIADB_SERIES" in
+		10.11|11.4|11.8) ;;
+		*) log_error "MariaDB 仅支持 10.11、11.4 或 11.8，收到: ${MARIADB_SERIES:-empty}" ;;
+	esac
+	if [[ "$PLATFORM_ID" == "debian" ]] && [[ "$MARIADB_SERIES" != "11.8" ]]; then
+		log_error "MariaDB 官方仓库在 Debian 13 (Trixie) 仅提供 11.8；10.11/11.4 仅支持 Ubuntu 24.04"
+	fi
+}
+
+configure_selected_mariadb_repository() {
+	resolve_mariadb_series
+	if [[ "$MARIADB_SERIES_EXPLICIT" != true ]]; then
+		log_info "MariaDB 使用系统发行版仓库默认系列（预期 ${MARIADB_SERIES}）"
+		return 0
+	fi
+
+	local key_download="$INSTALL_WORKDIR/mariadb-keyring-2019.gpg"
+	local keyring="/usr/share/keyrings/ols-wpanel-mariadb-archive-keyring.gpg"
+	local source_file="/etc/apt/sources.list.d/ols-wpanel-mariadb.sources"
+	local fingerprints=""
+	local candidate=""
+	log_info "配置 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
+	assert_managed_source_target "$source_file"
+	download_file "https://supplychain.mariadb.com/mariadb-keyring-2019.gpg" "$key_download" 60 1048576 || \
+		log_error "下载 MariaDB APT 公钥失败"
+	fingerprints=$(gpg --batch --show-keys --with-colons "$key_download" 2>/dev/null | awk -F: '$1 == "fpr" {print toupper($10)}')
+	grep -Fxq "$MARIADB_APT_KEY_FINGERPRINT" <<< "$fingerprints" || \
+		log_error "MariaDB APT 公钥指纹不匹配，拒绝继续"
+	install -o root -g root -m 0644 "$key_download" "$keyring"
+	cat > "$source_file" << MARIADBSOURCEEOF
+# Managed by OLS WPanel
+Types: deb
+URIs: https://mirror.mariadb.org/repo/${MARIADB_SERIES}/${PLATFORM_ID}
+Suites: ${PLATFORM_CODENAME}
+Components: main
+Signed-By: ${keyring}
+MARIADBSOURCEEOF
+	APT_SOURCES_MUTATED=true
+	apt-get update
+	candidate=$(LC_ALL=C apt-cache policy mariadb-server 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+	[[ "$candidate" == *"${MARIADB_SERIES}."* ]] || \
+		log_error "MariaDB 官方仓库未提供 ${MARIADB_SERIES} 候选包（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
+	log_info "MariaDB ${MARIADB_SERIES} 官方候选包可用: $candidate"
 }
 
 validate_lsphp_wordpress_modules() {
@@ -1588,6 +1658,10 @@ restore_managed_apt_sources() {
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-debian.sources
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-ubuntu.sources
 	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-litespeed.sources
+	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-mariadb.sources
+	if [[ ! -e /etc/apt/sources.list.d/ols-wpanel-mariadb.sources ]] && [[ ! -L /etc/apt/sources.list.d/ols-wpanel-mariadb.sources ]]; then
+		rm -f -- /usr/share/keyrings/ols-wpanel-mariadb-archive-keyring.gpg
+	fi
     for original in \
         /etc/apt/sources.list.d/debian.sources \
         /etc/apt/sources.list.d/ubuntu.sources; do
@@ -1744,7 +1818,7 @@ do_purge() {
     echo -e "  - /usr/local/lsws/conf/ols-wpanel（全部 OpenLiteSpeed/LSPHP 站点配置）"
     echo -e "  - /www/wwwroot、/www/wwwlogs、/www/server/certificates"
     echo -e "  - /www/ols-wpanel（面板状态、凭据、备份和共享安装包缓存）"
-    echo -e "  - 共享系统软件：OpenLiteSpeed、LSPHP 8.3、MariaDB、Redis、Fail2ban"
+    echo -e "  - 共享系统软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB、Redis、Fail2ban"
     echo -e "${RED}  这些目录和软件可能同时被非 OLS 工作负载使用；操作可能使其停机或永久丢失数据。${NC}"
     echo -e "${RED}  此操作不可逆。${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1779,7 +1853,7 @@ do_purge() {
     echo -e "  ${GREEN}✓${NC} 配置已清理"
 
     echo -e "  → 卸载软件包（可能需要 1-2 分钟）..."
-    DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' mariadb-server mariadb-common redis-server fail2ban 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' 'lsphp84*' 'lsphp85*' mariadb-server mariadb-common redis-server fail2ban 2>/dev/null || true
     DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} 软件包已卸载"
 
@@ -1823,8 +1897,21 @@ if [[ $EUID -ne 0 ]]; then
     log_error "请使用 root 权限运行此脚本"
 fi
 assert_supported_platform
+resolve_mariadb_series
 if $CHECK_PLATFORM_ONLY; then
     log_info "平台检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} (${PLATFORM_CODENAME}) ${PLATFORM_ARCH}"
+    trap - EXIT
+    exit 0
+fi
+if $CHECK_MARIADB_PACKAGES_ONLY; then
+    [[ "$MARIADB_SERIES_EXPLICIT" == true ]] || \
+        log_error "--check-mariadb-packages 必须同时指定 --mariadb-version"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl systemd
+    init_install_workdir
+    configure_selected_mariadb_repository
+    log_info "MariaDB ${MARIADB_SERIES} 软件包检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH}"
     trap - EXIT
     exit 0
 fi
@@ -2221,6 +2308,7 @@ apt-get install -y curl wget unzip ca-certificates gnupg lsb-release
 # OpenLiteSpeed 与 LSPHP 均只从 LiteSpeed 官方仓库安装；仓库公钥通过
 # HTTPS 下载并使用本发布内固定的 SHA-256 校验。
 configure_litespeed_repository
+configure_selected_mariadb_repository
 
 # ============================================================
 # 安装基础组件

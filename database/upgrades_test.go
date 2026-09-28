@@ -70,7 +70,7 @@ func TestFreshInstallRunsMigrationsAndRecordsLatestVersion(t *testing.T) {
 		t.Fatalf("fresh website disable_application_passwords = %d, want 1, err=%v", disableApplicationPasswords, err)
 	}
 
-	for _, col := range []string{"lsphp_socket_path", "ols_vhost_config_path", "wp_memory_limit", "file_lock_enabled", "file_lock_enabled_at", "file_lock_mode", "file_lock_apply_status", "cdn_realip_enabled", "ssl_last_error", "ssl_cert_source", "ssl_export_enabled", "document_root_subdir", "password_reset_mode"} {
+	for _, col := range []string{"lsphp_socket_path", "php_version", "ols_vhost_config_path", "wp_memory_limit", "file_lock_enabled", "file_lock_enabled_at", "file_lock_mode", "file_lock_apply_status", "cdn_realip_enabled", "ssl_last_error", "ssl_cert_source", "ssl_export_enabled", "document_root_subdir", "password_reset_mode"} {
 		var exists int
 		if err := DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('websites') WHERE name = ?", col).Scan(&exists); err != nil {
 			t.Fatalf("query websites column %s: %v", col, err)
@@ -78,6 +78,10 @@ func TestFreshInstallRunsMigrationsAndRecordsLatestVersion(t *testing.T) {
 		if exists != 1 {
 			t.Fatalf("websites.%s exists = %d, want 1", col, exists)
 		}
+	}
+	var phpVersion string
+	if err := DB.QueryRow(`SELECT php_version FROM websites WHERE domain='new.example'`).Scan(&phpVersion); err != nil || phpVersion != "8.3" {
+		t.Fatalf("fresh website php_version = %q, want 8.3, err=%v", phpVersion, err)
 	}
 
 	var groupCount int
@@ -396,7 +400,7 @@ func TestUpgradeAddsWPUpdateSchemaFrom1031(t *testing.T) {
 			t.Fatalf("table %s exists=%d err=%v", table, exists, err)
 		}
 	}
-	if got := LatestVersion(); got != "1.0.66" {
+	if got := LatestVersion(); got != "1.0.67" {
 		t.Fatalf("LatestVersion=%q", got)
 	}
 	for _, column := range []string{"database_backup_mode", "database_backup_source_id", "auto_rollback", "batch_id"} {

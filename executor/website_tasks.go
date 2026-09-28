@@ -54,8 +54,8 @@ func requireDomainTargetAvailable(path, label string) error {
 }
 
 const createWebsiteInsertSQL = `INSERT INTO websites (name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
-	 db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, template_version, access_log_mode, disable_application_passwords, log_retention_days, lsphp_max_children, expires_at)
-	 VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1.0', 'error_only', 1, ?, ?, ?)`
+	 db_name, db_user, lsphp_socket_path, php_version, ols_vhost_config_path, site_type, ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, template_version, access_log_mode, disable_application_passwords, log_retention_days, lsphp_max_children, expires_at)
+	 VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1.0', 'error_only', 1, ?, ?, ?)`
 
 func moveSiteLogDir(oldLogDir, newLogDir string) error {
 	if oldLogDir == newLogDir {
@@ -189,6 +189,10 @@ func executeCreateSite(task *Task) TaskResult {
 	cfg := config.AppConfig
 	domain := strings.ToLower(strings.TrimSpace(payload.Domain))
 	siteName := buildSiteName(domain)
+	phpRuntime, err := ResolveLSPHPRuntime(payload.PHPVersion, true)
+	if err != nil {
+		return TaskResult{Success: false, Message: "所选 PHP 版本尚未安装或不受支持"}
+	}
 
 	dbPassword := payload.DBPassword
 	if dbPassword == "" {
@@ -322,6 +326,7 @@ func executeCreateSite(task *Task) TaskResult {
 		SystemUser:     systemUser,
 		UseSSL:         false,
 		PHPProxy:       "unix:" + phpSockPath,
+		LSPHPBinary:    phpRuntime.LSAPIBinary,
 		SiteType:       payload.SiteType,
 		TemplateVer:    "v1.0",
 		AccessLogMode:  "error_only",
@@ -379,6 +384,7 @@ func executeCreateSite(task *Task) TaskResult {
 				SSLCertPath:    certPath,
 				SSLKeyPath:     keyPath,
 				PHPProxy:       "unix:" + phpSockPath,
+				LSPHPBinary:    phpRuntime.LSAPIBinary,
 				SiteType:       payload.SiteType,
 				TemplateVer:    "v1.0",
 				AccessLogMode:  "error_only",
@@ -435,7 +441,7 @@ func executeCreateSite(task *Task) TaskResult {
 	insertResult, err := db.Exec(
 		createWebsiteInsertSQL,
 		siteName, domain, strings.Join(payload.Aliases, "\n"), systemUser,
-		webRoot, documentRootSubdir, logDir, dbName, dbUser, phpSockPath, olsVHostConfigPath, payload.SiteType, sslEnabled,
+		webRoot, documentRootSubdir, logDir, dbName, dbUser, phpSockPath, phpRuntime.Version, olsVHostConfigPath, payload.SiteType, sslEnabled,
 		certPath, keyPath, sslExpiry, sslWarning, sslCertSource, defaultSiteLogRetentionDays, maxChildren, nilIfEmpty(payload.ExpiresAt),
 	)
 	if err != nil {

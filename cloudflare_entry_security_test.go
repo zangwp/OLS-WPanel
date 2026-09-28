@@ -13,7 +13,7 @@ func TestCloudflareInstallEntryVerifiesPinnedRelease(t *testing.T) {
 	}
 	worker := string(workerBytes)
 	for _, required := range []string{
-		`const RELEASE_VERSION = "v1.0.2"`,
+		`const RELEASE_VERSION = "v1.1.0"`,
 		`https://github.com/zangwp/OLS-WPanel/releases/download/${RELEASE_VERSION}`,
 		`const BOOTSTRAP_NAME = "bootstrap.sh"`,
 		`MCowBQYDK2VwAyEA5rZthMZ8gkeCHSqxa22OlYSpYtTIRY0fBrUtnLvWW9Y=`,

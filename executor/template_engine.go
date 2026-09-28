@@ -24,6 +24,7 @@ type OLSVHostData struct {
 	SSLCertPath      string
 	SSLKeyPath       string
 	PHPProxy         string
+	LSPHPBinary      string
 	TemplateVer      string
 	AccessLogMode    string
 	LSCacheEnabled   bool

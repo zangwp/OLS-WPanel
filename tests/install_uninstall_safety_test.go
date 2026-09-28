@@ -68,7 +68,7 @@ func TestPurgeRequiresExactSecondConfirmationBeforeMutation(t *testing.T) {
 		"全部 OpenLiteSpeed/LSPHP 站点配置",
 		"/www/wwwroot、/www/wwwlogs、/www/server/certificates",
 		"面板状态、凭据、备份和共享安装包缓存",
-		"共享系统软件：OpenLiteSpeed、LSPHP 8.3、MariaDB、Redis、Fail2ban",
+		"共享系统软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB、Redis、Fail2ban",
 		"可能同时被非 OLS 工作负载使用",
 		"选择“彻底清空”后的第二次确认",
 		"请输入精确的 ${BOLD}PURGE${NC}",

@@ -27,6 +27,7 @@ type Website struct {
 	DBUser                      string           `json:"db_user"`
 	TablePrefix                 string           `json:"table_prefix"`
 	LSPHPSocketPath             string           `json:"lsphp_socket_path"`
+	PHPVersion                  string           `json:"php_version"`
 	OLSVHostConfigPath          string           `json:"ols_vhost_config_path"`
 	SiteType                    string           `json:"site_type"`
 	SSLEnabled                  bool             `json:"ssl_enabled"`
@@ -72,6 +73,7 @@ type CreateWebsiteRequest struct {
 	ExpiresAt          string   `json:"expires_at"`
 	SiteType           string   `json:"site_type"`
 	DocumentRootSubdir string   `json:"document_root_subdir"`
+	PHPVersion         string   `json:"php_version"`
 	CleanDefaults      bool     `json:"clean_defaults"`
 	RemoveUnusedThemes bool     `json:"remove_unused_themes"`
 	EnableRedisCache   bool     `json:"enable_redis_cache"`

@@ -30,7 +30,7 @@ import (
 
 // canonical column list shared by all website queries.
 const websiteCols = `id, name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
-	db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled,
+	db_name, db_user, lsphp_socket_path, php_version, ols_vhost_config_path, site_type, ssl_enabled,
 	ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, ssl_export_enabled, template_version, access_log_mode,
 	litespeed_cache_enabled, litespeed_cache_ttl, litespeed_cache_key,
 	monitoring_enabled, monitoring_interval, disable_wp_updates, disable_file_editing,
@@ -108,7 +108,7 @@ func scanWebsite(scanner func(dest ...interface{}) error) (*models.Website, erro
 
 	err := scanner(
 		&w.ID, &w.Name, &w.Domain, &aliases, &status, &w.SystemUser,
-		&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.LSPHPSocketPath,
+		&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.LSPHPSocketPath, &w.PHPVersion,
 		&w.OLSVHostConfigPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath,
 		&w.SSLExpiresAt, &w.SSLLastError, &w.SSLCertSource, &sslExportEnabled, &w.TemplateVersion, &w.AccessLogMode,
 		&lsCacheEnabled, &w.LSCacheTTL, &w.LSCacheKey,
@@ -524,6 +524,7 @@ func (h *WebsiteHandler) Create(c *gin.Context) {
 		ExpiresAt:          req.ExpiresAt,
 		SiteType:           siteType,
 		DocumentRootSubdir: documentRootSubdir,
+		PHPVersion:         req.PHPVersion,
 		CleanDefaults:      req.CleanDefaults,
 		RemoveUnusedThemes: req.RemoveUnusedThemes,
 		EnableRedisCache:   req.EnableRedisCache,
@@ -587,6 +588,37 @@ func (h *WebsiteHandler) SetDocumentRoot(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(result.Message))
 	}
+}
+
+func (h *WebsiteHandler) SetPHPVersion(c *gin.Context) {
+	lang := i18n.LangFromRequest(c.Request)
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "website.invalid_site_id")))
+		return
+	}
+	var req struct {
+		Version string `json:"version"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "common.invalid_params")))
+		return
+	}
+	site := getWebsiteByID(id)
+	if site == nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(i18n.T(lang, "website.not_found")))
+		return
+	}
+	if rejectIfAIDevelopmentAccessActive(c, id) {
+		return
+	}
+	if err := executor.UpdateSiteLSPHPVersion(site, req.Version); err != nil {
+		log.Printf("切换网站 PHP 失败 site=%d version=%s: %v", id, req.Version, err)
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.T(lang, "website.php_runtime_switch_failed")))
+		return
+	}
+	_, _ = database.GetDB().Exec(`INSERT INTO operation_logs(operation,target,status,message) VALUES('site_php_runtime',?,'success',?)`, site.Domain, "LSPHP "+req.Version)
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "website.php_runtime_switched"), "version": req.Version}))
 }
 
 func (h *WebsiteHandler) Delete(c *gin.Context) {

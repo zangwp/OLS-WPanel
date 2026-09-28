@@ -346,7 +346,15 @@ func (r *WPInventoryRunner) validateInputs(cfg *config.Config, site *models.Webs
 	if uidErr != nil || gidErr != nil || uid <= 0 || gid <= 0 || u.Username != site.SystemUser || strings.TrimSpace(u.HomeDir) == "" {
 		return wpInventoryValidatedInput{}, runError(WPInventorySiteUserUnavailable, WPInventoryStageValidate, -1, false, errors.New("invalid site uid or gid"))
 	}
-	phpPath, err := validateInventoryBinary(r.phpPath, r.phpDir, r.ownerUID, r.ownerGID)
+	phpCandidate, phpDir := r.phpPath, r.phpDir
+	if strings.TrimSpace(site.PHPVersion) != "" {
+		if runtime, runtimeErr := ResolveLSPHPRuntime(site.PHPVersion, false); runtimeErr == nil {
+			phpCandidate, phpDir = runtime.CLIBinary, filepath.Dir(runtime.CLIBinary)
+		} else {
+			return wpInventoryValidatedInput{}, runError(WPInventoryPHPCLIUnavailable, WPInventoryStageValidate, -1, false, runtimeErr)
+		}
+	}
+	phpPath, err := validateInventoryBinary(phpCandidate, phpDir, r.ownerUID, r.ownerGID)
 	if err != nil {
 		return wpInventoryValidatedInput{}, runError(WPInventoryPHPCLIUnavailable, WPInventoryStageValidate, -1, false, err)
 	}

@@ -113,6 +113,10 @@ func (o productionSiteMigrationTargetConfigureOps) ResetIdentity(domain string, 
 
 func (o productionSiteMigrationTargetConfigureOps) ApplyConfigs(spec siteMigrationPublishSpec, settings SiteMigrationRuntimeSettings, identity siteMigrationPublishedIdentity, maxChildren int) error {
 	engine := NewTemplateEngine(o.cfg.Panel.BackupDir)
+	phpRuntime, err := ResolveLSPHPRuntime(settings.PHPVersion, true)
+	if err != nil {
+		return err
+	}
 	cdnGroups := make([]models.CDNRealIPGroup, 0, len(settings.CDNGroups))
 	for _, group := range settings.CDNGroups {
 		cdnGroups = append(cdnGroups, models.CDNRealIPGroup{ID: int(group.TargetID), Name: group.Name, Provider: group.Provider, HeaderName: group.HeaderName, IPRanges: group.IPRanges, Builtin: group.Builtin, Enabled: group.Enabled, Description: group.Description})
@@ -121,7 +125,7 @@ func (o productionSiteMigrationTargetConfigureOps) ApplyConfigs(spec siteMigrati
 	if err != nil {
 		return err
 	}
-	data := &OLSVHostData{Domain: spec.Domain, Aliases: settings.Aliases, ServerNames: buildServerNames(spec.Domain, settings.Aliases), WebRoot: EffectiveDocumentRoot(spec.WebRoot, spec.SiteType, spec.DocumentRootSubdir), LogDir: spec.LogDir, SystemUser: spec.SystemUser, UseSSL: identity.SSLEnabled, SSLCertPath: identity.CertPath, SSLKeyPath: identity.KeyPath, PHPProxy: "unix:" + spec.PHPSocketPath, TemplateVer: settings.TemplateVersion, AccessLogMode: settings.AccessLogMode, LSCacheEnabled: settings.LiteSpeedCacheEnabled, LSCacheTTL: settings.LiteSpeedCacheTTL, LSCacheKey: NewCacheKey(), SiteType: spec.SiteType, XMLRPCEnabled: settings.XMLRPCEnabled, CDNRealIPEnabled: settings.CDNRealIPEnabled, CDNRealIPHeader: cdnRuntime.HeaderName, CDNRealIPRanges: cdnRuntime.IPRanges, CDNRealIPCompat: cdnRuntime.Compatible, PHPMaxChildren: maxChildren}
+	data := &OLSVHostData{Domain: spec.Domain, Aliases: settings.Aliases, ServerNames: buildServerNames(spec.Domain, settings.Aliases), WebRoot: EffectiveDocumentRoot(spec.WebRoot, spec.SiteType, spec.DocumentRootSubdir), LogDir: spec.LogDir, SystemUser: spec.SystemUser, UseSSL: identity.SSLEnabled, SSLCertPath: identity.CertPath, SSLKeyPath: identity.KeyPath, PHPProxy: "unix:" + spec.PHPSocketPath, LSPHPBinary: phpRuntime.LSAPIBinary, TemplateVer: settings.TemplateVersion, AccessLogMode: settings.AccessLogMode, LSCacheEnabled: settings.LiteSpeedCacheEnabled, LSCacheTTL: settings.LiteSpeedCacheTTL, LSCacheKey: NewCacheKey(), SiteType: spec.SiteType, XMLRPCEnabled: settings.XMLRPCEnabled, CDNRealIPEnabled: settings.CDNRealIPEnabled, CDNRealIPHeader: cdnRuntime.HeaderName, CDNRealIPRanges: cdnRuntime.IPRanges, CDNRealIPCompat: cdnRuntime.Compatible, PHPMaxChildren: maxChildren}
 	olsVHostConfig, err := engine.RenderOLSVHostConfig(data)
 	if err != nil {
 		return err
@@ -158,6 +162,7 @@ func (p *SiteMigrationTargetPublisher) ConfigureAndHealth(ctx context.Context, m
 	if err != nil {
 		return err
 	}
+	spec.PHPVersion = settings.PHPVersion
 	maxChildren := RecommendLSPHPMaxChildren(CollectSystemFacts())
 	if maxChildren <= 0 {
 		return p.configureFailed(migrationSiteID, "php_capacity_unavailable", errors.New("target LSPHP capacity unavailable"))
@@ -328,9 +333,9 @@ func (p *SiteMigrationTargetPublisher) insertTargetWebsite(ctx context.Context, 
 		return 0, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO websites (name,domain,aliases,status,system_user,web_root,document_root_subdir,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type,ssl_enabled,ssl_cert_path,ssl_key_path,ssl_cert_source,template_version,access_log_mode,litespeed_cache_enabled,litespeed_cache_ttl,litespeed_cache_key,plugin_api_key,monitoring_enabled,monitoring_interval,disable_wp_updates,disable_file_editing,xmlrpc_enabled,disable_application_passwords,wp_debug_enabled,wp_post_revisions,wp_memory_limit,file_lock_enabled,file_lock_mode,password_reset_mode,log_retention_days,cdn_realip_enabled,lsphp_max_children,expires_at)
-		VALUES (?,?,?,'active',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		buildSiteName(spec.Domain), spec.Domain, strings.Join(settings.Aliases, "\n"), spec.SystemUser, spec.WebRoot, spec.DocumentRootSubdir, spec.LogDir, spec.DBName, spec.DBUser, spec.PHPSocketPath, spec.OLSVHostConfigPath, spec.SiteType, boolInt(published.SSLEnabled), published.CertPath, published.KeyPath, settings.SSLCertSource, settings.TemplateVersion, settings.AccessLogMode, boolInt(settings.LiteSpeedCacheEnabled), settings.LiteSpeedCacheTTL, NewCacheKey(), identity.APIKey, 0, settings.MonitoringInterval, boolInt(settings.DisableWPUpdates), boolInt(settings.DisableFileEditing), boolInt(settings.XMLRPCEnabled), boolInt(settings.DisableApplicationPasswords), boolInt(settings.WPDebugEnabled), settings.WPPostRevisions, settings.WPMemoryLimit, boolInt(settings.FileLockEnabled), settings.FileLockMode, settings.PasswordResetMode, settings.LogRetentionDays, boolInt(settings.CDNRealIPEnabled), maxChildren, nilIfEmpty(settings.ExpiresAt))
+	result, err := tx.ExecContext(ctx, `INSERT INTO websites (name,domain,aliases,status,system_user,web_root,document_root_subdir,log_dir,db_name,db_user,lsphp_socket_path,php_version,ols_vhost_config_path,site_type,ssl_enabled,ssl_cert_path,ssl_key_path,ssl_cert_source,template_version,access_log_mode,litespeed_cache_enabled,litespeed_cache_ttl,litespeed_cache_key,plugin_api_key,monitoring_enabled,monitoring_interval,disable_wp_updates,disable_file_editing,xmlrpc_enabled,disable_application_passwords,wp_debug_enabled,wp_post_revisions,wp_memory_limit,file_lock_enabled,file_lock_mode,password_reset_mode,log_retention_days,cdn_realip_enabled,lsphp_max_children,expires_at)
+		VALUES (?,?,?,'active',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		buildSiteName(spec.Domain), spec.Domain, strings.Join(settings.Aliases, "\n"), spec.SystemUser, spec.WebRoot, spec.DocumentRootSubdir, spec.LogDir, spec.DBName, spec.DBUser, spec.PHPSocketPath, settings.PHPVersion, spec.OLSVHostConfigPath, spec.SiteType, boolInt(published.SSLEnabled), published.CertPath, published.KeyPath, settings.SSLCertSource, settings.TemplateVersion, settings.AccessLogMode, boolInt(settings.LiteSpeedCacheEnabled), settings.LiteSpeedCacheTTL, NewCacheKey(), identity.APIKey, 0, settings.MonitoringInterval, boolInt(settings.DisableWPUpdates), boolInt(settings.DisableFileEditing), boolInt(settings.XMLRPCEnabled), boolInt(settings.DisableApplicationPasswords), boolInt(settings.WPDebugEnabled), settings.WPPostRevisions, settings.WPMemoryLimit, boolInt(settings.FileLockEnabled), settings.FileLockMode, settings.PasswordResetMode, settings.LogRetentionDays, boolInt(settings.CDNRealIPEnabled), maxChildren, nilIfEmpty(settings.ExpiresAt))
 	if err != nil {
 		return 0, err
 	}
@@ -465,7 +470,11 @@ func copyMigrationRegularFile(source, target string, mode os.FileMode) error {
 func runMigrationWordPressHealth(ctx context.Context, spec siteMigrationPublishSpec) error {
 	allowedHosts, _ := json.Marshal(append([]string{spec.Domain}, spec.Aliases...))
 	code := `$ols_wpanel_result=['ok'=>false];try{define('WP_USE_THEMES',false);define('DISABLE_WP_CRON',true);require ` + strconv.Quote(filepath.Join(spec.WebRoot, "wp-load.php")) + `;global $wpdb;$tables=[$wpdb->options,$wpdb->posts,$wpdb->users];foreach($tables as $table){$wpdb->get_var("SELECT 1 FROM {$table} LIMIT 1");if($wpdb->last_error){throw new Exception('core_table_unavailable');}}$allowed=json_decode(` + strconv.Quote(string(allowedHosts)) + `,true);$home=get_option('home');$siteurl=get_option('siteurl');foreach([$home,$siteurl] as $url){$host=strtolower((string)parse_url($url,PHP_URL_HOST));if(!$host||!in_array($host,$allowed,true)){throw new Exception('site_url_mismatch');}}$ols_wpanel_result=['ok'=>true];}catch(Throwable $e){$ols_wpanel_result=['ok'=>false,'error'=>'wordpress_bootstrap_failed'];}echo json_encode($ols_wpanel_result);exit($ols_wpanel_result['ok']?0:1);`
-	cmd := exec.CommandContext(ctx, "runuser", "-u", spec.SystemUser, "--", LSPHPBinaryPath(), "-r", code)
+	phpPath, err := LSPHPCLIPathForVersion(spec.PHPVersion)
+	if err != nil {
+		return errors.New("WordPress migration PHP runtime unavailable")
+	}
+	cmd := exec.CommandContext(ctx, "runuser", "-u", spec.SystemUser, "--", phpPath, "-r", code)
 	output, err := cmd.Output()
 	if err != nil || !strings.Contains(string(output), `"ok":true`) {
 		return errors.New("WordPress migration health failed")

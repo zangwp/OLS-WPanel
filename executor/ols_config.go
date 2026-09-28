@@ -185,8 +185,11 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 		maxChildren = 10
 	}
 	phpCfg := LoadPHPRuntimeConfig()
-	paths := currentOLSRuntimePaths()
-	lsphp, err := validateOLSScalar("LSPHP 程序", paths.lsphp, true)
+	lsphpPath := strings.TrimSpace(data.LSPHPBinary)
+	if lsphpPath == "" {
+		lsphpPath = currentOLSRuntimePaths().lsphp
+	}
+	lsphp, err := validateOLSScalar("LSPHP 程序", lsphpPath, true)
 	if err != nil {
 		return "", err
 	}

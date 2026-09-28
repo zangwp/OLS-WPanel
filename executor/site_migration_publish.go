@@ -37,6 +37,7 @@ type siteMigrationPublishSpec struct {
 	OLSVHostConfigPath  string   `json:"ols_vhost_config_path"`
 	OLSVHostEnabledPath string   `json:"ols_vhost_enabled_path"`
 	PHPSocketPath       string   `json:"php_socket_path"`
+	PHPVersion          string   `json:"php_version"`
 }
 
 type siteMigrationTargetPublishOps interface {

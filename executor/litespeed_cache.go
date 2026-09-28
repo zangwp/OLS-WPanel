@@ -660,7 +660,7 @@ func deleteRedisKeysByPrefix(prefix string) error {
 func RegenerateSiteOLSConfig(siteID int) error {
 	db := database.GetDB()
 	var domain, aliases, siteType, systemUser, webRoot, documentRootSubdir, logDir, accessLogMode, cacheKey, templateVer string
-	var phpPoolPath, olsVHostConfigPath string
+	var phpPoolPath, phpVersion, olsVHostConfigPath string
 	var sslEnabled, lsCacheEnabled, xmlrpcEnabled, cdnRealIPEnabled int
 	var lsCacheTTL int
 	var sslCertPath, sslKeyPath, status string
@@ -668,9 +668,9 @@ func RegenerateSiteOLSConfig(siteID int) error {
 	err := db.QueryRow(
 		`SELECT domain, aliases, site_type, system_user, web_root, document_root_subdir, log_dir, ssl_enabled,
 		        access_log_mode, litespeed_cache_enabled, litespeed_cache_ttl, litespeed_cache_key,
-		        ssl_cert_path, ssl_key_path, template_version, xmlrpc_enabled, lsphp_socket_path, ols_vhost_config_path, cdn_realip_enabled, status
+		        ssl_cert_path, ssl_key_path, template_version, xmlrpc_enabled, lsphp_socket_path, php_version, ols_vhost_config_path, cdn_realip_enabled, status
 		 FROM websites WHERE id = ?`, siteID,
-	).Scan(&domain, &aliases, &siteType, &systemUser, &webRoot, &documentRootSubdir, &logDir, &sslEnabled, &accessLogMode, &lsCacheEnabled, &lsCacheTTL, &cacheKey, &sslCertPath, &sslKeyPath, &templateVer, &xmlrpcEnabled, &phpPoolPath, &olsVHostConfigPath, &cdnRealIPEnabled, &status)
+	).Scan(&domain, &aliases, &siteType, &systemUser, &webRoot, &documentRootSubdir, &logDir, &sslEnabled, &accessLogMode, &lsCacheEnabled, &lsCacheTTL, &cacheKey, &sslCertPath, &sslKeyPath, &templateVer, &xmlrpcEnabled, &phpPoolPath, &phpVersion, &olsVHostConfigPath, &cdnRealIPEnabled, &status)
 	if err != nil || domain == "" {
 		if err != nil {
 			return fmt.Errorf("查询站点失败(site %d): %w", siteID, err)
@@ -687,6 +687,10 @@ func RegenerateSiteOLSConfig(siteID int) error {
 	}
 
 	cfg := config.AppConfig
+	phpRuntime, err := ResolveLSPHPRuntime(phpVersion, false)
+	if err != nil {
+		return fmt.Errorf("PHP 运行时配置无效(site %d): %w", siteID, err)
+	}
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
 
 	var aliasList []string
@@ -703,6 +707,7 @@ func RegenerateSiteOLSConfig(siteID int) error {
 		SystemUser:     systemUser,
 		SiteType:       siteType,
 		PHPProxy:       "unix:" + phpSocketPath(cfg, phpPoolPath, domain),
+		LSPHPBinary:    phpRuntime.LSAPIBinary,
 		TemplateVer:    templateVer,
 		AccessLogMode:  accessLogMode,
 		UseSSL:         sslEnabled == 1,

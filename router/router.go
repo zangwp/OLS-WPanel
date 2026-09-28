@@ -983,6 +983,9 @@ var i18nKeys = []string{
 	"software.operation_failed_with_error",
 	"software.php_installed_extensions",
 	"software.php_int_invalid",
+	"software.php_runtime_install_confirm",
+	"software.php_runtime_installed",
+	"software.php_runtime_site_count",
 	"software.php_size_invalid",
 	"software.post_max_size_hint",
 	"software.post_max_size_label",
@@ -999,6 +1002,10 @@ var i18nKeys = []string{
 	"software.write_config_failed",
 	"website.invalid_site_id",
 	"website.not_found",
+	"website.php_runtime_switch",
+	"website.php_runtime_switch_confirm",
+	"website.php_runtime_switched",
+	"website.php_runtime_switching",
 	"website.restore_failed",
 	"website.restore_file_invalid",
 	"website.restore_long_running_help",
@@ -1500,6 +1507,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.DELETE("/api/websites/:id/ai-development-access", aiDevelopmentHandler.Disable)
 	protected.PUT("/api/websites/:id/access-log", websiteHandler.SetAccessLogMode)
 	protected.PUT("/api/websites/:id/document-root", websiteHandler.SetDocumentRoot)
+	protected.PUT("/api/websites/:id/php-version", websiteHandler.SetPHPVersion)
 	protected.PUT("/api/websites/:id/cdn-realip", websiteHandler.SetCDNRealIP)
 	protected.PUT("/api/websites/:id/log-retention", websiteHandler.SetLogRetention)
 	protected.PUT("/api/websites/:id/expiry", websiteHandler.UpdateExpiry)
@@ -1696,6 +1704,8 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/api/software", softwareHandler.List)
 	protected.GET("/api/software/development-tools", softwareHandler.DevelopmentTools)
 	protected.POST("/api/software/development-tools/install", softwareHandler.InstallDevelopmentTool)
+	protected.GET("/api/software/php-runtimes", softwareHandler.PHPRuntimes)
+	protected.POST("/api/software/php-runtimes/install", softwareHandler.InstallPHPRuntime)
 	protected.GET("/api/software/recommend", softwareHandler.Recommend)
 	protected.POST("/api/software/opcache/clear", softwareHandler.ClearOpcache)
 	protected.GET("/api/software/guard", softwareHandler.GetGuardStatus)

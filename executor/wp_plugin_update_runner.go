@@ -162,7 +162,15 @@ func (r *wpPluginPHPRunner) Prepare(ctx context.Context, execution wpPluginUpdat
 	if uidErr != nil || gidErr != nil || uid <= 0 || gid <= 0 || u.Username != execution.SystemUser || !filepath.IsAbs(u.HomeDir) {
 		return nil, errors.New("invalid plugin runner site identity")
 	}
-	php, err := validateInventoryBinary(r.opts.phpPath, r.opts.phpDir, r.opts.ownerUID, r.opts.ownerGID)
+	phpCandidate, phpDir := r.opts.phpPath, r.opts.phpDir
+	if strings.TrimSpace(execution.PHPVersion) != "" {
+		runtime, runtimeErr := ResolveLSPHPRuntime(execution.PHPVersion, false)
+		if runtimeErr != nil {
+			return nil, runtimeErr
+		}
+		phpCandidate, phpDir = runtime.CLIBinary, filepath.Dir(runtime.CLIBinary)
+	}
+	php, err := validateInventoryBinary(phpCandidate, phpDir, r.opts.ownerUID, r.opts.ownerGID)
 	if err != nil {
 		return nil, err
 	}
