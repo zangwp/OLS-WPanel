@@ -1565,7 +1565,8 @@ func TestLightThemeOverridesCompiledComponentColors(t *testing.T) {
 		[]byte(`html[data-theme="light"] .table-header`),
 		[]byte(`html[data-theme="light"] .label`),
 		[]byte(`html[data-theme="light"] .input-field::placeholder`),
-		[]byte(`--panel-muted: #475569`),
+		[]byte(`--panel-muted: #3f4d63`),
+		[]byte(`--panel-subtle: #526176`),
 		[]byte(`html[data-theme="light"] .runtime-version`),
 		[]byte(`color: #166534 !important`),
 	} {
