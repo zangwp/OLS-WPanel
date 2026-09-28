@@ -111,10 +111,20 @@ jobs:
         run: |
           set -euo pipefail
           packages_file="$RUNNER_TEMP/ci-packages"
+          test_log="$RUNNER_TEMP/go-test.log"
           go list ./... | grep -v '/scratch$' > "$packages_file"
           mapfile -t packages < "$packages_file"
           test "${#packages[@]}" -gt 0
-          go test -trimpath "${packages[@]}"
+          if ! go test -trimpath "${packages[@]}" >"$test_log" 2>&1; then
+            cat "$test_log"
+            detail=$(tail -n 100 "$test_log" | tail -c 6000)
+            detail=${detail//'%'/'%25'}
+            detail=${detail//$'\r'/'%0D'}
+            detail=${detail//$'\n'/'%0A'}
+            echo "::error title=Go test failure::$detail"
+            exit 1
+          fi
+          cat "$test_log"
 
       - name: Vet
         shell: bash
