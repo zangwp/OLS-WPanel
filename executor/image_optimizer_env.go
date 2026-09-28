@@ -4,10 +4,13 @@ import (
 	"context"
 	"log"
 	"os/exec"
+	"strings"
 	"time"
 )
 
-const phpExifPackage = "lsphp83-common"
+func primaryPHPExifPackage() string {
+	return "lsphp" + strings.ReplaceAll(PrimaryLSPHPVersion(), ".", "") + "-common"
+}
 
 // jpegoptimPackage/optipngPackage 是历史图库批量优化依赖的无损压缩二进制，
 // 只影响那一个功能，跟 LSPHP 的 EXIF 支持（影响新上传处理）互不混淆。
@@ -20,6 +23,7 @@ const optipngPackage = "optipng"
 // 生效。插件侧不查询这个函数的状态——它直接在 PHP 运行时用
 // is_callable('exif_read_data') 判断，装好之后下次页面加载自然可用。
 func EnsurePHPExifExtension() {
+	phpExifPackage := primaryPHPExifPackage()
 	ensureAptPackage(phpExifPackage, func() {
 		if err := ReloadOpenLiteSpeed(); err != nil {
 			log.Printf("[图片优化] %s 补装成功，但重启 OpenLiteSpeed/LSPHP 失败，需要人工重启使扩展生效: %v", phpExifPackage, err)

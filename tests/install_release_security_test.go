@@ -467,6 +467,10 @@ func TestInstallerUsesSeparateRestorableDistributionSources(t *testing.T) {
 func TestInstallerPinsSupportedRuntimeRepositories(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 	for _, required := range []string{
+		`MARIADB_SERIES="11.8"`,
+		`配置全新安装默认 MariaDB ${MARIADB_SERIES} 官方 APT 仓库`,
+		`openlitespeed lsphp85 lsphp85-common lsphp85-mysql lsphp85-curl`,
+		`/usr/local/lsws/lsphp85/bin/php -m`,
 		`lsphp84 lsphp84-common lsphp84-mysql`,
 		`lsphp85 lsphp85-common lsphp85-mysql`,
 		`lsphp85-intl lsphp85-redis lsphp85-imagick`,

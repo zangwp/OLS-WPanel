@@ -16,7 +16,10 @@ type PHPRuntimeConfig struct {
 	MaxInputVars      string
 }
 
-var phpRuntimeConfigPath = "/usr/local/lsws/lsphp83/etc/php/8.3/litespeed/conf.d/99-ols-wpanel.ini"
+// Tests may override this path. Production derives it from the configured
+// primary LSPHP branch so upgraded 8.3 installations are not silently pointed
+// at the fresh-install 8.5 default.
+var phpRuntimeConfigPath string
 
 var phpRuntimeDefaults = PHPRuntimeConfig{
 	MemoryLimit:       "256M",
@@ -50,20 +53,26 @@ var phpOpcacheStaticDefaults = map[string]string{
 }
 
 func PHPRuntimeConfigPath() string {
-	return phpRuntimeConfigPath
+	if path := strings.TrimSpace(phpRuntimeConfigPath); path != "" {
+		return path
+	}
+	version := PrimaryLSPHPVersion()
+	suffix := strings.ReplaceAll(version, ".", "")
+	return filepath.Join("/usr/local/lsws", "lsphp"+suffix, "etc", "php", version, "litespeed", "conf.d", "99-ols-wpanel.ini")
 }
 
 func EnsurePHPRuntimeConfigFile() (bool, error) {
-	if err := os.MkdirAll(filepath.Dir(phpRuntimeConfigPath), 0755); err != nil {
+	path := PHPRuntimeConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return false, err
 	}
-	data, err := os.ReadFile(phpRuntimeConfigPath)
+	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return false, err
 	}
 
 	if os.IsNotExist(err) {
-		return true, os.WriteFile(phpRuntimeConfigPath, []byte(defaultPHPRuntimeConfigContent()), 0644)
+		return true, os.WriteFile(path, []byte(defaultPHPRuntimeConfigContent()), 0644)
 	}
 
 	content := string(data)
@@ -87,7 +96,7 @@ func EnsurePHPRuntimeConfigFile() (bool, error) {
 	if next == content {
 		return false, nil
 	}
-	return true, os.WriteFile(phpRuntimeConfigPath, []byte(next), 0644)
+	return true, os.WriteFile(path, []byte(next), 0644)
 }
 
 // recommendedOpcacheAdaptiveDefaults 计算 opcache.memory_consumption（MB）和
@@ -101,7 +110,7 @@ func recommendedOpcacheAdaptiveDefaults() (memoryConsumptionMB string, maxAccele
 
 func LoadPHPRuntimeConfig() PHPRuntimeConfig {
 	cfg := phpRuntimeDefaults
-	data, err := os.ReadFile(phpRuntimeConfigPath)
+	data, err := os.ReadFile(PHPRuntimeConfigPath())
 	if err != nil {
 		return cfg
 	}

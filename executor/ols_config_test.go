@@ -41,7 +41,7 @@ func TestRenderOLSVHostIncludesLSPHPAndLiteSpeedCache(t *testing.T) {
 		"# OLS-WPanel-Domains: example.com,www.example.com",
 		"type                   lsapi",
 		"address                uds://",
-		"path                   /usr/local/lsws/lsphp83/bin/lsphp",
+		"path                   /usr/local/lsws/lsphp85/bin/lsphp",
 		"extUser                wp_example",
 		"autoLoadHtaccess       1",
 		"module cache {",

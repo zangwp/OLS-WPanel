@@ -27,11 +27,11 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 短域名入口固定到已发布的 Release；Cloudflare Worker 会先验证 `bootstrap.sh` 的 Ed25519 签名和 SHA-256。脚本下载后会自动检查并补装 `wget`、`curl`、`ca-certificates`、`openssl` 等引导依赖，再次验签固定版本的 `install.sh`，最后才启动安装。它不会执行 GitHub `main` 分支上的可变脚本。
 
-当前稳定版本：`v1.1.0`。
+当前稳定版本：`v1.2.0`。
 
 ### 可选 MariaDB 系列（仅限全新安装）
 
-默认使用当前受支持系统的发行版系列；如果希望在纯净服务器上明确选择 MariaDB 系列，可使用：
+全新安装默认使用经本版本验证的最新稳定系列 MariaDB `11.8`；Ubuntu 24.04 如需旧应用兼容，可明确选择 `10.11` 或 `11.4`：
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash -s -- --mariadb-version 11.8
@@ -175,11 +175,11 @@ OLS WPanel 只做一件事：**在 VPS 上高效管理 WordPress 网站**。不�
 
 **PHP 版本如何选择？**
 
-全新安装默认启用兼容性最稳妥的 LSPHP 8.3；软件管理中可按需安装 8.4 或 8.5，再在创建网站或网站详情中逐站选择。切换前应确认主题和插件兼容性，同一台服务器上的不同网站可以并行使用不同版本。
+全新安装默认启用本版本已经验证的最新稳定运行时 LSPHP 8.5；软件管理中可按需添加 8.4 或 8.3 兼容运行时，再在创建网站或网站详情中逐站选择。已有服务器保持原主版本，不会因为面板更新自动切换网站。
 
 **为什么是 MariaDB 而非 MySQL？**
 
-WordPress 官方推荐 MariaDB 10.6 或更高版本。Ubuntu 24.04 全新安装支持 10.11、11.4、11.8，Debian 13 因官方仓库兼容范围仅支持 11.8；未指定时使用目标系统发行版系列，显式指定时使用经签名密钥校验的 MariaDB 官方仓库。MariaDB 是由社区驱动的 GPL 分支并兼容 MySQL。已有数据库不会被面板静默跨系列降级。
+WordPress 官方推荐 MariaDB 10.6 或更高版本。全新安装默认使用 MariaDB 11.8 和经签名密钥校验的官方仓库；Ubuntu 24.04 仍可显式选择 10.11 或 11.4，Debian 13 因官方仓库兼容范围仅支持 11.8。MariaDB 是由社区驱动的 GPL 分支并兼容 MySQL。已有数据库只接收当前系列的补丁，不会被面板静默跨系列升级或降级。
 
 **服务版本如何更新？**
 
@@ -199,8 +199,8 @@ OLS WPanel 会生成并维护服务器级与网站级 OpenLiteSpeed 配置，因
 
 | 组件 | 说明 |
 |------|------|
-| LSPHP 8.3 / 8.4 / 8.5 | LiteSpeed 官方 HTTPS 软件源；8.3 默认安装，其他版本按需安装；每个网站使用独立 LSAPI socket、系统用户和进程上限 |
-| MariaDB 10.11 / 11.4 / 11.8 | 全新安装可选；Ubuntu 24.04 支持三种系列，Debian 13 支持 11.8；使用目标系统发行版仓库或经验证的 MariaDB 官方仓库 |
+| LSPHP 8.5 / 8.4 / 8.3 | LiteSpeed 官方 HTTPS 软件源；8.5 默认安装，8.4/8.3 作为兼容运行时按需添加；每个网站使用独立 LSAPI socket、系统用户和进程上限 |
+| MariaDB 11.8 / 11.4 / 10.11 | 全新安装默认 11.8；Ubuntu 24.04 可显式选择三种系列，Debian 13 支持 11.8；使用经验证的 MariaDB 官方仓库 |
 | OpenLiteSpeed | LiteSpeed 官方 HTTPS 软件源；每站点独立虚拟主机，并自动安装官方 LiteSpeed Cache 插件 |
 | Redis 8.10.2+ | Redis 官方签名 APT 软件源；支持 Noble/Trixie 与 amd64/arm64 |
 | Fail2ban + nftables | 当前发行版系统源；界面同时显示上游稳定版本参考，避免源码覆盖系统防火墙组件 |

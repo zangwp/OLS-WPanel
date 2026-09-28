@@ -15,9 +15,9 @@ import (
 	"github.com/zangwp/OLS-WPanel/models"
 )
 
-const DefaultLSPHPVersion = "8.3"
+const DefaultLSPHPVersion = "8.5"
 
-var supportedLSPHPVersions = []string{"8.3", "8.4", "8.5"}
+var supportedLSPHPVersions = []string{"8.5", "8.4", "8.3"}
 
 // LSPHPRuntime is a deliberately small allow-listed runtime descriptor. Paths
 // are derived by the panel rather than accepted from an HTTP request.
@@ -58,7 +58,7 @@ func lsphpRuntimeForVersion(version string) (LSPHPRuntime, error) {
 		LSAPIBinary: filepath.Join(root, "lsphp"), CLIBinary: filepath.Join(root, "php"),
 		Recommended: version == DefaultLSPHPVersion,
 	}
-	if version == DefaultLSPHPVersion && config.AppConfig != nil {
+	if version == PrimaryLSPHPVersion() && config.AppConfig != nil {
 		if path := strings.TrimSpace(config.AppConfig.Paths.LSPHPBinary); path != "" {
 			runtime.LSAPIBinary = filepath.Clean(path)
 		}
@@ -68,6 +68,24 @@ func lsphpRuntimeForVersion(version string) (LSPHPRuntime, error) {
 	}
 	runtime.Installed = trustedLSPHPExecutable(runtime.LSAPIBinary) && trustedLSPHPExecutable(runtime.CLIBinary)
 	return runtime, nil
+}
+
+// PrimaryLSPHPVersion returns the version configured as the panel-wide CLI
+// runtime. Existing installations keep their configured branch (typically
+// 8.3), while fresh v1.2+ installations fall back to the verified 8.5 default.
+func PrimaryLSPHPVersion() string {
+	if config.AppConfig != nil {
+		for _, configured := range []string{config.AppConfig.Paths.LSPHPCLI, config.AppConfig.Paths.LSPHPBinary} {
+			clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(configured)))
+			for _, version := range supportedLSPHPVersions {
+				suffix := strings.ReplaceAll(version, ".", "")
+				if strings.Contains(clean, "/lsphp"+suffix+"/") {
+					return version
+				}
+			}
+		}
+	}
+	return DefaultLSPHPVersion
 }
 
 func trustedLSPHPExecutable(path string) bool {

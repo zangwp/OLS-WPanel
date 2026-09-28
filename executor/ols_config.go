@@ -56,8 +56,8 @@ func currentOLSRuntimePaths() olsRuntimePaths {
 		mainConfig:   "/usr/local/lsws/conf/httpd_config.conf",
 		managed:      "/usr/local/lsws/conf/ols-wpanel/sites.conf",
 		binary:       "/usr/local/lsws/bin/openlitespeed",
-		lsphp:        "/usr/local/lsws/lsphp83/bin/lsphp",
-		lsphpCLI:     "/usr/local/lsws/lsphp83/bin/php",
+		lsphp:        "/usr/local/lsws/lsphp85/bin/lsphp",
+		lsphpCLI:     "/usr/local/lsws/lsphp85/bin/php",
 		listenerCert: "/usr/local/lsws/conf/ols-wpanel/default.crt",
 		listenerKey:  "/usr/local/lsws/conf/ols-wpanel/default.key",
 	}

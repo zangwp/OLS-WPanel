@@ -4,9 +4,15 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/zangwp/OLS-WPanel/config"
 )
 
 func TestSupportedLSPHPVersionAllowlist(t *testing.T) {
+	got, err := normalizeLSPHPVersion("")
+	if err != nil || got != "8.5" {
+		t.Fatalf("blank LSPHP version = %q, %v; want fresh-install default 8.5", got, err)
+	}
 	for _, version := range []string{"8.3", "8.4", "8.5"} {
 		got, err := normalizeLSPHPVersion(version)
 		if err != nil || got != version {
@@ -17,6 +23,43 @@ func TestSupportedLSPHPVersionAllowlist(t *testing.T) {
 		if _, err := normalizeLSPHPVersion(version); err == nil {
 			t.Errorf("normalizeLSPHPVersion(%q) unexpectedly succeeded", version)
 		}
+	}
+}
+
+func TestPrimaryLSPHPVersionPreservesConfiguredExistingRuntime(t *testing.T) {
+	previous := config.AppConfig
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{
+		LSPHPBinary: "/usr/local/lsws/lsphp83/bin/lsphp",
+		LSPHPCLI:    "/usr/local/lsws/lsphp83/bin/php",
+	}}
+	t.Cleanup(func() { config.AppConfig = previous })
+
+	if got := PrimaryLSPHPVersion(); got != "8.3" {
+		t.Fatalf("PrimaryLSPHPVersion() = %q, want configured 8.3", got)
+	}
+	runtime, err := lsphpRuntimeForVersion("8.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.LSAPIBinary != config.AppConfig.Paths.LSPHPBinary || runtime.CLIBinary != config.AppConfig.Paths.LSPHPCLI {
+		t.Fatalf("configured primary runtime paths were not preserved: %+v", runtime)
+	}
+}
+
+func TestPrimaryLSPHPVersionDefaultsToLatestVerifiedRuntime(t *testing.T) {
+	previous := config.AppConfig
+	config.AppConfig = nil
+	t.Cleanup(func() { config.AppConfig = previous })
+
+	if got := PrimaryLSPHPVersion(); got != "8.5" {
+		t.Fatalf("PrimaryLSPHPVersion() = %q, want 8.5", got)
+	}
+	runtime, err := lsphpRuntimeForVersion("8.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.Recommended {
+		t.Fatal("LSPHP 8.5 must be marked as the recommended fresh-install runtime")
 	}
 }
 

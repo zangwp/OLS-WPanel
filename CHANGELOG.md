@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0 — 2026-09-28
+
+- Makes fresh installations use the latest release-verified defaults: LSPHP 8.5 and MariaDB 11.8.
+- Keeps LSPHP 8.4 and 8.3 available as per-site compatibility runtimes instead of installing every PHP branch by default.
+- Preserves the configured primary LSPHP branch on existing servers, including its CLI and managed PHP configuration path.
+- Keeps existing MariaDB installations on their current series; normal package updates remain same-series patch and security updates.
+- Updates the signed installer entry, documentation, and regression checks for the v1.2.0 release boundary.
+
 ## v1.1.0 — 2026-09-28
 
 - Adds independently installable LSPHP 8.3, 8.4, and 8.5 runtimes with per-site selection for new and existing sites.

@@ -29,7 +29,7 @@ var migrations = append([]string{
 		db_name               TEXT    NOT NULL,
 		db_user               TEXT    NOT NULL,
 		lsphp_socket_path      TEXT    NOT NULL,
-		php_version            TEXT    NOT NULL DEFAULT '8.3',
+		php_version            TEXT    NOT NULL DEFAULT '8.5',
 		ols_vhost_config_path       TEXT    NOT NULL,
 		site_type             TEXT    NOT NULL DEFAULT 'wordpress',
 		ssl_enabled           INTEGER NOT NULL DEFAULT 0,

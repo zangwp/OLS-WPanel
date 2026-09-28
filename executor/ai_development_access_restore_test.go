@@ -9,7 +9,7 @@ import (
 )
 
 func TestAIDevelopmentPHPKillArgsTargetsOnlyLSPHPWorkers(t *testing.T) {
-	want := []string{"-KILL", "-u", "wp_example", "-f", `(^|/)(lsphp|lsphp83)( |$)`}
+	want := []string{"-KILL", "-u", "wp_example", "-f", `(^|/)lsphp(83|84|85)?( |$)`}
 	if got := aiDevelopmentPHPKillArgs("KILL", "wp_example"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%q want=%q", got, want)
 	}

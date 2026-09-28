@@ -5,7 +5,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zangwp/OLS-WPanel/config"
 )
+
+func TestPHPRuntimeConfigPathFollowsConfiguredPrimaryRuntime(t *testing.T) {
+	oldPath := phpRuntimeConfigPath
+	previousConfig := config.AppConfig
+	phpRuntimeConfigPath = ""
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{
+		LSPHPCLI: "/usr/local/lsws/lsphp84/bin/php",
+	}}
+	t.Cleanup(func() {
+		phpRuntimeConfigPath = oldPath
+		config.AppConfig = previousConfig
+	})
+
+	want := filepath.Join("/usr/local/lsws", "lsphp84", "etc", "php", "8.4", "litespeed", "conf.d", "99-ols-wpanel.ini")
+	if got := PHPRuntimeConfigPath(); got != want {
+		t.Fatalf("PHPRuntimeConfigPath() = %q, want %q", got, want)
+	}
+}
 
 func TestEnsurePHPRuntimeConfigFileAddsMissingKeys(t *testing.T) {
 	oldPath := phpRuntimeConfigPath

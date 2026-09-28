@@ -600,7 +600,7 @@ func TestInstallerNeverPlacesGeneratedSecretsInChildArguments(t *testing.T) {
 		`MYSQL_CLIENT_CONFIG="$INSTALL_WORKDIR/mariadb-client.cnf"`,
 		`chmod 0600 "$MYSQL_CLIENT_CONFIG"`,
 		`mysql --defaults-extra-file="$MYSQL_CLIENT_CONFIG"`,
-		`printf '%s' "$password" | php8.3 -r`,
+		`printf '%s' "$password" | /usr/local/lsws/lsphp85/bin/php -r`,
 		`stream_get_contents(STDIN)`,
 		`printf '%s' "$password" | python3 -c`,
 		`sys.stdin.buffer.read()`,

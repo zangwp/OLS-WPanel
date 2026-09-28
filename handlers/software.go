@@ -94,7 +94,7 @@ func (h *SoftwareHandler) List(c *gin.Context) {
 	for i := range items {
 		populateConfigValues(&items[i])
 	}
-	applyPackageUpdateInfo(&items[0], "lsphp83")
+	applyPackageUpdateInfo(&items[0], "lsphp"+strings.ReplaceAll(executor.PrimaryLSPHPVersion(), ".", ""))
 	applyPackageUpdateInfo(&items[1], "openlitespeed")
 	applyPackageUpdateInfo(&items[2], "mariadb-server")
 	applyPackageUpdateInfo(&items[3], "redis-server")

@@ -1474,10 +1474,7 @@ REDISSOURCEEOF
 
 resolve_mariadb_series() {
 	if [[ -z "$MARIADB_SERIES" ]]; then
-		case "$PLATFORM_ID" in
-			ubuntu) MARIADB_SERIES="10.11" ;;
-			debian) MARIADB_SERIES="11.8" ;;
-		esac
+		MARIADB_SERIES="11.8"
 	fi
 	case "$MARIADB_SERIES" in
 		10.11|11.4|11.8) ;;
@@ -1490,17 +1487,16 @@ resolve_mariadb_series() {
 
 configure_selected_mariadb_repository() {
 	resolve_mariadb_series
-	if [[ "$MARIADB_SERIES_EXPLICIT" != true ]]; then
-		log_info "MariaDB 使用系统发行版仓库默认系列（预期 ${MARIADB_SERIES}）"
-		return 0
-	fi
-
 	local key_download="$INSTALL_WORKDIR/mariadb-keyring-2019.gpg"
 	local keyring="/usr/share/keyrings/ols-wpanel-mariadb-archive-keyring.gpg"
 	local source_file="/etc/apt/sources.list.d/ols-wpanel-mariadb.sources"
 	local fingerprints=""
 	local candidate=""
-	log_info "配置 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
+	if [[ "$MARIADB_SERIES_EXPLICIT" == true ]]; then
+		log_info "配置用户选择的 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
+	else
+		log_info "配置全新安装默认 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
+	fi
 	assert_managed_source_target "$source_file"
 	download_file "https://supplychain.mariadb.com/mariadb-keyring-2019.gpg" "$key_download" 60 1048576 || \
 		log_error "下载 MariaDB APT 公钥失败"
@@ -1525,13 +1521,13 @@ MARIADBSOURCEEOF
 }
 
 validate_lsphp_wordpress_modules() {
-	local modules_file="$INSTALL_WORKDIR/lsphp83-modules.txt"
+	local modules_file="$INSTALL_WORKDIR/lsphp85-modules.txt"
 	local module=""
 
-	/usr/local/lsws/lsphp83/bin/php -m > "$modules_file"
+	/usr/local/lsws/lsphp85/bin/php -m > "$modules_file"
 	for module in curl dom exif fileinfo gd imagick igbinary intl mbstring mysqli openssl pdo_mysql redis SimpleXML xml xmlreader xmlwriter zip "Zend OPcache"; do
 		grep -Fxq "$module" "$modules_file" || \
-			log_error "LSPHP 8.3 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
+			log_error "LSPHP 8.5 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	done
 }
 
@@ -1973,14 +1969,14 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     configure_litespeed_repository
 	configure_redis_repository
     apt-get install -y --no-install-recommends \
-        openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl \
-        lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick \
+        openlitespeed lsphp85 lsphp85-common lsphp85-mysql lsphp85-curl \
+        lsphp85-intl lsphp85-redis lsphp85-imagick \
 		redis-server redis-tools
     /usr/local/lsws/bin/openlitespeed -v
-    /usr/local/lsws/lsphp83/bin/lsphp -v
-    /usr/local/lsws/lsphp83/bin/php --ini
+    /usr/local/lsws/lsphp85/bin/lsphp -v
+    /usr/local/lsws/lsphp85/bin/php --ini
     validate_lsphp_wordpress_modules
-    cat "$INSTALL_WORKDIR/lsphp83-modules.txt"
+    cat "$INSTALL_WORKDIR/lsphp85-modules.txt"
     # Validate the same plain-text constructs emitted by the installer and Go
     # vhost renderer. The container is disposable, so replacing the vendor
     # sample config here cannot affect a user system.
@@ -2024,7 +2020,7 @@ extprocessor lsphp_example {
   persistConn            1
   respBuffer             0
   autoStart              1
-  path                   /usr/local/lsws/lsphp83/bin/lsphp
+  path                   /usr/local/lsws/lsphp85/bin/lsphp
   backlog                100
   instances              1
   extUser                nobody
@@ -2375,16 +2371,15 @@ apt-get install -y \
     sshpass \
     rsyslog \
     cron \
-    lsphp83 \
-    lsphp83-common \
-    lsphp83-mysql \
-    lsphp83-curl \
+    lsphp85 \
+    lsphp85-common \
+    lsphp85-mysql \
+    lsphp85-curl \
     jpegoptim \
     optipng \
-    lsphp83-intl \
-    lsphp83-redis \
-    lsphp83-opcache \
-    lsphp83-imagick
+    lsphp85-intl \
+    lsphp85-redis \
+    lsphp85-imagick
 
 validate_lsphp_wordpress_modules
 
@@ -2782,8 +2777,8 @@ generate_bcrypt_hash() {
     local password="$1"
     local hash=""
 
-    if command -v php8.3 &>/dev/null; then
-        hash=$(printf '%s' "$password" | php8.3 -r \
+    if [[ -x /usr/local/lsws/lsphp85/bin/php ]]; then
+        hash=$(printf '%s' "$password" | /usr/local/lsws/lsphp85/bin/php -r \
             '$password = stream_get_contents(STDIN); echo password_hash($password, PASSWORD_BCRYPT, ["cost" => 12]);' \
             2>/dev/null || true)
     fi
@@ -2852,8 +2847,8 @@ cat > "$CONFIG_FILE" << CONFIGEOF
     "ols_main_config": "/usr/local/lsws/conf/httpd_config.conf",
     "ols_managed_config": "/usr/local/lsws/conf/ols-wpanel/sites.conf",
     "ols_binary": "/usr/local/lsws/bin/openlitespeed",
-    "lsphp_binary": "/usr/local/lsws/lsphp83/bin/lsphp",
-    "lsphp_cli": "/usr/local/lsws/lsphp83/bin/php",
+    "lsphp_binary": "/usr/local/lsws/lsphp85/bin/lsphp",
+    "lsphp_cli": "/usr/local/lsws/lsphp85/bin/php",
     "ols_listener_cert": "/usr/local/lsws/conf/ols-wpanel/default.crt",
     "ols_listener_key": "/usr/local/lsws/conf/ols-wpanel/default.key",
     "ols_vhosts_available": "/usr/local/lsws/conf/ols-wpanel/sites-available",
@@ -3075,7 +3070,7 @@ echo -e "  3. 查看面板日志 / View panel logs: ${BOLD}journalctl -u ols-wpa
 echo ""
 echo -e "${BOLD}软件安装路径 / Installed Paths:${NC}"
 echo -e "  OpenLiteSpeed: /usr/local/lsws/"
-echo -e "  LSPHP 8.3:     /usr/local/lsws/lsphp83/"
+echo -e "  LSPHP 8.5:     /usr/local/lsws/lsphp85/"
 echo -e "  MariaDB:    /etc/mysql/"
 echo -e "  Redis:      /etc/redis/"
 echo -e "  面板程序 / Panel binary: /usr/local/bin/ols-wpanel"

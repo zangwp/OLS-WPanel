@@ -476,7 +476,7 @@ func (productionAIDevelopmentSystem) terminateSitePHPProcesses(ctx context.Conte
 }
 
 func aiDevelopmentPHPKillArgs(signal, systemUser string) []string {
-	return []string{"-" + signal, "-u", systemUser, "-f", `(^|/)(lsphp|lsphp83)( |$)`}
+	return []string{"-" + signal, "-u", systemUser, "-f", `(^|/)lsphp(83|84|85)?( |$)`}
 }
 
 func wrapAIDevelopmentUsermodBusy(err error) error {

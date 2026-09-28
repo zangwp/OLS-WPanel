@@ -16,11 +16,11 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.1.0`.
+The current stable release is `v1.2.0`.
 
 ### MariaDB series on a fresh server
 
-The default follows the supported operating-system series. A clean installation may explicitly select a MariaDB series:
+Fresh installs default to the latest stable series verified by this release, MariaDB `11.8`. Ubuntu 24.04 may explicitly select an older compatibility series:
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash -s -- --mariadb-version 11.8
@@ -39,8 +39,8 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 ## What it installs
 
 - OpenLiteSpeed with generated HTTP/HTTPS listeners and one isolated virtual host per site
-- LSPHP 8.3 by default, with optional 8.4 and 8.5 runtimes assignable per site
-- MariaDB 10.11, 11.4, or 11.8 on Ubuntu 24.04 fresh installs, MariaDB 11.8 on Debian 13, plus Redis 8.10.2 or newer from Redis' official signed APT repository
+- LSPHP 8.5 by default, with optional 8.4 and 8.3 compatibility runtimes assignable per site
+- MariaDB 11.8 by default; Ubuntu 24.04 may explicitly select 10.11 or 11.4, while Debian 13 supports 11.8; Redis 8.10.2 or newer comes from Redis' official signed APT repository
 - The official LiteSpeed Cache WordPress plugin, automatically activated for new WordPress sites
 - Redis object-cache defaults with an independent key prefix per site
 - Fail2ban and nftables for host-level enforcement

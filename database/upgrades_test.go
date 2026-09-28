@@ -80,8 +80,8 @@ func TestFreshInstallRunsMigrationsAndRecordsLatestVersion(t *testing.T) {
 		}
 	}
 	var phpVersion string
-	if err := DB.QueryRow(`SELECT php_version FROM websites WHERE domain='new.example'`).Scan(&phpVersion); err != nil || phpVersion != "8.3" {
-		t.Fatalf("fresh website php_version = %q, want 8.3, err=%v", phpVersion, err)
+	if err := DB.QueryRow(`SELECT php_version FROM websites WHERE domain='new.example'`).Scan(&phpVersion); err != nil || phpVersion != "8.5" {
+		t.Fatalf("fresh website php_version = %q, want 8.5, err=%v", phpVersion, err)
 	}
 
 	var groupCount int

@@ -19,7 +19,8 @@ func init() {
 // 这是一次性版本迁移（版本号 1.0.51），不会在每次面板启动时重复检查——用户升级后如果
 // 自己又把值改回 2000，是他的选择，不会被再次覆盖。
 func UpgradeLegacyPHPMaxInputVars() error {
-	data, err := os.ReadFile(phpRuntimeConfigPath)
+	path := PHPRuntimeConfigPath()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // 尚未初始化；EnsurePHPRuntimeConfigFile 会直接用新默认值写入
@@ -33,5 +34,5 @@ func UpgradeLegacyPHPMaxInputVars() error {
 	}
 
 	next := setIniValue(content, "max_input_vars", "10000")
-	return os.WriteFile(phpRuntimeConfigPath, []byte(next), 0644)
+	return os.WriteFile(path, []byte(next), 0644)
 }
