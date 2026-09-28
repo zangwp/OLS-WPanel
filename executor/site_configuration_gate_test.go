@@ -84,7 +84,7 @@ func TestRemoveSSLRejectsActiveMigrationBeforeSideEffects(t *testing.T) {
 	}
 }
 
-func TestPausedSiteRejectsOnlyAffectedNginxConfigurationTasks(t *testing.T) {
+func TestPausedSiteRejectsOnlyAffectedOpenLiteSpeedConfigurationTasks(t *testing.T) {
 	withPausedConfigurationTestDB(t)
 	site := &models.Website{ID: 7, Domain: "example.com", SiteType: "php"}
 	tests := []struct {

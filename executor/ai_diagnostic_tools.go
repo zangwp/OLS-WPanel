@@ -122,7 +122,7 @@ func statusDiagnosticRules(status string) []string {
 	case "404":
 		return append(base, "404需要区分正常旧链接或缺失静态资源、搜索引擎历史抓取，与随机路径、敏感文件和漏洞扫描。")
 	case "500", "502", "503", "504":
-		return append(base, "5xx需要结合具体日志样本、路径、PHP/Nginx错误、慢请求和当前HTTP探测；历史出现但当前未复现时不能声称网站仍在故障。")
+		return append(base, "5xx需要结合具体日志样本、路径、PHP/OpenLiteSpeed错误、慢请求和当前HTTP探测；历史出现但当前未复现时不能声称网站仍在故障。")
 	case "301", "302", "303", "307", "308":
 		return append(base, "重定向通常可能正常；检查是否集中于登录、HTTPS、规范网址或后台流程，并识别异常循环或非预期目标的证据。")
 	case "304":
@@ -146,7 +146,7 @@ func collectAIDiagnosticToolContext(site *models.Website, session *models.AISess
 	result := map[string]interface{}{}
 	events := []models.AIToolEvent{}
 	result["runtime_configuration"] = aiRuntimeConfigurationSummary(site)
-	events = append(events, models.AIToolEvent{ToolName: "read_site_runtime_configuration", ResultSummary: "已读取网站、PHP、Nginx和WordPress只读配置摘要"})
+	events = append(events, models.AIToolEvent{ToolName: "read_site_runtime_configuration", ResultSummary: "已读取网站、PHP、OpenLiteSpeed和WordPress只读配置摘要"})
 	result["security_configuration"] = aiSecuritySummary(site)
 	events = append(events, models.AIToolEvent{ToolName: "read_security_configuration", ResultSummary: "已读取限速、Fail2ban、CDN真实IP和封禁状态摘要"})
 	if session == nil || session.ContextType != "log_analysis" || strings.TrimSpace(session.ContextJSON) == "" {
@@ -312,28 +312,24 @@ func sanitizeLogDetailForAIWithIPMode(detail *models.LogAnalysisDetail, keepIPs 
 
 func aiRuntimeConfigurationSummary(site *models.Website) map[string]interface{} {
 	result := map[string]interface{}{
-		"site_type": site.SiteType, "ssl_enabled": site.SSLEnabled, "fastcgi_cache_enabled": site.FCacheEnabled,
-		"fastcgi_cache_ttl": site.FCacheTTL, "wp_debug_enabled": site.WPDebugEnabled, "xmlrpc_enabled": site.XMLRPCEnabled,
+		"site_type": site.SiteType, "ssl_enabled": site.SSLEnabled, "litespeed_cache_enabled": site.LSCacheEnabled,
+		"litespeed_cache_ttl": site.LSCacheTTL, "wp_debug_enabled": site.WPDebugEnabled, "xmlrpc_enabled": site.XMLRPCEnabled,
 		"disable_application_passwords": site.DisableApplicationPasswords,
 		"access_log_mode":               site.AccessLogMode, "log_retention_days": site.LogRetentionDays,
-		"php_pool_config_present": aiFileExists(site.PHPPoolPath), "nginx_config_present": aiFileExists(site.NginxConfPath),
+		"lsphp_socket_present": aiFileExists(site.LSPHPSocketPath), "ols_vhost_config_present": aiFileExists(site.OLSVHostConfigPath),
 	}
-	if base := filepath.Base(site.PHPPoolPath); base != "." {
-		result["php_pool_file"] = base
+	if base := filepath.Base(site.LSPHPSocketPath); base != "." {
+		result["lsphp_socket_file"] = base
 	}
 	result["wp_config"] = aiWPConfigSummary(site)
 	result["database_check"] = aiDBCheck(site)
 	result["service_checks"] = aiServiceChecks(site)
 	result["current_http_checks"] = aiCurrentHTTPChecks(site)
-	result["php_pool_directives"] = aiSafeConfigDirectives(site.PHPPoolPath, map[string]bool{
-		"pm": true, "pm.max_children": true, "pm.start_servers": true, "pm.min_spare_servers": true,
-		"pm.max_spare_servers": true, "pm.max_requests": true, "request_terminate_timeout": true,
-		"php_admin_value[memory_limit]": true, "php_admin_value[max_execution_time]": true,
-	})
-	result["nginx_directives"] = aiSafeConfigDirectives(site.NginxConfPath, map[string]bool{
-		"client_max_body_size": true, "keepalive_timeout": true, "fastcgi_read_timeout": true,
-		"limit_req": true, "limit_conn": true, "real_ip_header": true, "fastcgi_cache": true,
-		"fastcgi_cache_valid": true,
+	result["ols_vhost_directives"] = aiSafeConfigDirectives(site.OLSVHostConfigPath, map[string]bool{
+		"docRoot": true, "vhDomain": true, "vhAliases": true, "address": true,
+		"maxConns": true, "env": true, "extUser": true, "extGroup": true,
+		"php_admin_value": true, "php_admin_flag": true, "enableCache": true,
+		"expireInSeconds": true,
 	})
 	return result
 }

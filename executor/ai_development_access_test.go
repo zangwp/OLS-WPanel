@@ -83,8 +83,8 @@ func openAIDevelopmentTestDB(t *testing.T) *sql.DB {
 	);
 	CREATE TABLE websites (
 		id INTEGER PRIMARY KEY, domain TEXT NOT NULL, system_user TEXT NOT NULL,
-		web_root TEXT NOT NULL, log_dir TEXT NOT NULL DEFAULT '', php_pool_path TEXT NOT NULL DEFAULT '',
-		nginx_conf_path TEXT NOT NULL DEFAULT '', db_name TEXT NOT NULL, db_user TEXT NOT NULL
+		web_root TEXT NOT NULL, log_dir TEXT NOT NULL DEFAULT '', lsphp_socket_path TEXT NOT NULL DEFAULT '',
+		ols_vhost_config_path TEXT NOT NULL DEFAULT '', db_name TEXT NOT NULL, db_user TEXT NOT NULL
 	);
 	CREATE TABLE site_migration_locks (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL, site_id INTEGER,
@@ -332,10 +332,10 @@ func TestAIDevelopmentRotationDoesNotReportSuccessAfterStateDisappears(t *testin
 func TestAIDevelopmentHandoffDescribesSiteAndPanelBoundaries(t *testing.T) {
 	handoff := buildAIDevelopmentHandoff(AIDevelopmentSite{
 		Domain: "example.com", SystemUser: "wp_example", WebRoot: "/var/www/example",
-		LogDir: "/www/wwwlogs/example.com", PHPPoolPath: "/usr/local/lsws/conf/ols-wpanel/lsphp/wp_example.conf",
-		NginxConfPath: "/usr/local/lsws/conf/vhosts/example.com/vhconf.conf",
+		LogDir: "/www/wwwlogs/example.com", LSPHPSocketPath: "/tmp/lshttpd/wp_example.sock",
+		OLSVHostConfigPath: "/usr/local/lsws/conf/vhosts/example.com/vhconf.conf",
 	}, "SHA256:test", time.Date(2026, 9, 15, 1, 2, 3, 0, time.UTC))
-	for _, required := range []string{"Panel version:", "Generated at: 2026-09-15T01:02:03Z", "Site: example.com", "WebRoot: /var/www/example", "Site LSPHP runtime config: /usr/local/lsws/conf/ols-wpanel/lsphp/wp_example.conf (read-only, managed by OLS WPanel)", "Site OpenLiteSpeed virtual-host config: /usr/local/lsws/conf/vhosts/example.com/vhconf.conf (read-only, managed by OLS WPanel)", "Site log directory: /www/wwwlogs/example.com", "CLI PHP may use different values", "server-side handoff", "authoritative", "OLS-WPANEL-CAPABILITIES.md", "aaPanel/BT Panel", "cannot coexist", "ask the user to check the documented OLS WPanel page"} {
+	for _, required := range []string{"Panel version:", "Generated at: 2026-09-15T01:02:03Z", "Site: example.com", "WebRoot: /var/www/example", "Site LSPHP Unix socket: /tmp/lshttpd/wp_example.sock (runtime path, managed by OLS WPanel)", "Site OpenLiteSpeed virtual-host config: /usr/local/lsws/conf/vhosts/example.com/vhconf.conf (read-only, managed by OLS WPanel)", "Site log directory: /www/wwwlogs/example.com", "CLI PHP may use different values", "server-side handoff", "authoritative", "OLS-WPANEL-CAPABILITIES.md", "aaPanel/BT Panel", "cannot coexist", "ask the user to check the documented OLS WPanel page"} {
 		if !strings.Contains(handoff, required) {
 			t.Fatalf("handoff missing %q: %s", required, handoff)
 		}

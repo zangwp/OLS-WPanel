@@ -26,8 +26,8 @@ type Website struct {
 	DBName                      string           `json:"db_name"`
 	DBUser                      string           `json:"db_user"`
 	TablePrefix                 string           `json:"table_prefix"`
-	PHPPoolPath                 string           `json:"php_pool_path"`
-	NginxConfPath               string           `json:"nginx_conf_path"`
+	LSPHPSocketPath             string           `json:"lsphp_socket_path"`
+	OLSVHostConfigPath          string           `json:"ols_vhost_config_path"`
 	SiteType                    string           `json:"site_type"`
 	SSLEnabled                  bool             `json:"ssl_enabled"`
 	SSLCertPath                 string           `json:"ssl_cert_path"`
@@ -38,9 +38,9 @@ type Website struct {
 	SSLLastError                string           `json:"ssl_last_error"`
 	SSLCertSource               string           `json:"ssl_cert_source"`
 	SSLExportEnabled            bool             `json:"ssl_export_enabled"`
-	FCacheEnabled               bool             `json:"fastcgi_cache_enabled"`
-	FCacheTTL                   int              `json:"fastcgi_cache_ttl"`
-	FCacheKey                   string           `json:"fastcgi_cache_key"`
+	LSCacheEnabled              bool             `json:"litespeed_cache_enabled"`
+	LSCacheTTL                  int              `json:"litespeed_cache_ttl"`
+	LSCacheKey                  string           `json:"litespeed_cache_key"`
 	MonitoringEnabled           bool             `json:"monitoring_enabled"`
 	MonitoringInterval          int              `json:"monitoring_interval"`
 	DisableWPUpdates            bool             `json:"disable_wp_updates"`
@@ -58,7 +58,7 @@ type Website struct {
 	LogRetentionDays            int              `json:"log_retention_days"`
 	CDNRealIPEnabled            bool             `json:"cdn_realip_enabled"`
 	CDNRealIPGroups             []CDNRealIPGroup `json:"cdn_realip_groups,omitempty"`
-	PHPFPMMaxChildren           int              `json:"php_fpm_max_children"`
+	LSPHPMaxChildren            int              `json:"lsphp_max_children"`
 	ExpiresAt                   *time.Time       `json:"expires_at"`
 	CreatedAt                   time.Time        `json:"created_at"`
 	UpdatedAt                   time.Time        `json:"updated_at"`

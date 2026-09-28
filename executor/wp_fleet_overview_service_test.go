@@ -33,10 +33,10 @@ func TestWPFleetOverviewHandlesLegacyDatetimeTextFormats(t *testing.T) {
 	service, db := newWPFleetOverviewTest(t)
 	if _, err := db.Exec(`INSERT INTO websites
 		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user,
-		 php_pool_path, nginx_conf_path, site_type, ssl_enabled, ssl_expires_at, expires_at,
-		 monitoring_enabled, file_lock_enabled, fastcgi_cache_enabled, access_log_mode, created_at)
+		 lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled, ssl_expires_at, expires_at,
+		 monitoring_enabled, file_lock_enabled, litespeed_cache_enabled, access_log_mode, created_at)
 		VALUES (1, 'legacy.example.com', 'legacy.example.com', 'active', 'wp_test', '/tmp/www', '/tmp/log',
-		 'db', 'user', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress', 1,
+		 'db', 'user', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress', 1,
 		 '2026-08-24 10:43:42 +0000 UTC', '2027-05-05', 1, 1, 1, 'full', '2026-05-26 11:42:13')`); err != nil {
 		t.Fatalf("insert legacy-format site: %v", err)
 	}
@@ -273,8 +273,8 @@ func TestWPFleetOverviewRejectsInvalidStoredStateAndHidesSensitiveFields(t *test
 		t.Fatalf("json.Marshal(): %v", err)
 	}
 	for _, forbidden := range []string{
-		"system_user", "web_root", "log_dir", "db_name", "db_user", "php_pool_path", "nginx_conf_path",
-		"fastcgi_cache_key", "ssl_last_error", "ssl_cert_path", "ssl_key_path", "collection_id",
+		"system_user", "web_root", "log_dir", "db_name", "db_user", "lsphp_socket_path", "ols_vhost_config_path",
+		"litespeed_cache_key", "ssl_last_error", "ssl_cert_path", "ssl_key_path", "collection_id",
 		"lease_owner", "runner_hash", "runner_version", "last_error_stage", "response", "stdout", "max_rss",
 	} {
 		if strings.Contains(string(payload), forbidden) {
@@ -392,7 +392,7 @@ func insertWPFleetBudgetSites(t *testing.T, db *sql.DB, first, last int) {
 	}
 	websiteStmt, err := tx.Prepare(`INSERT INTO websites
 		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user,
-		php_pool_path, nginx_conf_path, site_type, created_at)
+		lsphp_socket_path, ols_vhost_config_path, site_type, created_at)
 		VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		t.Fatalf("prepare websites: %v", err)
@@ -411,7 +411,7 @@ func insertWPFleetBudgetSites(t *testing.T, db *sql.DB, first, last int) {
 			siteType = "wordpress"
 		}
 		if _, err := websiteStmt.Exec(i, domain, domain, "wp_test", "/tmp/www", "/tmp/log", "db", "user",
-			"/tmp/php.conf", "/tmp/nginx.conf", siteType, wpInventoryDBTime(wpFleetTestNow)); err != nil {
+			"/tmp/php.conf", "/tmp/openlitespeed.conf", siteType, wpInventoryDBTime(wpFleetTestNow)); err != nil {
 			t.Fatalf("insert website %d: %v", i, err)
 		}
 		if siteType == "wordpress" {
@@ -486,10 +486,10 @@ func insertWPFleetSite(t *testing.T, db *sql.DB, site wpFleetTestSite) {
 	}
 	if _, err := db.Exec(`INSERT INTO websites
 		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user,
-		php_pool_path, nginx_conf_path, site_type, ssl_enabled, ssl_expires_at, ssl_last_error,
-		monitoring_enabled, file_lock_enabled, fastcgi_cache_enabled, access_log_mode, disable_wp_updates, created_at)
+		lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled, ssl_expires_at, ssl_last_error,
+		monitoring_enabled, file_lock_enabled, litespeed_cache_enabled, access_log_mode, disable_wp_updates, created_at)
 		VALUES (?, ?, ?, ?, ?, '/tmp/www', '/tmp/log', 'db', 'user', '/tmp/php.conf',
-		'/tmp/nginx.conf', ?, ?, ?, ?, 1, 1, 1, 'full', ?, ?)`,
+		'/tmp/openlitespeed.conf', ?, ?, ?, ?, 1, 1, 1, 'full', ?, ?)`,
 		site.ID, site.Domain, site.Domain, site.Status, "wp_test", site.SiteType, boolDB(site.SSLEnabled),
 		sslExpiry, site.SSLLastError, boolDB(site.UpdateChecksDisabled), wpInventoryDBTime(wpFleetTestNow.Add(-time.Duration(site.ID)*time.Minute))); err != nil {
 		t.Fatalf("insert site %d: %v", site.ID, err)

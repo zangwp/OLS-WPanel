@@ -27,16 +27,16 @@ func withDocumentRootStubs(t *testing.T) {
 	}
 	oldDB := database.DB
 	oldConfig := config.AppConfig
-	oldPersist, oldApply := persistDocumentRoot, applyDocumentRootNginx
+	oldPersist, oldApply := persistDocumentRoot, applyDocumentRootOLSVHost
 	oldSetOwner := setEffectiveDocumentRootOwner
 	database.DB = db
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: t.TempDir()},
-		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir(), PHPFPMSock: t.TempDir()},
+		Paths: config.PathsConfig{OLSVHostsEnabled: t.TempDir(), LSPHPSocketDir: t.TempDir()},
 	}
 	setEffectiveDocumentRootOwner = func(string, string) error { return nil }
 	t.Cleanup(func() {
-		persistDocumentRoot, applyDocumentRootNginx = oldPersist, oldApply
+		persistDocumentRoot, applyDocumentRootOLSVHost = oldPersist, oldApply
 		setEffectiveDocumentRootOwner = oldSetOwner
 		config.AppConfig = oldConfig
 		database.DB = oldDB
@@ -50,8 +50,8 @@ func documentRootTestSite(t *testing.T) *models.Website {
 	return &models.Website{
 		ID: 1, Domain: "example.com", SiteType: "php", WebRoot: root,
 		SystemUser: "wp_example", LogDir: filepath.Join(root, "logs"),
-		PHPPoolPath:   filepath.Join(root, "lsphp.conf"),
-		NginxConfPath: filepath.Join(root, "example.com.conf"),
+		LSPHPSocketPath:    filepath.Join(root, "lsphp.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "example.com.conf"),
 	}
 }
 
@@ -61,28 +61,28 @@ func runDocumentRootTask(site *models.Website) TaskResult {
 	}})
 }
 
-func TestSetDocumentRootDatabaseFailureDoesNotApplyNginx(t *testing.T) {
+func TestSetDocumentRootDatabaseFailureDoesNotApplyOpenLiteSpeed(t *testing.T) {
 	withDocumentRootStubs(t)
-	nginxCalled := false
+	openlitespeedCalled := false
 	persistDocumentRoot = func(int, string) error { return errors.New("database failed") }
-	applyDocumentRootNginx = func(*TemplateEngine, string, string, string) error {
-		nginxCalled = true
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error {
+		openlitespeedCalled = true
 		return nil
 	}
 	result := runDocumentRootTask(documentRootTestSite(t))
-	if result.Success || nginxCalled {
-		t.Fatalf("result=%+v nginxCalled=%v", result, nginxCalled)
+	if result.Success || openlitespeedCalled {
+		t.Fatalf("result=%+v openlitespeedCalled=%v", result, openlitespeedCalled)
 	}
 }
 
-func TestSetDocumentRootNginxFailureRestoresDatabase(t *testing.T) {
+func TestSetDocumentRootOpenLiteSpeedFailureRestoresDatabase(t *testing.T) {
 	withDocumentRootStubs(t)
 	var saved []string
 	persistDocumentRoot = func(_ int, subdir string) error {
 		saved = append(saved, subdir)
 		return nil
 	}
-	applyDocumentRootNginx = func(*TemplateEngine, string, string, string) error { return errors.New("nginx failed") }
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error { return errors.New("openlitespeed failed") }
 	result := runDocumentRootTask(documentRootTestSite(t))
 	if result.Success || len(saved) != 2 || saved[0] != DocumentRootPublic || saved[1] != "" {
 		t.Fatalf("result=%+v saved=%v", result, saved)
@@ -99,9 +99,9 @@ func TestSetDocumentRootReportsDatabaseRecoveryFailure(t *testing.T) {
 		}
 		return nil
 	}
-	applyDocumentRootNginx = func(*TemplateEngine, string, string, string) error { return errors.New("nginx failed") }
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error { return errors.New("openlitespeed failed") }
 	result := runDocumentRootTask(documentRootTestSite(t))
-	if result.Success || result.Message != "应用 Nginx 配置失败，Web 入口目录状态恢复失败，请人工检查" {
+	if result.Success || result.Message != "应用 OpenLiteSpeed 配置失败，Web 入口目录状态恢复失败，请人工检查" {
 		t.Fatalf("result=%+v", result)
 	}
 }
@@ -113,14 +113,14 @@ func TestSetDocumentRootSuccessPersistsAndApplies(t *testing.T) {
 		saved = subdir
 		return nil
 	}
-	nginxCalled := false
-	applyDocumentRootNginx = func(*TemplateEngine, string, string, string) error {
-		nginxCalled = true
+	openlitespeedCalled := false
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error {
+		openlitespeedCalled = true
 		return nil
 	}
 	result := runDocumentRootTask(documentRootTestSite(t))
-	if !result.Success || saved != DocumentRootPublic || !nginxCalled {
-		t.Fatalf("result=%+v saved=%q nginxCalled=%v", result, saved, nginxCalled)
+	if !result.Success || saved != DocumentRootPublic || !openlitespeedCalled {
+		t.Fatalf("result=%+v saved=%q openlitespeedCalled=%v", result, saved, openlitespeedCalled)
 	}
 }
 

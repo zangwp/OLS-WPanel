@@ -25,8 +25,8 @@ type SiteMigrationTargetSpec struct {
 type siteMigrationTargetPlan struct {
 	Domain, SystemUser, WebRoot, LogDir string
 	DBName, DBUser                      string
-	PHPPoolPath, NginxConfPath          string
-	NginxEnabledPath, PHPSockPath       string
+	OLSVHostConfigPath                  string
+	OLSVHostEnabledPath, PHPSockPath    string
 }
 
 type siteMigrationTargetResourceOps interface {
@@ -43,7 +43,7 @@ type siteMigrationTargetResourceOps interface {
 type productionSiteMigrationTargetResourceOps struct{ cfg *config.Config }
 
 func (o productionSiteMigrationTargetResourceOps) EnsureAvailable(plan siteMigrationTargetPlan) error {
-	return ensureCreateSiteResourcesAvailable(plan.SystemUser, plan.WebRoot, plan.LogDir, plan.DBName, plan.DBUser, plan.PHPPoolPath, plan.NginxConfPath, plan.NginxEnabledPath, plan.PHPSockPath)
+	return ensureCreateSiteResourcesAvailable(plan.SystemUser, plan.WebRoot, plan.LogDir, plan.DBName, plan.DBUser, plan.OLSVHostConfigPath, plan.OLSVHostEnabledPath, plan.PHPSockPath)
 }
 func (o productionSiteMigrationTargetResourceOps) CreateUser(name string) error {
 	if _, err := executeCommand("useradd", "-r", "-U", "-s", "/usr/sbin/nologin", "-M", "-d", "/nonexistent", name); err != nil {
@@ -260,8 +260,8 @@ func (s *SiteMigrationTargetResourceService) beginCreation(ctx context.Context, 
 		"domain": spec.Domain, "aliases": normalizedAliases, "site_type": spec.SiteType,
 		"document_root_subdir": spec.DocumentRootSubdir, "system_user": plan.SystemUser,
 		"web_root": plan.WebRoot, "log_dir": plan.LogDir, "db_name": plan.DBName, "db_user": plan.DBUser,
-		"php_pool_path": plan.PHPPoolPath, "nginx_conf_path": plan.NginxConfPath,
-		"nginx_enabled_path": plan.NginxEnabledPath, "php_socket_path": plan.PHPSockPath,
+		"ols_vhost_config_path":  plan.OLSVHostConfigPath,
+		"ols_vhost_enabled_path": plan.OLSVHostEnabledPath, "php_socket_path": plan.PHPSockPath,
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -306,8 +306,8 @@ func (s *SiteMigrationTargetResourceService) plan(ctx context.Context, migration
 		Domain: spec.Domain, SystemUser: systemUser,
 		WebRoot: filepath.Join(s.cfg.Paths.WWWRoot, spec.Domain), LogDir: filepath.Join(s.cfg.Paths.WWWLogs, spec.Domain),
 		DBName: "db_" + siteName, DBUser: "user_" + siteName,
-		PHPPoolPath: filepath.Join(s.cfg.Paths.PHPFPMPool, configBase+".conf"), NginxConfPath: filepath.Join(s.cfg.Paths.NginxSitesAvailable, configBase+".conf"),
-		NginxEnabledPath: filepath.Join(s.cfg.Paths.NginxSitesEnabled, configBase+".conf"), PHPSockPath: filepath.Join(s.cfg.Paths.PHPFPMSock, configBase+".sock"),
+		OLSVHostConfigPath:  filepath.Join(s.cfg.Paths.OLSVHostsAvailable, configBase+".conf"),
+		OLSVHostEnabledPath: filepath.Join(s.cfg.Paths.OLSVHostsEnabled, configBase+".conf"), PHPSockPath: filepath.Join(s.cfg.Paths.LSPHPSocketDir, configBase+".sock"),
 	}
 	if err := validateUnixSocketPath(plan.PHPSockPath); err != nil {
 		return siteMigrationTargetPlan{}, err

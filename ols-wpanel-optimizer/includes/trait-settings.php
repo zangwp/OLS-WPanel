@@ -161,8 +161,8 @@ trait OLSW_Optimizer_Settings_Trait {
             $panelState = self::fetch_panel_state();
             if ($panelState) {
                 $companionLatestVersion = sanitize_text_field($panelState['companion_latest_version'] ?? '');
-                update_option(self::OPTION_FCACHE_ENABLED, !empty($panelState['fastcgi_cache_enabled']) ? '1' : '0');
-                update_option(self::OPTION_FCACHE_TTL, intval($panelState['fastcgi_cache_ttl'] ?? 300));
+                update_option(self::OPTION_LSCACHE_ENABLED, !empty($panelState['litespeed_cache_enabled']) ? '1' : '0');
+                update_option(self::OPTION_LSCACHE_TTL, intval($panelState['litespeed_cache_ttl'] ?? 300));
                 update_option(self::OPTION_NO_UPDATES, !empty($panelState['disable_wp_updates']) ? '1' : '0');
                 update_option(self::OPTION_NO_FILE_EDIT, !empty($panelState['disable_file_editing']) ? '1' : '0');
                 update_option(self::OPTION_XMLRPC_ENABLED, !empty($panelState['xmlrpc_enabled']) ? '1' : '0');
@@ -185,8 +185,8 @@ trait OLSW_Optimizer_Settings_Trait {
             // only controls that write protected paths (currently wp-config.php)
             // read-only. 面向 AI/开发者：禁止因文件保护而整页禁用，必须按实际写入范围判断。
             $fileLockSafeOnly = self::sync_file_lock_state(true);
-            $fcacheEnabled  = !empty($_POST['fcache_enabled'])  ? true : false;
-            $fcacheTTL      = isset($_POST['fcache_ttl']) ? intval($_POST['fcache_ttl']) : 300;
+            $lscacheEnabled  = !empty($_POST['litespeed_cache_enabled'])  ? true : false;
+            $lscacheTTL      = isset($_POST['litespeed_cache_ttl']) ? intval($_POST['litespeed_cache_ttl']) : 300;
             $noUpdates      = $fileLockSafeOnly ? get_option(self::OPTION_NO_UPDATES, '0') === '1' : !empty($_POST['no_updates']);
             $noFileEdit     = $fileLockSafeOnly ? get_option(self::OPTION_NO_FILE_EDIT, '0') === '1' : !empty($_POST['no_file_edit']);
             $wpDebug        = $fileLockSafeOnly ? get_option(self::OPTION_WP_DEBUG, '0') === '1' : !empty($_POST['wp_debug']);
@@ -195,8 +195,8 @@ trait OLSW_Optimizer_Settings_Trait {
             $preloadEnabled = !empty($_POST['preload_enabled']) ? true : false;
             $preloadLimit   = isset($_POST['preload_limit']) ? intval(wp_unslash($_POST['preload_limit'])) : 100;
 
-            if ($fcacheTTL < 10)  $fcacheTTL = 300;
-            if ($fcacheTTL > 86400) $fcacheTTL = 86400;
+            if ($lscacheTTL < 10)  $lscacheTTL = 300;
+            if ($lscacheTTL > 86400) $lscacheTTL = 86400;
             $preloadLimit = self::normalize_preload_limit($preloadLimit);
 
             $imageModeBefore = self::image_optimizer_mode();
@@ -211,8 +211,8 @@ trait OLSW_Optimizer_Settings_Trait {
             update_option(self::OPTION_IMAGE_WEBP_QUALITY, $imageWebpQuality);
             $switchedToWebp = ($imageMode === self::IMAGE_MODE_WEBP && $imageModeBefore !== self::IMAGE_MODE_WEBP);
 
-            update_option(self::OPTION_FCACHE_ENABLED, $fcacheEnabled ? '1' : '0');
-            update_option(self::OPTION_FCACHE_TTL, $fcacheTTL);
+            update_option(self::OPTION_LSCACHE_ENABLED, $lscacheEnabled ? '1' : '0');
+            update_option(self::OPTION_LSCACHE_TTL, $lscacheTTL);
             if (!$fileLockSafeOnly) {
                 update_option(self::OPTION_NO_UPDATES, $noUpdates ? '1' : '0');
                 if ($noUpdates) {
@@ -226,7 +226,7 @@ trait OLSW_Optimizer_Settings_Trait {
             update_option(self::OPTION_PRELOAD_ENABLED, $preloadEnabled ? '1' : '0');
             update_option(self::OPTION_PRELOAD_LIMIT, $preloadLimit);
 
-            $pushed = self::push_optimizer_settings($fcacheEnabled, $fcacheTTL, $noUpdates, $noFileEdit, $wpDebug, $postRevisions, $memoryLimit, $fileLockSafeOnly);
+            $pushed = self::push_optimizer_settings($lscacheEnabled, $lscacheTTL, $noUpdates, $noFileEdit, $wpDebug, $postRevisions, $memoryLimit, $fileLockSafeOnly);
             if ($pushed === true) {
                 $noticeText = $fileLockSafeOnly
                     ? __('Available settings were saved. Settings that modify wp-config.php remain unchanged while file protection is enabled.', 'ols-wpanel-optimizer')
@@ -241,8 +241,8 @@ trait OLSW_Optimizer_Settings_Trait {
             }
         }
 
-        $fcacheEnabled  = get_option(self::OPTION_FCACHE_ENABLED, '0') === '1';
-        $fcacheTTL      = get_option(self::OPTION_FCACHE_TTL, '300');
+        $lscacheEnabled  = get_option(self::OPTION_LSCACHE_ENABLED, '0') === '1';
+        $lscacheTTL      = get_option(self::OPTION_LSCACHE_TTL, '300');
         $noUpdates      = get_option(self::OPTION_NO_UPDATES, '0') === '1';
         $noFileEdit     = get_option(self::OPTION_NO_FILE_EDIT, '0') === '1';
         $wpDebug        = get_option(self::OPTION_WP_DEBUG, '0') === '1';
@@ -357,9 +357,9 @@ trait OLSW_Optimizer_Settings_Trait {
                 </div>
                 <div class="olsw-readout__item">
                     <span class="olsw-readout__label"><?php echo esc_html__('LiteSpeed cache', 'ols-wpanel-optimizer'); ?></span>
-                    <span class="olsw-readout__value <?php echo $fcacheEnabled ? 'is-ok' : 'is-idle'; ?>">
-                        <span class="olsw-flag olsw-flag--<?php echo $fcacheEnabled ? 'ok' : 'idle'; ?>" aria-hidden="true"></span>
-                        <?php echo $fcacheEnabled ? esc_html__('Enabled', 'ols-wpanel-optimizer') : esc_html__('Disabled', 'ols-wpanel-optimizer'); ?>
+                    <span class="olsw-readout__value <?php echo $lscacheEnabled ? 'is-ok' : 'is-idle'; ?>">
+                        <span class="olsw-flag olsw-flag--<?php echo $lscacheEnabled ? 'ok' : 'idle'; ?>" aria-hidden="true"></span>
+                        <?php echo $lscacheEnabled ? esc_html__('Enabled', 'ols-wpanel-optimizer') : esc_html__('Disabled', 'ols-wpanel-optimizer'); ?>
                     </span>
                 </div>
                 <div class="olsw-readout__item">
@@ -420,12 +420,12 @@ trait OLSW_Optimizer_Settings_Trait {
                         <div class="olsw-section__body">
                             <div class="olsw-field">
                                 <div class="olsw-field__head">
-                                    <label class="olsw-field__title" for="olsw-fcache-enabled"><?php echo esc_html__('LiteSpeed cache', 'ols-wpanel-optimizer'); ?></label>
+                                    <label class="olsw-field__title" for="olsw-lscache-enabled"><?php echo esc_html__('LiteSpeed cache', 'ols-wpanel-optimizer'); ?></label>
                                     <span class="olsw-field__summary"><?php echo esc_html__('Ideal for blogs and business sites that mostly serve public content.', 'ols-wpanel-optimizer'); ?></span>
                                 </div>
                                 <div class="olsw-field__body">
                                     <label class="olsw-switch">
-                                        <input id="olsw-fcache-enabled" name="fcache_enabled" type="checkbox" value="1" <?php checked($fcacheEnabled); ?>>
+                                        <input id="olsw-lscache-enabled" name="litespeed_cache_enabled" type="checkbox" value="1" <?php checked($lscacheEnabled); ?>>
                                         <span class="olsw-switch__track"><span class="olsw-switch__thumb"></span></span>
                                         <span class="olsw-switch__text"><?php echo esc_html__('Enable LiteSpeed cache', 'ols-wpanel-optimizer'); ?></span>
                                     </label>
@@ -453,11 +453,11 @@ trait OLSW_Optimizer_Settings_Trait {
                         <div class="olsw-section__body">
                             <div class="olsw-field">
                                 <div class="olsw-field__head">
-                                    <label class="olsw-field__title" for="olsw-fcache-ttl"><?php echo esc_html__('Cache lifetime', 'ols-wpanel-optimizer'); ?></label>
+                                    <label class="olsw-field__title" for="olsw-lscache-ttl"><?php echo esc_html__('Cache lifetime', 'ols-wpanel-optimizer'); ?></label>
                                     <span class="olsw-field__summary"><?php echo esc_html__('Regenerated automatically when it expires; no manual cleanup is required.', 'ols-wpanel-optimizer'); ?></span>
                                 </div>
                                 <div class="olsw-field__body">
-                                    <input id="olsw-fcache-ttl" name="fcache_ttl" type="number" class="olsw-input olsw-input--num" value="<?php echo esc_attr($fcacheTTL); ?>" min="10" max="86400">
+                                    <input id="olsw-lscache-ttl" name="litespeed_cache_ttl" type="number" class="olsw-input olsw-input--num" value="<?php echo esc_attr($lscacheTTL); ?>" min="10" max="86400">
                                     <p class="olsw-field__note"><?php echo sprintf(esc_html__('%1$s300%2$s seconds equal 5 minutes. For most sites, %1$s300–3600%2$s seconds works well.', 'ols-wpanel-optimizer'), '<span class="olsw-key">', '</span>'); ?></p>
                                     <p class="olsw-field__note"><?php echo esc_html__('Longer lifetimes reduce server load; the cache can still be cleared automatically or manually after content updates.', 'ols-wpanel-optimizer'); ?></p>
                                 </div>
@@ -482,7 +482,7 @@ trait OLSW_Optimizer_Settings_Trait {
                                         <span class="olsw-switch__track"><span class="olsw-switch__thumb"></span></span>
                                         <span class="olsw-switch__text"><?php echo esc_html__('Enable automatic preload', 'ols-wpanel-optimizer'); ?></span>
                                     </label>
-                                    <p class="olsw-hint" id="olsw-preload-requires-cache" <?php echo $fcacheEnabled ? 'style="display:none"' : ''; ?>>
+                                    <p class="olsw-hint" id="olsw-preload-requires-cache" <?php echo $lscacheEnabled ? 'style="display:none"' : ''; ?>>
                                         <span class="dashicons dashicons-info" aria-hidden="true"></span>
                                         <?php echo sprintf(esc_html__('Preloading only takes effect after the %1$sLiteSpeed cache%2$s above is enabled.', 'ols-wpanel-optimizer'), '<strong>', '</strong>'); ?>
                                     </p>
@@ -935,9 +935,9 @@ trait OLSW_Optimizer_Settings_Trait {
                                 <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                                     <?php wp_nonce_field('olsw_cache_preload'); ?>
                                     <input type="hidden" name="action" value="olsw_cache_preload">
-                                    <button type="submit" class="button" <?php disabled(!$fcacheEnabled); ?>><?php echo esc_html__('Preload now', 'ols-wpanel-optimizer'); ?></button>
+                                    <button type="submit" class="button" <?php disabled(!$lscacheEnabled); ?>><?php echo esc_html__('Preload now', 'ols-wpanel-optimizer'); ?></button>
                                 </form>
-                                <p class="olsw-ops__reason <?php echo $fcacheEnabled ? '' : 'is-warn'; ?>" id="olsw-preload-reason"><?php echo esc_html($fcacheEnabled ? __('After saving settings, published pages will be preloaded according to the rules.', 'ols-wpanel-optimizer') : __('Preload unavailable: enable the LiteSpeed cache first and save.', 'ols-wpanel-optimizer')); ?></p>
+                                <p class="olsw-ops__reason <?php echo $lscacheEnabled ? '' : 'is-warn'; ?>" id="olsw-preload-reason"><?php echo esc_html($lscacheEnabled ? __('After saving settings, published pages will be preloaded according to the rules.', 'ols-wpanel-optimizer') : __('Preload unavailable: enable the LiteSpeed cache first and save.', 'ols-wpanel-optimizer')); ?></p>
                             </div>
                             <div class="olsw-cache-action">
                                 <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
@@ -1050,12 +1050,12 @@ trait OLSW_Optimizer_Settings_Trait {
             // 预加载依赖缓存：原因前置到开关旁，并直接绑定在按钮下方，
             // 不让用户自己去推断"为什么按钮是灰的"。
             (function() {
-                var fcache = document.getElementById('olsw-fcache-enabled');
+                var lscache = document.getElementById('olsw-lscache-enabled');
                 var hint = document.getElementById('olsw-preload-requires-cache');
                 var reason = document.getElementById('olsw-preload-reason');
-                if (!fcache) return;
+                if (!lscache) return;
                 function sync() {
-                    var on = fcache.checked;
+                    var on = lscache.checked;
                     if (hint) hint.style.display = on ? 'none' : '';
                     if (reason) {
                         reason.textContent = on
@@ -1064,7 +1064,7 @@ trait OLSW_Optimizer_Settings_Trait {
                         reason.classList.toggle('is-warn', !on);
                     }
                 }
-                fcache.addEventListener('change', sync);
+                lscache.addEventListener('change', sync);
                 sync();
             })();
 

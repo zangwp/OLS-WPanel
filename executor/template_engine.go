@@ -2,22 +2,18 @@ package executor
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
-type NginxSiteData struct {
+type OLSVHostData struct {
 	Domain           string
 	Aliases          []string
 	ServerNames      string
@@ -30,9 +26,9 @@ type NginxSiteData struct {
 	PHPProxy         string
 	TemplateVer      string
 	AccessLogMode    string
-	FCacheEnabled    bool
-	FCacheTTL        int
-	FCacheKey        string
+	LSCacheEnabled   bool
+	LSCacheTTL       int
+	LSCacheKey       string
 	SiteType         string
 	RateLimitEnabled bool
 	RateLimitBurst   int
@@ -48,296 +44,11 @@ type NginxSiteData struct {
 	PHPMaxChildren   int
 }
 
-type PHPFPMPoolData struct {
-	Domain            string
-	PoolName          string
-	SystemUser        string
-	WebRoot           string
-	SocketPath        string
-	SocketName        string
-	MemoryLimit       string
-	UploadMaxFilesize string
-	PostMaxSize       string
-	MaxExecutionTime  string
-	MaxInputTime      string
-	// MaxChildren 是 pm.max_children 的值。建站时按当时的服务器内存/CPU 计算一次并持久化到
-	// websites.php_fpm_max_children，此后固定不变——不会因为后续站点数量变化、或者其它站点
-	// 触发 PHP 配置重建而被重新计算。调用方（建站/改域名/RegenerateAllSitesFPM）都应该显式传入
-	// 已持久化的值；留空时回退到旧的固定默认值 10，仅作为兜底。
-	MaxChildren string
-}
-
 type TemplateEngine struct {
 	BackupDir string
 }
 
-const nginxConfigBackupKeepCount = 7
-
-func EnsureLogMap() error {
-	// OpenLiteSpeed does not consume Nginx map files. Security logging is
-	// emitted by each generated OLS virtual host and Fail2ban reads those logs.
-	return nil
-}
-
-func nginxGlobalLogMapConfig() string {
-	return `# OLS WPanel — 日志条件变量 (勿手动修改)
-log_format olswpanel_combined '$remote_addr - $remote_user [$time_local] "$request" '
-                             '$status $body_bytes_sent "$http_referer" '
-                             '"$http_user_agent" peer=$realip_remote_addr';
-
-map $status $wp_loggable {
-    ~^[45]  1;
-    default 0;
-}
-
-map $arg_wp_hc $wp_hc_loggable {
-    ""      1;
-    default 0;
-}
-
-map $request_uri $wp_access_log_disabled {
-    default 0;
-}
-
-# 只阻断正常网站不应从根目录公开提供的高置信度敏感文件。规则同时用于
-# WordPress 与通用 PHP 站点，故意不包含普通 config/settings/API 路由，
-# 也不按 json/yaml/zip/sql 等通用后缀扩大匹配。
-map $uri $wp_sensitive_path_blocked {
-    default 0;
-    ~*^/\.env(?:\.[^/]+)?/?$ 1;
-    ~*^/\.git(?:/|$) 1;
-    ~*^/\.DS_Store/?$ 1;
-    ~*^/secrets\.(?:json|ya?ml)/?$ 1;
-    ~*^/settings\.py/?$ 1;
-    ~*^/application\.properties/?$ 1;
-    ~*^/config\.toml/?$ 1;
-}
-
-# WordPress 专用的探测请求识别。这里只覆盖高置信度的非 WordPress 配置探测，
-# 不匹配 wp-admin/wp-json/wc-api/webhook 等正常入口，也不使用可伪造的登录 Cookie
-# 作为豁免条件。通用 PHP 模板不引用 wp_scan_limit，因此合法业务路由不受影响。
-# 与敏感文件 map 重叠的条目会先被直接阻断；这里仍保留它们，以写入 wp-security.log。
-map $uri $wp_scan_probe_hit {
-    default 0;
-    ~*^/api/(?:env|config|settings)/?$ 1;
-    ~*(?:^|/)(?:secrets\.(?:json|ya?ml)|settings\.py|application\.properties|config\.toml)/?$ 1;
-    ~*(?:^|/)(?:phpinfo|info|test|phptest|configuration|parameters)\.php/?$ 1;
-}
-
-map $wp_scan_probe_hit $wp_scan_probe_key {
-    default "";
-    1 "$server_name:$binary_remote_addr";
-}
-
-limit_req_zone $wp_scan_probe_key zone=wp_scan_limit:10m rate=30r/m;
-
-map $uri $wp_uri_security_loggable {
-    default 0;
-    / 0;
-    /wp-admin 0;
-    /index.php 0;
-    /wp-login.php 0;
-    /wp-cron.php 0;
-    /wp-comments-post.php 0;
-    /xmlrpc.php 0;
-    /robots.txt 0;
-    /favicon.ico 0;
-    /ads.txt 0;
-    /app-ads.txt 0;
-    ~^/wp-admin/ 0;
-    ~^/wp-includes/ 0;
-` + buildWPSecurityLogWhitelistMapEntries() + `    ~*^/wp-content/(?!plugins/|themes/|mu-plugins/).*\.(php|phtml|phar|php[0-9])$ 1;
-    ~^/wp-content/ 0;
-    ~^/wp-json(/|$) 0;
-    ~^/sitemap.*\.xml$ 0;
-    ~^/\.well-known/ 0;
-    ~^/google[A-Za-z0-9_-]*\.html$ 0;
-    /BingSiteAuth.xml 0;
-    ~^/baidu_verify_[A-Za-z0-9_-]*\.html$ 0;
-    ~^/yandex_[A-Za-z0-9_-]*\.html$ 0;
-    ~*(^|/)(config|settings|database|db|phpinfo|info|test|phptest|configuration|parameters)\.php$ 1;
-    ~*(^|/)(next|nuxt|vite)\.config\.js$ 1;
-    ~*(^|/)(composer\.(json|lock)|package\.json|yarn\.lock|pnpm-lock\.yaml)$ 1;
-    ~*(^|/)(\.env|\.git|\.DS_Store)$ 1;
-    ~*\.(sql|bak|old|save|swp|tar|tgz|gz|zip)$ 1;
-    ~*/dup-installer/ 1;
-    ~*^/(?!index\.php$|wp-login\.php$|wp-cron\.php$|wp-comments-post\.php$|xmlrpc\.php$).+\.php$ 1;
-}
-
-` + nginxSecurityProbeMapConfig() + `
-map "$wp_uri_security_loggable$wp_sqli_probe_hit$wp_sqli_block_hit$wp_fake_search_bot_hit$wp_scan_probe_hit" $wp_security_loggable {
-    default 1;
-    "00000" 0;
-}
-
-# 登录/XML-RPC 认证爆破检测的唯一真实来源：Nginx 已经完成 merge_slashes、
-# %XX 解码、location 匹配之后的 $uri，而不是客户端提交的原始 $request 文本。
-# 任何斜杠数量、编码变体，只要最终被 Nginx 路由进了 wp-login.php / xmlrpc.php
-# 这两个 location 并拿到下面的状态码，就一定会命中这里——不需要、也不允许再
-# 在 Fail2ban 正则里为新的斜杠/编码变体打补丁。这份日志不受站点 AccessLogMode
-# 影响，始终记录（与 wp-security.log 的既有语义一致）。
-map "$request_method:$uri:$status" $wp_login_attempt_loggable {
-    default 0;
-    "POST:/wp-login.php:200" 1;
-    "POST:/xmlrpc.php:403"   1;
-}
-`
-}
-
-// nginxSecurityProbeMapConfig 生成方案 D 阶段二的"只记录、不拦截"探测规则：
-// SQL 注入探测（基于 $request_uri，与 executor/wp_security_report.go 里
-// sqliProbePatterns 保持同一套关键词，但故意做得更宽松——这里只决定"是否值得记录"，
-// 真正的精细分类和去重仍由 Go 侧 classifySecurityEvent() 完成，多记一点不会误封，
-// 少记一条就等于证据永久丢失）和伪装搜索引擎爬虫探测（UA 声明 Googlebot/Bingbot，
-// 但来源 IP 不在官方段）。
-//
-// 注意：这里的 geo/map 变量名全部独立命名（wp_security_ 前缀），不能复用
-// executor/rate_limit.go 里 Bot 限流用的同名变量——Bot 限流的配置文件是开关控制、
-// 可能被删除的，如果这里直接引用它的变量，关闭 Bot 限流后本文件会因引用不存在的
-// 变量导致 nginx -t 失败；两处同名定义同时存在时则会因为重复定义变量而失败。
-// 两个功能各自独立定义、各自不依赖对方是否启用。
-func nginxSecurityProbeMapConfig() string {
-	googleGeoEntries := renderSecurityBotGeoEntries("googlebot_ips")
-	bingGeoEntries := renderSecurityBotGeoEntries("bingbot_ips")
-	googleFakeRule := fakeBotMapRule(googleGeoEntries)
-	bingFakeRule := fakeBotMapRule(bingGeoEntries)
-
-	return `# 宽松 SQL 特征只用于留证，不得直接用于拦截或封禁。
-map $request_uri $wp_sqli_probe_hit {
-    default 0;
-    ~*union(?:\s|%20|\+)+select 1;
-    ~*sleep\s*\( 1;
-    ~*benchmark\s*\( 1;
-    ~*information_schema 1;
-    ~*\bxp_cmdshell\b 1;
-    ~*\bwaitfor(?:\s|%20|\+)+delay\b 1;
-    ~*\bload_file\s*\( 1;
-    ~*\binto(?:\s|%20|\+)+outfile\b 1;
-    "~*0x[0-9a-f]{16,}" 1;
-    "~*(?:;|%3b)(?:\s|%20|\+)*(?:drop|insert|update|delete)(?:\s|%20|\+)+" 1;
-}
-
-# 高置信度 SQL 注入结构。规则要求多个攻击语法元素同时出现，避免将
-# WordPress 搜索中的普通 SQL 词语升级为拦截信号。
-map $request_uri $wp_sqli_block_hit {
-    default 0;
-    # 仅豁免 WordPress 核心的纯搜索请求。不能看到 s/search 参数就整条放行，
-    # 否则攻击者可给其它恶意参数追加搜索参数来绕过拦截。
-    "~*^/(?:index\.php)?\?s=[^&]*$" 0;
-    "~*^/wp-json/wp/v2/(?:posts|pages)/?\?search=[^&]*$" 0;
-    "~*union(?:\s|%20|\+|/\*.*?\*/)+select(?:\s|%20|\+|/\*.*?\*/)+.*(?:from|information_schema)" 1;
-    "~*(?:sleep|pg_sleep)(?:\s|%20|\+)*(?:\(|%28)(?:\s|%20|\+)*[0-9]+(?:\s|%20|\+)*(?:\)|%29)" 1;
-    "~*benchmark(?:\s|%20|\+)*(?:\(|%28)(?:\s|%20|\+)*[0-9]+(?:\s|%20|\+)*(?:,|%2c)" 1;
-    "~*(?:union(?:\s|%20|\+)+select|select(?:\s|%20|\+)+).*information_schema" 1;
-    "~*(?:load_file(?:\s|%20|\+)*(?:\(|%28).*(?:'|%27)|into(?:\s|%20|\+)+outfile(?:\s|%20|\+)+(?:'|%27))" 1;
-    "~*(?:;|%3b)(?:\s|%20|\+)*(?:drop|alter|truncate)(?:\s|%20|\+)+(?:table|database)(?:\s|%20|\+)+" 1;
-    "~*(?:'|%27)(?:\s|%20|\+)*or(?:\s|%20|\+)+(?:'|%27)?[0-9]+(?:'|%27)?(?:\s|%20|\+)*(?:=|%3d)(?:\s|%20|\+)*(?:'|%27)?[0-9]+(?:'|%27)?(?:\s|%20|\+)*(?:--|%2d%2d|#|%23)" 1;
-}
-
-geo $wp_security_verified_googlebot_ip {
-    default 0;
-` + googleGeoEntries + `}
-
-geo $wp_security_verified_bingbot_ip {
-    default 0;
-` + bingGeoEntries + `}
-
-map $http_user_agent $wp_security_claims_googlebot {
-    default 0;
-    ~*googlebot 1;
-}
-
-map $http_user_agent $wp_security_claims_bingbot {
-    default 0;
-    ~*bingbot 1;
-}
-
-map "$wp_security_claims_googlebot:$wp_security_verified_googlebot_ip" $wp_fake_googlebot_hit {
-    default 0;
-` + googleFakeRule + `}
-
-map "$wp_security_claims_bingbot:$wp_security_verified_bingbot_ip" $wp_fake_bingbot_hit {
-    default 0;
-` + bingFakeRule + `}
-
-map "$wp_fake_googlebot_hit$wp_fake_bingbot_hit" $wp_fake_search_bot_hit {
-    default 0;
-    ~1 1;
-}
-`
-}
-
-func renderSecurityBotGeoEntries(key string) string {
-	if key != "googlebot_ips" && key != "bingbot_ips" {
-		return ""
-	}
-	db := database.GetDB()
-	if db == nil {
-		return ""
-	}
-	var raw string
-	_ = db.QueryRow(`SELECT svalue FROM security_settings WHERE skey = ?`, key).Scan(&raw)
-	var b strings.Builder
-	seen := map[string]bool{}
-	for _, line := range strings.Split(raw, "\n") {
-		item := strings.TrimSpace(line)
-		if item == "" || seen[item] || !isValidIPOrCIDR(item) {
-			continue
-		}
-		seen[item] = true
-		b.WriteString("    ")
-		b.WriteString(item)
-		b.WriteString(" 1;\n")
-	}
-	return b.String()
-}
-
-func fakeBotMapRule(geoEntries string) string {
-	if geoEntries == "" {
-		return ""
-	}
-	return `    "1:0" 1;
-`
-}
-
-func restoreLogMapConfig(path string, oldContent []byte, oldExists bool) {
-	if oldExists {
-		_ = os.WriteFile(path, oldContent, 0644)
-		return
-	}
-	_ = os.Remove(path)
-}
-
-func buildWPSecurityLogWhitelistMapEntries() string {
-	if database.GetDB() == nil {
-		return ""
-	}
-	var raw string
-	_ = database.GetDB().QueryRow(`SELECT svalue FROM security_settings WHERE skey = 'wp_security_log_whitelist'`).Scan(&raw)
-	patterns, err := NormalizeWPSecurityLogWhitelist(raw)
-	if err != nil {
-		return ""
-	}
-	var b strings.Builder
-	for _, pattern := range patterns {
-		if strings.Contains(pattern, "*") {
-			b.WriteString("    ~^")
-			b.WriteString(wildcardPathToRegex(pattern))
-			b.WriteString("$ 0;\n")
-			continue
-		}
-		if strings.HasSuffix(pattern, "/") {
-			b.WriteString("    ~^")
-			b.WriteString(regexp.QuoteMeta(pattern))
-			b.WriteString(" 0;\n")
-			continue
-		}
-		b.WriteString("    ")
-		b.WriteString(pattern)
-		b.WriteString(" 0;\n")
-	}
-	return b.String()
-}
+const olsVHostConfigBackupKeepCount = 7
 
 func NormalizeWPSecurityLogWhitelist(raw string) ([]string, error) {
 	raw = strings.TrimSpace(raw)
@@ -375,22 +86,12 @@ func NormalizeWPSecurityLogWhitelist(raw string) ([]string, error) {
 	return patterns, nil
 }
 
-func wildcardPathToRegex(pattern string) string {
-	var b strings.Builder
-	for _, part := range strings.Split(pattern, "*") {
-		b.WriteString(regexp.QuoteMeta(part))
-		b.WriteString("[^/]*")
-	}
-	out := b.String()
-	return strings.TrimSuffix(out, "[^/]*")
-}
-
 func NewTemplateEngine(backupDir string) *TemplateEngine {
 	os.MkdirAll(backupDir, 0755)
 	return &TemplateEngine{BackupDir: backupDir}
 }
 
-func (e *TemplateEngine) RenderNginxConfig(data *NginxSiteData) (string, error) {
+func (e *TemplateEngine) RenderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	return renderOLSVHostConfig(data)
 }
 
@@ -411,56 +112,8 @@ func GetSQLiProtectionSettings() (blockEnabled, autoBanEnabled bool) {
 	return
 }
 
-func (e *TemplateEngine) RenderPHPFPMPool(data *PHPFPMPoolData) (string, error) {
-	if data.PoolName == "" {
-		data.PoolName = data.Domain
-	}
-	if data.SocketName == "" {
-		data.SocketName = data.PoolName
-	}
-	phpCfg := LoadPHPRuntimeConfig()
-	if data.MemoryLimit == "" {
-		data.MemoryLimit = phpCfg.MemoryLimit
-	}
-	if data.UploadMaxFilesize == "" {
-		data.UploadMaxFilesize = phpCfg.UploadMaxFilesize
-	}
-	if data.PostMaxSize == "" {
-		data.PostMaxSize = phpCfg.PostMaxSize
-	}
-	if data.MaxExecutionTime == "" {
-		data.MaxExecutionTime = phpCfg.MaxExecutionTime
-	}
-	if data.MaxInputTime == "" {
-		data.MaxInputTime = phpCfg.MaxInputTime
-	}
-	// 兜底不能只挡空字符串——如果调用方漏加载 site.PHPFPMMaxChildren（零值 0），
-	// strconv.Itoa(0) 得到的是非空字符串 "0"，pm.max_children=0 会被 php-fpm8.3 -t
-	// 拒绝（"must be a positive value"），虽然现有语法检查+回滚机制能挡住它不生效，
-	// 但不该指望这层保护，源头上就不要生成非正数。strconv.Atoi("") 本身就会返回
-	// error，因此这一个判断同时覆盖了空字符串和非正数两种情况。
-	if n, err := strconv.Atoi(data.MaxChildren); err != nil || n <= 0 {
-		data.MaxChildren = "10"
-	}
-	tmpl, err := template.New("php_fpm_pool").Funcs(template.FuncMap{
-		"sitePHPOpenBaseDir":       sitePHPOpenBaseDir,
-		"sitePHPDisabledFunctions": sitePHPDisabledFunctions,
-		"sitePluginConfigPath":     sitePluginConfigPath,
-	}).Parse(phpFPMPoolTemplate)
-	if err != nil {
-		return "", fmt.Errorf("模板解析失败: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("模板渲染失败: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
-func (e *TemplateEngine) ApplyNginxConfig(configContent string, targetPath string, enabledPath string) error {
-	if locked, err := siteMigrationLockedByNginxConfig(targetPath); err != nil {
+func (e *TemplateEngine) ApplyOLSVHostConfig(configContent string, targetPath string, enabledPath string) error {
+	if locked, err := siteMigrationLockedByOLSVHostConfig(targetPath); err != nil {
 		return fmt.Errorf("检查站点迁移锁失败: %w", err)
 	} else if locked {
 		return errSiteMigrationBusy
@@ -468,7 +121,7 @@ func (e *TemplateEngine) ApplyNginxConfig(configContent string, targetPath strin
 	return applyOLSVHostConfig(e, configContent, targetPath, enabledPath)
 }
 
-func siteMigrationLockedByNginxConfig(targetPath string) (bool, error) {
+func siteMigrationLockedByOLSVHostConfig(targetPath string) (bool, error) {
 	db := database.GetDB()
 	if db == nil || strings.TrimSpace(targetPath) == "" {
 		return false, nil
@@ -476,20 +129,20 @@ func siteMigrationLockedByNginxConfig(targetPath string) (bool, error) {
 	var count int
 	err := db.QueryRow(`SELECT COUNT(*) FROM site_migration_locks ml
 		JOIN websites w ON w.id=ml.site_id
-		WHERE ml.status='active' AND w.nginx_conf_path=?`, filepath.Clean(targetPath)).Scan(&count)
+		WHERE ml.status='active' AND w.ols_vhost_config_path=?`, filepath.Clean(targetPath)).Scan(&count)
 	return count > 0, err
 }
 
-// ApplyNginxConfigKeepDisabled 校验并写入 Nginx 配置文件内容（含旧配置备份），
+// ApplyOLSVHostConfigKeepDisabled 校验并写入 OpenLiteSpeed 配置文件内容（含旧配置备份），
 // 但不创建/恢复 sites-enabled 软链接，也不触发 reload。
 // 用于刷新已暂停网站的配置模板，避免把暂停中的站点重新暴露为可访问。
-func (e *TemplateEngine) ApplyNginxConfigKeepDisabled(configContent string, targetPath string) error {
-	return e.writeNginxConfigFile(configContent, targetPath)
+func (e *TemplateEngine) ApplyOLSVHostConfigKeepDisabled(configContent string, targetPath string) error {
+	return e.writeOLSVHostConfigFile(configContent, targetPath)
 }
 
-// writeNginxConfigFile 校验 Nginx 配置语法，备份旧文件后写入 targetPath。
-// 不涉及 sites-enabled 软链接和 nginx reload，由调用方决定是否启用。
-func (e *TemplateEngine) writeNginxConfigFile(configContent string, targetPath string) error {
+// writeOLSVHostConfigFile 校验 OpenLiteSpeed 配置语法，备份旧文件后写入 targetPath。
+// 不涉及启用链接和 OpenLiteSpeed 重载，由调用方决定是否启用。
+func (e *TemplateEngine) writeOLSVHostConfigFile(configContent string, targetPath string) error {
 	if err := validateOLSVHostContent(configContent, targetPath); err != nil {
 		return err
 	}
@@ -511,80 +164,7 @@ func (e *TemplateEngine) writeNginxConfigFile(configContent string, targetPath s
 	return nil
 }
 
-func writeNginxConfigAfterBackup(targetPath, backupPath string, content []byte, writeFile func(string, []byte, os.FileMode) error) error {
-	if err := writeFile(targetPath, content, 0644); err != nil {
-		if backupPath == "" {
-			return fmt.Errorf("写入配置文件失败: %w", err)
-		}
-		if restoreErr := os.Rename(backupPath, targetPath); restoreErr != nil {
-			return fmt.Errorf("写入配置文件失败: %v；恢复旧配置也失败: %w", err, restoreErr)
-		}
-		return fmt.Errorf("写入配置文件失败，旧配置已恢复: %w", err)
-	}
-	return nil
-}
-
-var (
-	writePHPFPMPoolFile    = os.WriteFile
-	removePHPFPMPoolFile   = os.Remove
-	runPHPFPMServiceAction = func(action string) error {
-		out, err := exec.Command("systemctl", action, "php8.3-fpm").CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("systemctl %s php8.3-fpm: %s", action, strings.TrimSpace(string(out)))
-		}
-		return nil
-	}
-)
-
-func (e *TemplateEngine) ApplyPHPFPMPool(configContent string, targetPath string, logDir string, socketPath string) error {
-	if strings.TrimSpace(configContent) == "" {
-		return errors.New("LSPHP 站点参数为空")
-	}
-	if _, err := validateOLSScalar("LSPHP 站点参数路径", targetPath, true); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(logDir, 0750); err != nil {
-		return fmt.Errorf("创建站点日志目录失败: %w", err)
-	}
-	if err := writeOLSFileAtomic(targetPath, []byte(configContent), 0640); err != nil {
-		return fmt.Errorf("写入 LSPHP 站点参数失败: %w", err)
-	}
-	return nil
-}
-
-func restorePHPFPMPool(targetPath string, oldContent []byte, hadOld, restart bool, socketPath string) error {
-	if hadOld {
-		if err := writePHPFPMPoolFile(targetPath, oldContent, 0644); err != nil {
-			return fmt.Errorf("恢复旧 Pool 文件失败: %w", err)
-		}
-	} else if err := removePHPFPMPoolFile(targetPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("删除本次新建 Pool 文件失败: %w", err)
-	}
-	if !restart {
-		return nil
-	}
-	if err := runPHPFPMServiceAction("restart"); err != nil {
-		return fmt.Errorf("恢复旧配置后重启 PHP-FPM 失败: %w", err)
-	}
-	if err := waitForPHPFPMSocket(socketPath, 30, 100*time.Millisecond); err != nil {
-		return fmt.Errorf("恢复旧配置后网站 Pool 仍未就绪: %w", err)
-	}
-	return nil
-}
-
-func waitForPHPFPMSocket(path string, attempts int, interval time.Duration) error {
-	for i := 0; i < attempts; i++ {
-		if _, err := os.Stat(path); err == nil {
-			return nil
-		}
-		if i+1 < attempts {
-			time.Sleep(interval)
-		}
-	}
-	return fmt.Errorf("等待 PHP-FPM Socket 超时: %s", path)
-}
-
-func (e *TemplateEngine) RemoveNginxConfig(targetPath string, enabledPath string) error {
+func (e *TemplateEngine) RemoveOLSVHostConfig(targetPath string, enabledPath string) error {
 	if err := os.Remove(enabledPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -604,9 +184,9 @@ func getConfBaseName(path string) string {
 	return path
 }
 
-func cleanupNginxConfigBackups(backupDir, targetPath string, keepCount int) int {
+func cleanupOLSVHostConfigBackups(backupDir, targetPath string, keepCount int) int {
 	if keepCount <= 0 {
-		keepCount = nginxConfigBackupKeepCount
+		keepCount = olsVHostConfigBackupKeepCount
 	}
 
 	entries, err := os.ReadDir(backupDir)
@@ -649,439 +229,3 @@ func cleanupNginxConfigBackups(backupDir, targetPath string, keepCount int) int 
 	}
 	return removed
 }
-
-func getNginxTemplate(useSSL bool, siteType string) string {
-	if siteType == "php" {
-		if useSSL {
-			return phpHTTPSTemplate
-		}
-		return phpHTTPTemplate
-	}
-	if useSSL {
-		return nginxHTTPSTemplate
-	}
-	return nginxHTTPTemplate
-}
-
-const nginxHTTPTemplate = `# OLS WPanel Generated — {{.TemplateVer}}
-# Site: {{.Domain}}
-server {
-    listen 80;
-    listen [::]:80;
-
-    server_name {{.ServerNames}};
-
-    {{if .CDNRealIPEnabled}}
-    {{if .CDNRealIPCompat}}
-    set_real_ip_from 0.0.0.0/0;
-    set_real_ip_from ::/0;
-    {{else}}
-    {{range .CDNRealIPRanges}}set_real_ip_from {{.}};
-    {{end}}{{end}}
-    real_ip_header {{.CDNRealIPHeader}};
-    real_ip_recursive on;
-    {{end}}
-
-    if ($olswpanel_banned_ip) { return 444; }
-    if ($wp_sensitive_path_blocked) { return 404; }
-    {{if .SQLiBlockEnabled}}if ($wp_sqli_block_hit) { return 403; }{{end}}
-
-    limit_req zone=wp_scan_limit burst=20 nodelay;
-
-    {{if .RateLimitEnabled}}
-    limit_req zone=wp_req_limit burst={{.RateLimitBurst}} nodelay;
-    {{end}}
-    {{if .BotLimitEnabled}}
-    limit_req zone=wp_bot_limit burst={{.BotLimitBurst}} nodelay;
-    {{end}}
-
-    set $wp_cache_ver "{{.FCacheKey}}";
-
-    include /www/ols-wpanel/nginx-custom/{{.Domain}}.pre.conf;
-
-    root {{.WebRoot}};
-    index index.php index.html index.htm;
-
-    {{if eq .AccessLogMode "full"}}
-	    access_log /www/wwwlogs/{{.Domain}}/access.log olswpanel_combined if=$wp_hc_loggable;
-	    {{else if eq .AccessLogMode "error_only"}}
-	    access_log /www/wwwlogs/{{.Domain}}/access.log olswpanel_combined if=$wp_loggable;
-	    {{else}}
-	    access_log /www/wwwlogs/{{.Domain}}/access.log olswpanel_combined if=$wp_access_log_disabled;
-	    {{end}}
-    access_log /www/wwwlogs/{{.Domain}}/wp-security.log olswpanel_combined if=$wp_security_loggable;
-    access_log /www/wwwlogs/{{.Domain}}/wp-login-security.log olswpanel_combined if=$wp_login_attempt_loggable;
-    {{if .SQLiAutoBanLog}}access_log /www/wwwlogs/{{.Domain}}/wp-sqli-security.log olswpanel_combined if=$wp_sqli_block_hit;{{end}}
-
-    {{if .FCacheEnabled}}
-    set $wp_skip_cache 0;
-    {{end}}
-
-    include /www/ols-wpanel/nginx-custom/{{.Domain}}.conf;
-
-    location ~* /dup-installer/ {
-        return 404;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.php?$args;
-    }
-
-    {{if not .XMLRPCEnabled}}
-    location ~ ^/+xmlrpc\.php$ {
-        return 403;
-    }
-
-    {{end}}
-    location ~* ^/(wp-config\.php|wordfence-waf\.php|php\.ini)$ {
-        return 404;
-    }
-
-    location ~* ^/wp-content/(?!plugins/|themes/|mu-plugins/).*\.(php|phtml|phar|php[0-9])$ {
-        return 404;
-    }
-
-    location ~ \.php$ {
-        try_files $uri =404;
-        include /etc/nginx/fastcgi_params;
-        fastcgi_pass {{.PHPProxy}};
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_read_timeout 300;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 8 128k;
-        fastcgi_busy_buffers_size 256k;
-	    {{if .FCacheEnabled}}
-	    if ($request_method = POST) { set $wp_skip_cache 1; }
-	    if ($wp_cache_skip_args != "") { set $wp_skip_cache 1; }
-	    if ($http_cookie ~* "wordpress_logged_in|wordpress_sec_|wp-settings-|comment_author|woocommerce|wp_woocommerce_session|wp-resetpass") { set $wp_skip_cache 1; }
-	    if ($request_uri ~* "/wp-admin/|/wp-login.php|/wp-signup.php|/cart/|/checkout/|/my-account/|/wp-json/") { set $wp_skip_cache 1; }
-	    fastcgi_cache WP_CACHE;
-	    fastcgi_cache_key "$scheme$request_method$host$request_uri$wp_cache_ver";
-	    fastcgi_cache_valid 200 {{.FCacheTTL}}s;
-	    fastcgi_cache_valid 404 1m;
-	    fastcgi_cache_use_stale error timeout updating invalid_header http_500;
-	    fastcgi_cache_background_update on;
-	    fastcgi_cache_bypass $wp_skip_cache;
-	    fastcgi_no_cache $wp_skip_cache;
-	    fastcgi_cache_lock on;
-	    # WordPress 在 404/搜索结果等页面会自带 Cache-Control: no-store 之类的响应头
-	    # （核心 nocache_headers() 调用），不忽略这两个头的话上面的 fastcgi_cache_valid
-	    # 404 完全不会生效——Nginx 会尊重源站"不要缓存"的指令，实测验证过。
-	    # 特意不把 Set-Cookie 也加进来：如果匿名访客的响应带了 Set-Cookie（比如
-	    # WooCommerce 购物车令牌），忽略这个头会让 Nginx 把这次响应缓存下来，
-	    # 之后所有访问同一 URL 的人都会收到同一个 Set-Cookie，属于真实的跨用户风险。
-	    fastcgi_ignore_headers Cache-Control Expires;
-	    add_header X-FastCGI-Cache $upstream_cache_status always;
-	    {{end}}
-    }
-
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # uploads 目录 zip 例外，必须在通用阻断规则之前
-    location ~* /wp-content/uploads/.*\.zip$ {
-        try_files $uri =404;
-    }
-
-    location ~* \.(env|git|config\.bak|sql|tar|gz|zip|old|swp|save)$ {
-        return 404;
-    }
-
-	    location ~* /ols-wpanel-config.json$ {
-	        return 404;
-	    }
-
-    location ^~ /.well-known/acme-challenge/ {
-        try_files $uri =404;
-    }
-
-    location ~ /\. {
-        return 404;
-    }
-
-    location = /wp-login.php {
-        include /etc/nginx/fastcgi_params;
-        fastcgi_pass {{.PHPProxy}};
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_read_timeout 300;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 8 128k;
-        fastcgi_busy_buffers_size 256k;
-    }
-
-    {{if .XMLRPCEnabled}}
-    location = /xmlrpc.php {
-        include /etc/nginx/fastcgi_params;
-        fastcgi_pass {{.PHPProxy}};
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_read_timeout 300;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 8 128k;
-        fastcgi_busy_buffers_size 256k;
-    }
-    {{end}}
-}
-`
-
-const nginxHTTPSTemplate = `# OLS WPanel Generated — {{.TemplateVer}}
-# Site: {{.Domain}}
-server {
-    listen 80;
-    listen [::]:80;
-    server_name {{.ServerNames}};
-
-    {{if .CDNRealIPEnabled}}
-    {{if .CDNRealIPCompat}}
-    set_real_ip_from 0.0.0.0/0;
-    set_real_ip_from ::/0;
-    {{else}}
-    {{range .CDNRealIPRanges}}set_real_ip_from {{.}};
-    {{end}}{{end}}
-    real_ip_header {{.CDNRealIPHeader}};
-    real_ip_recursive on;
-    {{end}}
-
-    if ($olswpanel_banned_ip) { return 444; }
-    if ($wp_sensitive_path_blocked) { return 404; }
-
-    limit_req zone=wp_scan_limit burst=20 nodelay;
-
-    {{if .RateLimitEnabled}}
-    limit_req zone=wp_req_limit burst={{.RateLimitBurst}} nodelay;
-    {{end}}
-    {{if .BotLimitEnabled}}
-    limit_req zone=wp_bot_limit burst={{.BotLimitBurst}} nodelay;
-    {{end}}
-
-    set $wp_cache_ver "{{.FCacheKey}}";
-
-    root {{.WebRoot}};
-    add_header Cache-Control "no-store, no-cache, max-age=0, must-revalidate" always;
-
-    location ^~ /.well-known/acme-challenge/ {
-        try_files $uri =404;
-    }
-
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-
-    server_name {{.ServerNames}};
-
-    {{if .CDNRealIPEnabled}}
-    {{if .CDNRealIPCompat}}
-    set_real_ip_from 0.0.0.0/0;
-    set_real_ip_from ::/0;
-    {{else}}
-    {{range .CDNRealIPRanges}}set_real_ip_from {{.}};
-    {{end}}{{end}}
-    real_ip_header {{.CDNRealIPHeader}};
-    real_ip_recursive on;
-    {{end}}
-
-    if ($olswpanel_banned_ip) { return 444; }
-    if ($wp_sensitive_path_blocked) { return 404; }
-    {{if .SQLiBlockEnabled}}if ($wp_sqli_block_hit) { return 403; }{{end}}
-
-    limit_req zone=wp_scan_limit burst=20 nodelay;
-
-    {{if .RateLimitEnabled}}
-    limit_req zone=wp_req_limit burst={{.RateLimitBurst}} nodelay;
-    {{end}}
-    {{if .BotLimitEnabled}}
-    limit_req zone=wp_bot_limit burst={{.BotLimitBurst}} nodelay;
-    {{end}}
-
-    set $wp_cache_ver "{{.FCacheKey}}";
-
-    ssl_certificate {{.SSLCertPath}};
-    ssl_certificate_key {{.SSLKeyPath}};
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-
-    include /www/ols-wpanel/nginx-custom/{{.Domain}}.pre.conf;
-
-    root {{.WebRoot}};
-    index index.php index.html index.htm;
-
-    {{if eq .AccessLogMode "full"}}
-	    access_log /www/wwwlogs/{{.Domain}}/access.log olswpanel_combined if=$wp_hc_loggable;
-	    {{else if eq .AccessLogMode "error_only"}}
-	    access_log /www/wwwlogs/{{.Domain}}/access.log olswpanel_combined if=$wp_loggable;
-	    {{else}}
-	    access_log /www/wwwlogs/{{.Domain}}/access.log olswpanel_combined if=$wp_access_log_disabled;
-	    {{end}}
-    access_log /www/wwwlogs/{{.Domain}}/wp-security.log olswpanel_combined if=$wp_security_loggable;
-    access_log /www/wwwlogs/{{.Domain}}/wp-login-security.log olswpanel_combined if=$wp_login_attempt_loggable;
-    {{if .SQLiAutoBanLog}}access_log /www/wwwlogs/{{.Domain}}/wp-sqli-security.log olswpanel_combined if=$wp_sqli_block_hit;{{end}}
-
-    {{if .FCacheEnabled}}
-    set $wp_skip_cache 0;
-    {{end}}
-
-    include /www/ols-wpanel/nginx-custom/{{.Domain}}.conf;
-
-    location ~* /dup-installer/ {
-        return 404;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.php?$args;
-    }
-
-    {{if not .XMLRPCEnabled}}
-    location ~ ^/+xmlrpc\.php$ {
-        return 403;
-    }
-
-    {{end}}
-    location ~* ^/(wp-config\.php|wordfence-waf\.php|php\.ini)$ {
-        return 404;
-    }
-
-    location ~* ^/wp-content/(?!plugins/|themes/|mu-plugins/).*\.(php|phtml|phar|php[0-9])$ {
-        return 404;
-    }
-
-    location ~ \.php$ {
-        try_files $uri =404;
-        include /etc/nginx/fastcgi_params;
-        fastcgi_pass {{.PHPProxy}};
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_param HTTPS on;
-        fastcgi_read_timeout 300;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 8 128k;
-        fastcgi_busy_buffers_size 256k;
-	    {{if .FCacheEnabled}}
-	    if ($request_method = POST) { set $wp_skip_cache 1; }
-	    if ($wp_cache_skip_args != "") { set $wp_skip_cache 1; }
-	    if ($http_cookie ~* "wordpress_logged_in|wordpress_sec_|wp-settings-|comment_author|woocommerce|wp_woocommerce_session|wp-resetpass") { set $wp_skip_cache 1; }
-	    if ($request_uri ~* "/wp-admin/|/wp-login.php|/wp-signup.php|/cart/|/checkout/|/my-account/|/wp-json/") { set $wp_skip_cache 1; }
-	    fastcgi_cache WP_CACHE;
-	    fastcgi_cache_key "$scheme$request_method$host$request_uri$wp_cache_ver";
-	    fastcgi_cache_valid 200 {{.FCacheTTL}}s;
-	    fastcgi_cache_valid 404 1m;
-	    fastcgi_cache_use_stale error timeout updating invalid_header http_500;
-	    fastcgi_cache_background_update on;
-	    fastcgi_cache_bypass $wp_skip_cache;
-	    fastcgi_no_cache $wp_skip_cache;
-	    fastcgi_cache_lock on;
-	    # WordPress 在 404/搜索结果等页面会自带 Cache-Control: no-store 之类的响应头
-	    # （核心 nocache_headers() 调用），不忽略这两个头的话上面的 fastcgi_cache_valid
-	    # 404 完全不会生效——Nginx 会尊重源站"不要缓存"的指令，实测验证过。
-	    # 特意不把 Set-Cookie 也加进来：如果匿名访客的响应带了 Set-Cookie（比如
-	    # WooCommerce 购物车令牌），忽略这个头会让 Nginx 把这次响应缓存下来，
-	    # 之后所有访问同一 URL 的人都会收到同一个 Set-Cookie，属于真实的跨用户风险。
-	    fastcgi_ignore_headers Cache-Control Expires;
-	    add_header X-FastCGI-Cache $upstream_cache_status always;
-	    {{end}}
-    }
-
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # uploads 目录 zip 例外，必须在通用阻断规则之前
-    location ~* /wp-content/uploads/.*\.zip$ {
-        try_files $uri =404;
-    }
-
-    location ~* \.(env|git|config\.bak|sql|tar|gz|zip|old|swp|save)$ {
-        return 404;
-    }
-
-	    location ~* /ols-wpanel-config.json$ {
-	        return 404;
-	    }
-
-    location ^~ /.well-known/acme-challenge/ {
-        try_files $uri =404;
-    }
-
-    location ~ /\. {
-        return 404;
-    }
-
-    location = /wp-login.php {
-        include /etc/nginx/fastcgi_params;
-        fastcgi_pass {{.PHPProxy}};
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_param HTTPS on;
-        fastcgi_read_timeout 300;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 8 128k;
-        fastcgi_busy_buffers_size 256k;
-    }
-
-    {{if .XMLRPCEnabled}}
-    location = /xmlrpc.php {
-        include /etc/nginx/fastcgi_params;
-        fastcgi_pass {{.PHPProxy}};
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_param HTTPS on;
-        fastcgi_read_timeout 300;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 8 128k;
-        fastcgi_busy_buffers_size 256k;
-    }
-    {{end}}
-}
-`
-
-const phpFPMPoolTemplate = `; OLS WPanel Generated — v1.0
-; Site: {{.Domain}}
-
-[{{.PoolName}}]
-user = {{.SystemUser}}
-group = {{.SystemUser}}
-
-listen = {{.SocketPath}}/{{.SocketName}}.sock
-listen.owner = www-data
-listen.group = www-data
-listen.mode = 0660
-
-pm = ondemand
-pm.max_children = {{.MaxChildren}}
-pm.process_idle_timeout = 10s
-pm.max_requests = 500
-
-php_admin_value[open_basedir] = {{sitePHPOpenBaseDir .WebRoot .Domain}}
-php_admin_value[upload_max_filesize] = {{.UploadMaxFilesize}}
-php_admin_value[post_max_size] = {{.PostMaxSize}}
-php_admin_value[max_execution_time] = {{.MaxExecutionTime}}
-php_admin_value[max_input_time] = {{.MaxInputTime}}
-php_admin_value[memory_limit] = {{.MemoryLimit}}
-php_admin_value[disable_functions] = {{sitePHPDisabledFunctions}}
-php_admin_flag[allow_url_fopen] = On
-php_admin_flag[allow_url_include] = Off
-
-env[` + sitePluginConfigEnvName + `] = {{sitePluginConfigPath .Domain}}
-
-slowlog = /www/wwwlogs/{{.Domain}}/php-slow.log
-request_slowlog_timeout = 30s
-
-php_flag[display_errors] = Off
-php_flag[log_errors] = On
-php_value[error_log] = /www/wwwlogs/{{.Domain}}/php-error.log
-`

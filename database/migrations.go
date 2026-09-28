@@ -28,8 +28,8 @@ var migrations = append([]string{
 		log_dir               TEXT    NOT NULL,
 		db_name               TEXT    NOT NULL,
 		db_user               TEXT    NOT NULL,
-		php_pool_path         TEXT    NOT NULL,
-		nginx_conf_path       TEXT    NOT NULL,
+		lsphp_socket_path      TEXT    NOT NULL,
+		ols_vhost_config_path       TEXT    NOT NULL,
 		site_type             TEXT    NOT NULL DEFAULT 'wordpress',
 		ssl_enabled           INTEGER NOT NULL DEFAULT 0,
 		ssl_cert_path         TEXT    DEFAULT '',
@@ -40,9 +40,9 @@ var migrations = append([]string{
 		ssl_export_enabled    INTEGER NOT NULL DEFAULT 0,
 		template_version      TEXT    NOT NULL DEFAULT 'v1.0',
 		access_log_mode       TEXT    NOT NULL DEFAULT 'error_only',
-		fastcgi_cache_enabled INTEGER NOT NULL DEFAULT 0,
-		fastcgi_cache_ttl     INTEGER NOT NULL DEFAULT 300,
-		fastcgi_cache_key     TEXT    NOT NULL DEFAULT '',
+		litespeed_cache_enabled INTEGER NOT NULL DEFAULT 0,
+		litespeed_cache_ttl     INTEGER NOT NULL DEFAULT 300,
+		litespeed_cache_key     TEXT    NOT NULL DEFAULT '',
 		plugin_api_key        TEXT    NOT NULL DEFAULT '',
 		monitoring_enabled    INTEGER NOT NULL DEFAULT 0,
 		monitoring_interval   INTEGER NOT NULL DEFAULT 5,
@@ -61,7 +61,7 @@ var migrations = append([]string{
 		password_reset_mode   TEXT    NOT NULL DEFAULT 'allow',
 		log_retention_days    INTEGER NOT NULL DEFAULT 14,
 		cdn_realip_enabled    INTEGER NOT NULL DEFAULT 0,
-		php_fpm_max_children  INTEGER NOT NULL DEFAULT 10,
+		lsphp_max_children  INTEGER NOT NULL DEFAULT 10,
 		expires_at            DATETIME,
 		created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -363,9 +363,9 @@ var migrations = append([]string{
 	// seed: template_versions
 	// ============================================================
 	`INSERT OR IGNORE INTO template_versions (template_type, version, description, is_active) VALUES
-		('nginx_http',   'v1.0', 'HTTP默认模板',             1),
-		('nginx_https',  'v1.0', 'HTTPS(含SSL)模板',         1),
-		('php_fpm_pool', 'v1.0', 'PHP-FPM Pool隔离模板',     1)`,
+		('openlitespeed_http',  'v1.0', 'OpenLiteSpeed HTTP模板',      1),
+		('openlitespeed_https', 'v1.0', 'OpenLiteSpeed HTTPS模板',     1),
+		('openlitespeed_lsphp', 'v1.0', 'OpenLiteSpeed LSPHP 隔离模板', 1)`,
 
 	// ============================================================
 	// seed: cdn_realip_groups

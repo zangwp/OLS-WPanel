@@ -33,20 +33,20 @@ var aiDevelopmentUserPattern = regexp.MustCompile(`^(wp|php)_[a-z0-9_]{1,28}$`)
 var aiDevelopmentSessionPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 // ErrAIDevelopmentSiteBusy means usermod could not change the site user because
-// its PHP-FPM workers never had a fully idle moment during the retry window. The
+// its LSPHP workers never had a fully idle moment during the retry window. The
 // caller may retry with force to terminate those workers before retrying.
 var ErrAIDevelopmentSiteBusy = errors.New("site has active PHP processes")
 
 type AIDevelopmentSite struct {
-	ID            int64
-	Domain        string
-	SystemUser    string
-	WebRoot       string
-	LogDir        string
-	PHPPoolPath   string
-	NginxConfPath string
-	DBName        string
-	DBUser        string
+	ID                 int64
+	Domain             string
+	SystemUser         string
+	WebRoot            string
+	LogDir             string
+	LSPHPSocketPath    string
+	OLSVHostConfigPath string
+	DBName             string
+	DBUser             string
 }
 
 type aiDevelopmentPasswd struct {
@@ -123,7 +123,7 @@ func (s *AIDevelopmentAccessService) ReconcilePending(ctx context.Context) error
 // RefreshEnabledHandoffs keeps the server-side documents authoritative across
 // panel upgrades without rotating credentials or interrupting active sessions.
 func (s *AIDevelopmentAccessService) RefreshEnabledHandoffs(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT w.id,w.domain,w.system_user,w.web_root,w.log_dir,w.php_pool_path,w.nginx_conf_path,w.db_name,w.db_user,a.key_fingerprint
+	rows, err := s.db.QueryContext(ctx, `SELECT w.id,w.domain,w.system_user,w.web_root,w.log_dir,w.lsphp_socket_path,w.ols_vhost_config_path,w.db_name,w.db_user,a.key_fingerprint
 		FROM website_ai_development_access a
 		JOIN websites w ON w.id=a.site_id
 		WHERE a.status='enabled' AND a.operation=''
@@ -139,7 +139,7 @@ func (s *AIDevelopmentAccessService) RefreshEnabledHandoffs(ctx context.Context)
 	var items []enabledHandoff
 	for rows.Next() {
 		var item enabledHandoff
-		if err := rows.Scan(&item.site.ID, &item.site.Domain, &item.site.SystemUser, &item.site.WebRoot, &item.site.LogDir, &item.site.PHPPoolPath, &item.site.NginxConfPath, &item.site.DBName, &item.site.DBUser, &item.fingerprint); err != nil {
+		if err := rows.Scan(&item.site.ID, &item.site.Domain, &item.site.SystemUser, &item.site.WebRoot, &item.site.LogDir, &item.site.LSPHPSocketPath, &item.site.OLSVHostConfigPath, &item.site.DBName, &item.site.DBUser, &item.fingerprint); err != nil {
 			return err
 		}
 		items = append(items, item)
@@ -675,7 +675,7 @@ Generated at: %s
 Site: %s
 WebRoot: %s
 System user: %s
-Site LSPHP runtime config: %s (read-only, managed by OLS WPanel)
+Site LSPHP Unix socket: %s (runtime path, managed by OLS WPanel)
 Site OpenLiteSpeed virtual-host config: %s (read-only, managed by OLS WPanel)
 Site log directory: %s
 SSH key fingerprint: %s
@@ -699,7 +699,7 @@ Before recommending or performing a server-level, backup, SSL, security, perform
 AI development access cannot coexist with a WordPress maintenance window. The user must close AI development access in OLS WPanel before opening a maintenance window; closing access terminates this SSH session.
 
 Use the exact OLS WPanel entry documented in the capability file. Do not improvise equivalent server configuration, ad-hoc system cron jobs, raw service commands, or edits to panel-managed files. If no matching capability is documented, say so and ask the user to check OLS WPanel instead of inventing a menu, API or path.
-`, aiDevelopmentPanelVersion, aiDevelopmentCapabilitiesSchemaVersion, generatedAt.Format(time.RFC3339), site.Domain, site.WebRoot, site.SystemUser, site.PHPPoolPath, site.NginxConfPath, site.LogDir, fingerprint, site.WebRoot)
+`, aiDevelopmentPanelVersion, aiDevelopmentCapabilitiesSchemaVersion, generatedAt.Format(time.RFC3339), site.Domain, site.WebRoot, site.SystemUser, site.LSPHPSocketPath, site.OLSVHostConfigPath, site.LogDir, fingerprint, site.WebRoot)
 }
 
 type aiDevelopmentCapability struct {

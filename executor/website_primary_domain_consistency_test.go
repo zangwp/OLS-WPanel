@@ -18,29 +18,26 @@ func setupPrimaryDomainTest(t *testing.T) (*models.Website, string) {
 	root := t.TempDir()
 	oldCfg := config.AppConfig
 	oldSecretsRoot := siteSecretsRoot
-	oldNginxCustomDir := nginxCustomDir
-	oldApplyPHP, oldApplyNginx := applyPrimaryDomainPHP, applyPrimaryDomainNginx
+	oldApplyOpenLiteSpeed := applyPrimaryDomainOLSVHost
 	oldChange := changeWebsitePrimaryDomain
-	oldReloadPHP, oldReloadNginx := reloadPrimaryDomainPHP, reloadPrimaryDomainNginx
+	oldReloadOpenLiteSpeed := reloadPrimaryDomainOLS
 	oldUpdateURLs := updatePrimaryDomainWPSiteURLs
 	oldReadURLs := readPrimaryDomainWPSiteURLs
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: filepath.Join(root, "backups")},
 		Paths: config.PathsConfig{
 			WWWRoot: filepath.Join(root, "www"), WWWLogs: filepath.Join(root, "logs"),
-			Certificates: filepath.Join(root, "certs"), NginxSitesAvailable: filepath.Join(root, "available"),
-			NginxSitesEnabled: filepath.Join(root, "enabled"), PHPFPMSock: "/run/php",
+			Certificates: filepath.Join(root, "certs"), OLSVHostsAvailable: filepath.Join(root, "available"),
+			OLSVHostsEnabled: filepath.Join(root, "enabled"), LSPHPSocketDir: "/run/php",
 		},
 	}
 	siteSecretsRoot = filepath.Join(root, "secrets")
-	nginxCustomDir = filepath.Join(root, "nginx-custom")
 	t.Cleanup(func() {
 		config.AppConfig = oldCfg
 		siteSecretsRoot = oldSecretsRoot
-		nginxCustomDir = oldNginxCustomDir
-		applyPrimaryDomainPHP, applyPrimaryDomainNginx = oldApplyPHP, oldApplyNginx
+		applyPrimaryDomainOLSVHost = oldApplyOpenLiteSpeed
 		changeWebsitePrimaryDomain = oldChange
-		reloadPrimaryDomainPHP, reloadPrimaryDomainNginx = oldReloadPHP, oldReloadNginx
+		reloadPrimaryDomainOLS = oldReloadOpenLiteSpeed
 		updatePrimaryDomainWPSiteURLs = oldUpdateURLs
 		readPrimaryDomainWPSiteURLs = oldReadURLs
 	})
@@ -49,44 +46,36 @@ func setupPrimaryDomainTest(t *testing.T) (*models.Website, string) {
 	newDomain := "new.example.com"
 	oldWebRoot := filepath.Join(config.AppConfig.Paths.WWWRoot, oldDomain)
 	oldLogDir := filepath.Join(config.AppConfig.Paths.WWWLogs, oldDomain)
-	nginxPath := filepath.Join(config.AppConfig.Paths.NginxSitesAvailable, oldDomain+".conf")
-	phpPath := filepath.Join(root, "php", oldDomain+".conf")
-	for _, dir := range []string{oldWebRoot, oldLogDir, filepath.Dir(nginxPath), filepath.Dir(phpPath), config.AppConfig.Paths.NginxSitesEnabled, filepath.Join(config.AppConfig.Panel.BackupDir, oldDomain), nginxCustomDir} {
+	olsVHostPath := filepath.Join(config.AppConfig.Paths.OLSVHostsAvailable, oldDomain+".conf")
+	phpSocketPath := filepath.Join(config.AppConfig.Paths.LSPHPSocketDir, "old_example.sock")
+	for _, dir := range []string{oldWebRoot, oldLogDir, filepath.Dir(olsVHostPath), config.AppConfig.Paths.OLSVHostsEnabled, filepath.Join(config.AppConfig.Panel.BackupDir, oldDomain)} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(nginxPath, []byte("old nginx"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(phpPath, []byte("old php"), 0644); err != nil {
+	if err := os.WriteFile(olsVHostPath, []byte("old openlitespeed"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(config.AppConfig.Panel.BackupDir, oldDomain, "backup.tar"), []byte("backup"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(nginxCustomDir, oldDomain+".conf"), []byte("custom"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	enabledPath := nginxEnabledPath(config.AppConfig, nginxPath, oldDomain)
-	if err := os.Symlink(nginxPath, enabledPath); err != nil {
+	enabledPath := olsVHostEnabledPath(config.AppConfig, olsVHostPath, oldDomain)
+	if err := os.Symlink(olsVHostPath, enabledPath); err != nil {
 		t.Fatal(err)
 	}
 	site := &models.Website{
 		ID: 92, Domain: oldDomain, Status: models.StatusActive, SiteType: "wordpress", SystemUser: "siteuser",
-		WebRoot: oldWebRoot, LogDir: oldLogDir, NginxConfPath: nginxPath, PHPPoolPath: phpPath,
-		DBName: "wpdb", DBUser: "wpuser", TablePrefix: "wp_", PHPFPMMaxChildren: 10,
+		WebRoot: oldWebRoot, LogDir: oldLogDir, OLSVHostConfigPath: olsVHostPath, LSPHPSocketPath: phpSocketPath,
+		DBName: "wpdb", DBUser: "wpuser", TablePrefix: "wp_", LSPHPMaxChildren: 10,
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id,name,domain,aliases,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,php_fpm_max_children)
+		(id,name,domain,aliases,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,lsphp_max_children)
 		VALUES (92,'domain-test',?,'','active','wordpress','siteuser',?,?,'wpdb','wpuser',?,?,10)`,
-		oldDomain, oldWebRoot, oldLogDir, phpPath, nginxPath); err != nil {
+		oldDomain, oldWebRoot, oldLogDir, phpSocketPath, olsVHostPath); err != nil {
 		t.Fatal(err)
 	}
-	reloadPrimaryDomainPHP = func() error { return nil }
-	reloadPrimaryDomainNginx = func() error { return nil }
-	applyPrimaryDomainPHP = func(*TemplateEngine, string, string, string, string) error { return nil }
-	applyPrimaryDomainNginx = func(_ *TemplateEngine, content, target, enabled string) error {
+	reloadPrimaryDomainOLS = func() error { return nil }
+	applyPrimaryDomainOLSVHost = func(_ *TemplateEngine, content, target, enabled string) error {
 		if err := os.WriteFile(target, []byte(content), 0644); err != nil {
 			return err
 		}
@@ -132,23 +121,20 @@ func TestPrimaryDomainDatabaseFailureRestoresFilesystemAndConfig(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(config.AppConfig.Paths.WWWRoot, newDomain)); !os.IsNotExist(err) {
 		t.Fatalf("new web root remains: %v", err)
 	}
-	content, err := os.ReadFile(site.NginxConfPath)
-	if err != nil || string(content) != "old nginx" {
-		t.Fatalf("nginx=%q err=%v", content, err)
+	content, err := os.ReadFile(site.OLSVHostConfigPath)
+	if err != nil || string(content) != "old openlitespeed" {
+		t.Fatalf("openlitespeed=%q err=%v", content, err)
 	}
 	if _, err := os.Stat(filepath.Join(config.AppConfig.Panel.BackupDir, "old.example.com", "backup.tar")); err != nil {
 		t.Fatalf("old backup not restored: %v", err)
 	}
-	if content, err := os.ReadFile(filepath.Join(nginxCustomDir, "old.example.com.conf")); err != nil || string(content) != "custom" {
-		t.Fatalf("old custom nginx not restored: content=%q err=%v", content, err)
-	}
 }
 
-func TestPrimaryDomainNginxFailureRestoresMovedResources(t *testing.T) {
+func TestPrimaryDomainOpenLiteSpeedFailureRestoresMovedResources(t *testing.T) {
 	site, newDomain := setupPrimaryDomainTest(t)
-	applyPrimaryDomainNginx = func(*TemplateEngine, string, string, string) error { return errors.New("nginx failed") }
+	applyPrimaryDomainOLSVHost = func(*TemplateEngine, string, string, string) error { return errors.New("openlitespeed failed") }
 	result := runPrimaryDomainUpdate(site, newDomain)
-	if result.Success || !strings.Contains(result.Message, "Nginx") {
+	if result.Success || !strings.Contains(result.Message, "OpenLiteSpeed") {
 		t.Fatalf("result=%+v", result)
 	}
 	if _, err := os.Stat(site.WebRoot); err != nil {
@@ -181,9 +167,9 @@ func TestPrimaryDomainWordPressURLVerificationFailureRollsBack(t *testing.T) {
 func TestPrimaryDomainReportsRollbackFailure(t *testing.T) {
 	site, newDomain := setupPrimaryDomainTest(t)
 	changeWebsitePrimaryDomain = func(int, string, *models.Website) error { return errors.New("database failed") }
-	reloadPrimaryDomainPHP = func() error { return errors.New("reload failed") }
+	reloadPrimaryDomainOLS = func() error { return errors.New("reload failed") }
 	result := runPrimaryDomainUpdate(site, newDomain)
-	if result.Success || !strings.Contains(result.Message, "状态恢复不完整") || !strings.Contains(result.Message, "PHP-FPM") {
+	if result.Success || !strings.Contains(result.Message, "状态恢复不完整") || !strings.Contains(result.Message, "OpenLiteSpeed") {
 		t.Fatalf("result=%+v", result)
 	}
 }
@@ -203,9 +189,6 @@ func TestPrimaryDomainSuccessPersistsAndVerifies(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(config.AppConfig.Panel.BackupDir, newDomain, "backup.tar")); err != nil || string(data) != "backup" {
 		t.Fatalf("backup not moved: data=%q err=%v", data, err)
-	}
-	if data, err := os.ReadFile(filepath.Join(nginxCustomDir, newDomain+".conf")); err != nil || string(data) != "custom" {
-		t.Fatalf("custom nginx not moved: data=%q err=%v", data, err)
 	}
 }
 

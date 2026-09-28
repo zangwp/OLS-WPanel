@@ -163,7 +163,6 @@ func TestInstallerVerifiesReleaseBeforeExecutionAndDeployment(t *testing.T) {
 		`CHECKSUM_ASSET_MAX_BYTES=$((4 * 1024))`,
 		`SIGNATURE_ASSET_MAX_BYTES=64`,
 		`LICENSE_ARCHIVE_MAX_BYTES=$((64 * 1024 * 1024))`,
-		`PHP_KEYRING_MAX_BYTES=$((1 * 1024 * 1024))`,
 		`WORDPRESS_ZIP_MAX_BYTES=$((256 * 1024 * 1024))`,
 		`PUBLIC_IP_MAX_BYTES=$((4 * 1024))`,
 		`--max-filesize "$max_bytes"`,
@@ -174,7 +173,6 @@ func TestInstallerVerifiesReleaseBeforeExecutionAndDeployment(t *testing.T) {
 		`download_file "$license_url" "$LICENSE_ARCHIVE" 120 "$LICENSE_ARCHIVE_MAX_BYTES"`,
 		`download_file "${license_url}.sha256" "$LICENSE_SHA256_FILE" 60 "$CHECKSUM_ASSET_MAX_BYTES"`,
 		`download_file "${license_url}.sha256.sig" "$LICENSE_SIGNATURE_FILE" 60 "$SIGNATURE_ASSET_MAX_BYTES"`,
-		`download_file "$PHP_KEY_URL" "$tmp_key" 20 "$PHP_KEYRING_MAX_BYTES"`,
 		`download_file "https://wordpress.org/latest.zip" "$WP_ZIP_TMP" 60 "$WORDPRESS_ZIP_MAX_BYTES"`,
 		`download_file "https://ip.sb" "$PUBLIC_IP_FILE" 15 "$PUBLIC_IP_MAX_BYTES"`,
 		`download_file "https://ifconfig.me/ip" "$PUBLIC_IP_FILE" 15 "$PUBLIC_IP_MAX_BYTES"`,
@@ -412,7 +410,7 @@ func TestInstallerPlatformAndArtifactPreflightPrecedeSystemWrites(t *testing.T) 
 		`[[ "$machine" == "$dpkg_arch" ]]`,
 		`PANEL_ASSET_NAME="ols-wpanel-linux-${PLATFORM_ARCH}"`,
 		`select_platform_source`,
-		`Ubuntu 24.04 使用系统原生 PHP 8.3`,
+		`配置 OpenLiteSpeed/LSPHP 8.3 软件源`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("install.sh missing platform restriction %q", required)
@@ -497,41 +495,5 @@ func TestInstallerUsesPrivateWorkdirsAndBoundedDownloads(t *testing.T) {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("install.sh still uses predictable temporary path %q", forbidden)
 		}
-	}
-}
-
-func TestPHPKeyringPackageIsPinnedBeforeExecution(t *testing.T) {
-	script := readInstallScript(t, installScriptPath)
-	start := requiredIndex(t, script, "configure_php_source() {")
-	endRelative := requiredIndex(t, script[start:], "select_php_source() {")
-	configure := script[start : start+endRelative]
-
-	for _, required := range []string{
-		`DEBSURY_KEYRING_PACKAGE="debsuryorg-archive-keyring"`,
-		`DEBSURY_KEYRING_VERSION="2025.11.18"`,
-		`DEBSURY_KEYRING_SHA256="7511384559c9ddf1d5ce5f60be429ae9d4e7d01d9480d6f1b7a30c0810cf8b60"`,
-		`actual_sha=$(sha256sum "$tmp_key"`,
-		`[[ "$actual_sha" != "$DEBSURY_KEYRING_SHA256" ]]`,
-		`package_name=$(dpkg-deb -f "$tmp_key" Package`,
-		`package_version=$(dpkg-deb -f "$tmp_key" Version`,
-		`package_arch=$(dpkg-deb -f "$tmp_key" Architecture`,
-		`[[ "$package_name" != "$DEBSURY_KEYRING_PACKAGE" ]]`,
-		`[[ "$package_version" != "$DEBSURY_KEYRING_VERSION" ]]`,
-		`[[ "$package_arch" != "all" ]]`,
-		`rm -f "$tmp_key"`,
-	} {
-		if !strings.Contains(script, required) {
-			t.Errorf("install.sh missing PHP keyring guard %q", required)
-		}
-	}
-
-	hashCheck := requiredIndex(t, configure, `[[ "$actual_sha" != "$DEBSURY_KEYRING_SHA256" ]]`)
-	metadataCheck := requiredIndex(t, configure, `[[ "$package_name" != "$DEBSURY_KEYRING_PACKAGE" ]]`)
-	packageInstall := requiredIndex(t, configure, `dpkg -i "$tmp_key"`)
-	if !(hashCheck < metadataCheck && metadataCheck < packageInstall) {
-		t.Fatalf("PHP keyring validation must precede package execution: hash=%d metadata=%d install=%d", hashCheck, metadataCheck, packageInstall)
-	}
-	if strings.Contains(configure, "复用本机已有 keyring") {
-		t.Fatal("PHP source bootstrap must not reuse an unverified pre-existing keyring")
 	}
 }

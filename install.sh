@@ -4,7 +4,7 @@ set -o pipefail
 
 # ============================================================
 # OLS WPanel 安装脚本 — 适用于 Debian 13 / Ubuntu 24.04 LTS，建议使用纯净系统
-# 自动选择当前架构的已签名二进制，并按发行版配置 PHP 8.3 与 APT 源
+# 自动选择当前架构的已签名二进制，并配置 OpenLiteSpeed/LSPHP 8.3 软件源
 # ============================================================
 
 RED='\033[0;31m'
@@ -24,7 +24,6 @@ PANEL_PORT=8888
 MYSQL_PASS=""
 GHPROXY="${OLS_WPANEL_GITHUB_PROXY:-}"
 PREFER_CN=false
-PHP_SOURCE_MODE="${OLS_WPANEL_PHP_SOURCE:-auto}"
 CHECK_PLATFORM_ONLY=false
 CHECK_OLS_PACKAGES_ONLY=false
 PLATFORM_ID=""
@@ -67,14 +66,10 @@ INSTALLER_RELEASE_VERSION="__OLS_WPANEL_RELEASE_VERSION__"
 MIN_PANEL_VERSION="v1.0.0"
 LITESPEED_DEBIAN_KEY_SHA256="b465f0e857d1574ca9e045282a1b8113eebd7a8d2401bdb204803d0e0a9241aa"
 LITESPEED_REPO_KEY_SHA256="186cd78298b9349134c38130f48b015e87fc228b9a9ca9aeb0c65e47630ed2d5"
-DEBSURY_KEYRING_PACKAGE="debsuryorg-archive-keyring"
-DEBSURY_KEYRING_VERSION="2025.11.18"
-DEBSURY_KEYRING_SHA256="7511384559c9ddf1d5ce5f60be429ae9d4e7d01d9480d6f1b7a30c0810cf8b60"
 PANEL_ASSET_MAX_BYTES=$((256 * 1024 * 1024))
 CHECKSUM_ASSET_MAX_BYTES=$((4 * 1024))
 SIGNATURE_ASSET_MAX_BYTES=64
 LICENSE_ARCHIVE_MAX_BYTES=$((64 * 1024 * 1024))
-PHP_KEYRING_MAX_BYTES=$((1 * 1024 * 1024))
 WORDPRESS_ZIP_MAX_BYTES=$((256 * 1024 * 1024))
 PUBLIC_IP_MAX_BYTES=$((4 * 1024))
 # SubjectPublicKeyInfo PEM derived from RELEASE_PUBLIC_KEY_HEX. Keeping the raw
@@ -342,17 +337,6 @@ while [[ $# -gt 0 ]]; do
             PREFER_CN=true
             shift
             ;;
-        --php-source)
-            if [[ $# -lt 2 ]]; then
-                log_error "--php-source 需要指定 official、ustc、sjtu 或 auto"
-            fi
-            PHP_SOURCE_MODE="$2"
-            shift 2
-            ;;
-        --php-source=*)
-            PHP_SOURCE_MODE="${1#*=}"
-            shift
-            ;;
         --check-platform)
             CHECK_PLATFORM_ONLY=true
             shift
@@ -370,33 +354,6 @@ done
 
 # 异常退出时回滚 repair，并只清理由 mktemp 创建的本次工作目录。
 trap installer_exit EXIT
-
-# ============================================================
-# PHP 8.3 源选择（官方源 + 国内镜像多重兜底）
-# ============================================================
-
-set_php_source_meta() {
-    case "$1" in
-        official)
-            PHP_SOURCE_LABEL="Ondřej Surý 官方源"
-            PHP_KEY_URL="https://packages.sury.org/debsuryorg-archive-keyring.deb"
-            PHP_REPO_URL="https://packages.sury.org/php/"
-            ;;
-        ustc)
-            PHP_SOURCE_LABEL="中科大 PHP Sury 镜像"
-            PHP_KEY_URL="https://mirrors.ustc.edu.cn/sury/debsuryorg-archive-keyring.deb"
-            PHP_REPO_URL="https://mirrors.ustc.edu.cn/sury/php/"
-            ;;
-        sjtu)
-            PHP_SOURCE_LABEL="上海交大 PHP Sury 镜像"
-            PHP_KEY_URL="https://mirror.sjtu.edu.cn/sury/debsuryorg-archive-keyring.deb"
-            PHP_REPO_URL="https://mirror.sjtu.edu.cn/sury/php/"
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
 
 file_size_within_limit() {
     local path="$1"
@@ -1294,12 +1251,6 @@ apt_package_available() {
     LC_ALL=C apt-cache show "$pkg" >/dev/null 2>&1
 }
 
-php_package_available() {
-    local pkg="$1"
-
-    apt_package_available "$pkg"
-}
-
 assert_managed_source_target() {
     local source_path="$1"
 
@@ -1585,8 +1536,7 @@ configure_ubuntu_source() {
     set_ubuntu_source_meta "$source_id" || return 1
     log_info "尝试 Ubuntu 源: ${UBUNTU_SOURCE_LABEL}"
     write_ubuntu_sources "$codename"
-    if apt-get update > "$apt_log" 2>&1 && base_packages_available && \
-       php_package_available php8.3-cli && php_package_available php8.3-fpm; then
+    if apt-get update > "$apt_log" 2>&1 && base_packages_available; then
         rm -f "$apt_log"
         log_info "Ubuntu 源可用: ${UBUNTU_SOURCE_LABEL}"
         return 0
@@ -1609,8 +1559,6 @@ select_ubuntu_source() {
         log_info "使用系统默认 Ubuntu APT 源"
         apt-get update
         base_packages_available || log_error "系统默认 Ubuntu APT 源缺少关键系统包"
-        php_package_available php8.3-cli && php_package_available php8.3-fpm || \
-            log_error "系统默认 Ubuntu APT 源缺少 PHP 8.3；请确认 noble 的 main/universe 仓库已启用"
         return 0
     fi
     for source_id in "${candidates[@]}"; do
@@ -1630,122 +1578,6 @@ select_platform_source() {
     esac
 }
 
-configure_php_source() {
-    local source_id="$1"
-    local codename="$2"
-    local keyring_file="/usr/share/keyrings/debsuryorg-archive-keyring.gpg"
-    local tmp_key="$INSTALL_WORKDIR/debsuryorg-archive-keyring.deb"
-    local apt_log="$INSTALL_WORKDIR/php-apt-update.log"
-    local actual_sha=""
-    local package_name=""
-    local package_version=""
-    local package_arch=""
-
-    set_php_source_meta "$source_id" || return 1
-    log_info "尝试 PHP 源: ${PHP_SOURCE_LABEL}"
-
-    rm -f "$tmp_key"
-    if download_file "$PHP_KEY_URL" "$tmp_key" 20 "$PHP_KEYRING_MAX_BYTES"; then
-        actual_sha=$(sha256sum "$tmp_key" 2>/dev/null | awk '{print $1}') || actual_sha=""
-        if [[ "$actual_sha" != "$DEBSURY_KEYRING_SHA256" ]]; then
-            rm -f "$tmp_key"
-            log_warn "${PHP_SOURCE_LABEL} keyring SHA-256 不匹配，拒绝执行下载的安装包"
-            return 1
-        fi
-
-        package_name=$(dpkg-deb -f "$tmp_key" Package 2>/dev/null || true)
-        package_version=$(dpkg-deb -f "$tmp_key" Version 2>/dev/null || true)
-        package_arch=$(dpkg-deb -f "$tmp_key" Architecture 2>/dev/null || true)
-        if [[ "$package_name" != "$DEBSURY_KEYRING_PACKAGE" ]] || \
-            [[ "$package_version" != "$DEBSURY_KEYRING_VERSION" ]] || \
-            [[ "$package_arch" != "all" ]]; then
-            rm -f "$tmp_key"
-            log_warn "${PHP_SOURCE_LABEL} keyring 包元数据不匹配，拒绝执行"
-            return 1
-        fi
-
-        if ! dpkg -i "$tmp_key" >/dev/null 2>&1; then
-            rm -f "$tmp_key"
-            log_warn "${PHP_SOURCE_LABEL} GPG key 安装失败"
-            return 1
-        fi
-        rm -f "$tmp_key"
-    else
-        rm -f "$tmp_key"
-        log_warn "${PHP_SOURCE_LABEL} GPG key 下载失败；不会复用未由本次安装验证的 keyring"
-        return 1
-    fi
-
-    [[ -f "$keyring_file" ]] && [[ ! -L "$keyring_file" ]] || {
-        log_warn "${PHP_SOURCE_LABEL} 未生成预期的常规 keyring 文件"
-        return 1
-    }
-
-    assert_managed_source_target /etc/apt/sources.list.d/ols-wpanel-php.sources
-    cat > /etc/apt/sources.list.d/ols-wpanel-php.sources << PHPSOURCESEOF
-# Managed by OLS WPanel
-Types: deb
-URIs: ${PHP_REPO_URL}
-Suites: ${codename}
-Components: main
-Signed-By: ${keyring_file}
-PHPSOURCESEOF
-    APT_SOURCES_MUTATED=true
-
-    if apt-get update > "$apt_log" 2>&1 && \
-        php_package_available php8.3-cli && \
-        php_package_available php8.3-fpm; then
-        rm -f "$apt_log"
-        log_info "PHP 源可用: ${PHP_SOURCE_LABEL}"
-        return 0
-    fi
-
-    log_warn "${PHP_SOURCE_LABEL} 不可用，准备尝试下一个 PHP 源"
-    if [[ -f "$apt_log" ]]; then
-        tail -n 8 "$apt_log" 2>/dev/null || true
-    fi
-    rm -f "$apt_log"
-    return 1
-}
-
-select_php_source() {
-    local codename="$1"
-    local candidates=()
-    local source_id=""
-
-    if [[ "$PLATFORM_ID" == "ubuntu" ]]; then
-        php_package_available php8.3-cli && php_package_available php8.3-fpm || \
-            log_error "Ubuntu 24.04 系统源缺少 PHP 8.3 软件包"
-        log_info "Ubuntu 24.04 使用系统原生 PHP 8.3 软件包，不添加 Debian Sury 源"
-        return 0
-    fi
-
-    case "$PHP_SOURCE_MODE" in
-        auto|"")
-            if $PREFER_CN; then
-                candidates=(ustc sjtu official)
-            else
-                candidates=(official ustc sjtu)
-            fi
-            ;;
-        official|ustc|sjtu)
-            candidates=("$PHP_SOURCE_MODE")
-            ;;
-        *)
-            log_warn "未知 PHP 源模式 ${PHP_SOURCE_MODE}，回退到 auto"
-            candidates=(official ustc sjtu)
-            ;;
-    esac
-
-    for source_id in "${candidates[@]}"; do
-        if configure_php_source "$source_id" "$codename"; then
-            return 0
-        fi
-    done
-
-    log_error "所有 PHP 8.3 源均不可用。请检查网络、DNS、证书时间，或稍后重试。"
-}
-
 restore_managed_apt_sources() {
     local original=""
     local backup=""
@@ -1753,8 +1585,6 @@ restore_managed_apt_sources() {
 
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-debian.sources
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-ubuntu.sources
-    remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-php.sources
-
     for original in \
         /etc/apt/sources.list.d/debian.sources \
         /etc/apt/sources.list.d/ubuntu.sources; do
@@ -1822,22 +1652,11 @@ cleanup_ols_runtime_integrations() {
         /etc/systemd/system/mariadb.service.d/ols-wpanel.conf \
         /etc/systemd/system/redis-server.service.d/ols-wpanel.conf \
         /etc/fail2ban/jail.d/olswpanel.conf \
-        /etc/fail2ban/action.d/olswpanel-nginx.conf \
         /etc/fail2ban/action.d/olswpanel-record.conf \
         /etc/fail2ban/filter.d/olswpanel.conf \
         /etc/fail2ban/filter.d/olswpanel-404.conf \
         /etc/fail2ban/filter.d/olswpanel-login.conf \
         /etc/fail2ban/filter.d/olswpanel-sqli.conf \
-        /etc/nginx/conf.d/olswpanel.conf \
-        /etc/nginx/conf.d/olswpanel-cache-bypass.conf \
-        /etc/nginx/conf.d/olswpanel-ssl-default.conf \
-        /etc/nginx/conf.d/olswpanel-ratelimit.conf \
-        /etc/nginx/conf.d/olswpanel-botlimit.conf \
-        /etc/nginx/conf.d/olswpanel-limit-status.conf \
-        /etc/nginx/conf.d/olswpanel-cache.conf \
-        /etc/nginx/conf.d/olswpanel-log.conf \
-        /etc/nginx/conf.d/olswpanel-realip.conf \
-        /etc/nginx/conf.d/olswpanel-banned-ips.conf \
         2>/dev/null || true
 
     # Remove only unit-specific overrides owned by this panel. Hierarchical or
@@ -2897,10 +2716,9 @@ cat > "$CONFIG_FILE" << CONFIGEOF
     "lsphp_cli": "/usr/local/lsws/lsphp83/bin/php",
     "ols_listener_cert": "/usr/local/lsws/conf/ols-wpanel/default.crt",
     "ols_listener_key": "/usr/local/lsws/conf/ols-wpanel/default.key",
-    "nginx_sites_available": "/usr/local/lsws/conf/ols-wpanel/sites-available",
-    "nginx_sites_enabled": "/usr/local/lsws/conf/ols-wpanel/sites-enabled",
-    "php_fpm_pool": "/usr/local/lsws/conf/ols-wpanel/lsphp-sites",
-    "php_fpm_sock": "/tmp/lshttpd",
+    "ols_vhosts_available": "/usr/local/lsws/conf/ols-wpanel/sites-available",
+    "ols_vhosts_enabled": "/usr/local/lsws/conf/ols-wpanel/sites-enabled",
+    "lsphp_socket_dir": "/tmp/lshttpd",
     "certificates": "/www/server/certificates",
     "wordpress_package": "$INSTALL_DIR/packages/wordpress.zip",
     "cron_file": "/etc/cron.d/ols_wpanel_cron"

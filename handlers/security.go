@@ -28,8 +28,7 @@ var (
 	applyFail2banSettings             = executor.ApplyFail2banSettings
 	applyRateLimitSettings            = executor.ApplyRateLimitSettings
 	applyOLSTrustedProxyList          = executor.ApplyOLSTrustedProxyList
-	ensureLogMap                      = executor.EnsureLogMap
-	regenerateAllSitesNginx           = executor.RegenerateAllSitesNginx
+	regenerateAllOLSVHosts            = executor.RegenerateAllSitesOLSConfigs
 	websiteIDsForCDNRealIPGroup       = executor.WebsiteIDsForCDNRealIPGroup
 	restoreCDNRealIPGroupWithBindings = executor.RestoreCDNRealIPGroupWithBindings
 	withFail2banSettingsLock          = executor.WithFail2banSettingsLock
@@ -196,13 +195,8 @@ func validateTelemetrySettingsUpdate(db *sql.DB, settings map[string]string) err
 
 func restoreSecuritySettingsRuntime(settings map[string]string, applyFail2ban func() error) error {
 	var restoreErrors []error
-	if _, ok := settings["wp_security_log_whitelist"]; ok {
-		if err := ensureLogMap(); err != nil {
-			restoreErrors = append(restoreErrors, fmt.Errorf("Nginx 日志规则恢复失败: %w", err))
-		}
-	}
 	if hasSQLiSettings(settings) {
-		if err := regenerateAllSitesNginx(); err != nil {
+		if err := regenerateAllOLSVHosts(); err != nil {
 			restoreErrors = append(restoreErrors, fmt.Errorf("SQL 注入防护恢复失败: %w", err))
 		}
 	}
@@ -213,7 +207,7 @@ func restoreSecuritySettingsRuntime(settings map[string]string, applyFail2ban fu
 	}
 	if needsRateLimitApply(settings) {
 		if err := applyRateLimitSettings(); err != nil {
-			restoreErrors = append(restoreErrors, fmt.Errorf("Nginx 限速配置恢复失败: %w", err))
+			restoreErrors = append(restoreErrors, fmt.Errorf("请求限速设置恢复失败: %w", err))
 		}
 	}
 	return errors.Join(restoreErrors...)
@@ -234,13 +228,8 @@ func writeSecuritySettings(db *sql.DB, settings map[string]string) error {
 }
 
 func applySecuritySettingsRuntime(settings map[string]string, applyFail2ban func() error) error {
-	if _, ok := settings["wp_security_log_whitelist"]; ok {
-		if err := ensureLogMap(); err != nil {
-			return fmt.Errorf("Nginx 日志规则应用失败: %w", err)
-		}
-	}
 	if hasSQLiSettings(settings) {
-		if err := regenerateAllSitesNginx(); err != nil {
+		if err := regenerateAllOLSVHosts(); err != nil {
 			return fmt.Errorf("SQL 注入防护应用失败: %w", err)
 		}
 	}
@@ -251,7 +240,7 @@ func applySecuritySettingsRuntime(settings map[string]string, applyFail2ban func
 	}
 	if needsRateLimitApply(settings) {
 		if err := applyRateLimitSettings(); err != nil {
-			return fmt.Errorf("Nginx 限速配置应用失败: %w", err)
+			return fmt.Errorf("请求限速设置应用失败: %w", err)
 		}
 	}
 	return nil
@@ -339,9 +328,6 @@ func (h *SecurityHandler) ImportGooglebotRanges(c *gin.Context) {
 
 		if err := apply(); err != nil {
 			return rollback(newSecurityHandlerError(http.StatusInternalServerError, "Fail2ban 白名单应用失败，已回滚: "+err.Error()))
-		}
-		if err := ensureLogMap(); err != nil {
-			return rollback(newSecurityHandlerError(http.StatusInternalServerError, "搜索引擎验证规则应用失败，已回滚: "+err.Error()))
 		}
 		return nil
 	})
@@ -646,9 +632,6 @@ func reapplyImportedGooglebotRuntime(apply func() error) error {
 	var restoreErrors []error
 	if err := apply(); err != nil {
 		restoreErrors = append(restoreErrors, fmt.Errorf("Fail2ban 回滚失败: %w", err))
-	}
-	if err := ensureLogMap(); err != nil {
-		restoreErrors = append(restoreErrors, fmt.Errorf("搜索引擎验证规则回滚失败: %w", err))
 	}
 	return errors.Join(restoreErrors...)
 }

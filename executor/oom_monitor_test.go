@@ -108,7 +108,7 @@ func TestRecordOOMEventPersistsWhenAlertDisabled(t *testing.T) {
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 
-	event := oomEvent{Key: "disabled-event", Process: "nginx", PID: 99, OccurredAt: time.Now().UTC()}
+	event := oomEvent{Key: "disabled-event", Process: "openlitespeed", PID: 99, OccurredAt: time.Now().UTC()}
 	if err := recordOOMEvent(event); err != nil {
 		t.Fatalf("recordOOMEvent: %v", err)
 	}

@@ -43,7 +43,7 @@ func TestRecommendOPcacheMemoryConsumptionNeverExceedsHardCap(t *testing.T) {
 	}
 }
 
-func TestRecommendPHPFPMMaxChildren(t *testing.T) {
+func TestRecommendLSPHPMaxChildren(t *testing.T) {
 	cases := []struct {
 		name     string
 		totalMB  uint64
@@ -63,9 +63,9 @@ func TestRecommendPHPFPMMaxChildren(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			facts := SystemFacts{TotalMemoryBytes: tc.totalMB * 1024 * 1024, CPUCores: tc.cpuCores}
-			got := RecommendPHPFPMMaxChildren(facts)
+			got := RecommendLSPHPMaxChildren(facts)
 			if got != tc.want {
-				t.Fatalf("RecommendPHPFPMMaxChildren(%+v) = %d, want %d", facts, got, tc.want)
+				t.Fatalf("RecommendLSPHPMaxChildren(%+v) = %d, want %d", facts, got, tc.want)
 			}
 		})
 	}

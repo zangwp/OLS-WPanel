@@ -36,8 +36,8 @@ func TestOpenEnablesForeignKeysOnEveryConnection(t *testing.T) {
 	for i, conn := range conns {
 		domain := fmt.Sprintf("foreign-key-%d.example.com", i+1)
 		result, err := conn.ExecContext(ctx, `INSERT INTO websites
-			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-			VALUES (?, ?, 'active', 'wp_fk_test', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`, domain, domain)
+			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+			VALUES (?, ?, 'active', 'wp_fk_test', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`, domain, domain)
 		if err != nil {
 			t.Fatalf("insert website on connection #%d: %v", i+1, err)
 		}

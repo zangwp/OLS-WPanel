@@ -33,13 +33,13 @@ type acmeUser struct {
 }
 
 var (
-	applySSLNginxConfig  = applySSLNginxToSite
-	applyHTTPNginxConfig = applyHTTPNginxToSite
-	persistSSLState      = persistSSLDatabaseState
-	persistSSLDisabled   = persistSSLDisabledDatabaseState
-	restoreSSLState      = restoreSSLDatabaseState
-	restoreSSLCertDir    = restorePublishedSSLCertDir
-	removeSSLCertDir     = os.RemoveAll
+	applySSLOLSVHostConfig  = applySSLOLSVHostToSite
+	applyHTTPOLSVHostConfig = applyHTTPOLSVHostToSite
+	persistSSLState         = persistSSLDatabaseState
+	persistSSLDisabled      = persistSSLDisabledDatabaseState
+	restoreSSLState         = restoreSSLDatabaseState
+	restoreSSLCertDir       = restorePublishedSSLCertDir
+	removeSSLCertDir        = os.RemoveAll
 )
 
 func (u *acmeUser) GetEmail() string                        { return u.Email }
@@ -143,13 +143,13 @@ func publishSSLCertificate(site *models.Website, certDir, stageDir, certPath, ke
 		return fmt.Errorf("保存SSL状态失败: %w", err)
 	}
 
-	if err := applySSLNginxConfig(site, certPath, keyPath); err != nil {
+	if err := applySSLOLSVHostConfig(site, certPath, keyPath); err != nil {
 		dbRestoreErr := restoreSSLState(site)
 		certRestoreErr := restoreSSLCertDir(certDir, backupDir, hadOldCertDir)
 		if dbRestoreErr != nil || certRestoreErr != nil {
-			return fmt.Errorf("应用Nginx配置失败: %v；恢复数据库失败: %v；恢复旧证书失败: %v", err, dbRestoreErr, certRestoreErr)
+			return fmt.Errorf("应用OpenLiteSpeed配置失败: %v；恢复数据库失败: %v；恢复旧证书失败: %v", err, dbRestoreErr, certRestoreErr)
 		}
-		return fmt.Errorf("应用Nginx配置失败，已恢复原状态: %w", err)
+		return fmt.Errorf("应用OpenLiteSpeed配置失败，已恢复原状态: %w", err)
 	}
 	if hadOldCertDir {
 		logRecoveryFailure("清理旧证书备份", os.RemoveAll(backupDir))
@@ -207,13 +207,13 @@ func removeSSLCertificate(site *models.Website, certDir string) TaskResult {
 		return taskFailure("保存 SSL 关闭状态失败", err)
 	}
 
-	if err := applyHTTPNginxConfig(site); err != nil {
+	if err := applyHTTPOLSVHostConfig(site); err != nil {
 		if restoreErr := restoreSSLState(site); restoreErr != nil {
 			log.Printf("应用 HTTP 配置失败，且恢复 SSL 数据库状态失败: apply_error=%v restore_error=%v", err, restoreErr)
 			return TaskResult{Success: false, Message: "切换 HTTP 失败，且原 SSL 状态恢复失败，请立即检查网站配置"}
 		}
 		log.Printf("应用 HTTP 配置失败，数据库 SSL 状态已恢复且证书未删除: %v", err)
-		return TaskResult{Success: false, Message: "切换 HTTP 失败，数据库 SSL 状态已恢复且证书未删除，请检查 Nginx 当前配置"}
+		return TaskResult{Success: false, Message: "切换 HTTP 失败，数据库 SSL 状态已恢复且证书未删除，请检查 OpenLiteSpeed 当前配置"}
 	}
 
 	if err := removeSSLCertDir(certDir); err != nil {
@@ -421,48 +421,48 @@ func (w *webrootProvider) CleanUp(domain, token, keyAuth string) error {
 	return nil
 }
 
-func applySSLNginxToSite(site *models.Website, certPath, keyPath string) error {
+func applySSLOLSVHostToSite(site *models.Website, certPath, keyPath string) error {
 	cfg := config.AppConfig
 
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
-	nginxData, err := nginxDataFromSiteChecked(site)
+	olsVHostData, err := olsVHostDataFromSiteChecked(site)
 	if err != nil {
 		return fmt.Errorf("CDN 真实 IP 配置无效: %w", err)
 	}
-	nginxData.UseSSL = true
-	nginxData.SSLCertPath = certPath
-	nginxData.SSLKeyPath = keyPath
+	olsVHostData.UseSSL = true
+	olsVHostData.SSLCertPath = certPath
+	olsVHostData.SSLKeyPath = keyPath
 
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
 	if err != nil {
-		return fmt.Errorf("渲染 Nginx 配置失败: %w", err)
+		return fmt.Errorf("渲染 OpenLiteSpeed 配置失败: %w", err)
 	}
 
-	if err := engine.ApplyNginxConfig(nginxConfig, site.NginxConfPath,
-		nginxEnabledPath(cfg, site.NginxConfPath, site.Domain)); err != nil {
-		return fmt.Errorf("应用 Nginx 配置失败: %w", err)
+	if err := engine.ApplyOLSVHostConfig(olsVHostConfig, site.OLSVHostConfigPath,
+		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
+		return fmt.Errorf("应用 OpenLiteSpeed 配置失败: %w", err)
 	}
 
 	return nil
 }
 
-func applyHTTPNginxToSite(site *models.Website) error {
+func applyHTTPOLSVHostToSite(site *models.Website) error {
 	cfg := config.AppConfig
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
-	nginxData, err := nginxDataFromSiteChecked(site)
+	olsVHostData, err := olsVHostDataFromSiteChecked(site)
 	if err != nil {
 		return fmt.Errorf("CDN 真实 IP 配置无效: %w", err)
 	}
-	nginxData.UseSSL = false
-	nginxData.SSLCertPath = ""
-	nginxData.SSLKeyPath = ""
+	olsVHostData.UseSSL = false
+	olsVHostData.SSLCertPath = ""
+	olsVHostData.SSLKeyPath = ""
 
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
 	if err != nil {
 		return fmt.Errorf("渲染 HTTP 配置失败: %w", err)
 	}
-	if err := engine.ApplyNginxConfig(nginxConfig, site.NginxConfPath,
-		nginxEnabledPath(cfg, site.NginxConfPath, site.Domain)); err != nil {
+	if err := engine.ApplyOLSVHostConfig(olsVHostConfig, site.OLSVHostConfigPath,
+		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
 		return fmt.Errorf("应用 HTTP 配置失败: %w", err)
 	}
 	return nil
@@ -591,7 +591,7 @@ func executeRenewSSL(task *Task) TaskResult {
 
 	rows, err := db.Query(
 		`SELECT id, name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
-		        db_name, db_user, php_pool_path, nginx_conf_path, site_type, ssl_enabled,
+		        db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled,
 		        ssl_cert_path, ssl_key_path, ssl_cert_source, template_version, ssl_expires_at
 		 FROM websites WHERE ssl_enabled = 1 AND ssl_cert_path != ''`,
 	)
@@ -614,8 +614,8 @@ func executeRenewSSL(task *Task) TaskResult {
 		var sslExpiresAt *time.Time
 		if scanErr := rows.Scan(
 			&w.ID, &w.Name, &w.Domain, &aliases, &status, &w.SystemUser,
-			&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.PHPPoolPath,
-			&w.NginxConfPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.SSLCertSource,
+			&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.LSPHPSocketPath,
+			&w.OLSVHostConfigPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.SSLCertSource,
 			&w.TemplateVersion, &sslExpiresAt,
 		); scanErr != nil {
 			failed = append(failed, w.Domain+"(读取失败)")

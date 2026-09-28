@@ -10,8 +10,8 @@ import (
 	"github.com/zangwp/OLS-WPanel/config"
 )
 
-func testOLSVHostData(root string) *NginxSiteData {
-	return &NginxSiteData{
+func testOLSVHostData(root string) *OLSVHostData {
+	return &OLSVHostData{
 		Domain:         "example.com",
 		Aliases:        []string{"www.example.com"},
 		WebRoot:        filepath.Join(root, "www", "example.com"),
@@ -21,8 +21,8 @@ func testOLSVHostData(root string) *NginxSiteData {
 		PHPProxy:       "unix:" + filepath.Join(root, "run", "example.sock"),
 		TemplateVer:    "v1.0",
 		AccessLogMode:  "all",
-		FCacheEnabled:  true,
-		FCacheTTL:      7200,
+		LSCacheEnabled: true,
+		LSCacheTTL:     7200,
 		PHPMaxChildren: 12,
 	}
 }
@@ -94,7 +94,7 @@ func TestRenderOLSManagedRegistryRejectsDuplicateDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := config.AppConfig
-	config.AppConfig = &config.Config{Paths: config.PathsConfig{NginxSitesAvailable: available}}
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{OLSVHostsAvailable: available}}
 	t.Cleanup(func() { config.AppConfig = old })
 
 	for i, name := range []string{"one", "two"} {
@@ -131,7 +131,7 @@ func TestRenderOLSManagedRegistryRejectsEscapingSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := config.AppConfig
-	config.AppConfig = &config.Config{Paths: config.PathsConfig{NginxSitesAvailable: available}}
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{OLSVHostsAvailable: available}}
 	t.Cleanup(func() { config.AppConfig = old })
 	if _, err := renderOLSManagedRegistry(enabled); err == nil {
 		t.Fatal("escaping enabled-site symlink was accepted")
@@ -152,7 +152,7 @@ func TestApplyOLSVHostRollsBackWhenOLSTestFails(t *testing.T) {
 
 	oldCfg := config.AppConfig
 	config.AppConfig = &config.Config{Paths: config.PathsConfig{
-		NginxSitesAvailable: available, NginxSitesEnabled: enabled,
+		OLSVHostsAvailable: available, OLSVHostsEnabled: enabled,
 		OLSManagedConfig: managed, OLSBinary: filepath.Join(root, "openlitespeed"),
 		LSPHPBinary:     "/usr/local/lsws/lsphp83/bin/lsphp",
 		OLSListenerCert: filepath.Join(root, "default.crt"), OLSListenerKey: filepath.Join(root, "default.key"),
@@ -163,7 +163,7 @@ func TestApplyOLSVHostRollsBackWhenOLSTestFails(t *testing.T) {
 	link := filepath.Join(enabled, "example.com.conf")
 	oldContent := mustRenderOLSVHost(t, testOLSVHostData(root))
 	newData := testOLSVHostData(root)
-	newData.FCacheTTL = 3333
+	newData.LSCacheTTL = 3333
 	newContent := mustRenderOLSVHost(t, newData)
 	if err := os.WriteFile(target, []byte(oldContent), 0640); err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestApplyOLSVHostRollsBackWhenOLSTestFails(t *testing.T) {
 	}
 }
 
-func mustRenderOLSVHost(t *testing.T, data *NginxSiteData) string {
+func mustRenderOLSVHost(t *testing.T, data *OLSVHostData) string {
 	t.Helper()
 	content, err := renderOLSVHostConfig(data)
 	if err != nil {

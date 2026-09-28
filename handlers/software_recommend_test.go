@@ -94,7 +94,7 @@ func TestRecommendReturnsMaxmemoryForRedis(t *testing.T) {
 }
 
 func TestRecommendRejectsUnsupportedSoftware(t *testing.T) {
-	rec := requestRecommend(t, "Nginx")
+	rec := requestRecommend(t, "OpenLiteSpeed")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for unsupported software, got %d: %s", rec.Code, rec.Body.String())
 	}

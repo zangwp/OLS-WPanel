@@ -26,21 +26,16 @@ type siteMigrationTargetRollbackOps interface {
 type productionSiteMigrationTargetRollbackOps struct{ cfg *config.Config }
 
 func (o productionSiteMigrationTargetRollbackOps) StopRuntime(spec siteMigrationPublishSpec) error {
-	if err := removeMigrationPath(spec.NginxEnabledPath); err != nil {
+	if err := removeMigrationPath(spec.OLSVHostEnabledPath); err != nil {
 		return err
 	}
-	if output, err := executeCommand("nginx", "-s", "reload"); err != nil {
-		return fmt.Errorf("reload Nginx after migration rollback: %s", strings.TrimSpace(output))
-	}
-	for _, path := range []string{spec.NginxConfPath, spec.PHPPoolPath} {
+	for _, path := range []string{spec.OLSVHostConfigPath, spec.PHPSocketPath} {
 		if err := removeMigrationPath(path); err != nil {
 			return err
 		}
 	}
-	if output, err := executeCommand("systemctl", "reload", "php8.3-fpm"); err != nil {
-		return fmt.Errorf("reload PHP-FPM after migration rollback: %s", strings.TrimSpace(output))
-	}
-	return nil
+	_, err := reloadOLSManagedRegistry(filepath.Dir(spec.OLSVHostEnabledPath))
+	return err
 }
 
 func (productionSiteMigrationTargetRollbackOps) RemovePath(path string) error {
@@ -267,7 +262,7 @@ func (s *SiteMigrationTargetRollbackService) loadScope(ctx context.Context, task
 		return siteMigrationRollbackScope{}, errors.New("target rollback snapshot unavailable")
 	}
 	plan, err := (&SiteMigrationTargetPublisher{cfg: s.cfg}).expectedPlan(snapshot.TargetSpec.Domain, snapshot.TargetSpec.SiteType)
-	if err != nil || snapshot.TargetSpec.SystemUser != plan.SystemUser || snapshot.TargetSpec.WebRoot != plan.WebRoot || snapshot.TargetSpec.LogDir != plan.LogDir || snapshot.TargetSpec.DBName != plan.DBName || snapshot.TargetSpec.DBUser != plan.DBUser || snapshot.TargetSpec.PHPPoolPath != plan.PHPPoolPath || snapshot.TargetSpec.NginxConfPath != plan.NginxConfPath || snapshot.TargetSpec.NginxEnabledPath != plan.NginxEnabledPath {
+	if err != nil || snapshot.TargetSpec.SystemUser != plan.SystemUser || snapshot.TargetSpec.WebRoot != plan.WebRoot || snapshot.TargetSpec.LogDir != plan.LogDir || snapshot.TargetSpec.DBName != plan.DBName || snapshot.TargetSpec.DBUser != plan.DBUser || snapshot.TargetSpec.PHPSocketPath != plan.PHPSockPath || snapshot.TargetSpec.OLSVHostConfigPath != plan.OLSVHostConfigPath || snapshot.TargetSpec.OLSVHostEnabledPath != plan.OLSVHostEnabledPath {
 		return siteMigrationRollbackScope{}, errors.New("target rollback plan mismatch")
 	}
 	resources, err := s.loadResources(ctx, taskID, snapshot.TargetSpec)
@@ -309,7 +304,7 @@ func (s *SiteMigrationTargetRollbackService) loadResources(ctx context.Context, 
 		"database": spec.DBName, "database_user": spec.DBUser, "database_identity": filepath.Join(s.stagingRoot, taskID, "identity", "database.json"),
 		"site_identity": filepath.Join(s.stagingRoot, taskID, "identity", sitePluginConfigFileName), "database_import": spec.DBName, "file_publish": spec.WebRoot,
 		"site_secret_publish": sitePluginSecretsDir(spec.Domain), "certificate_publish": filepath.Join(s.cfg.Paths.Certificates, spec.Domain),
-		"runtime_config_publish": spec.NginxConfPath, "target_marker_config": spec.NginxConfPath,
+		"runtime_config_publish": spec.OLSVHostConfigPath, "target_marker_config": spec.OLSVHostConfigPath,
 	}
 	for kind, identifiers := range resources {
 		if expected, fixed := want[kind]; fixed {

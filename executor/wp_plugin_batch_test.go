@@ -385,8 +385,8 @@ func TestWPPluginBatchOrchestratorSlowBatchDoesNotBlockOthers(t *testing.T) {
 func seedSecondWebsiteForBatchTest(t *testing.T, store *wpUpdateStore) int {
 	t.Helper()
 	result, err := store.db.Exec(`INSERT INTO websites
-		(name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type)
-		VALUES ('update2.example.com','update2.example.com','active','wp_update2','/tmp/www2','/tmp/log2','db2','dbuser2','/tmp/php2','/tmp/nginx2','wordpress')`)
+		(name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type)
+		VALUES ('update2.example.com','update2.example.com','active','wp_update2','/tmp/www2','/tmp/log2','db2','dbuser2','/tmp/php2','/tmp/openlitespeed2','wordpress')`)
 	if err != nil {
 		t.Fatal(err)
 	}

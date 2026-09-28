@@ -50,7 +50,7 @@ func (t *LoginAttemptTracker) RecordAttempt(ip string, attemptType string) {
 // activity essentially never triggers. Locking an admin out of the panel for
 // typos on a site they'd need the panel to go fix is a worse outcome than
 // letting that one signal not also gate panel access; the hosted site itself
-// is still protected by the olswpanel-login jail at the Nginx/nftables layer.
+// is still protected by the olswpanel-login jail and nftables enforcement.
 func (t *LoginAttemptTracker) IsBanned(ip string) (bool, error) {
 	var count int
 	err := t.DB.QueryRow(

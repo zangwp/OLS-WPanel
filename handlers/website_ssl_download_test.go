@@ -62,12 +62,12 @@ func insertSSLDownloadWebsite(t *testing.T, domain string, sslEnabled bool) int6
 	result, err := database.GetDB().Exec(`
 		INSERT INTO websites (
 			name, domain, aliases, status, system_user, web_root, log_dir,
-			db_name, db_user, php_pool_path, nginx_conf_path, site_type,
+			db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type,
 			ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at
 		) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, 'wordpress', ?, ?, ?, ?)`,
 		domain, domain, "www."+domain, "wp_test", "/www/wwwroot/"+domain,
 		"/www/wwwlogs/"+domain, "db", "dbuser", "/etc/php/pool.conf",
-		"/etc/nginx/sites-available/"+domain+".conf", sslValue,
+		"/etc/openlitespeed/sites-available/"+domain+".conf", sslValue,
 		"/tmp/ignored/fullchain.pem", "/tmp/ignored/privkey.pem", expiresAt,
 	)
 	if err != nil {

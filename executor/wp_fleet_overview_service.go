@@ -29,7 +29,7 @@ const wpFleetOverviewSQL = `SELECT
 	w.ssl_enabled, w.ssl_expires_at,
 	CASE WHEN TRIM(COALESCE(w.ssl_last_error, '')) <> '' THEN 1 ELSE 0 END,
 	w.monitoring_enabled, COALESCE(bs.enabled, 0), w.file_lock_enabled,
-	w.fastcgi_cache_enabled, w.access_log_mode, w.disable_wp_updates,
+	w.litespeed_cache_enabled, w.access_log_mode, w.disable_wp_updates,
 	CASE WHEN s.site_id IS NULL THEN 0 ELSE 1 END,
 	COALESCE(s.status, 'unknown'), COALESCE(s.wordpress_version, ''),
 	COALESCE(s.collection_id, ''), COALESCE(CAST(s.last_attempt_at AS TEXT), ''),
@@ -67,34 +67,34 @@ type WPFleetOverviewService struct {
 }
 
 type wpFleetOverviewRow struct {
-	id                   int
-	name                 string
-	domain               string
-	siteType             string
-	status               string
-	createdAt            time.Time
-	expiresAt            sql.NullTime
-	sslEnabled           bool
-	sslExpiresAt         sql.NullTime
-	sslHasError          bool
-	monitoringEnabled    bool
-	backupEnabled        bool
-	fileLockEnabled      bool
-	fastCGICacheEnabled  bool
-	accessLogMode        string
-	updateChecksDisabled bool
-	hasInventoryState    bool
-	inventoryStatus      string
-	wordpressVersion     string
-	pluginUpdates        int
-	themeUpdates         int
-	collectionID         string
-	lastAttemptAt        string
-	lastSuccessAt        string
-	lastErrorCode        string
-	lastErrorStage       string
-	activeJobStatus      string
-	coreUpgradeAvailable bool
+	id                    int
+	name                  string
+	domain                string
+	siteType              string
+	status                string
+	createdAt             time.Time
+	expiresAt             sql.NullTime
+	sslEnabled            bool
+	sslExpiresAt          sql.NullTime
+	sslHasError           bool
+	monitoringEnabled     bool
+	backupEnabled         bool
+	fileLockEnabled       bool
+	liteSpeedCacheEnabled bool
+	accessLogMode         string
+	updateChecksDisabled  bool
+	hasInventoryState     bool
+	inventoryStatus       string
+	wordpressVersion      string
+	pluginUpdates         int
+	themeUpdates          int
+	collectionID          string
+	lastAttemptAt         string
+	lastSuccessAt         string
+	lastErrorCode         string
+	lastErrorStage        string
+	activeJobStatus       string
+	coreUpgradeAvailable  bool
 }
 
 func NewWPFleetOverviewService(db *sql.DB) (*WPFleetOverviewService, error) {
@@ -147,11 +147,11 @@ func (s *WPFleetOverviewService) Overview(ctx context.Context) (models.WPFleetOv
 func scanWPFleetOverviewRow(rows *sql.Rows) (wpFleetOverviewRow, error) {
 	var row wpFleetOverviewRow
 	var sslEnabled, sslHasError, monitoringEnabled, backupEnabled int
-	var fileLockEnabled, fastCGICacheEnabled, updateChecksDisabled, hasInventoryState, coreUpgradeAvailable int
+	var fileLockEnabled, liteSpeedCacheEnabled, updateChecksDisabled, hasInventoryState, coreUpgradeAvailable int
 	err := rows.Scan(
 		&row.id, &row.name, &row.domain, &row.siteType, &row.status,
 		&row.createdAt, &row.expiresAt, &sslEnabled, &row.sslExpiresAt, &sslHasError,
-		&monitoringEnabled, &backupEnabled, &fileLockEnabled, &fastCGICacheEnabled,
+		&monitoringEnabled, &backupEnabled, &fileLockEnabled, &liteSpeedCacheEnabled,
 		&row.accessLogMode, &updateChecksDisabled, &hasInventoryState, &row.inventoryStatus, &row.wordpressVersion,
 		&row.collectionID, &row.lastAttemptAt,
 		&row.lastSuccessAt, &row.lastErrorCode, &row.lastErrorStage, &row.activeJobStatus,
@@ -162,7 +162,7 @@ func scanWPFleetOverviewRow(rows *sql.Rows) (wpFleetOverviewRow, error) {
 	row.monitoringEnabled = monitoringEnabled == 1
 	row.backupEnabled = backupEnabled == 1
 	row.fileLockEnabled = fileLockEnabled == 1
-	row.fastCGICacheEnabled = fastCGICacheEnabled == 1
+	row.liteSpeedCacheEnabled = liteSpeedCacheEnabled == 1
 	row.updateChecksDisabled = updateChecksDisabled == 1
 	row.hasInventoryState = hasInventoryState == 1
 	row.coreUpgradeAvailable = coreUpgradeAvailable == 1
@@ -222,7 +222,7 @@ func wpFleetSiteModel(row wpFleetOverviewRow, generatedAt time.Time) (models.WPF
 		CreatedAt: createdAt, ExpiresAt: expiresAt, SSLEnabled: row.sslEnabled,
 		SSLExpiresAt: sslExpiresAt, SSLState: sslState, MonitoringEnabled: row.monitoringEnabled,
 		BackupEnabled: row.backupEnabled, FileLockEnabled: row.fileLockEnabled,
-		FastCGICacheEnabled: row.fastCGICacheEnabled, AccessLogMode: row.accessLogMode,
+		LiteSpeedCacheEnabled: row.liteSpeedCacheEnabled, AccessLogMode: row.accessLogMode,
 		UpdateChecksDisabled: row.updateChecksDisabled,
 		Inventory:            inventory,
 	}

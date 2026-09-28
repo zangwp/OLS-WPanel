@@ -306,10 +306,10 @@ func TestWPInventorySchedulerMaximumDatasetBudgetAndProgress(t *testing.T) {
 	for i := 2; i <= 300; i++ {
 		domain := fmt.Sprintf("scheduled-%03d.example.com", i)
 		if _, err := tx.Exec(`INSERT INTO websites
-			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 			VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
 			domain, domain, fmt.Sprintf("wp_s%03d", i), "/tmp/www", "/tmp/log",
-			fmt.Sprintf("db%d", i), fmt.Sprintf("dbu%d", i), "/tmp/php.conf", "/tmp/nginx.conf"); err != nil {
+			fmt.Sprintf("db%d", i), fmt.Sprintf("dbu%d", i), "/tmp/php.conf", "/tmp/openlitespeed.conf"); err != nil {
 			t.Fatal(err)
 		}
 	}

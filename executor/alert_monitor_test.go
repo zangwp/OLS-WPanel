@@ -146,7 +146,7 @@ func TestMetricAlertChecksReportUnknownForStaleSamples(t *testing.T) {
 func TestServiceAlertUsesLiveStateAndReportsUnknownWhenUnreadable(t *testing.T) {
 	previousGuard := guard
 	previousCommand := guardCommand
-	guard = &ProcessGuard{services: []*GuardService{{Name: "Nginx", ServiceName: "nginx"}}}
+	guard = &ProcessGuard{services: []*GuardService{{Name: "OpenLiteSpeed", ServiceName: "openlitespeed"}}}
 	t.Cleanup(func() {
 		guard = previousGuard
 		guardCommand = previousCommand

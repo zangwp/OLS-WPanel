@@ -367,7 +367,7 @@ var i18nKeys = []string{
 	"website.save_other_cdn_settings",
 	"website.save_settings",
 	"website.wp_optimization",
-	"website.fastcgi_cache_title",
+	"website.litespeed_cache_title",
 	"website.restore",
 	"website.processing",
 	"website.sync_db_info",
@@ -703,7 +703,7 @@ var i18nKeys = []string{
 	"firewall.source_sqli",
 	"firewall.source_manual",
 	"firewall.source_nftables",
-	"firewall.source_nginx",
+	"firewall.source_persistent_firewall",
 	"firewall.source_panel",
 	"firewall.source_scan",
 	"firewall.source_scanner",
@@ -972,11 +972,10 @@ var i18nKeys = []string{
 	"software.maxmemory_label",
 	"software.memory_limit_hint",
 	"software.memory_limit_label",
-	"software.nginx_value_no_semicolon",
+	"software.openlitespeed_value_no_semicolon",
 	"software.operation_failed_with_error",
 	"software.php_installed_extensions",
 	"software.php_int_invalid",
-	"software.php_pool_rebuild_failed",
 	"software.php_size_invalid",
 	"software.post_max_size_hint",
 	"software.post_max_size_label",
@@ -1294,7 +1293,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	r.Use(middleware.ScanDefense(db, cfg.Panel.RandomSuffix))
 
 	// Site migration remains disabled for v1.0.0. The inherited protocol edits
-	// Nginx/PHP-FPM state and must not be reachable until it has an OLS-native
+	// OpenLiteSpeed/LSPHP state and must not be reachable until it has an OLS-native
 	// implementation and recovery tests.
 
 	attemptTracker := middleware.NewLoginAttemptTracker(

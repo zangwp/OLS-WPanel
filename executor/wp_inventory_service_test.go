@@ -255,9 +255,9 @@ func TestWPInventoryServiceRefreshAllEnqueuesEligibleSitesAndDeduplicates(t *tes
 	store, firstSiteID := newWPInventoryStoreTest(t)
 	secondSiteID := insertWPInventoryWorkerSite(t, store, "bulk-second.example.com")
 	if _, err := store.db.Exec(`INSERT INTO websites
-		(name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type)
-		VALUES ('Creating','creating.example.com','creating','wp_creating','/tmp/creating','/tmp/log','db','dbuser','/tmp/php','/tmp/nginx','wordpress'),
-		('PHP','php.example.com','active','wp_php','/tmp/php-site','/tmp/log','db2','dbuser2','/tmp/php2','/tmp/nginx2','php')`); err != nil {
+		(name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type)
+		VALUES ('Creating','creating.example.com','creating','wp_creating','/tmp/creating','/tmp/log','db','dbuser','/tmp/php','/tmp/openlitespeed','wordpress'),
+		('PHP','php.example.com','active','wp_php','/tmp/php-site','/tmp/log','db2','dbuser2','/tmp/php2','/tmp/openlitespeed2','php')`); err != nil {
 		t.Fatalf("insert ineligible sites: %v", err)
 	}
 	now := time.Date(2026, 8, 1, 2, 0, 0, 0, time.UTC)
@@ -607,8 +607,8 @@ func newTestWPInventoryService(t *testing.T, store *wpInventoryStore) *WPInvento
 func insertWPInventoryServiceSite(t *testing.T, store *wpInventoryStore, domain, status, siteType string) int {
 	t.Helper()
 	result, err := store.db.Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (?, ?, ?, 'wp_service', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', ?)`,
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (?, ?, ?, 'wp_service', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', ?)`,
 		domain, domain, status, siteType)
 	if err != nil {
 		t.Fatalf("insert service site %s: %v", domain, err)

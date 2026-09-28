@@ -10,31 +10,31 @@ import (
 
 func withSSLRemoveStubs(t *testing.T) {
 	t.Helper()
-	oldApply, oldPersist, oldRestore, oldRemove := applyHTTPNginxConfig, persistSSLDisabled, restoreSSLState, removeSSLCertDir
+	oldApply, oldPersist, oldRestore, oldRemove := applyHTTPOLSVHostConfig, persistSSLDisabled, restoreSSLState, removeSSLCertDir
 	t.Cleanup(func() {
-		applyHTTPNginxConfig, persistSSLDisabled = oldApply, oldPersist
+		applyHTTPOLSVHostConfig, persistSSLDisabled = oldApply, oldPersist
 		restoreSSLState, removeSSLCertDir = oldRestore, oldRemove
 	})
 }
 
-func TestRemoveSSLCertificateStopsBeforeNginxWhenDatabaseSaveFails(t *testing.T) {
+func TestRemoveSSLCertificateStopsBeforeOpenLiteSpeedWhenDatabaseSaveFails(t *testing.T) {
 	withSSLRemoveStubs(t)
-	nginxCalled, removeCalled := false, false
+	openlitespeedCalled, removeCalled := false, false
 	persistSSLDisabled = func(int) error { return errors.New("database failed") }
-	applyHTTPNginxConfig = func(*models.Website) error { nginxCalled = true; return nil }
+	applyHTTPOLSVHostConfig = func(*models.Website) error { openlitespeedCalled = true; return nil }
 	removeSSLCertDir = func(string) error { removeCalled = true; return nil }
 
 	result := removeSSLCertificate(&models.Website{ID: 1}, "/certs/example.com")
-	if result.Success || nginxCalled || removeCalled {
-		t.Fatalf("result=%+v nginxCalled=%v removeCalled=%v", result, nginxCalled, removeCalled)
+	if result.Success || openlitespeedCalled || removeCalled {
+		t.Fatalf("result=%+v openlitespeedCalled=%v removeCalled=%v", result, openlitespeedCalled, removeCalled)
 	}
 }
 
-func TestRemoveSSLCertificateRestoresDatabaseWhenNginxFails(t *testing.T) {
+func TestRemoveSSLCertificateRestoresDatabaseWhenOpenLiteSpeedFails(t *testing.T) {
 	withSSLRemoveStubs(t)
 	restored, removeCalled := false, false
 	persistSSLDisabled = func(int) error { return nil }
-	applyHTTPNginxConfig = func(*models.Website) error { return errors.New("nginx failed") }
+	applyHTTPOLSVHostConfig = func(*models.Website) error { return errors.New("openlitespeed failed") }
 	restoreSSLState = func(*models.Website) error { restored = true; return nil }
 	removeSSLCertDir = func(string) error { removeCalled = true; return nil }
 
@@ -47,7 +47,7 @@ func TestRemoveSSLCertificateRestoresDatabaseWhenNginxFails(t *testing.T) {
 func TestRemoveSSLCertificateReportsDatabaseRestoreFailure(t *testing.T) {
 	withSSLRemoveStubs(t)
 	persistSSLDisabled = func(int) error { return nil }
-	applyHTTPNginxConfig = func(*models.Website) error { return errors.New("nginx failed") }
+	applyHTTPOLSVHostConfig = func(*models.Website) error { return errors.New("openlitespeed failed") }
 	restoreSSLState = func(*models.Website) error { return errors.New("restore failed") }
 
 	result := removeSSLCertificate(&models.Website{ID: 1}, "/certs/example.com")
@@ -59,7 +59,7 @@ func TestRemoveSSLCertificateReportsDatabaseRestoreFailure(t *testing.T) {
 func TestRemoveSSLCertificateReportsCleanupFailureAfterHTTPCommit(t *testing.T) {
 	withSSLRemoveStubs(t)
 	persistSSLDisabled = func(int) error { return nil }
-	applyHTTPNginxConfig = func(*models.Website) error { return nil }
+	applyHTTPOLSVHostConfig = func(*models.Website) error { return nil }
 	removeSSLCertDir = func(string) error { return errors.New("remove failed") }
 
 	result := removeSSLCertificate(&models.Website{ID: 1}, "/certs/example.com")
@@ -72,11 +72,11 @@ func TestRemoveSSLCertificateSucceedsInSafeOrder(t *testing.T) {
 	withSSLRemoveStubs(t)
 	steps := make([]string, 0, 3)
 	persistSSLDisabled = func(int) error { steps = append(steps, "database"); return nil }
-	applyHTTPNginxConfig = func(*models.Website) error { steps = append(steps, "nginx"); return nil }
+	applyHTTPOLSVHostConfig = func(*models.Website) error { steps = append(steps, "openlitespeed"); return nil }
 	removeSSLCertDir = func(string) error { steps = append(steps, "certificate"); return nil }
 
 	result := removeSSLCertificate(&models.Website{ID: 1, Domain: "example.com"}, "/certs/example.com")
-	if !result.Success || strings.Join(steps, ",") != "database,nginx,certificate" {
+	if !result.Success || strings.Join(steps, ",") != "database,openlitespeed,certificate" {
 		t.Fatalf("result=%+v steps=%v", result, steps)
 	}
 }

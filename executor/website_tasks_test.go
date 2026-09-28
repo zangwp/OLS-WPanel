@@ -83,11 +83,11 @@ func TestCreateWebsiteInsertOverridesLegacyLogRetentionDefault(t *testing.T) {
 
 	_, err = db.Exec(`CREATE TABLE websites (
 		name TEXT, domain TEXT, aliases TEXT, status TEXT, system_user TEXT, web_root TEXT,
-		document_root_subdir TEXT, log_dir TEXT, db_name TEXT, db_user TEXT, php_pool_path TEXT,
-		nginx_conf_path TEXT, site_type TEXT, ssl_enabled INTEGER, ssl_cert_path TEXT,
+		document_root_subdir TEXT, log_dir TEXT, db_name TEXT, db_user TEXT, lsphp_socket_path TEXT,
+		ols_vhost_config_path TEXT, site_type TEXT, ssl_enabled INTEGER, ssl_cert_path TEXT,
 		ssl_key_path TEXT, ssl_expires_at DATETIME, ssl_last_error TEXT, ssl_cert_source TEXT, template_version TEXT,
 		access_log_mode TEXT, disable_application_passwords INTEGER,
-		log_retention_days INTEGER NOT NULL DEFAULT 7, php_fpm_max_children INTEGER, expires_at DATETIME
+		log_retention_days INTEGER NOT NULL DEFAULT 7, lsphp_max_children INTEGER, expires_at DATETIME
 	)`)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestCreateWebsiteInsertOverridesLegacyLogRetentionDefault(t *testing.T) {
 
 	_, err = db.Exec(createWebsiteInsertSQL,
 		"legacy-default", "legacy-default.example.com", "", "wp_legacy", "/www/legacy", "", "/logs/legacy",
-		"db_legacy", "user_legacy", "/php/legacy.conf", "/nginx/legacy.conf", "wordpress", 0,
+		"db_legacy", "user_legacy", "/php/legacy.conf", "/openlitespeed/legacy.conf", "wordpress", 0,
 		"", "", nil, "", "", defaultSiteLogRetentionDays, 5, nil,
 	)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestDeleteSiteAndAssociatedCronJobsDeletesOnlyMatchingSite(t *testing.T) {
 	openTestDB(t)
 	db := database.GetDB()
 	insertMinimalWebsite(t, "site-a.example.com")
-	mustExec(t, db, `INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	mustExec(t, db, `INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (2, 'site-b', 'site-b.example.com', 'u2', '/www/wwwroot/site-b.example.com', '/www/wwwlogs/site-b.example.com', 'db2', 'u2', '/p2', '/n2')`)
 	mustExec(t, db, `INSERT INTO cron_jobs (id, name, cron_expression, command, task_type, backup_mode, site_id, enabled)
 		VALUES (1, 'site-a backup', '0 2 * * *', 'ols-wpanel file backup', 'file_backup', 'incremental', 1, 1)`)
@@ -236,27 +236,27 @@ func TestFinalDeleteFailureLeavesWebsiteDeletingAndRetryCompletes(t *testing.T) 
 
 func legacyEnableSiteRestoresMigratedMaintenanceLink(t *testing.T) {
 	openTestDB(t)
-	installStubNginx(t)
+	installStubOpenLiteSpeed(t)
 	db := database.GetDB()
 	root := t.TempDir()
 	cfg := &config.Config{Paths: config.PathsConfig{
-		NginxSitesAvailable: filepath.Join(root, "available"),
-		NginxSitesEnabled:   filepath.Join(root, "enabled"),
+		OLSVHostsAvailable: filepath.Join(root, "available"),
+		OLSVHostsEnabled:   filepath.Join(root, "enabled"),
 	}}
 	oldCfg := config.AppConfig
 	config.AppConfig = cfg
 	t.Cleanup(func() { config.AppConfig = oldCfg })
-	if err := os.MkdirAll(cfg.Paths.NginxSitesAvailable, 0755); err != nil {
+	if err := os.MkdirAll(cfg.Paths.OLSVHostsAvailable, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(cfg.Paths.NginxSitesEnabled, 0755); err != nil {
+	if err := os.MkdirAll(cfg.Paths.OLSVHostsEnabled, 0755); err != nil {
 		t.Fatal(err)
 	}
 	domain := "migrated.example.com"
-	nginxConf := filepath.Join(cfg.Paths.NginxSitesAvailable, domain+".conf")
-	maintenance := filepath.Join(cfg.Paths.NginxSitesAvailable, ".ols-wpanel-migration-migration_0000001.conf")
-	enabled := filepath.Join(cfg.Paths.NginxSitesEnabled, domain+".conf")
-	if err := os.WriteFile(nginxConf, []byte("server {}"), 0644); err != nil {
+	openlitespeedConf := filepath.Join(cfg.Paths.OLSVHostsAvailable, domain+".conf")
+	maintenance := filepath.Join(cfg.Paths.OLSVHostsAvailable, ".ols-wpanel-migration-migration_0000001.conf")
+	enabled := filepath.Join(cfg.Paths.OLSVHostsEnabled, domain+".conf")
+	if err := os.WriteFile(openlitespeedConf, []byte("# OpenLiteSpeed vhost placeholder\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(maintenance, []byte("return 503;"), 0600); err != nil {
@@ -265,17 +265,17 @@ func legacyEnableSiteRestoresMigratedMaintenanceLink(t *testing.T) {
 	if err := os.Symlink(maintenance, enabled); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
-		VALUES (31,'migrated','migrated.example.com','migrated','wp_migrated','/www/migrated','/logs/migrated','db','user','/php/migrated',?)`, nginxConf); err != nil {
+	if _, err := db.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
+		VALUES (31,'migrated','migrated.example.com','migrated','wp_migrated','/www/migrated','/logs/migrated','db','user','/php/migrated',?)`, openlitespeedConf); err != nil {
 		t.Fatal(err)
 	}
-	site := &models.Website{ID: 31, Domain: domain, Status: models.StatusMigrated, NginxConfPath: nginxConf}
+	site := &models.Website{ID: 31, Domain: domain, Status: models.StatusMigrated, OLSVHostConfigPath: openlitespeedConf}
 	result := executeEnableSite(&Task{Payload: &EnableSitePayload{Site: site}})
 	if !result.Success {
 		t.Fatalf("restore migrated site failed: %+v", result)
 	}
 	target, err := os.Readlink(enabled)
-	if err != nil || filepath.Clean(target) != filepath.Clean(nginxConf) {
+	if err != nil || filepath.Clean(target) != filepath.Clean(openlitespeedConf) {
 		t.Fatalf("enabled target=%q err=%v", target, err)
 	}
 	if _, err := os.Stat(maintenance); !os.IsNotExist(err) {
@@ -298,17 +298,16 @@ func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 			RootPassword: "test",
 		},
 		Paths: config.PathsConfig{
-			WWWRoot:             filepath.Join(root, "wwwroot"),
-			WWWLogs:             filepath.Join(root, "wwwlogs"),
-			NginxSitesAvailable: filepath.Join(root, "nginx-available"),
-			NginxSitesEnabled:   filepath.Join(root, "nginx-enabled"),
-			PHPFPMPool:          filepath.Join(root, "php-pool"),
-			PHPFPMSock:          filepath.Join(root, "php-sock"),
-			Certificates:        filepath.Join(root, "certs"),
-			CronFile:            filepath.Join(root, "ols-wpanel-cron"),
-			OLSManagedConfig:    filepath.Join(root, "ols", "sites.conf"),
-			OLSListenerCert:     filepath.Join(root, "ols", "default.crt"),
-			OLSListenerKey:      filepath.Join(root, "ols", "default.key"),
+			WWWRoot:            filepath.Join(root, "wwwroot"),
+			WWWLogs:            filepath.Join(root, "wwwlogs"),
+			OLSVHostsAvailable: filepath.Join(root, "openlitespeed-available"),
+			OLSVHostsEnabled:   filepath.Join(root, "openlitespeed-enabled"),
+			LSPHPSocketDir:     filepath.Join(root, "php-sock"),
+			Certificates:       filepath.Join(root, "certs"),
+			CronFile:           filepath.Join(root, "ols-wpanel-cron"),
+			OLSManagedConfig:   filepath.Join(root, "ols", "sites.conf"),
+			OLSListenerCert:    filepath.Join(root, "ols", "default.crt"),
+			OLSListenerKey:     filepath.Join(root, "ols", "default.key"),
 		},
 	}
 	oldCfg := config.AppConfig
@@ -324,10 +323,9 @@ func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 	for _, dir := range []string{
 		cfg.Paths.WWWRoot,
 		cfg.Paths.WWWLogs,
-		cfg.Paths.NginxSitesAvailable,
-		cfg.Paths.NginxSitesEnabled,
-		cfg.Paths.PHPFPMPool,
-		cfg.Paths.PHPFPMSock,
+		cfg.Paths.OLSVHostsAvailable,
+		cfg.Paths.OLSVHostsEnabled,
+		cfg.Paths.LSPHPSocketDir,
 		cfg.Paths.Certificates,
 		filepath.Dir(cfg.Paths.CronFile),
 	} {
@@ -338,19 +336,19 @@ func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 
 	domain := "delete-cron.example.com"
 	site := &models.Website{
-		ID:            10,
-		Domain:        domain,
-		SystemUser:    "php_delete_cron",
-		WebRoot:       filepath.Join(cfg.Paths.WWWRoot, domain),
-		LogDir:        filepath.Join(cfg.Paths.WWWLogs, domain),
-		DBName:        "db_delete_cron",
-		DBUser:        "user_delete_cron",
-		PHPPoolPath:   filepath.Join(cfg.Paths.PHPFPMPool, "delete-cron.conf"),
-		NginxConfPath: filepath.Join(cfg.Paths.NginxSitesAvailable, "delete-cron.conf"),
-		SiteType:      "php",
+		ID:                 10,
+		Domain:             domain,
+		SystemUser:         "php_delete_cron",
+		WebRoot:            filepath.Join(cfg.Paths.WWWRoot, domain),
+		LogDir:             filepath.Join(cfg.Paths.WWWLogs, domain),
+		DBName:             "db_delete_cron",
+		DBUser:             "user_delete_cron",
+		LSPHPSocketPath:    filepath.Join(cfg.Paths.LSPHPSocketDir, "delete-cron.sock"),
+		OLSVHostConfigPath: filepath.Join(cfg.Paths.OLSVHostsAvailable, "delete-cron.conf"),
+		SiteType:           "php",
 	}
-	mustExec(t, db, `INSERT INTO websites (id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (10, 'delete-cron', 'delete-cron.example.com', 'active', 'php_delete_cron', '`+site.WebRoot+`', '`+site.LogDir+`', 'db_delete_cron', 'user_delete_cron', '`+site.PHPPoolPath+`', '`+site.NginxConfPath+`', 'php')`)
+	mustExec(t, db, `INSERT INTO websites (id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (10, 'delete-cron', 'delete-cron.example.com', 'active', 'php_delete_cron', '`+site.WebRoot+`', '`+site.LogDir+`', 'db_delete_cron', 'user_delete_cron', '`+site.LSPHPSocketPath+`', '`+site.OLSVHostConfigPath+`', 'php')`)
 	mustExec(t, db, `INSERT INTO cron_jobs (name, cron_expression, command, task_type, backup_mode, site_id, enabled)
 		VALUES ('delete-cron file backup', '0 2 * * *', 'ols-wpanel file backup', 'file_backup', 'incremental', 10, 1)`)
 	mustExec(t, db, `INSERT INTO cron_jobs (name, cron_expression, command, task_type, site_id, enabled)
@@ -411,7 +409,7 @@ func TestDeleteSiteRejectsActiveMigrationBeforeExternalCleanup(t *testing.T) {
 
 func TestDeleteSiteAllowsCompletedSourceAndClearsMigrationReferences(t *testing.T) {
 	store, siteID := newSiteMigrationStoreTest(t)
-	if err := store.acquireLock(context.Background(), "migration_0000001", &siteID, "example.com", "source", freezerTestTime()); err != nil {
+	if err := store.acquireLock(context.Background(), "migration_0000001", &siteID, "example.com", "source", time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`UPDATE site_migration_sites SET status='completed',stage='completed' WHERE id='migration_0000001'`); err != nil {

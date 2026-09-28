@@ -30,23 +30,23 @@ import (
 
 // canonical column list shared by all website queries.
 const websiteCols = `id, name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
-	db_name, db_user, php_pool_path, nginx_conf_path, site_type, ssl_enabled,
+	db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled,
 	ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, ssl_export_enabled, template_version, access_log_mode,
-	fastcgi_cache_enabled, fastcgi_cache_ttl, fastcgi_cache_key,
+	litespeed_cache_enabled, litespeed_cache_ttl, litespeed_cache_key,
 	monitoring_enabled, monitoring_interval, disable_wp_updates, disable_file_editing,
 		xmlrpc_enabled, disable_application_passwords, wp_debug_enabled, wp_post_revisions, wp_memory_limit,
 		file_lock_enabled, file_lock_mode, file_lock_apply_status,
 		password_reset_mode,
-		log_retention_days, cdn_realip_enabled, php_fpm_max_children, expires_at, created_at, updated_at`
+		log_retention_days, cdn_realip_enabled, lsphp_max_children, expires_at, created_at, updated_at`
 
 const fileLockBlockedMessage = "该站点已开启文件锁定，请先解除文件锁定后再执行此维护操作"
 
 var wpOptimizationSiteLocks sync.Map // siteID(int) -> *sync.Mutex
 
 var (
-	updateSiteFastCGICache            = executor.UpdateSiteFastCGICache
-	publishSiteNginxWithCacheRollback = executor.PublishSiteNginxWithCacheRollback
-	clearSiteCache                    = executor.ClearSiteCache
+	updateSiteLiteSpeedCache        = executor.UpdateSiteLiteSpeedCache
+	publishSiteOLSWithCacheRollback = executor.PublishSiteOLSWithCacheRollback
+	clearSiteCache                  = executor.ClearSiteCache
 )
 
 func wpOptimizationSiteLock(id int) *sync.Mutex {
@@ -95,7 +95,7 @@ type siteLogFileInfo struct {
 func scanWebsite(scanner func(dest ...interface{}) error) (*models.Website, error) {
 	var w models.Website
 	var aliases, status string
-	var sslEnabled, sslExportEnabled, fCacheEnabled, monitoringEnabled int
+	var sslEnabled, sslExportEnabled, lsCacheEnabled, monitoringEnabled int
 	var monitoringInterval int
 	var disableWPUpdates, disableFileEditing, xmlrpcEnabled, disableApplicationPasswords int
 	var wpDebugEnabled int
@@ -108,15 +108,15 @@ func scanWebsite(scanner func(dest ...interface{}) error) (*models.Website, erro
 
 	err := scanner(
 		&w.ID, &w.Name, &w.Domain, &aliases, &status, &w.SystemUser,
-		&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.PHPPoolPath,
-		&w.NginxConfPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath,
+		&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.LSPHPSocketPath,
+		&w.OLSVHostConfigPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath,
 		&w.SSLExpiresAt, &w.SSLLastError, &w.SSLCertSource, &sslExportEnabled, &w.TemplateVersion, &w.AccessLogMode,
-		&fCacheEnabled, &w.FCacheTTL, &w.FCacheKey,
+		&lsCacheEnabled, &w.LSCacheTTL, &w.LSCacheKey,
 		&monitoringEnabled, &monitoringInterval, &disableWPUpdates, &disableFileEditing,
 		&xmlrpcEnabled, &disableApplicationPasswords, &wpDebugEnabled, &wpPostRevisions, &wpMemoryLimit,
 		&fileLockEnabled, &w.FileLockMode, &w.FileLockApplyStatus,
 		&passwordResetMode,
-		&logRetentionDays, &cdnRealIPEnabled, &w.PHPFPMMaxChildren, &w.ExpiresAt,
+		&logRetentionDays, &cdnRealIPEnabled, &w.LSPHPMaxChildren, &w.ExpiresAt,
 		&w.CreatedAt, &w.UpdatedAt,
 	)
 	if err != nil {
@@ -127,7 +127,7 @@ func scanWebsite(scanner func(dest ...interface{}) error) (*models.Website, erro
 	w.Status = models.WebsiteStatus(status)
 	w.SSLEnabled = sslEnabled == 1
 	w.SSLExportEnabled = sslExportEnabled == 1
-	w.FCacheEnabled = fCacheEnabled == 1
+	w.LSCacheEnabled = lsCacheEnabled == 1
 	w.MonitoringEnabled = monitoringEnabled == 1
 	w.MonitoringInterval = monitoringInterval
 	w.DisableWPUpdates = disableWPUpdates == 1
@@ -346,7 +346,7 @@ func (h *WebsiteHandler) List(c *gin.Context) {
 		models.Website
 		AccessLogEnabled            bool   `json:"access_log_enabled"`
 		AccessLogMode               string `json:"access_log_mode"`
-		FCacheEnabled               bool   `json:"fastcgi_cache_enabled"`
+		LSCacheEnabled              bool   `json:"litespeed_cache_enabled"`
 		BackupEnabled               bool   `json:"backup_enabled"`
 		AIDevelopment               bool   `json:"ai_development_enabled"`
 		AnomalyMonitoringEnabled    bool   `json:"anomaly_monitoring_enabled"`
@@ -400,7 +400,7 @@ func (h *WebsiteHandler) List(c *gin.Context) {
 		result[i] = siteRow{
 			Website:                     w,
 			AccessLogMode:               w.AccessLogMode,
-			FCacheEnabled:               w.FCacheEnabled,
+			LSCacheEnabled:              w.LSCacheEnabled,
 			AccessLogEnabled:            w.AccessLogMode != "off",
 			AIDevelopment:               aiDevelopmentSites[w.ID],
 			AnomalyMonitoringEnabled:    anomalyMonitoringSites[w.ID],
@@ -1506,7 +1506,7 @@ func (h *WebsiteHandler) UpdateWPSiteURLs(c *gin.Context) {
 		return
 	}
 
-	// 异步清理 FastCGI 和 Redis Object Cache，避免旧缓存继续返回旧站点 URL。
+	// 异步清理 LiteSpeed 和 Redis Object Cache，避免旧缓存继续返回旧站点 URL。
 	executor.GoSafe(func() { executor.ClearWPSiteRuntimeCaches(site.ID, site.Domain, site.WebRoot) })
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "站点 URL 已更新"}))
@@ -2040,14 +2040,6 @@ func listSiteLogFiles(logDir, logType string) ([]siteLogFileInfo, error) {
 	return files, nil
 }
 
-func (h *WebsiteHandler) GetNginxCustom(c *gin.Context) {
-	c.JSON(http.StatusGone, models.ErrorResponse("OpenLiteSpeed v1.0.0 不提供旧版 Nginx 自定义配置接口"))
-}
-
-func (h *WebsiteHandler) SaveNginxCustom(c *gin.Context) {
-	c.JSON(http.StatusGone, models.ErrorResponse("OpenLiteSpeed v1.0.0 不提供旧版 Nginx 自定义配置接口"))
-}
-
 func (h *WebsiteHandler) SetAccessLogMode(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -2309,7 +2301,7 @@ func (h *WebsiteHandler) UpdateCache(c *gin.Context) {
 	if req.Enabled {
 		enabled = 1
 	}
-	if err := updateSiteFastCGICache(id, enabled, req.TTL); err != nil {
+	if err := updateSiteLiteSpeedCache(id, enabled, req.TTL); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("缓存设置未生效: "+err.Error()))
 		return
 	}
@@ -2342,8 +2334,8 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	}
 
 	var req struct {
-		FCacheEnabled               bool   `json:"fcache_enabled"`
-		FCacheTTL                   int    `json:"fcache_ttl"`
+		LSCacheEnabled              bool   `json:"litespeed_cache_enabled"`
+		LSCacheTTL                  int    `json:"litespeed_cache_ttl"`
 		DisableWPUpdates            bool   `json:"disable_wp_updates"`
 		ExpectedWPUpdates           *bool  `json:"expected_disable_wp_updates"`
 		DisableFileEditing          bool   `json:"disable_file_editing"`
@@ -2358,19 +2350,19 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("参数错误"))
 		return
 	}
-	if req.FCacheTTL < 10 {
-		req.FCacheTTL = 300
+	if req.LSCacheTTL < 10 {
+		req.LSCacheTTL = 300
 	}
-	if req.FCacheTTL > 86400 {
-		req.FCacheTTL = 86400
+	if req.LSCacheTTL > 86400 {
+		req.LSCacheTTL = 86400
 	}
 	db := database.GetDB()
 
-	// 检查 FastCGI / XML-RPC 配置是否变化，决定是否重载 Nginx
+	// 检查 LiteSpeed / XML-RPC 配置是否变化，决定是否重载 OpenLiteSpeed
 	var domain string
-	var oldFCacheEnabled, oldFCacheTTL, oldXMLRPCEnabled, oldDisableWPUpdates, oldDisableApplicationPasswords int
-	if err := db.QueryRow("SELECT domain, fastcgi_cache_enabled, fastcgi_cache_ttl, xmlrpc_enabled, disable_wp_updates, disable_application_passwords FROM websites WHERE id = ?", id).
-		Scan(&domain, &oldFCacheEnabled, &oldFCacheTTL, &oldXMLRPCEnabled, &oldDisableWPUpdates, &oldDisableApplicationPasswords); err != nil {
+	var oldLSCacheEnabled, oldLSCacheTTL, oldXMLRPCEnabled, oldDisableWPUpdates, oldDisableApplicationPasswords int
+	if err := db.QueryRow("SELECT domain, litespeed_cache_enabled, litespeed_cache_ttl, xmlrpc_enabled, disable_wp_updates, disable_application_passwords FROM websites WHERE id = ?", id).
+		Scan(&domain, &oldLSCacheEnabled, &oldLSCacheTTL, &oldXMLRPCEnabled, &oldDisableWPUpdates, &oldDisableApplicationPasswords); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("保存失败"))
 		return
 	}
@@ -2380,7 +2372,7 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	}
 
 	fcEnabled := 0
-	if req.FCacheEnabled {
+	if req.LSCacheEnabled {
 		fcEnabled = 1
 	}
 	disableUpdates := 0
@@ -2420,11 +2412,11 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	}
 
 	updateQuery := `UPDATE websites SET
-		fastcgi_cache_enabled = ?, fastcgi_cache_ttl = ?,
+		litespeed_cache_enabled = ?, litespeed_cache_ttl = ?,
 		disable_wp_updates = ?, disable_file_editing = ?, xmlrpc_enabled = ?, disable_application_passwords = ?,
 		wp_debug_enabled = ?, wp_post_revisions = ?, wp_memory_limit = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`
-	updateArgs := []any{fcEnabled, req.FCacheTTL, disableUpdates, disableEditing, xmlrpcEnabled, disableApplicationPasswords,
+	updateArgs := []any{fcEnabled, req.LSCacheTTL, disableUpdates, disableEditing, xmlrpcEnabled, disableApplicationPasswords,
 		wpDebug, req.WPPostRevisions, req.WPMemoryLimit, id}
 	if req.ExpectedWPUpdates != nil {
 		updateQuery += " AND disable_wp_updates = ?"
@@ -2461,16 +2453,16 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 		}
 	}
 
-	// FastCGI / XML-RPC 配置变化时重载 Nginx
-	if oldFCacheEnabled != fcEnabled || oldFCacheTTL != req.FCacheTTL || oldXMLRPCEnabled != xmlrpcEnabled {
-		if err := publishSiteNginxWithCacheRollback(id, oldFCacheEnabled, oldFCacheTTL); err != nil {
+	// LiteSpeed / XML-RPC 配置变化时重载 OpenLiteSpeed
+	if oldLSCacheEnabled != fcEnabled || oldLSCacheTTL != req.LSCacheTTL || oldXMLRPCEnabled != xmlrpcEnabled {
+		if err := publishSiteOLSWithCacheRollback(id, oldLSCacheEnabled, oldLSCacheTTL); err != nil {
 			recordHandlerOperationLog("wp_optimizations", domain, "failed", err.Error())
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse("其它设置已保存，但缓存或 Nginx 设置未生效: "+err.Error()))
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("其它设置已保存，但缓存或 OpenLiteSpeed 设置未生效: "+err.Error()))
 			return
 		}
 	}
 	if domain != "" {
-		recordHandlerOperationLog("wp_optimizations", domain, "success", wpOptimizationsLogMessage(req.FCacheEnabled, req.FCacheTTL, req.DisableWPUpdates, req.DisableFileEditing, req.XMLRPCEnabled, req.DisableApplicationPasswords, req.WPDebugEnabled, wpDebugDisplay, req.WPPostRevisions, req.WPMemoryLimit))
+		recordHandlerOperationLog("wp_optimizations", domain, "success", wpOptimizationsLogMessage(req.LSCacheEnabled, req.LSCacheTTL, req.DisableWPUpdates, req.DisableFileEditing, req.XMLRPCEnabled, req.DisableApplicationPasswords, req.WPDebugEnabled, wpDebugDisplay, req.WPPostRevisions, req.WPMemoryLimit))
 	}
 	if site.FileLockEnabled && site.FileLockApplyStatus == executor.FileLockApplyStatusReady {
 		executor.RefreshWPCodeIntegrityBaselineBestEffort(id, "WordPress 优化设置保存成功")
@@ -2942,11 +2934,11 @@ func (h *CacheHelperHandler) UpdateCacheSettings(c *gin.Context) {
 	db := database.GetDB()
 	var siteID int
 	var enabled int
-	if err := db.QueryRow("SELECT id, fastcgi_cache_enabled FROM websites WHERE (domain = ? OR (char(10) || aliases || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%') ESCAPE '\\')", req.Domain, escapeLike(req.Domain)).Scan(&siteID, &enabled); err != nil {
+	if err := db.QueryRow("SELECT id, litespeed_cache_enabled FROM websites WHERE (domain = ? OR (char(10) || aliases || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%') ESCAPE '\\')", req.Domain, escapeLike(req.Domain)).Scan(&siteID, &enabled); err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("网站不存在"))
 		return
 	}
-	if err := updateSiteFastCGICache(siteID, enabled, req.TTL); err != nil {
+	if err := updateSiteLiteSpeedCache(siteID, enabled, req.TTL); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("TTL 更新未生效: "+err.Error()))
 		return
 	}
@@ -2995,12 +2987,12 @@ func (h *CacheHelperHandler) FindByDomain(c *gin.Context) {
 		return
 	}
 
-	var siteID, fcacheEnabled, fcacheTTL, disableUpdates, disableEditing, xmlrpcEnabled, disableApplicationPasswords, wpDebugEnabled, wpPostRevisions, fileLockEnabled int
+	var siteID, lscacheEnabled, lscacheTTL, disableUpdates, disableEditing, xmlrpcEnabled, disableApplicationPasswords, wpDebugEnabled, wpPostRevisions, fileLockEnabled int
 	var anomalyEnabled int
 	var anomalyLastSuccess int64
 	var wpMemoryLimit, passwordResetMode, anomalyLastError string
 	err := database.GetDB().QueryRow(
-		`SELECT id, fastcgi_cache_enabled, fastcgi_cache_ttl, disable_wp_updates,
+		`SELECT id, litespeed_cache_enabled, litespeed_cache_ttl, disable_wp_updates,
 			disable_file_editing, xmlrpc_enabled, disable_application_passwords,
 			wp_debug_enabled, wp_post_revisions, wp_memory_limit, file_lock_enabled,
 			COALESCE(password_reset_mode, 'allow'),
@@ -3010,7 +3002,7 @@ func (h *CacheHelperHandler) FindByDomain(c *gin.Context) {
 		 FROM websites
 		 WHERE domain = ? OR (char(10) || aliases || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%') ESCAPE '\'`,
 		domain, escapeLike(domain),
-	).Scan(&siteID, &fcacheEnabled, &fcacheTTL, &disableUpdates, &disableEditing, &xmlrpcEnabled, &disableApplicationPasswords, &wpDebugEnabled, &wpPostRevisions, &wpMemoryLimit, &fileLockEnabled, &passwordResetMode, &anomalyEnabled, &anomalyLastSuccess, &anomalyLastError)
+	).Scan(&siteID, &lscacheEnabled, &lscacheTTL, &disableUpdates, &disableEditing, &xmlrpcEnabled, &disableApplicationPasswords, &wpDebugEnabled, &wpPostRevisions, &wpMemoryLimit, &fileLockEnabled, &passwordResetMode, &anomalyEnabled, &anomalyLastSuccess, &anomalyLastError)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("网站不存在"))
 		return
@@ -3034,8 +3026,8 @@ func (h *CacheHelperHandler) FindByDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"site_id":                       siteID,
 		"domain":                        domain,
-		"fastcgi_cache_enabled":         fcacheEnabled == 1,
-		"fastcgi_cache_ttl":             fcacheTTL,
+		"litespeed_cache_enabled":       lscacheEnabled == 1,
+		"litespeed_cache_ttl":           lscacheTTL,
 		"disable_wp_updates":            disableUpdates == 1,
 		"disable_file_editing":          disableEditing == 1,
 		"xmlrpc_enabled":                xmlrpcEnabled == 1,
@@ -3186,9 +3178,9 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 
 	db := database.GetDB()
 
-	var oldFCacheEnabled, oldFCacheTTL int
-	db.QueryRow("SELECT fastcgi_cache_enabled, fastcgi_cache_ttl FROM websites WHERE domain = ? OR (char(10) || aliases || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%') ESCAPE '\\'", req.Domain, escapeLike(req.Domain)).
-		Scan(&oldFCacheEnabled, &oldFCacheTTL)
+	var oldLSCacheEnabled, oldLSCacheTTL int
+	db.QueryRow("SELECT litespeed_cache_enabled, litespeed_cache_ttl FROM websites WHERE domain = ? OR (char(10) || aliases || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%') ESCAPE '\\'", req.Domain, escapeLike(req.Domain)).
+		Scan(&oldLSCacheEnabled, &oldLSCacheTTL)
 
 	fcEnabled := 0
 	if req.Enabled {
@@ -3199,19 +3191,19 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 			c.JSON(http.StatusConflict, models.ErrorResponse("文件保护状态已变化，请刷新页面后重试"))
 			return
 		}
-		if _, err := db.Exec(`UPDATE websites SET fastcgi_cache_enabled=?, fastcgi_cache_ttl=? WHERE id=?`, fcEnabled, req.TTL, site.ID); err != nil {
+		if _, err := db.Exec(`UPDATE websites SET litespeed_cache_enabled=?, litespeed_cache_ttl=? WHERE id=?`, fcEnabled, req.TTL, site.ID); err != nil {
 			log.Printf("UpdateOptimizerSettings 安全字段更新失败 (site %s): %v", req.Domain, err)
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("保存失败"))
 			return
 		}
-		if oldFCacheEnabled != fcEnabled || oldFCacheTTL != req.TTL {
-			if err := publishSiteNginxWithCacheRollback(site.ID, oldFCacheEnabled, oldFCacheTTL); err != nil {
+		if oldLSCacheEnabled != fcEnabled || oldLSCacheTTL != req.TTL {
+			if err := publishSiteOLSWithCacheRollback(site.ID, oldLSCacheEnabled, oldLSCacheTTL); err != nil {
 				recordHandlerOperationLog("wp_optimizations", req.Domain, "failed", err.Error())
 				c.JSON(http.StatusInternalServerError, models.ErrorResponse("缓存设置未生效: "+err.Error()))
 				return
 			}
 		}
-		recordHandlerOperationLog("wp_optimizations", req.Domain, "success", fmt.Sprintf("文件保护期间保存可用设置：FastCGI缓存=%t, TTL=%d秒", req.Enabled, req.TTL))
+		recordHandlerOperationLog("wp_optimizations", req.Domain, "success", fmt.Sprintf("文件保护期间保存可用设置：LiteSpeed缓存=%t, TTL=%d秒", req.Enabled, req.TTL))
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "可用设置已保存，受文件保护的设置保持不变"}))
 		return
 	}
@@ -3244,7 +3236,7 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 	}
 
 	_, err = db.Exec(`UPDATE websites SET
-		fastcgi_cache_enabled = ?, fastcgi_cache_ttl = ?,
+		litespeed_cache_enabled = ?, litespeed_cache_ttl = ?,
 		disable_wp_updates = ?, disable_file_editing = ?,
 		wp_debug_enabled = ?, wp_post_revisions = ?, wp_memory_limit = ?
 		WHERE domain = ? OR (char(10) || aliases || char(10)) LIKE ('%' || char(10) || ? || char(10) || '%') ESCAPE '\'`,
@@ -3255,9 +3247,9 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 		return
 	}
 
-	// FastCGI 配置变化时重载 Nginx
-	if oldFCacheEnabled != fcEnabled || oldFCacheTTL != req.TTL {
-		if err := publishSiteNginxWithCacheRollback(site.ID, oldFCacheEnabled, oldFCacheTTL); err != nil {
+	// LiteSpeed 配置变化时重载 OpenLiteSpeed
+	if oldLSCacheEnabled != fcEnabled || oldLSCacheTTL != req.TTL {
+		if err := publishSiteOLSWithCacheRollback(site.ID, oldLSCacheEnabled, oldLSCacheTTL); err != nil {
 			recordHandlerOperationLog("wp_optimizations", req.Domain, "failed", err.Error())
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("其它设置已保存，但缓存设置未生效: "+err.Error()))
 			return
@@ -3271,7 +3263,7 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "已保存"}))
 }
 
-func wpOptimizationsLogMessage(fcacheEnabled bool, fcacheTTL int, disableUpdates, disableEditing, xmlrpcEnabled, disableApplicationPasswords, wpDebugEnabled, wpDebugDisplay bool, postRevisions int, memoryLimit string) string {
+func wpOptimizationsLogMessage(lscacheEnabled bool, lscacheTTL int, disableUpdates, disableEditing, xmlrpcEnabled, disableApplicationPasswords, wpDebugEnabled, wpDebugDisplay bool, postRevisions int, memoryLimit string) string {
 	state := func(enabled bool) string {
 		if enabled {
 			return "开启"
@@ -3279,8 +3271,8 @@ func wpOptimizationsLogMessage(fcacheEnabled bool, fcacheTTL int, disableUpdates
 		return "关闭"
 	}
 	parts := []string{
-		"FastCGI缓存=" + state(fcacheEnabled),
-		fmt.Sprintf("缓存TTL=%d", fcacheTTL),
+		"LiteSpeed缓存=" + state(lscacheEnabled),
+		fmt.Sprintf("缓存TTL=%d", lscacheTTL),
 		"禁止更新=" + state(disableUpdates),
 		"禁止文件编辑=" + state(disableEditing),
 		"XML-RPC=" + state(xmlrpcEnabled),

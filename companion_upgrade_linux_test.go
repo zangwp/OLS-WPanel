@@ -69,7 +69,7 @@ func TestLockedCompanionUpgradeRealPermissions(t *testing.T) {
 				t.Fatal(err)
 			}
 			key := strings.Repeat("a", 64)
-			_, err := database.GetDB().Exec(`INSERT INTO websites(name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,plugin_api_key,file_lock_enabled,file_lock_mode,file_lock_apply_status) VALUES ('locked','locked.example','nobody',?,'','','','','',?,1,?,'ready')`, root, key, mode)
+			_, err := database.GetDB().Exec(`INSERT INTO websites(name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,plugin_api_key,file_lock_enabled,file_lock_mode,file_lock_apply_status) VALUES ('locked','locked.example','nobody',?,'','','','','',?,1,?,'ready')`, root, key, mode)
 			if err != nil {
 				t.Fatal(err)
 			}

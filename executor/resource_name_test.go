@@ -37,32 +37,30 @@ func TestShortResourcePathsFitLongDomain(t *testing.T) {
 	domain := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.example.com"
 	siteName := buildSiteName(domain)
 	cfg := &config.Config{}
-	cfg.Paths.PHPFPMSock = "/run/php"
+	cfg.Paths.LSPHPSocketDir = "/run/php"
 
-	phpPoolPath := filepath.Join("/etc/php/8.3/fpm/pool.d", siteConfigBaseName(siteName)+".conf")
-	if len(filepath.Base(phpPoolPath)) > 255 {
-		t.Fatalf("php pool filename length = %d, want <= 255", len(filepath.Base(phpPoolPath)))
-	}
-	if err := validateUnixSocketPath(phpSocketPath(cfg, phpPoolPath, domain)); err != nil {
+	phpSocket := filepath.Join(cfg.Paths.LSPHPSocketDir, siteConfigBaseName(siteName)+".sock")
+	if err := validateUnixSocketPath(phpSocketPath(cfg, phpSocket, domain)); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestPHPPoolNamePreservesLegacyDomainPool(t *testing.T) {
-	got := phpPoolName("/etc/php/8.3/fpm/pool.d/example.com.conf", "new.example.com")
-	if got != "example.com" {
-		t.Fatalf("expected legacy pool name to be preserved, got %q", got)
+func TestPHPSocketPathPreservesStoredSocket(t *testing.T) {
+	cfg := &config.Config{Paths: config.PathsConfig{LSPHPSocketDir: "/tmp/lshttpd"}}
+	got := phpSocketPath(cfg, "/tmp/lshttpd/example.sock", "new.example.com")
+	if got != "/tmp/lshttpd/example.sock" {
+		t.Fatalf("expected stored socket path to be preserved, got %q", got)
 	}
 }
 
-func TestNginxEnabledPathUsesStoredConfigFilename(t *testing.T) {
+func TestOLSVHostEnabledPathUsesStoredConfigFilename(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Paths.NginxSitesEnabled = "/etc/nginx/sites-enabled"
+	cfg.Paths.OLSVHostsEnabled = "/etc/openlitespeed/sites-enabled"
 
-	got := nginxEnabledPath(cfg, "/etc/nginx/sites-available/vps17_top_0ea8c86a.conf", "vps17.top")
-	want := filepath.Join("/etc/nginx/sites-enabled", "vps17_top_0ea8c86a.conf")
+	got := olsVHostEnabledPath(cfg, "/etc/openlitespeed/sites-available/vps17_top_0ea8c86a.conf", "vps17.top")
+	want := filepath.Join("/etc/openlitespeed/sites-enabled", "vps17_top_0ea8c86a.conf")
 	if got != want {
-		t.Fatalf("nginxEnabledPath() = %q, want %q", got, want)
+		t.Fatalf("olsVHostEnabledPath() = %q, want %q", got, want)
 	}
 }
 

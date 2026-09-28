@@ -65,7 +65,7 @@ func (o productionSiteMigrationSourcePrepareOps) Settings(ctx context.Context, i
 }
 
 func NewSiteMigrationSourcePreparationService(db *sql.DB, cfg *config.Config, pairing *SiteMigrationPairingService) (*SiteMigrationSourcePreparationService, error) {
-	freezer, err := newSiteMigrationFreezer(db, cfg, productionSiteMigrationNginxRunner{})
+	freezer, err := newSiteMigrationFreezer(db, cfg, productionSiteMigrationOLSRunner{})
 	if err != nil {
 		return nil, err
 	}

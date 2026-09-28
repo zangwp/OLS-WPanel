@@ -32,7 +32,7 @@ func TestMaintenanceSecretEncryptionAndLegacy(t *testing.T) {
 		t.Fatal("public status leaked secret")
 	}
 	// Copying ciphertext to a different site must fail authentication.
-	_, err = m.db.Exec(`INSERT INTO websites(id,name,domain,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,maintenance_security) VALUES(999,'other','other.test','wordpress','wp_other','/www/wwwroot/other.test','','','','','',?)`, raw)
+	_, err = m.db.Exec(`INSERT INTO websites(id,name,domain,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,maintenance_security) VALUES(999,'other','other.test','wordpress','wp_other','/www/wwwroot/other.test','','','','','',?)`, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestMaintenanceSecretRekeyKeepsOtherSiteHashValid(t *testing.T) {
 	if err := m.Configure(firstID, true, 5, "site-one"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.db.Exec(`INSERT INTO websites(id,name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,file_lock_enabled,file_lock_mode,file_lock_apply_status) VALUES(999,'other','other.test','active','wordpress','wp_other','/www/wwwroot/other.test','','','','','',1,'standard','ready')`); err != nil {
+	if _, err := m.db.Exec(`INSERT INTO websites(id,name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,file_lock_enabled,file_lock_mode,file_lock_apply_status) VALUES(999,'other','other.test','active','wordpress','wp_other','/www/wwwroot/other.test','','','','','',1,'standard','ready')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Configure(999, true, 5, "site-two"); err != nil {

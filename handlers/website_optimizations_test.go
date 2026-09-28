@@ -22,8 +22,8 @@ func TestSaveWPOptimizationsRecordsOperationLog(t *testing.T) {
 	router.PUT("/api/websites/:id/wp-optimizations", handler.SaveWPOptimizations)
 
 	body := `{
-		"fcache_enabled": false,
-		"fcache_ttl": 300,
+		"litespeed_cache_enabled": false,
+		"litespeed_cache_ttl": 300,
 		"disable_wp_updates": false,
 		"disable_file_editing": false,
 		"xmlrpc_enabled": false,
@@ -73,7 +73,7 @@ func TestSaveWPOptimizationsPreservesDisplayWhenFieldIsMissing(t *testing.T) {
 
 	router := gin.New()
 	router.PUT("/api/websites/:id/wp-optimizations", (&WebsiteHandler{}).SaveWPOptimizations)
-	body := `{"fcache_enabled":false,"fcache_ttl":300,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":true,"wp_post_revisions":-1,"wp_memory_limit":""}`
+	body := `{"litespeed_cache_enabled":false,"litespeed_cache_ttl":300,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":true,"wp_post_revisions":-1,"wp_memory_limit":""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-optimizations", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -103,7 +103,7 @@ func TestSaveWPOptimizationsDoesNotUpdateDatabaseWhenWPConfigWriteFails(t *testi
 
 	router := gin.New()
 	router.PUT("/api/websites/:id/wp-optimizations", (&WebsiteHandler{}).SaveWPOptimizations)
-	body := `{"fcache_enabled":false,"fcache_ttl":300,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":true,"wp_post_revisions":-1,"wp_memory_limit":""}`
+	body := `{"litespeed_cache_enabled":false,"litespeed_cache_ttl":300,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":true,"wp_post_revisions":-1,"wp_memory_limit":""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-optimizations", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -137,7 +137,7 @@ func TestSaveWPOptimizationsRestoresWPConfigWhenDatabaseUpdateFails(t *testing.T
 
 	router := gin.New()
 	router.PUT("/api/websites/:id/wp-optimizations", (&WebsiteHandler{}).SaveWPOptimizations)
-	body := `{"fcache_enabled":false,"fcache_ttl":300,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":true,"wp_post_revisions":-1,"wp_memory_limit":""}`
+	body := `{"litespeed_cache_enabled":false,"litespeed_cache_ttl":300,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":true,"wp_post_revisions":-1,"wp_memory_limit":""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-optimizations", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -226,7 +226,7 @@ func TestSaveWPOptimizationsAllowsPHPWithoutWPConfig(t *testing.T) {
 
 	router := gin.New()
 	router.PUT("/api/websites/:id/wp-optimizations", (&WebsiteHandler{}).SaveWPOptimizations)
-	body := `{"fcache_enabled":false,"fcache_ttl":600,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":false,"wp_post_revisions":-1,"wp_memory_limit":""}`
+	body := `{"litespeed_cache_enabled":false,"litespeed_cache_ttl":600,"disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":false,"wp_post_revisions":-1,"wp_memory_limit":""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-optimizations", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -235,11 +235,11 @@ func TestSaveWPOptimizationsAllowsPHPWithoutWPConfig(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var ttl int
-	if err := database.GetDB().QueryRow(`SELECT fastcgi_cache_ttl FROM websites WHERE id=1`).Scan(&ttl); err != nil {
+	if err := database.GetDB().QueryRow(`SELECT litespeed_cache_ttl FROM websites WHERE id=1`).Scan(&ttl); err != nil {
 		t.Fatal(err)
 	}
 	if ttl != 600 {
-		t.Fatalf("fastcgi_cache_ttl=%d, want 600", ttl)
+		t.Fatalf("litespeed_cache_ttl=%d, want 600", ttl)
 	}
 }
 
@@ -264,7 +264,7 @@ func performPluginOptimizationRequestWithBody(t *testing.T, body string) *httpte
 func TestPluginOptimizationFileLockSafeOnlyUpdatesCacheFields(t *testing.T) {
 	setupWebsiteOptimizationsTestDB(t)
 	db := database.GetDB()
-	if _, err := db.Exec(`UPDATE websites SET plugin_api_key='secret', file_lock_enabled=1, fastcgi_cache_enabled=0, fastcgi_cache_ttl=300, disable_wp_updates=1, disable_file_editing=1, wp_debug_enabled=1, wp_post_revisions=5, wp_memory_limit='128M' WHERE id=1`); err != nil {
+	if _, err := db.Exec(`UPDATE websites SET plugin_api_key='secret', file_lock_enabled=1, litespeed_cache_enabled=0, litespeed_cache_ttl=300, disable_wp_updates=1, disable_file_editing=1, wp_debug_enabled=1, wp_post_revisions=5, wp_memory_limit='128M' WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -275,7 +275,7 @@ func TestPluginOptimizationFileLockSafeOnlyUpdatesCacheFields(t *testing.T) {
 
 	var cacheEnabled, ttl, noUpdates, noEdit, debugEnabled, revisions int
 	var memoryLimit string
-	if err := db.QueryRow(`SELECT fastcgi_cache_enabled, fastcgi_cache_ttl, disable_wp_updates, disable_file_editing, wp_debug_enabled, wp_post_revisions, wp_memory_limit FROM websites WHERE id=1`).Scan(&cacheEnabled, &ttl, &noUpdates, &noEdit, &debugEnabled, &revisions, &memoryLimit); err != nil {
+	if err := db.QueryRow(`SELECT litespeed_cache_enabled, litespeed_cache_ttl, disable_wp_updates, disable_file_editing, wp_debug_enabled, wp_post_revisions, wp_memory_limit FROM websites WHERE id=1`).Scan(&cacheEnabled, &ttl, &noUpdates, &noEdit, &debugEnabled, &revisions, &memoryLimit); err != nil {
 		t.Fatal(err)
 	}
 	if cacheEnabled != 1 || ttl != 600 {
@@ -543,7 +543,7 @@ func TestSaveWPOptimizationsRejectsStaleUpdateCheckState(t *testing.T) {
 	}
 	router := gin.New()
 	router.PUT("/api/websites/:id/wp-optimizations", (&WebsiteHandler{}).SaveWPOptimizations)
-	body := `{"fcache_enabled":false,"fcache_ttl":300,"disable_wp_updates":false,"expected_disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":false,"wp_post_revisions":-1,"wp_memory_limit":""}`
+	body := `{"litespeed_cache_enabled":false,"litespeed_cache_ttl":300,"disable_wp_updates":false,"expected_disable_wp_updates":false,"disable_file_editing":false,"xmlrpc_enabled":false,"wp_debug_enabled":false,"wp_post_revisions":-1,"wp_memory_limit":""}`
 	req := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-optimizations", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -569,8 +569,8 @@ func TestSaveWPOptimizationsRejectsStaleUpdateCheckState(t *testing.T) {
 
 func setupWebsiteOptimizationsTestDB(t *testing.T) {
 	t.Helper()
-	oldPublish := publishSiteNginxWithCacheRollback
-	publishSiteNginxWithCacheRollback = func(int, int, int) error { return nil }
+	oldPublish := publishSiteOLSWithCacheRollback
+	publishSiteOLSWithCacheRollback = func(int, int, int) error { return nil }
 	oldDB := database.DB
 	if err := database.Open(filepath.Join(t.TempDir(), "panel.db")); err != nil {
 		t.Fatalf("open db: %v", err)
@@ -579,7 +579,7 @@ func setupWebsiteOptimizationsTestDB(t *testing.T) {
 		t.Fatalf("migrate db: %v", err)
 	}
 	t.Cleanup(func() {
-		publishSiteNginxWithCacheRollback = oldPublish
+		publishSiteOLSWithCacheRollback = oldPublish
 		_ = database.Close()
 		database.DB = oldDB
 	})
@@ -598,10 +598,10 @@ $table_prefix = 'wp_';
 	_, err := database.GetDB().Exec(`
 		INSERT INTO websites (
 			id, name, domain, aliases, status, system_user, web_root, log_dir,
-			db_name, db_user, php_pool_path, nginx_conf_path, site_type
+			db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type
 		) VALUES (
 			1, 'example', 'example.com', '', 'active', 'wp_example', ?, '/www/wwwlogs/example.com',
-			'db_example', 'user_example', '/etc/php/8.3/fpm/pool.d/example.conf', '/etc/nginx/sites-available/example.conf',
+			'db_example', 'user_example', '/tmp/lshttpd/example.sock', '/etc/openlitespeed/sites-available/example.conf',
 			'wordpress'
 		)
 	`, webRoot)

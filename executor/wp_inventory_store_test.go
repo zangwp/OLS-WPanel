@@ -498,8 +498,8 @@ func TestWPInventoryStoreMaximumDatasetBudget(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		domain := fmt.Sprintf("typical-%03d.example.com", i)
 		siteResult, err := store.db.Exec(`INSERT INTO websites
-			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-			VALUES (?, ?, 'active', 'wp_typical', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`, domain, domain)
+			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+			VALUES (?, ?, 'active', 'wp_typical', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`, domain, domain)
 		if err != nil {
 			t.Fatalf("insert typical site %d: %v", i, err)
 		}
@@ -714,8 +714,8 @@ func newWPInventoryStoreTest(t *testing.T) (*wpInventoryStore, int) {
 		t.Fatalf("newWPInventoryStore(): %v", err)
 	}
 	result, err := store.db.Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-		VALUES ('inventory.example.com', 'inventory.example.com', 'active', 'wp_inventory', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`)
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+		VALUES ('inventory.example.com', 'inventory.example.com', 'active', 'wp_inventory', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`)
 	if err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -841,7 +841,7 @@ func TestWPInventoryBulkEnqueueReportsPartialBatchFailureAndContinues(t *testing
 		t.Fatal(err)
 	}
 	for id := 1; id <= 101; id++ {
-		if _, err := tx.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/nginx')`, id, fmt.Sprintf("site-%d", id), fmt.Sprintf("site-%d.example", id), fmt.Sprintf("wp_%d", id)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/openlitespeed')`, id, fmt.Sprintf("site-%d", id), fmt.Sprintf("site-%d.example", id), fmt.Sprintf("wp_%d", id)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -876,7 +876,7 @@ func TestWPInventoryBulkEnqueueStopsAfterConsecutiveBatchFailures(t *testing.T) 
 		t.Fatal(err)
 	}
 	for id := 1; id <= 200; id++ {
-		if _, err := tx.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/nginx')`, id, fmt.Sprintf("site-%d", id), fmt.Sprintf("site-%d.example", id), fmt.Sprintf("wp_%d", id)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/openlitespeed')`, id, fmt.Sprintf("site-%d", id), fmt.Sprintf("site-%d.example", id), fmt.Sprintf("wp_%d", id)); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -115,12 +115,6 @@ func TestImportGooglebotRangesRollsBackDatabaseAndRuntimeInsideLock(t *testing.T
 		}
 		return nil
 	}
-	logMapCalls := 0
-	ensureLogMap = func() error {
-		logMapCalls++
-		return nil
-	}
-
 	rec := performSecurityRequest(
 		http.MethodPost,
 		"/googlebot",
@@ -133,8 +127,8 @@ func TestImportGooglebotRangesRollsBackDatabaseAndRuntimeInsideLock(t *testing.T
 	if got := securitySettingValue(t, "googlebot_ips"); got != "203.0.113.0/24" {
 		t.Fatalf("googlebot_ips after rollback = %q", got)
 	}
-	if applyCalls != 2 || logMapCalls != 1 {
-		t.Fatalf("Fail2ban/log-map calls = %d/%d, want 2/1", applyCalls, logMapCalls)
+	if applyCalls != 2 {
+		t.Fatalf("Fail2ban calls = %d, want 2", applyCalls)
 	}
 }
 
@@ -453,8 +447,8 @@ func TestDeleteCDNRealIPGroupReportsRestoreFailure(t *testing.T) {
 func TestUpdateSQLiSettingsAppliesAndPersists(t *testing.T) {
 	setupSecurityTestDB(t)
 	restoreSecurityExecutorHooks(t)
-	nginxCalls, fail2banCalls := 0, 0
-	regenerateAllSitesNginx = func() error { nginxCalls++; return nil }
+	olsCalls, fail2banCalls := 0, 0
+	regenerateAllOLSVHosts = func() error { olsCalls++; return nil }
 	applyFail2banSettings = func() error { fail2banCalls++; return nil }
 
 	rec := performSecurityRequest(http.MethodPut, "/settings", `{"wp_sqli_block_enabled":"false","wp_sqli_autoban_enabled":"false","wp_sqli_ban_threshold":"7","wp_sqli_ban_window_seconds":"900"}`, func(router *gin.Engine, h *SecurityHandler) {
@@ -463,8 +457,8 @@ func TestUpdateSQLiSettingsAppliesAndPersists(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if nginxCalls != 1 || fail2banCalls != 1 {
-		t.Fatalf("nginx/fail2ban calls = %d/%d, want 1/1", nginxCalls, fail2banCalls)
+	if olsCalls != 1 || fail2banCalls != 1 {
+		t.Fatalf("OLS/Fail2ban calls = %d/%d, want 1/1", olsCalls, fail2banCalls)
 	}
 	for key, want := range map[string]string{
 		"wp_sqli_block_enabled": "false", "wp_sqli_autoban_enabled": "false",
@@ -480,8 +474,8 @@ func TestUpdateSQLiSettingsAppliesAndPersists(t *testing.T) {
 func TestUpdateSQLiSettingsRollsBackDatabaseAndRuntime(t *testing.T) {
 	setupSecurityTestDB(t)
 	restoreSecurityExecutorHooks(t)
-	nginxCalls, fail2banCalls := 0, 0
-	regenerateAllSitesNginx = func() error { nginxCalls++; return nil }
+	olsCalls, fail2banCalls := 0, 0
+	regenerateAllOLSVHosts = func() error { olsCalls++; return nil }
 	applyFail2banSettings = func() error {
 		fail2banCalls++
 		if fail2banCalls == 1 {
@@ -496,8 +490,8 @@ func TestUpdateSQLiSettingsRollsBackDatabaseAndRuntime(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if nginxCalls != 2 || fail2banCalls != 2 {
-		t.Fatalf("nginx/fail2ban calls = %d/%d, want 2/2", nginxCalls, fail2banCalls)
+	if olsCalls != 2 || fail2banCalls != 2 {
+		t.Fatalf("OLS/Fail2ban calls = %d/%d, want 2/2", olsCalls, fail2banCalls)
 	}
 	var got string
 	if err := database.GetDB().QueryRow(`SELECT svalue FROM security_settings WHERE skey='wp_sqli_ban_threshold'`).Scan(&got); err != nil || got != "5" {
@@ -514,7 +508,7 @@ func TestUpdateSQLiSettingsDatabaseWriteIsAtomic(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	regenerateAllSitesNginx = func() error { t.Fatal("nginx must not run after database failure"); return nil }
+	regenerateAllOLSVHosts = func() error { t.Fatal("openlitespeed must not run after database failure"); return nil }
 	applyFail2banSettings = func() error { t.Fatal("fail2ban must not run after database failure"); return nil }
 
 	rec := performSecurityRequest(http.MethodPut, "/settings", `{"wp_sqli_block_enabled":"false","wp_sqli_ban_threshold":"9"}`, func(router *gin.Engine, h *SecurityHandler) {
@@ -543,7 +537,7 @@ func TestUpdateSecuritySettingsDatabaseWriteIsAtomicAcrossSubsystems(t *testing.
 		BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	regenerateAllSitesNginx = func() error { t.Fatal("nginx must not run after database failure"); return nil }
+	regenerateAllOLSVHosts = func() error { t.Fatal("openlitespeed must not run after database failure"); return nil }
 	applyFail2banSettings = func() error { t.Fatal("fail2ban must not run after database failure"); return nil }
 	applyRateLimitSettings = func() error { t.Fatal("rate limit must not run after database failure"); return nil }
 
@@ -594,11 +588,11 @@ func TestUpdateSecuritySettingsRollbackAttemptsEveryRuntimeSubsystem(t *testing.
 	setupSecurityTestDB(t)
 	restoreSecurityExecutorHooks(t)
 
-	nginxCalls, fail2banCalls, rateLimitCalls := 0, 0, 0
-	regenerateAllSitesNginx = func() error {
-		nginxCalls++
-		if nginxCalls == 2 {
-			return errors.New("injected rollback nginx failure")
+	olsCalls, fail2banCalls, rateLimitCalls := 0, 0, 0
+	regenerateAllOLSVHosts = func() error {
+		olsCalls++
+		if olsCalls == 2 {
+			return errors.New("injected rollback OLS failure")
 		}
 		return nil
 	}
@@ -617,8 +611,8 @@ func TestUpdateSecuritySettingsRollbackAttemptsEveryRuntimeSubsystem(t *testing.
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if nginxCalls != 2 || fail2banCalls != 2 || rateLimitCalls != 2 {
-		t.Fatalf("nginx/fail2ban/rate limit calls = %d/%d/%d, want 2/2/2", nginxCalls, fail2banCalls, rateLimitCalls)
+	if olsCalls != 2 || fail2banCalls != 2 || rateLimitCalls != 2 {
+		t.Fatalf("OLS/Fail2ban/rate limit calls = %d/%d/%d, want 2/2/2", olsCalls, fail2banCalls, rateLimitCalls)
 	}
 	if !strings.Contains(decodeAPIResponse(t, rec).Message, "服务器配置恢复不完整") {
 		t.Fatalf("unexpected message: %s", rec.Body.String())
@@ -920,8 +914,7 @@ func restoreSecurityExecutorHooks(t *testing.T) {
 	oldApplyFail2ban := applyFail2banSettings
 	oldWithFail2banLock := withFail2banSettingsLock
 	oldApplyRateLimit := applyRateLimitSettings
-	oldEnsureLogMap := ensureLogMap
-	oldRegenerateAllSitesNginx := regenerateAllSitesNginx
+	oldRegenerateAllSitesOLSConfigs := regenerateAllOLSVHosts
 	oldApplyOLSTrustedProxyList := applyOLSTrustedProxyList
 	oldWebsiteIDsForCDNRealIPGroup := websiteIDsForCDNRealIPGroup
 	oldRestoreCDNRealIPGroupWithBindings := restoreCDNRealIPGroupWithBindings
@@ -932,8 +925,7 @@ func restoreSecurityExecutorHooks(t *testing.T) {
 		applyFail2banSettings = oldApplyFail2ban
 		withFail2banSettingsLock = oldWithFail2banLock
 		applyRateLimitSettings = oldApplyRateLimit
-		ensureLogMap = oldEnsureLogMap
-		regenerateAllSitesNginx = oldRegenerateAllSitesNginx
+		regenerateAllOLSVHosts = oldRegenerateAllSitesOLSConfigs
 		applyOLSTrustedProxyList = oldApplyOLSTrustedProxyList
 		websiteIDsForCDNRealIPGroup = oldWebsiteIDsForCDNRealIPGroup
 		restoreCDNRealIPGroupWithBindings = oldRestoreCDNRealIPGroupWithBindings

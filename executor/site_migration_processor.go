@@ -83,7 +83,7 @@ func newSiteMigrationStageProcessor(db *sql.DB, cfg *config.Config, pairing *Sit
 	if err != nil {
 		return nil, err
 	}
-	freezer, err := newSiteMigrationFreezer(db, cfg, productionSiteMigrationNginxRunner{})
+	freezer, err := newSiteMigrationFreezer(db, cfg, productionSiteMigrationOLSRunner{})
 	if err != nil {
 		return nil, err
 	}

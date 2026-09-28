@@ -112,7 +112,7 @@ func TestValidateS3BackupSettingsAcceptsR2StyleConfig(t *testing.T) {
 }
 
 func TestS3ObjectURLUsesPathStyleAndEscapesKey(t *testing.T) {
-	u, err := s3ObjectURL("https://abc123.r2.cloudflarestorage.com", "ols-wpanel-backups", "yub wpanel/example.com/db/site backup.sql.gz", "")
+	u, err := s3ObjectURL("https://abc123.r2.cloudflarestorage.com", "ols-wpanel-backups", "ols wpanel/example.com/db/site backup.sql.gz", "")
 	if err != nil {
 		t.Fatalf("s3ObjectURL() error = %v", err)
 	}
@@ -704,7 +704,7 @@ func TestS3HasFullBackupNoResultsReturnsFalse(t *testing.T) {
 
 func insertMinimalWebsite(t *testing.T, domain string) {
 	t.Helper()
-	mustExec(t, database.GetDB(), `INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	mustExec(t, database.GetDB(), `INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', '`+domain+`', 'u1', '/www/wwwroot/`+domain+`', '/www/wwwlogs/`+domain+`', 'db1', 'u1', '/p', '/n')`)
 }
 

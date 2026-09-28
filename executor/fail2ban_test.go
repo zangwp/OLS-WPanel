@@ -279,11 +279,9 @@ func TestUnbanAllIPsFlushesBothPersistFamilies(t *testing.T) {
 	openTestDB(t)
 	oldExec := persistNftExec
 	oldShell := shellExec
-	oldReplace := unbanAllReplaceNginxBannedIPs
 	t.Cleanup(func() {
 		persistNftExec = oldExec
 		shellExec = oldShell
-		unbanAllReplaceNginxBannedIPs = oldReplace
 	})
 	var flushed []string
 	persistNftExec = func(args ...string) (string, error) {
@@ -293,7 +291,6 @@ func TestUnbanAllIPsFlushesBothPersistFamilies(t *testing.T) {
 		return "", nil
 	}
 	shellExec = func(string, ...string) (string, error) { return "", errors.New("not running") }
-	unbanAllReplaceNginxBannedIPs = func(map[string]bool) error { return nil }
 	UnbanAllIPs()
 	if strings.Join(flushed, ",") != "ip,ip6" {
 		t.Fatalf("flushed families = %v, want [ip ip6]", flushed)
@@ -437,7 +434,7 @@ func TestFail2banLoginFilterAllowsQueriesAndIgnoresCoreNonLoginActions(t *testin
 
 // TestFail2banLoginFilterIsUriAgnostic 证明登录/XML-RPC 爆破 failregex 的判定
 // 只依赖状态码结构（POST ... 200/403），不要求路径斜杠数量——因为"是不是
-// wp-login.php/xmlrpc.php"这件事已经由 Nginx 侧基于规范化 $uri 的 map 判断完，
+// wp-login.php/xmlrpc.php"这件事已经由 OpenLiteSpeed 侧基于规范化 $uri 的 map 判断完，
 // 写进 wp-login-security.log 的每一行本身就是候选事件，这里只做防御性结构校验。
 func TestFail2banLoginFilterIsUriAgnostic(t *testing.T) {
 	lines := strings.Split(fail2banLoginFilterConfig, "\n")
@@ -539,10 +536,8 @@ func TestValidateGeneratedFail2banJailConfigRequiresFixedLadderForAllJails(t *te
 func TestSyncFail2banBansDoesNotSplitLongSSHBanIntoTenMinuteRows(t *testing.T) {
 	openTestDB(t)
 	oldShellExec := shellExec
-	oldReplace := syncReplaceNginxBannedIPs
 	t.Cleanup(func() {
 		shellExec = oldShellExec
-		syncReplaceNginxBannedIPs = oldReplace
 	})
 
 	ip := "203.0.113.97"
@@ -560,8 +555,6 @@ func TestSyncFail2banBansDoesNotSplitLongSSHBanIntoTenMinuteRows(t *testing.T) {
 		}
 		return "Status\n|- Currently banned: 0\n`- Banned IP list:", nil
 	}
-	syncReplaceNginxBannedIPs = func(map[string]bool) error { return nil }
-
 	SyncFail2banBans()
 	SyncFail2banBans()
 
@@ -587,12 +580,10 @@ func TestSyncFail2banBansDoesNotSplitLongSSHBanIntoTenMinuteRows(t *testing.T) {
 func TestSyncFail2banBansPreservesPanelManagedBan(t *testing.T) {
 	openTestDB(t)
 	oldShellExec := shellExec
-	oldReplace := syncReplaceNginxBannedIPs
 	oldAddPersist := syncAddPersistBan
 	oldRemovePersist := syncRemovePersistBan
 	t.Cleanup(func() {
 		shellExec = oldShellExec
-		syncReplaceNginxBannedIPs = oldReplace
 		syncAddPersistBan = oldAddPersist
 		syncRemovePersistBan = oldRemovePersist
 	})
@@ -603,7 +594,6 @@ func TestSyncFail2banBansPreservesPanelManagedBan(t *testing.T) {
 		}
 		return "", errors.New("unexpected command")
 	}
-	syncReplaceNginxBannedIPs = func(map[string]bool) error { return nil }
 	var added, removed []string
 	syncAddPersistBan = func(ip string) error { added = append(added, ip); return nil }
 	syncRemovePersistBan = func(ip string) error { removed = append(removed, ip); return nil }
@@ -670,10 +660,10 @@ func TestReconcilePanelManagedBansDoesNotRemoveIPWithAnotherActiveOwner(t *testi
 func TestCleanExpiredBansDoesNotRemoveIPWithAnotherActiveOwner(t *testing.T) {
 	openTestDB(t)
 	oldRemovePersist := syncRemovePersistBan
-	oldRemoveNginx := conditionalRemoveNginxBan
+	oldRemoveOpenLiteSpeed := conditionalRemoveWebPersistBan
 	t.Cleanup(func() {
 		syncRemovePersistBan = oldRemovePersist
-		conditionalRemoveNginxBan = oldRemoveNginx
+		conditionalRemoveWebPersistBan = oldRemoveOpenLiteSpeed
 	})
 
 	ip := "203.0.113.94"
@@ -689,14 +679,14 @@ func TestCleanExpiredBansDoesNotRemoveIPWithAnotherActiveOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var persistRemoved, nginxRemoved int
+	var persistRemoved, openlitespeedRemoved int
 	syncRemovePersistBan = func(string) error { persistRemoved++; return nil }
-	conditionalRemoveNginxBan = func(string) error { nginxRemoved++; return nil }
+	conditionalRemoveWebPersistBan = func(string) error { openlitespeedRemoved++; return nil }
 
 	CleanExpiredBans()
 
-	if persistRemoved != 0 || nginxRemoved != 0 {
-		t.Fatalf("shared ban was removed while another owner remained: persist=%d nginx=%d", persistRemoved, nginxRemoved)
+	if persistRemoved != 0 || openlitespeedRemoved != 0 {
+		t.Fatalf("shared ban was removed while another owner remained: persist=%d openlitespeed=%d", persistRemoved, openlitespeedRemoved)
 	}
 	var active int
 	if err := database.GetDB().QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE ip_address=?
@@ -792,10 +782,10 @@ func TestRestoreActiveFail2banReceiptUsesTicketTimes(t *testing.T) {
 
 func TestRecordFail2banUnbanClosesOnlyMatchingJail(t *testing.T) {
 	openTestDB(t)
-	oldRemove := conditionalRemoveNginxBan
+	oldRemove := conditionalRemoveWebPersistBan
 	removeCalls := 0
-	conditionalRemoveNginxBan = func(string) error { removeCalls++; return nil }
-	t.Cleanup(func() { conditionalRemoveNginxBan = oldRemove })
+	conditionalRemoveWebPersistBan = func(string) error { removeCalls++; return nil }
+	t.Cleanup(func() { conditionalRemoveWebPersistBan = oldRemove })
 	ip := "203.0.113.71"
 	for _, jail := range []string{"olswpanel", "olswpanel-404"} {
 		if _, err := database.GetDB().Exec(`INSERT INTO firewall_bans
@@ -814,13 +804,13 @@ func TestRecordFail2banUnbanClosesOnlyMatchingJail(t *testing.T) {
 		t.Fatalf("unexpected active rows: olswpanel=%d olswpanel-404=%d", activeWeb, active404)
 	}
 	if removeCalls != 0 {
-		t.Fatal("nginx ban was removed while another web jail remained active")
+		t.Fatal("persistent web ban was removed while another web jail remained active")
 	}
 	if err := RecordFail2banUnban(ip, "olswpanel-404"); err != nil {
 		t.Fatal(err)
 	}
 	if removeCalls != 1 {
-		t.Fatalf("nginx ban should be removed after the last web jail, calls=%d", removeCalls)
+		t.Fatalf("persistent web ban should be removed after the last web jail, calls=%d", removeCalls)
 	}
 }
 
@@ -1121,21 +1111,21 @@ func TestUpgradeDeduplicatesActiveFirewallBans(t *testing.T) {
 func TestExecuteManualBanCreatesSingleManualRecord(t *testing.T) {
 	openTestDB(t)
 
-	oldAddNginxBan := manualAddNginxBan
-	oldRemoveNginxBan := manualRemoveNginxBan
+	oldAddPersistBan := manualAddPersistBan
+	oldRemovePersistBan := manualRemovePersistBan
 	oldShellExec := shellExec
 	t.Cleanup(func() {
-		manualAddNginxBan = oldAddNginxBan
-		manualRemoveNginxBan = oldRemoveNginxBan
+		manualAddPersistBan = oldAddPersistBan
+		manualRemovePersistBan = oldRemovePersistBan
 		shellExec = oldShellExec
 	})
 
-	var nginxBanned []string
-	manualAddNginxBan = func(ip string) error {
-		nginxBanned = append(nginxBanned, ip)
+	var persistBanned []string
+	manualAddPersistBan = func(ip string) error {
+		persistBanned = append(persistBanned, ip)
 		return nil
 	}
-	manualRemoveNginxBan = func(string) error { return nil }
+	manualRemovePersistBan = func(string) error { return nil }
 	shellExec = func(binary string, args ...string) (string, error) {
 		if binary == "fail2ban-client" && strings.Join(args, " ") == "set olswpanel banip 203.0.113.88" {
 			t.Fatalf("manual ban must not call fail2ban banip")
@@ -1147,8 +1137,8 @@ func TestExecuteManualBanCreatesSingleManualRecord(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("manual ban failed: %s", result.Message)
 	}
-	if len(nginxBanned) != 1 || nginxBanned[0] != "203.0.113.88" {
-		t.Fatalf("expected one nginx ban, got %v", nginxBanned)
+	if len(persistBanned) != 1 || persistBanned[0] != "203.0.113.88" {
+		t.Fatalf("expected one persistent ban, got %v", persistBanned)
 	}
 
 	var count, level, isManual, banCount int
@@ -1180,10 +1170,10 @@ func TestSyncFail2banBansKeepsActiveManualBan(t *testing.T) {
 	openTestDB(t)
 
 	oldShellExec := shellExec
-	oldReplace := syncReplaceNginxBannedIPs
+	oldAddPersist := syncAddPersistBan
 	t.Cleanup(func() {
 		shellExec = oldShellExec
-		syncReplaceNginxBannedIPs = oldReplace
+		syncAddPersistBan = oldAddPersist
 	})
 
 	shellExec = func(binary string, args ...string) (string, error) {
@@ -1193,14 +1183,8 @@ func TestSyncFail2banBansKeepsActiveManualBan(t *testing.T) {
 		return "", errors.New("unexpected command")
 	}
 
-	var synced map[string]bool
-	syncReplaceNginxBannedIPs = func(ips map[string]bool) error {
-		synced = map[string]bool{}
-		for ip, banned := range ips {
-			synced[ip] = banned
-		}
-		return nil
-	}
+	var synced []string
+	syncAddPersistBan = func(ip string) error { synced = append(synced, ip); return nil }
 
 	if _, err := database.GetDB().Exec(
 		`INSERT INTO firewall_bans (ip_address, ban_level, reason, source_jail, is_manual, ban_count, expires_at)
@@ -1218,18 +1202,16 @@ func TestSyncFail2banBansKeepsActiveManualBan(t *testing.T) {
 	if unbannedAt != nil {
 		t.Fatalf("active manual ban was marked unbanned: %v", *unbannedAt)
 	}
-	if !synced["203.0.113.99"] {
-		t.Fatalf("active manual ban was not synced to nginx set: %v", synced)
+	if len(synced) != 1 || synced[0] != "203.0.113.99" {
+		t.Fatalf("active manual ban was not synced to the persistent nftables set: %v", synced)
 	}
 }
 
 func TestSyncFail2banBansPreservesFailedJailState(t *testing.T) {
 	openTestDB(t)
 	oldShellExec := shellExec
-	oldReplace := syncReplaceNginxBannedIPs
 	t.Cleanup(func() {
 		shellExec = oldShellExec
-		syncReplaceNginxBannedIPs = oldReplace
 	})
 
 	shellExec = func(binary string, args ...string) (string, error) {
@@ -1240,14 +1222,6 @@ func TestSyncFail2banBansPreservesFailedJailState(t *testing.T) {
 			return "", errors.New("temporary socket failure")
 		}
 		return "Status\n|- Currently banned: 0\n`- Banned IP list:", nil
-	}
-	var synced map[string]bool
-	syncReplaceNginxBannedIPs = func(ips map[string]bool) error {
-		synced = make(map[string]bool, len(ips))
-		for ip, active := range ips {
-			synced[ip] = active
-		}
-		return nil
 	}
 	ip := "203.0.113.98"
 	if _, err := database.GetDB().Exec(`INSERT INTO firewall_bans
@@ -1260,8 +1234,8 @@ func TestSyncFail2banBansPreservesFailedJailState(t *testing.T) {
 
 	var active int
 	_ = database.GetDB().QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE ip_address=? AND unbanned_at IS NULL`, ip).Scan(&active)
-	if active != 1 || !synced[ip] {
-		t.Fatalf("failed jail state was not preserved: active=%d nginx=%v", active, synced)
+	if active != 1 {
+		t.Fatalf("failed jail state was not preserved: active=%d", active)
 	}
 }
 
@@ -1277,10 +1251,10 @@ func TestRestoreCDNRealIPGroupWithBindings(t *testing.T) {
 		{102, "two.example.com"},
 	} {
 		if _, err := db.Exec(`INSERT INTO websites
-			(id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+			(id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			site.id, site.domain, site.domain, "wpuser", "/www/wwwroot/"+site.domain, "/www/wwwlogs/"+site.domain,
-			"db_"+site.domain, "dbu_"+site.domain, "/etc/php/"+site.domain+".conf", "/etc/nginx/sites-available/"+site.domain+".conf"); err != nil {
+			"db_"+site.domain, "dbu_"+site.domain, "/etc/php/"+site.domain+".conf", "/etc/openlitespeed/sites-available/"+site.domain+".conf"); err != nil {
 			t.Fatalf("insert website %s: %v", site.domain, err)
 		}
 	}
@@ -1431,267 +1405,6 @@ func TestEnsureFail2banSSHRecordActionRestartsOnlyWhenMissing(t *testing.T) {
 	}
 }
 
-func legacyNginxTemplateErrorOnlyAccessLog(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:        "example.com",
-		ServerNames:   "example.com",
-		WebRoot:       "/www/wwwroot/example.com",
-		PHPProxy:      "unix:/run/php/example.sock",
-		TemplateVer:   "v1.0",
-		AccessLogMode: "error_only",
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	if !strings.Contains(config, `access_log /www/wwwlogs/example.com/access.log olswpanel_combined if=$wp_loggable;`) {
-		t.Fatalf("expected error-only access log in config:\n%s", config)
-	}
-	if strings.Contains(config, "access_log off;") {
-		t.Fatalf("did not expect access_log off in error-only config:\n%s", config)
-	}
-}
-
-func legacyNginxTemplateIncludesFastCGIHeaderBuffers(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:        "example.com",
-		ServerNames:   "example.com",
-		WebRoot:       "/www/wwwroot/example.com",
-		PHPProxy:      "unix:/run/php/example.sock",
-		TemplateVer:   "v1.0",
-		AccessLogMode: "full",
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-
-	for _, directive := range []string{
-		"fastcgi_buffer_size 128k;",
-		"fastcgi_buffers 8 128k;",
-		"fastcgi_busy_buffers_size 256k;",
-	} {
-		if !strings.Contains(config, directive) {
-			t.Fatalf("expected %q in config:\n%s", directive, config)
-		}
-	}
-}
-
-func legacyWordPressTemplateIncludesSecurityLogAndTryFiles(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:        "example.com",
-		ServerNames:   "example.com",
-		WebRoot:       "/www/wwwroot/example.com",
-		PHPProxy:      "unix:/run/php/example.sock",
-		TemplateVer:   "v1.0",
-		AccessLogMode: "error_only",
-		SiteType:      "wordpress",
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	if !strings.Contains(config, `access_log /www/wwwlogs/example.com/wp-security.log olswpanel_combined if=$wp_security_loggable;`) {
-		t.Fatalf("expected WordPress security log in config:\n%s", config)
-	}
-	if !strings.Contains(config, "try_files $uri =404;") {
-		t.Fatalf("expected php location to reject missing php files before FastCGI:\n%s", config)
-	}
-	if !strings.Contains(config, "location ~* /dup-installer/") {
-		t.Fatalf("expected explicit dup-installer block before WordPress fallback:\n%s", config)
-	}
-}
-
-func legacyWordPressTemplateKeepsSecurityLogWhenAccessLogIsOff(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:        "example.com",
-		ServerNames:   "example.com",
-		WebRoot:       "/www/wwwroot/example.com",
-		PHPProxy:      "unix:/run/php/example.sock",
-		TemplateVer:   "v1.0",
-		AccessLogMode: "off",
-		SiteType:      "wordpress",
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	if strings.Contains(config, "access_log off;") {
-		t.Fatalf("wordpress config must not disable security logs with access_log off:\n%s", config)
-	}
-	if !strings.Contains(config, `access_log /www/wwwlogs/example.com/access.log olswpanel_combined if=$wp_access_log_disabled;`) {
-		t.Fatalf("expected ordinary access log to be disabled by condition:\n%s", config)
-	}
-	if !strings.Contains(config, `access_log /www/wwwlogs/example.com/wp-security.log olswpanel_combined if=$wp_security_loggable;`) {
-		t.Fatalf("expected WordPress security log to remain enabled:\n%s", config)
-	}
-}
-
-func legacyPHPTemplateDoesNotIncludeWordPressSecurityLog(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:        "example.com",
-		ServerNames:   "example.com",
-		WebRoot:       "/www/wwwroot/example.com",
-		PHPProxy:      "unix:/run/php/example.sock",
-		TemplateVer:   "v1.0",
-		AccessLogMode: "error_only",
-		SiteType:      "php",
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	if strings.Contains(config, "wp-security.log") {
-		t.Fatalf("did not expect WordPress security log in generic PHP config:\n%s", config)
-	}
-}
-
-func legacyNginxTemplateUsesGlobalLimitStatusAndBotDefaultOff(t *testing.T) {
-	openTestDB(t)
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:        "example.com",
-		ServerNames:   "example.com",
-		WebRoot:       "/www/wwwroot/example.com",
-		PHPProxy:      "unix:/run/php/example.sock",
-		TemplateVer:   "v1.0",
-		AccessLogMode: "error_only",
-		SiteType:      "wordpress",
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	if !strings.Contains(config, "limit_req zone=wp_req_limit burst=300 nodelay;") {
-		t.Fatalf("expected existing IP rate limit in config:\n%s", config)
-	}
-	if strings.Contains(config, "limit_req zone=wp_bot_limit") {
-		t.Fatalf("bot limit should be disabled by default:\n%s", config)
-	}
-	if strings.Contains(config, "limit_req_status 429") {
-		t.Fatalf("limit_req_status must be managed globally, not per site:\n%s", config)
-	}
-}
-
-func legacyNginxTemplateIncludesBotLimit(t *testing.T) {
-	openTestDB(t)
-	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = 'true' WHERE skey = 'bot_limit_enabled'`); err != nil {
-		t.Fatalf("enable bot limit: %v", err)
-	}
-	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = '25' WHERE skey = 'bot_limit_burst'`); err != nil {
-		t.Fatalf("set bot burst: %v", err)
-	}
-
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:           "example.com",
-		ServerNames:      "example.com",
-		WebRoot:          "/www/wwwroot/example.com",
-		PHPProxy:         "unix:/run/php/example.sock",
-		TemplateVer:      "v1.0",
-		AccessLogMode:    "error_only",
-		SiteType:         "wordpress",
-		CDNRealIPEnabled: true,
-		CDNRealIPHeader:  "X-Forwarded-For",
-		CDNRealIPCompat:  true,
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	if !strings.Contains(config, "limit_req zone=wp_bot_limit burst=25 nodelay;") {
-		t.Fatalf("expected bot limit in config:\n%s", config)
-	}
-	if strings.Contains(config, "limit_req_status 429") {
-		t.Fatalf("limit_req_status must be managed globally, not per site:\n%s", config)
-	}
-}
-
-func TestRenderVerifiedSearchBotGeoEntries(t *testing.T) {
-	openTestDB(t)
-	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = ? WHERE skey = 'googlebot_ips'`, "66.249.64.0/19\n2001:4860:4801::/48\nbad"); err != nil {
-		t.Fatalf("set googlebot ips: %v", err)
-	}
-	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = ? WHERE skey = 'bingbot_ips'`, "40.77.167.0/24\n66.249.64.0/19"); err != nil {
-		t.Fatalf("set bingbot ips: %v", err)
-	}
-	entries := renderVerifiedSearchBotGeoEntries()
-	for _, want := range []string{
-		"66.249.64.0/19 1;",
-		"2001:4860:4801::/48 1;",
-		"40.77.167.0/24 1;",
-	} {
-		if !strings.Contains(entries, want) {
-			t.Fatalf("missing %q in geo entries:\n%s", want, entries)
-		}
-	}
-	if strings.Contains(entries, "bad") {
-		t.Fatalf("invalid ranges must not be rendered:\n%s", entries)
-	}
-	if strings.Count(entries, "66.249.64.0/19 1;") != 1 {
-		t.Fatalf("duplicate ranges must be collapsed:\n%s", entries)
-	}
-}
-
-func TestWriteBotRateLimitConfigUsesVerifiedSearchBotExemption(t *testing.T) {
-	openTestDB(t)
-	config := renderBotRateLimitConfig(30)
-	for _, want := range []string{
-		`map "$wp_bot_ua:$wp_search_bot_ua:$wp_verified_search_bot_ip" $wp_bot_rate_key`,
-		`"1:1:1" "";`,
-	} {
-		if !strings.Contains(config, want) {
-			t.Fatalf("missing %q in bot config:\n%s", want, config)
-		}
-	}
-	if strings.Contains(config, "wp_cdn_realip_compat") {
-		t.Fatalf("verified search bot exemption must not depend on CDN compat mode:\n%s", config)
-	}
-}
-
-func TestRewriteRateLimitDirectivesCombinations(t *testing.T) {
-	base := `server {
-    # server_name ignored.example.com;
-    listen 80;
-    server_name example.com;
-    limit_req zone=wp_req_limit burst=10 nodelay;
-    limit_req zone=wp_bot_limit burst=5 nodelay;
-    limit_req_status 429;
-}`
-	ipLine := "    limit_req zone=wp_req_limit burst=300 nodelay;"
-	botLine := "    limit_req zone=wp_bot_limit burst=20 nodelay;"
-
-	tests := []struct {
-		name      string
-		ip        bool
-		bot       bool
-		wantIP    bool
-		wantBot   bool
-		wantCount int
-	}{
-		{"both on", true, true, true, true, 2},
-		{"ip only", true, false, true, false, 1},
-		{"bot only", false, true, false, true, 1},
-		{"both off", false, false, false, false, 0},
-	}
-	for _, tt := range tests {
-		got := rewriteRateLimitDirectives(base, ipLine, botLine, tt.ip, tt.bot)
-		if strings.Contains(got, "limit_req_status 429") {
-			t.Fatalf("%s: per-site status should be removed:\n%s", tt.name, got)
-		}
-		if strings.Contains(got, "# server_name ignored.example.com;\n    limit_req") {
-			t.Fatalf("%s: must not inject after commented server_name:\n%s", tt.name, got)
-		}
-		if strings.Contains(got, "zone=wp_req_limit") != tt.wantIP {
-			t.Fatalf("%s: IP limit presence mismatch:\n%s", tt.name, got)
-		}
-		if strings.Contains(got, "zone=wp_bot_limit") != tt.wantBot {
-			t.Fatalf("%s: bot limit presence mismatch:\n%s", tt.name, got)
-		}
-		if count := strings.Count(got, "limit_req zone="); count != tt.wantCount {
-			t.Fatalf("%s: limit count = %d, want %d:\n%s", tt.name, count, tt.wantCount, got)
-		}
-	}
-}
-
 func TestNormalizeWPSecurityLogWhitelist(t *testing.T) {
 	patterns, err := NormalizeWPSecurityLogWhitelist("/google*.html\n/BingSiteAuth.xml\n/google*.html")
 	if err != nil {
@@ -1710,17 +1423,6 @@ func TestNormalizeWPSecurityLogWhitelist(t *testing.T) {
 		if _, err := NormalizeWPSecurityLogWhitelist(pattern); err == nil {
 			t.Fatalf("expected %q to be rejected", pattern)
 		}
-	}
-}
-
-func TestBuildWPSecurityLogWhitelistMapEntriesEscapesWildcard(t *testing.T) {
-	openTestDB(t)
-	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = ? WHERE skey = 'wp_security_log_whitelist'`, "/verify-*.txt"); err != nil {
-		t.Fatalf("save whitelist: %v", err)
-	}
-	entries := buildWPSecurityLogWhitelistMapEntries()
-	if !strings.Contains(entries, `~^/verify-[^/]*\.txt$ 0;`) {
-		t.Fatalf("expected escaped wildcard map entry, got:\n%s", entries)
 	}
 }
 
@@ -1749,109 +1451,6 @@ func TestWPSecurityReportCacheReturnsClone(t *testing.T) {
 	}
 	if gotAgain[0].SamplePaths[0] == "mutated" || gotAgain[0].Evidence[0] == "mutated" {
 		t.Fatalf("cache returned mutable internals: %+v", gotAgain[0])
-	}
-}
-
-func legacyNginxTemplateIncludesCDNRealIPTrustedRanges(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:           "example.com",
-		ServerNames:      "example.com",
-		WebRoot:          "/www/wwwroot/example.com",
-		PHPProxy:         "unix:/run/php/example.sock",
-		TemplateVer:      "v1.0",
-		AccessLogMode:    "error_only",
-		SiteType:         "wordpress",
-		CDNRealIPEnabled: true,
-		CDNRealIPHeader:  "X-Forwarded-For",
-		CDNRealIPRanges:  []string{"203.0.113.0/24", "2001:db8::/32"},
-		CDNRealIPCompat:  false,
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	for _, want := range []string{
-		"set_real_ip_from 203.0.113.0/24;",
-		"set_real_ip_from 2001:db8::/32;",
-		"real_ip_header X-Forwarded-For;",
-		"real_ip_recursive on;",
-	} {
-		if !strings.Contains(config, want) {
-			t.Fatalf("missing %q in config:\n%s", want, config)
-		}
-	}
-}
-
-func legacyNginxTemplateIncludesCDNRealIPCompatibleMode(t *testing.T) {
-	engine := NewTemplateEngine(t.TempDir())
-	config, err := engine.RenderNginxConfig(&NginxSiteData{
-		Domain:           "example.com",
-		ServerNames:      "example.com",
-		WebRoot:          "/www/wwwroot/example.com",
-		PHPProxy:         "unix:/run/php/example.sock",
-		TemplateVer:      "v1.0",
-		AccessLogMode:    "error_only",
-		SiteType:         "php",
-		CDNRealIPEnabled: true,
-		CDNRealIPHeader:  "X-Real-IP",
-		CDNRealIPCompat:  true,
-	})
-	if err != nil {
-		t.Fatalf("render nginx config: %v", err)
-	}
-	for _, want := range []string{
-		"set_real_ip_from 0.0.0.0/0;",
-		"set_real_ip_from ::/0;",
-		"real_ip_header X-Real-IP;",
-	} {
-		if !strings.Contains(config, want) {
-			t.Fatalf("missing %q in config:\n%s", want, config)
-		}
-	}
-}
-
-func legacySQLiProtectionRenderScopeAndTrustedClientGate(t *testing.T) {
-	openTestDB(t)
-	engine := NewTemplateEngine(t.TempDir())
-	render := func(siteType string, compat bool) string {
-		t.Helper()
-		config, err := engine.RenderNginxConfig(&NginxSiteData{
-			Domain:           "example.com",
-			ServerNames:      "example.com",
-			WebRoot:          "/www/wwwroot/example.com",
-			PHPProxy:         "unix:/run/php/example.sock",
-			TemplateVer:      "v1.0",
-			AccessLogMode:    "error_only",
-			SiteType:         siteType,
-			CDNRealIPEnabled: compat,
-			CDNRealIPHeader:  "X-Forwarded-For",
-			CDNRealIPCompat:  compat,
-		})
-		if err != nil {
-			t.Fatalf("render nginx config: %v", err)
-		}
-		return config
-	}
-
-	direct := render("wordpress", false)
-	if !strings.Contains(direct, "if ($wp_sqli_block_hit) { return 403; }") || !strings.Contains(direct, "wp-sqli-security.log") {
-		t.Fatal("direct WordPress traffic must be blocked and eligible for automatic banning")
-	}
-	compatibleProxy := render("wordpress", true)
-	if !strings.Contains(compatibleProxy, "if ($wp_sqli_block_hit) { return 403; }") || strings.Contains(compatibleProxy, "wp-sqli-security.log") {
-		t.Fatal("compatible real-IP mode must block but must not feed automatic banning")
-	}
-	php := render("php", false)
-	if strings.Contains(php, "$wp_sqli_block_hit") || strings.Contains(php, "wp-sqli-security.log") {
-		t.Fatal("generic PHP templates must not enable WordPress SQL injection protection")
-	}
-
-	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue='false' WHERE skey='wp_sqli_block_enabled'`); err != nil {
-		t.Fatal(err)
-	}
-	disabled := render("wordpress", false)
-	if strings.Contains(disabled, "if ($wp_sqli_block_hit) { return 403; }") || strings.Contains(disabled, "wp-sqli-security.log") {
-		t.Fatal("disabled SQL injection protection must neither block nor feed automatic banning")
 	}
 }
 

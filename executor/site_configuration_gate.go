@@ -7,7 +7,7 @@ import (
 )
 
 // rejectPausedSiteConfiguration keeps the narrowly scoped configuration
-// operations that can recreate an Nginx enabled link closed for paused sites.
+// operations that can recreate an OpenLiteSpeed enabled link closed for paused sites.
 func rejectPausedSiteConfiguration(siteID int) *TaskResult {
 	var status string
 	if err := database.GetDB().QueryRow(`SELECT status FROM websites WHERE id=?`, siteID).Scan(&status); err != nil {

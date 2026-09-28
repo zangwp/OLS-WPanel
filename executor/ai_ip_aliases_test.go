@@ -88,7 +88,7 @@ func TestPrepareAIDiagnosticPromptRedactsSensitiveContext(t *testing.T) {
 
 func insertAIIPAliasTestSession(t *testing.T, domain string) int {
 	t.Helper()
-	result, err := database.DB.Exec(`INSERT INTO websites (name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path) VALUES (?, ?, 'wp_test', '/srv/test', '/var/log/test', 'wp_test', 'wp_test', '/etc/php/pool.conf', '/etc/nginx/site.conf')`, domain, domain)
+	result, err := database.DB.Exec(`INSERT INTO websites (name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path) VALUES (?, ?, 'wp_test', '/srv/test', '/var/log/test', 'wp_test', 'wp_test', '/etc/php/pool.conf', '/etc/openlitespeed/site.conf')`, domain, domain)
 	if err != nil {
 		t.Fatal(err)
 	}

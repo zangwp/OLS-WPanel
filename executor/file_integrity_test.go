@@ -344,8 +344,8 @@ func prepareFileIntegrityRefreshTest(t *testing.T) (*sql.DB, *models.Website, st
 	config.AppConfig = &config.Config{Panel: config.PanelConfig{DataDir: t.TempDir()}}
 	t.Cleanup(func() { config.AppConfig = oldConfig })
 	if _, err := db.Exec(`INSERT INTO websites
-		(id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type,file_lock_enabled,file_lock_mode,file_lock_apply_status)
-		VALUES(79,'demo','example.com','active','wp_demo',?,'/tmp/log','db','dbuser','/tmp/php.conf','/tmp/nginx.conf','wordpress',1,'standard','ready')`, root); err != nil {
+		(id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type,file_lock_enabled,file_lock_mode,file_lock_apply_status)
+		VALUES(79,'demo','example.com','active','wp_demo',?,'/tmp/log','db','dbuser','/tmp/php.conf','/tmp/openlitespeed.conf','wordpress',1,'standard','ready')`, root); err != nil {
 		t.Fatal(err)
 	}
 	site := &models.Website{ID: 79, Domain: "example.com", WebRoot: root, SiteType: "wordpress", Status: models.StatusActive, FileLockEnabled: true, FileLockMode: "standard", FileLockApplyStatus: FileLockApplyStatusReady}
@@ -394,8 +394,8 @@ func TestPersistIntegrityDiffsDeduplicatesChangesAndResolvesRecovery(t *testing.
 	openTestDB(t)
 	db := database.GetDB()
 	if _, err := db.Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (77, 'demo', 'example.com', 'active', 'wp_demo', '/www/wwwroot/example.com', '/www/wwwlogs/example.com', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`); err != nil {
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (77, 'demo', 'example.com', 'active', 'wp_demo', '/www/wwwroot/example.com', '/www/wwwlogs/example.com', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
 	site := &models.Website{ID: 77, Domain: "example.com"}
@@ -440,8 +440,8 @@ func TestRemoveFileIntegrityBaselineResolvesCurrentEvents(t *testing.T) {
 	t.Cleanup(func() { config.AppConfig = oldConfig })
 	db := database.GetDB()
 	if _, err := db.Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (78, 'demo', 'example.com', 'active', 'wp_demo', '/www/wwwroot/example.com', '/www/wwwlogs/example.com', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`); err != nil {
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (78, 'demo', 'example.com', 'active', 'wp_demo', '/www/wwwroot/example.com', '/www/wwwlogs/example.com', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
 	path, err := fileIntegrityPath(78)

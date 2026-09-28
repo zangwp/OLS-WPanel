@@ -25,19 +25,18 @@ type siteMigrationDatabaseIdentity struct {
 }
 
 type siteMigrationPublishSpec struct {
-	Domain             string   `json:"domain"`
-	Aliases            []string `json:"aliases"`
-	SiteType           string   `json:"site_type"`
-	DocumentRootSubdir string   `json:"document_root_subdir"`
-	SystemUser         string   `json:"system_user"`
-	WebRoot            string   `json:"web_root"`
-	LogDir             string   `json:"log_dir"`
-	DBName             string   `json:"db_name"`
-	DBUser             string   `json:"db_user"`
-	PHPPoolPath        string   `json:"php_pool_path"`
-	NginxConfPath      string   `json:"nginx_conf_path"`
-	NginxEnabledPath   string   `json:"nginx_enabled_path"`
-	PHPSocketPath      string   `json:"php_socket_path"`
+	Domain              string   `json:"domain"`
+	Aliases             []string `json:"aliases"`
+	SiteType            string   `json:"site_type"`
+	DocumentRootSubdir  string   `json:"document_root_subdir"`
+	SystemUser          string   `json:"system_user"`
+	WebRoot             string   `json:"web_root"`
+	LogDir              string   `json:"log_dir"`
+	DBName              string   `json:"db_name"`
+	DBUser              string   `json:"db_user"`
+	OLSVHostConfigPath  string   `json:"ols_vhost_config_path"`
+	OLSVHostEnabledPath string   `json:"ols_vhost_enabled_path"`
+	PHPSocketPath       string   `json:"php_socket_path"`
 }
 
 type siteMigrationTargetPublishOps interface {
@@ -206,7 +205,7 @@ func (p *SiteMigrationTargetPublisher) loadPublishScope(ctx context.Context, mig
 		return siteMigrationPublishSpec{}, siteMigrationDatabaseIdentity{}, errors.New("target publish specification invalid")
 	}
 	plan, err := p.expectedPlan(spec.Domain, spec.SiteType)
-	if err != nil || spec.SystemUser != plan.SystemUser || spec.WebRoot != plan.WebRoot || spec.LogDir != plan.LogDir || spec.DBName != plan.DBName || spec.DBUser != plan.DBUser || spec.PHPPoolPath != plan.PHPPoolPath || spec.NginxConfPath != plan.NginxConfPath || spec.NginxEnabledPath != plan.NginxEnabledPath || spec.PHPSocketPath != plan.PHPSockPath {
+	if err != nil || spec.SystemUser != plan.SystemUser || spec.WebRoot != plan.WebRoot || spec.LogDir != plan.LogDir || spec.DBName != plan.DBName || spec.DBUser != plan.DBUser || spec.OLSVHostConfigPath != plan.OLSVHostConfigPath || spec.OLSVHostEnabledPath != plan.OLSVHostEnabledPath || spec.PHPSocketPath != plan.PHPSockPath {
 		return siteMigrationPublishSpec{}, siteMigrationDatabaseIdentity{}, errors.New("target publish plan mismatch")
 	}
 	siteRoot := filepath.Join(p.stagingRoot, migrationSiteID)
@@ -239,7 +238,7 @@ func (p *SiteMigrationTargetPublisher) expectedPlan(domain, siteType string) (si
 		systemUser = "php_" + siteName
 	}
 	configBase := siteConfigBaseName(siteName)
-	plan := siteMigrationTargetPlan{Domain: domain, SystemUser: systemUser, WebRoot: filepath.Join(service.cfg.Paths.WWWRoot, domain), LogDir: filepath.Join(service.cfg.Paths.WWWLogs, domain), DBName: "db_" + siteName, DBUser: "user_" + siteName, PHPPoolPath: filepath.Join(service.cfg.Paths.PHPFPMPool, configBase+".conf"), NginxConfPath: filepath.Join(service.cfg.Paths.NginxSitesAvailable, configBase+".conf"), NginxEnabledPath: filepath.Join(service.cfg.Paths.NginxSitesEnabled, configBase+".conf"), PHPSockPath: filepath.Join(service.cfg.Paths.PHPFPMSock, configBase+".sock")}
+	plan := siteMigrationTargetPlan{Domain: domain, SystemUser: systemUser, WebRoot: filepath.Join(service.cfg.Paths.WWWRoot, domain), LogDir: filepath.Join(service.cfg.Paths.WWWLogs, domain), DBName: "db_" + siteName, DBUser: "user_" + siteName, OLSVHostConfigPath: filepath.Join(service.cfg.Paths.OLSVHostsAvailable, configBase+".conf"), OLSVHostEnabledPath: filepath.Join(service.cfg.Paths.OLSVHostsEnabled, configBase+".conf"), PHPSockPath: filepath.Join(service.cfg.Paths.LSPHPSocketDir, configBase+".sock")}
 	return plan, validateUnixSocketPath(plan.PHPSockPath)
 }
 

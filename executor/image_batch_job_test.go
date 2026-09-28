@@ -9,7 +9,7 @@ import (
 func TestForgetImageOptimizationFingerprintsLeavesFilesRetryable(t *testing.T) {
 	openTestDB(t)
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
 		VALUES('images','images.test','active','wordpress','wp_images','/tmp/images','','','','','')`)
 	if err != nil {
 		t.Fatal(err)

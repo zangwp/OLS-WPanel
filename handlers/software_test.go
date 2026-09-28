@@ -14,18 +14,18 @@ func TestFindPHPIniValueSkipsComments(t *testing.T) {
 	}
 }
 
-func TestPHPConfigRequiresPoolRebuild(t *testing.T) {
-	if !phpConfigRequiresPoolRebuild("post_max_size") {
-		t.Fatal("post_max_size should rebuild PHP-FPM pools")
+func TestPHPConfigRequiresVHostRegeneration(t *testing.T) {
+	if !phpConfigRequiresVHostRegeneration("post_max_size") {
+		t.Fatal("post_max_size should regenerate OpenLiteSpeed vhosts")
 	}
-	if phpConfigRequiresPoolRebuild("max_input_vars") {
-		t.Fatal("max_input_vars should only reload PHP-FPM")
+	if phpConfigRequiresVHostRegeneration("max_input_vars") {
+		t.Fatal("max_input_vars should only restart OpenLiteSpeed")
 	}
-	// opcache 参数只存在于全局 ini，不是每站点 pool 里的字段，改动只需要 reload，
-	// 不应该触发全站点 PHP-FPM pool 批量重建。
+	// OPcache 参数只存在于全局 ini，改动只需要重启 OpenLiteSpeed，
+	// 不应该触发全站点虚拟主机批量重建。
 	for _, key := range []string{"opcache.memory_consumption", "opcache.max_accelerated_files"} {
-		if phpConfigRequiresPoolRebuild(key) {
-			t.Fatalf("%s should only reload PHP-FPM, not rebuild pools", key)
+		if phpConfigRequiresVHostRegeneration(key) {
+			t.Fatalf("%s should only restart OpenLiteSpeed, not regenerate vhosts", key)
 		}
 	}
 }

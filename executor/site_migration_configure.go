@@ -113,14 +113,6 @@ func (o productionSiteMigrationTargetConfigureOps) ResetIdentity(domain string, 
 
 func (o productionSiteMigrationTargetConfigureOps) ApplyConfigs(spec siteMigrationPublishSpec, settings SiteMigrationRuntimeSettings, identity siteMigrationPublishedIdentity, maxChildren int) error {
 	engine := NewTemplateEngine(o.cfg.Panel.BackupDir)
-	configBase := strings.TrimSuffix(filepath.Base(spec.PHPPoolPath), ".conf")
-	phpConfig, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{Domain: spec.Domain, PoolName: configBase, SystemUser: spec.SystemUser, WebRoot: spec.WebRoot, SocketPath: o.cfg.Paths.PHPFPMSock, SocketName: configBase, MaxChildren: strconv.Itoa(maxChildren)})
-	if err != nil {
-		return err
-	}
-	if err := engine.ApplyPHPFPMPool(phpConfig, spec.PHPPoolPath, spec.LogDir, spec.PHPSocketPath); err != nil {
-		return err
-	}
 	cdnGroups := make([]models.CDNRealIPGroup, 0, len(settings.CDNGroups))
 	for _, group := range settings.CDNGroups {
 		cdnGroups = append(cdnGroups, models.CDNRealIPGroup{ID: int(group.TargetID), Name: group.Name, Provider: group.Provider, HeaderName: group.HeaderName, IPRanges: group.IPRanges, Builtin: group.Builtin, Enabled: group.Enabled, Description: group.Description})
@@ -129,16 +121,16 @@ func (o productionSiteMigrationTargetConfigureOps) ApplyConfigs(spec siteMigrati
 	if err != nil {
 		return err
 	}
-	data := &NginxSiteData{Domain: spec.Domain, Aliases: settings.Aliases, ServerNames: buildServerNames(spec.Domain, settings.Aliases), WebRoot: EffectiveDocumentRoot(spec.WebRoot, spec.SiteType, spec.DocumentRootSubdir), LogDir: spec.LogDir, SystemUser: spec.SystemUser, UseSSL: identity.SSLEnabled, SSLCertPath: identity.CertPath, SSLKeyPath: identity.KeyPath, PHPProxy: "unix:" + spec.PHPSocketPath, TemplateVer: settings.TemplateVersion, AccessLogMode: settings.AccessLogMode, FCacheEnabled: settings.FastCGICacheEnabled, FCacheTTL: settings.FastCGICacheTTL, FCacheKey: NewCacheKey(), SiteType: spec.SiteType, XMLRPCEnabled: settings.XMLRPCEnabled, CDNRealIPEnabled: settings.CDNRealIPEnabled, CDNRealIPHeader: cdnRuntime.HeaderName, CDNRealIPRanges: cdnRuntime.IPRanges, CDNRealIPCompat: cdnRuntime.Compatible}
-	nginxConfig, err := engine.RenderNginxConfig(data)
+	data := &OLSVHostData{Domain: spec.Domain, Aliases: settings.Aliases, ServerNames: buildServerNames(spec.Domain, settings.Aliases), WebRoot: EffectiveDocumentRoot(spec.WebRoot, spec.SiteType, spec.DocumentRootSubdir), LogDir: spec.LogDir, SystemUser: spec.SystemUser, UseSSL: identity.SSLEnabled, SSLCertPath: identity.CertPath, SSLKeyPath: identity.KeyPath, PHPProxy: "unix:" + spec.PHPSocketPath, TemplateVer: settings.TemplateVersion, AccessLogMode: settings.AccessLogMode, LSCacheEnabled: settings.LiteSpeedCacheEnabled, LSCacheTTL: settings.LiteSpeedCacheTTL, LSCacheKey: NewCacheKey(), SiteType: spec.SiteType, XMLRPCEnabled: settings.XMLRPCEnabled, CDNRealIPEnabled: settings.CDNRealIPEnabled, CDNRealIPHeader: cdnRuntime.HeaderName, CDNRealIPRanges: cdnRuntime.IPRanges, CDNRealIPCompat: cdnRuntime.Compatible, PHPMaxChildren: maxChildren}
+	olsVHostConfig, err := engine.RenderOLSVHostConfig(data)
 	if err != nil {
 		return err
 	}
-	return engine.ApplyNginxConfig(nginxConfig, spec.NginxConfPath, spec.NginxEnabledPath)
+	return engine.ApplyOLSVHostConfig(olsVHostConfig, spec.OLSVHostConfigPath, spec.OLSVHostEnabledPath)
 }
 
 func (o productionSiteMigrationTargetConfigureOps) ResetRuntime(spec siteMigrationPublishSpec) error {
-	for _, path := range []string{spec.NginxEnabledPath, spec.NginxConfPath, spec.PHPPoolPath} {
+	for _, path := range []string{spec.OLSVHostEnabledPath, spec.OLSVHostConfigPath, spec.PHPSocketPath} {
 		if err := removeMigrationPath(path); err != nil {
 			return err
 		}
@@ -166,9 +158,9 @@ func (p *SiteMigrationTargetPublisher) ConfigureAndHealth(ctx context.Context, m
 	if err != nil {
 		return err
 	}
-	maxChildren := RecommendPHPFPMMaxChildren(CollectSystemFacts())
+	maxChildren := RecommendLSPHPMaxChildren(CollectSystemFacts())
 	if maxChildren <= 0 {
-		return p.configureFailed(migrationSiteID, "php_capacity_unavailable", errors.New("target PHP-FPM capacity unavailable"))
+		return p.configureFailed(migrationSiteID, "php_capacity_unavailable", errors.New("target LSPHP capacity unavailable"))
 	}
 	siteRoot := filepath.Join(p.stagingRoot, migrationSiteID)
 	if err := p.resolveTargetCDNGroups(ctx, migrationSiteID, &settings); err != nil {
@@ -209,7 +201,7 @@ func (p *SiteMigrationTargetPublisher) ConfigureAndHealth(ctx context.Context, m
 			}
 		}
 	}
-	runtimeStatus, runtimeExisting, err := p.beginPublishStep(ctx, migrationSiteID, "runtime_config_publish", spec.NginxConfPath)
+	runtimeStatus, runtimeExisting, err := p.beginPublishStep(ctx, migrationSiteID, "runtime_config_publish", spec.OLSVHostConfigPath)
 	if err != nil {
 		return err
 	}
@@ -222,7 +214,7 @@ func (p *SiteMigrationTargetPublisher) ConfigureAndHealth(ctx context.Context, m
 		if err := ops.ApplyConfigs(spec, settings, published, maxChildren); err != nil {
 			return p.configureFailed(migrationSiteID, "runtime_config_failed", err)
 		}
-		if err := p.completePublishStep(ctx, migrationSiteID, "runtime_config_publish", spec.NginxConfPath); err != nil {
+		if err := p.completePublishStep(ctx, migrationSiteID, "runtime_config_publish", spec.OLSVHostConfigPath); err != nil {
 			return p.publishUnknown(migrationSiteID, err)
 		}
 	}
@@ -301,7 +293,7 @@ func (p *SiteMigrationTargetPublisher) loadConfigureScope(ctx context.Context, m
 		return siteMigrationPublishSpec{}, SiteMigrationRuntimeSettings{}, siteMigrationSiteIdentity{}, false, errors.New("target configure specification invalid")
 	}
 	plan, err := p.expectedPlan(spec.Domain, spec.SiteType)
-	if err != nil || spec.WebRoot != plan.WebRoot || spec.SystemUser != plan.SystemUser || spec.DBName != plan.DBName || spec.DBUser != plan.DBUser || spec.PHPPoolPath != plan.PHPPoolPath || spec.NginxConfPath != plan.NginxConfPath || spec.NginxEnabledPath != plan.NginxEnabledPath || spec.PHPSocketPath != plan.PHPSockPath {
+	if err != nil || spec.WebRoot != plan.WebRoot || spec.SystemUser != plan.SystemUser || spec.DBName != plan.DBName || spec.DBUser != plan.DBUser || spec.OLSVHostConfigPath != plan.OLSVHostConfigPath || spec.OLSVHostEnabledPath != plan.OLSVHostEnabledPath || spec.PHPSocketPath != plan.PHPSockPath {
 		return siteMigrationPublishSpec{}, SiteMigrationRuntimeSettings{}, siteMigrationSiteIdentity{}, false, errors.New("target configure plan mismatch")
 	}
 	if strings.Join(snapshot.RuntimeSettings.Aliases, "\n") != strings.Join(spec.Aliases, "\n") || snapshot.RuntimeSettings.DocumentRootSubdir != spec.DocumentRootSubdir {
@@ -336,9 +328,9 @@ func (p *SiteMigrationTargetPublisher) insertTargetWebsite(ctx context.Context, 
 		return 0, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO websites (name,domain,aliases,status,system_user,web_root,document_root_subdir,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type,ssl_enabled,ssl_cert_path,ssl_key_path,ssl_cert_source,template_version,access_log_mode,fastcgi_cache_enabled,fastcgi_cache_ttl,fastcgi_cache_key,plugin_api_key,monitoring_enabled,monitoring_interval,disable_wp_updates,disable_file_editing,xmlrpc_enabled,disable_application_passwords,wp_debug_enabled,wp_post_revisions,wp_memory_limit,file_lock_enabled,file_lock_mode,password_reset_mode,log_retention_days,cdn_realip_enabled,php_fpm_max_children,expires_at)
+	result, err := tx.ExecContext(ctx, `INSERT INTO websites (name,domain,aliases,status,system_user,web_root,document_root_subdir,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type,ssl_enabled,ssl_cert_path,ssl_key_path,ssl_cert_source,template_version,access_log_mode,litespeed_cache_enabled,litespeed_cache_ttl,litespeed_cache_key,plugin_api_key,monitoring_enabled,monitoring_interval,disable_wp_updates,disable_file_editing,xmlrpc_enabled,disable_application_passwords,wp_debug_enabled,wp_post_revisions,wp_memory_limit,file_lock_enabled,file_lock_mode,password_reset_mode,log_retention_days,cdn_realip_enabled,lsphp_max_children,expires_at)
 		VALUES (?,?,?,'active',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		buildSiteName(spec.Domain), spec.Domain, strings.Join(settings.Aliases, "\n"), spec.SystemUser, spec.WebRoot, spec.DocumentRootSubdir, spec.LogDir, spec.DBName, spec.DBUser, spec.PHPPoolPath, spec.NginxConfPath, spec.SiteType, boolInt(published.SSLEnabled), published.CertPath, published.KeyPath, settings.SSLCertSource, settings.TemplateVersion, settings.AccessLogMode, boolInt(settings.FastCGICacheEnabled), settings.FastCGICacheTTL, NewCacheKey(), identity.APIKey, 0, settings.MonitoringInterval, boolInt(settings.DisableWPUpdates), boolInt(settings.DisableFileEditing), boolInt(settings.XMLRPCEnabled), boolInt(settings.DisableApplicationPasswords), boolInt(settings.WPDebugEnabled), settings.WPPostRevisions, settings.WPMemoryLimit, boolInt(settings.FileLockEnabled), settings.FileLockMode, settings.PasswordResetMode, settings.LogRetentionDays, boolInt(settings.CDNRealIPEnabled), maxChildren, nilIfEmpty(settings.ExpiresAt))
+		buildSiteName(spec.Domain), spec.Domain, strings.Join(settings.Aliases, "\n"), spec.SystemUser, spec.WebRoot, spec.DocumentRootSubdir, spec.LogDir, spec.DBName, spec.DBUser, spec.PHPSocketPath, spec.OLSVHostConfigPath, spec.SiteType, boolInt(published.SSLEnabled), published.CertPath, published.KeyPath, settings.SSLCertSource, settings.TemplateVersion, settings.AccessLogMode, boolInt(settings.LiteSpeedCacheEnabled), settings.LiteSpeedCacheTTL, NewCacheKey(), identity.APIKey, 0, settings.MonitoringInterval, boolInt(settings.DisableWPUpdates), boolInt(settings.DisableFileEditing), boolInt(settings.XMLRPCEnabled), boolInt(settings.DisableApplicationPasswords), boolInt(settings.WPDebugEnabled), settings.WPPostRevisions, settings.WPMemoryLimit, boolInt(settings.FileLockEnabled), settings.FileLockMode, settings.PasswordResetMode, settings.LogRetentionDays, boolInt(settings.CDNRealIPEnabled), maxChildren, nilIfEmpty(settings.ExpiresAt))
 	if err != nil {
 		return 0, err
 	}

@@ -47,23 +47,22 @@ type BasicAuthConfig struct {
 }
 
 type PathsConfig struct {
-	WWWRoot             string `json:"www_root"`
-	WWWLogs             string `json:"www_logs"`
-	OLSRoot             string `json:"ols_root"`
-	OLSMainConfig       string `json:"ols_main_config"`
-	OLSManagedConfig    string `json:"ols_managed_config"`
-	OLSBinary           string `json:"ols_binary"`
-	LSPHPBinary         string `json:"lsphp_binary"`
-	LSPHPCLI            string `json:"lsphp_cli"`
-	OLSListenerCert     string `json:"ols_listener_cert"`
-	OLSListenerKey      string `json:"ols_listener_key"`
-	NginxSitesAvailable string `json:"nginx_sites_available"`
-	NginxSitesEnabled   string `json:"nginx_sites_enabled"`
-	PHPFPMPool          string `json:"php_fpm_pool"`
-	PHPFPMSock          string `json:"php_fpm_sock"`
-	Certificates        string `json:"certificates"`
-	WordPressPackage    string `json:"wordpress_package"`
-	CronFile            string `json:"cron_file"`
+	WWWRoot            string `json:"www_root"`
+	WWWLogs            string `json:"www_logs"`
+	OLSRoot            string `json:"ols_root"`
+	OLSMainConfig      string `json:"ols_main_config"`
+	OLSManagedConfig   string `json:"ols_managed_config"`
+	OLSBinary          string `json:"ols_binary"`
+	LSPHPBinary        string `json:"lsphp_binary"`
+	LSPHPCLI           string `json:"lsphp_cli"`
+	OLSListenerCert    string `json:"ols_listener_cert"`
+	OLSListenerKey     string `json:"ols_listener_key"`
+	OLSVHostsAvailable string `json:"ols_vhosts_available"`
+	OLSVHostsEnabled   string `json:"ols_vhosts_enabled"`
+	LSPHPSocketDir     string `json:"lsphp_socket_dir"`
+	Certificates       string `json:"certificates"`
+	WordPressPackage   string `json:"wordpress_package"`
+	CronFile           string `json:"cron_file"`
 }
 
 type SecurityConfig struct {

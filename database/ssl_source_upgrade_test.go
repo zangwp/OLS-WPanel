@@ -63,7 +63,7 @@ func TestUpgradeBackfillsExistingSSLCertificateSources(t *testing.T) {
 		domain string
 		path   string
 	}{{"auto.example", autoPath}, {"manual.example", manualPath}} {
-		if _, err := DB.Exec(`INSERT INTO websites (id,name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,ssl_enabled,ssl_cert_path) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`, id+1, item.domain, item.domain, "wp_test", "/tmp/www", "/tmp/log", "db", "user", "/tmp/php", "/tmp/nginx", item.path); err != nil {
+		if _, err := DB.Exec(`INSERT INTO websites (id,name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,ssl_enabled,ssl_cert_path) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`, id+1, item.domain, item.domain, "wp_test", "/tmp/www", "/tmp/log", "db", "user", "/tmp/php", "/tmp/openlitespeed", item.path); err != nil {
 			t.Fatal(err)
 		}
 	}

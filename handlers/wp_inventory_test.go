@@ -94,10 +94,10 @@ func TestWPInventoryHandlerSummaryRefreshAndTask(t *testing.T) {
 func TestWPInventoryHandlerErrorMapping(t *testing.T) {
 	db := setupWPInventoryHandlerTestDB(t)
 	if _, err := db.Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
 		VALUES
-		(2, 'php.example.com', 'php.example.com', 'active', 'wp_php', '/tmp/php', '/tmp/log', 'db2', 'u2', '/tmp/php.conf', '/tmp/nginx.conf', 'php'),
-		(3, 'creating.example.com', 'creating.example.com', 'creating', 'wp_creating', '/tmp/creating', '/tmp/log', 'db3', 'u3', '/tmp/php3.conf', '/tmp/nginx3.conf', 'wordpress')`); err != nil {
+		(2, 'php.example.com', 'php.example.com', 'active', 'wp_php', '/tmp/php', '/tmp/log', 'db2', 'u2', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'php'),
+		(3, 'creating.example.com', 'creating.example.com', 'creating', 'wp_creating', '/tmp/creating', '/tmp/log', 'db3', 'u3', '/tmp/php3.conf', '/tmp/openlitespeed3.conf', 'wordpress')`); err != nil {
 		t.Fatalf("insert error mapping sites: %v", err)
 	}
 	router := newWPInventoryHandlerTestRouter(db)
@@ -129,8 +129,8 @@ func TestWPInventoryHandlerErrorMapping(t *testing.T) {
 func TestWPInventoryHandlerTaskCannotCrossSites(t *testing.T) {
 	db := setupWPInventoryHandlerTestDB(t)
 	if _, err := db.Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (2, 'other.example.com', 'other.example.com', 'active', 'wp_other', '/tmp/other', '/tmp/log', 'db2', 'u2', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`); err != nil {
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (2, 'other.example.com', 'other.example.com', 'active', 'wp_other', '/tmp/other', '/tmp/log', 'db2', 'u2', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`); err != nil {
 		t.Fatalf("insert other site: %v", err)
 	}
 	router := newWPInventoryHandlerTestRouter(db)
@@ -255,8 +255,8 @@ func setupWPInventoryHandlerTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("RunUpgrades(): %v", err)
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (1, 'inventory.example.com', 'inventory.example.com', 'active', 'wp_inventory', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`); err != nil {
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (1, 'inventory.example.com', 'inventory.example.com', 'active', 'wp_inventory', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`); err != nil {
 		t.Fatalf("insert inventory site: %v", err)
 	}
 	return database.GetDB()

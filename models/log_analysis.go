@@ -98,7 +98,7 @@ type LogAnalysisReport struct {
 	Bots                    []LogAnalysisBotCount `json:"bots"`
 	PHPFatalCount           int                   `json:"php_fatal_count"`
 	PHPWarningCount         int                   `json:"php_warning_count"`
-	NginxErrorCount         int                   `json:"nginx_error_count"`
+	WebServerErrorCount     int                   `json:"web_server_error_count"`
 	SlowRequestCount        int                   `json:"slow_request_count"`
 	SecurityRequestCount    int                   `json:"security_request_count"`
 	FakeSearchBotCount      int                   `json:"fake_search_bot_count"`

@@ -26,7 +26,7 @@ import (
 const pluginDirName = "ols-wpanel-optimizer"
 
 var setCompanionPluginPermissions = InstallPluginPermissions
-var regenerateSiteNginxForCache = RegenerateSiteNginx
+var regenerateSiteOLSForCache = RegenerateSiteOLSConfig
 
 var errCompanionRemovedBeforePublish = errors.New("installed companion was removed before publish")
 
@@ -35,11 +35,6 @@ var errCompanionRemovedBeforePublish = errors.New("installed companion was remov
 // 请求时使用——handlers 包不能直接拿到 main 包的 embed.FS（会形成循环导入），
 // EnsureCacheHelperPlugin 是启动时唯一会调用一次的入口，顺带存一份即可。
 var cacheHelperPluginFS embed.FS
-
-func EnsureFastCGICacheConfig() {
-	// OpenLiteSpeed owns the per-vhost cache storage declared by the generated
-	// virtual-host configuration. There is no global Nginx FastCGI cache file.
-}
 
 // EnsureCacheHelperPlugin 把面板内嵌的配套插件目录同步到本地参照副本
 // （/www/ols-wpanel/packages/ols-wpanel-optimizer/），仅用于版本比对，不直接服务任何站点，
@@ -502,13 +497,13 @@ func NewAPIKey() string {
 	return hex.EncodeToString(b)
 }
 
-func UpdateSiteFastCGICache(siteID, enabled, ttl int) error {
+func UpdateSiteLiteSpeedCache(siteID, enabled, ttl int) error {
 	db := database.GetDB()
 	var oldEnabled, oldTTL int
-	if err := db.QueryRow(`SELECT fastcgi_cache_enabled, fastcgi_cache_ttl FROM websites WHERE id=?`, siteID).Scan(&oldEnabled, &oldTTL); err != nil {
+	if err := db.QueryRow(`SELECT litespeed_cache_enabled, litespeed_cache_ttl FROM websites WHERE id=?`, siteID).Scan(&oldEnabled, &oldTTL); err != nil {
 		return fmt.Errorf("读取原缓存设置失败: %w", err)
 	}
-	result, err := db.Exec(`UPDATE websites SET fastcgi_cache_enabled=?, fastcgi_cache_ttl=? WHERE id=?`, enabled, ttl, siteID)
+	result, err := db.Exec(`UPDATE websites SET litespeed_cache_enabled=?, litespeed_cache_ttl=? WHERE id=?`, enabled, ttl, siteID)
 	if err != nil {
 		return fmt.Errorf("保存缓存设置失败: %w", err)
 	}
@@ -518,44 +513,44 @@ func UpdateSiteFastCGICache(siteID, enabled, ttl int) error {
 		}
 		return errors.New("网站不存在")
 	}
-	return publishSiteNginxWithCacheRollback(siteID, oldEnabled, oldTTL)
+	return publishSiteOLSWithCacheRollback(siteID, oldEnabled, oldTTL)
 }
 
-func publishSiteNginxWithCacheRollback(siteID, oldEnabled, oldTTL int) error {
-	if err := regenerateSiteNginxForCache(siteID); err == nil {
+func publishSiteOLSWithCacheRollback(siteID, oldEnabled, oldTTL int) error {
+	if err := regenerateSiteOLSForCache(siteID); err == nil {
 		return nil
 	} else {
 		applyErr := err
-		if _, rollbackErr := database.GetDB().Exec(`UPDATE websites SET fastcgi_cache_enabled=?, fastcgi_cache_ttl=? WHERE id=?`, oldEnabled, oldTTL, siteID); rollbackErr != nil {
+		if _, rollbackErr := database.GetDB().Exec(`UPDATE websites SET litespeed_cache_enabled=?, litespeed_cache_ttl=? WHERE id=?`, oldEnabled, oldTTL, siteID); rollbackErr != nil {
 			return fmt.Errorf("应用 OpenLiteSpeed 配置失败: %v；恢复缓存设置失败: %w", applyErr, rollbackErr)
 		}
-		if rollbackErr := regenerateSiteNginxForCache(siteID); rollbackErr != nil {
+		if rollbackErr := regenerateSiteOLSForCache(siteID); rollbackErr != nil {
 			return fmt.Errorf("应用 OpenLiteSpeed 配置失败: %v；恢复旧配置失败: %w", applyErr, rollbackErr)
 		}
 		return fmt.Errorf("应用 OpenLiteSpeed 配置失败，缓存设置已恢复: %w", applyErr)
 	}
 }
 
-func PublishSiteNginxWithCacheRollback(siteID, oldEnabled, oldTTL int) error {
-	return publishSiteNginxWithCacheRollback(siteID, oldEnabled, oldTTL)
+func PublishSiteOLSWithCacheRollback(siteID, oldEnabled, oldTTL int) error {
+	return publishSiteOLSWithCacheRollback(siteID, oldEnabled, oldTTL)
 }
 
 func ClearSiteCache(siteID int) error {
 	db := database.GetDB()
 	var oldKey, webRoot string
-	if err := db.QueryRow(`SELECT fastcgi_cache_key,web_root FROM websites WHERE id=?`, siteID).Scan(&oldKey, &webRoot); err != nil {
+	if err := db.QueryRow(`SELECT litespeed_cache_key,web_root FROM websites WHERE id=?`, siteID).Scan(&oldKey, &webRoot); err != nil {
 		return fmt.Errorf("读取缓存标识失败: %w", err)
 	}
 	key := NewCacheKey()
-	if _, err := db.Exec("UPDATE websites SET fastcgi_cache_key = ? WHERE id = ?", key, siteID); err != nil {
+	if _, err := db.Exec("UPDATE websites SET litespeed_cache_key = ? WHERE id = ?", key, siteID); err != nil {
 		return fmt.Errorf("更新缓存标识失败: %w", err)
 	}
-	if err := regenerateSiteNginxForCache(siteID); err != nil {
-		if _, rollbackErr := db.Exec(`UPDATE websites SET fastcgi_cache_key=? WHERE id=?`, oldKey, siteID); rollbackErr != nil {
+	if err := regenerateSiteOLSForCache(siteID); err != nil {
+		if _, rollbackErr := db.Exec(`UPDATE websites SET litespeed_cache_key=? WHERE id=?`, oldKey, siteID); rollbackErr != nil {
 			return fmt.Errorf("清除缓存应用失败: %v；恢复缓存标识失败: %w", err, rollbackErr)
 		}
-		if rollbackErr := regenerateSiteNginxForCache(siteID); rollbackErr != nil {
-			return fmt.Errorf("清除缓存应用失败: %v；恢复旧 Nginx 配置失败: %w", err, rollbackErr)
+		if rollbackErr := regenerateSiteOLSForCache(siteID); rollbackErr != nil {
+			return fmt.Errorf("清除缓存应用失败: %v；恢复旧 OpenLiteSpeed 配置失败: %w", err, rollbackErr)
 		}
 		return fmt.Errorf("清除缓存失败，原缓存标识已恢复: %w", err)
 	}
@@ -662,20 +657,20 @@ func deleteRedisKeysByPrefix(prefix string) error {
 	return flush()
 }
 
-func RegenerateSiteNginx(siteID int) error {
+func RegenerateSiteOLSConfig(siteID int) error {
 	db := database.GetDB()
 	var domain, aliases, siteType, systemUser, webRoot, documentRootSubdir, logDir, accessLogMode, cacheKey, templateVer string
-	var phpPoolPath, nginxConfPath string
-	var sslEnabled, fCacheEnabled, xmlrpcEnabled, cdnRealIPEnabled int
-	var fCacheTTL int
+	var phpPoolPath, olsVHostConfigPath string
+	var sslEnabled, lsCacheEnabled, xmlrpcEnabled, cdnRealIPEnabled int
+	var lsCacheTTL int
 	var sslCertPath, sslKeyPath, status string
 
 	err := db.QueryRow(
 		`SELECT domain, aliases, site_type, system_user, web_root, document_root_subdir, log_dir, ssl_enabled,
-		        access_log_mode, fastcgi_cache_enabled, fastcgi_cache_ttl, fastcgi_cache_key,
-		        ssl_cert_path, ssl_key_path, template_version, xmlrpc_enabled, php_pool_path, nginx_conf_path, cdn_realip_enabled, status
+		        access_log_mode, litespeed_cache_enabled, litespeed_cache_ttl, litespeed_cache_key,
+		        ssl_cert_path, ssl_key_path, template_version, xmlrpc_enabled, lsphp_socket_path, ols_vhost_config_path, cdn_realip_enabled, status
 		 FROM websites WHERE id = ?`, siteID,
-	).Scan(&domain, &aliases, &siteType, &systemUser, &webRoot, &documentRootSubdir, &logDir, &sslEnabled, &accessLogMode, &fCacheEnabled, &fCacheTTL, &cacheKey, &sslCertPath, &sslKeyPath, &templateVer, &xmlrpcEnabled, &phpPoolPath, &nginxConfPath, &cdnRealIPEnabled, &status)
+	).Scan(&domain, &aliases, &siteType, &systemUser, &webRoot, &documentRootSubdir, &logDir, &sslEnabled, &accessLogMode, &lsCacheEnabled, &lsCacheTTL, &cacheKey, &sslCertPath, &sslKeyPath, &templateVer, &xmlrpcEnabled, &phpPoolPath, &olsVHostConfigPath, &cdnRealIPEnabled, &status)
 	if err != nil || domain == "" {
 		if err != nil {
 			return fmt.Errorf("查询站点失败(site %d): %w", siteID, err)
@@ -688,7 +683,7 @@ func RegenerateSiteNginx(siteID int) error {
 	}
 	if cacheKey == "" {
 		cacheKey = NewCacheKey()
-		db.Exec("UPDATE websites SET fastcgi_cache_key = ? WHERE id = ?", cacheKey, siteID)
+		db.Exec("UPDATE websites SET litespeed_cache_key = ? WHERE id = ?", cacheKey, siteID)
 	}
 
 	cfg := config.AppConfig
@@ -699,22 +694,22 @@ func RegenerateSiteNginx(siteID int) error {
 		aliasList = strings.Split(aliases, "\n")
 	}
 
-	data := &NginxSiteData{
-		Domain:        domain,
-		Aliases:       aliasList,
-		ServerNames:   buildServerNames(domain, aliasList),
-		WebRoot:       EffectiveDocumentRoot(webRoot, siteType, documentRootSubdir),
-		LogDir:        logDir,
-		SystemUser:    systemUser,
-		SiteType:      siteType,
-		PHPProxy:      "unix:" + phpSocketPath(cfg, phpPoolPath, domain),
-		TemplateVer:   templateVer,
-		AccessLogMode: accessLogMode,
-		UseSSL:        sslEnabled == 1,
-		FCacheEnabled: fCacheEnabled == 1,
-		FCacheTTL:     fCacheTTL,
-		FCacheKey:     cacheKey,
-		XMLRPCEnabled: xmlrpcEnabled == 1,
+	data := &OLSVHostData{
+		Domain:         domain,
+		Aliases:        aliasList,
+		ServerNames:    buildServerNames(domain, aliasList),
+		WebRoot:        EffectiveDocumentRoot(webRoot, siteType, documentRootSubdir),
+		LogDir:         logDir,
+		SystemUser:     systemUser,
+		SiteType:       siteType,
+		PHPProxy:       "unix:" + phpSocketPath(cfg, phpPoolPath, domain),
+		TemplateVer:    templateVer,
+		AccessLogMode:  accessLogMode,
+		UseSSL:         sslEnabled == 1,
+		LSCacheEnabled: lsCacheEnabled == 1,
+		LSCacheTTL:     lsCacheTTL,
+		LSCacheKey:     cacheKey,
+		XMLRPCEnabled:  xmlrpcEnabled == 1,
 	}
 	if cdnRealIPEnabled == 1 {
 		groups, _ := GetWebsiteCDNRealIPGroups(siteID)
@@ -734,9 +729,9 @@ func RegenerateSiteNginx(siteID int) error {
 		data.SSLKeyPath = sslKeyPath
 	}
 
-	config, err := engine.RenderNginxConfig(data)
+	config, err := engine.RenderOLSVHostConfig(data)
 	if err != nil {
-		return fmt.Errorf("渲染 Nginx 配置失败(site %d): %w", siteID, err)
+		return fmt.Errorf("渲染 OpenLiteSpeed 配置失败(site %d): %w", siteID, err)
 	}
 	var migrationLockCount int
 	var migrationLockDirection, migrationSiteID, migrationStage string
@@ -757,40 +752,40 @@ func RegenerateSiteNginx(siteID int) error {
 		if err != nil {
 			return fmt.Errorf("恢复迁移目标配置失败(site %d): %w", siteID, err)
 		}
-		if err := applyMigrationNginxContent(nginxConfPath, enabledPath, config); err != nil {
-			return fmt.Errorf("应用迁移目标 Nginx 配置失败(site %d): %w", siteID, err)
+		if err := applyMigrationOLSVHostContent(olsVHostConfigPath, enabledPath, config); err != nil {
+			return fmt.Errorf("应用迁移目标 OpenLiteSpeed 配置失败(site %d): %w", siteID, err)
 		}
 		return nil
 	}
 	if migrationLockDirection == "source" {
 		// Keep the task-owned maintenance symlink untouched while still refreshing
 		// the inactive normal configuration for a future explicit restore.
-		if err := engine.ApplyNginxConfigKeepDisabled(config, nginxConfPath); err != nil {
-			return fmt.Errorf("应用迁移中站点 Nginx 配置失败(site %d): %w", siteID, err)
+		if err := engine.ApplyOLSVHostConfigKeepDisabled(config, olsVHostConfigPath); err != nil {
+			return fmt.Errorf("应用迁移中站点 OpenLiteSpeed 配置失败(site %d): %w", siteID, err)
 		}
 		return nil
 	}
 
 	if status == string(models.StatusPaused) || status == string(models.StatusMigrated) {
 		// 已暂停或已搬家的源站只刷新未启用配置，不改变当前运行链接。
-		if err := engine.ApplyNginxConfigKeepDisabled(config, nginxConfPath); err != nil {
-			return fmt.Errorf("应用 Nginx 配置失败(site %d): %w", siteID, err)
+		if err := engine.ApplyOLSVHostConfigKeepDisabled(config, olsVHostConfigPath); err != nil {
+			return fmt.Errorf("应用 OpenLiteSpeed 配置失败(site %d): %w", siteID, err)
 		}
 		return nil
 	}
 
-	if err := engine.ApplyNginxConfig(config, nginxConfPath, nginxEnabledPath(cfg, nginxConfPath, domain)); err != nil {
-		return fmt.Errorf("应用 Nginx 配置失败(site %d): %w", siteID, err)
+	if err := engine.ApplyOLSVHostConfig(config, olsVHostConfigPath, olsVHostEnabledPath(cfg, olsVHostConfigPath, domain)); err != nil {
+		return fmt.Errorf("应用 OpenLiteSpeed 配置失败(site %d): %w", siteID, err)
 	}
 	return nil
 }
 
-// RegenerateAllSitesNginx 重建全部网站的 Nginx 配置，用于模板更新后批量刷新。
-func RegenerateAllSitesNginx() error {
+// RegenerateAllSitesOLSConfigs 重建全部网站的 OpenLiteSpeed 虚拟主机配置。
+func RegenerateAllSitesOLSConfigs() error {
 	db := database.GetDB()
 	rows, err := db.Query("SELECT id FROM websites")
 	if err != nil {
-		log.Printf("[Nginx重建] 查询网站列表失败: %v", err)
+		log.Printf("[OpenLiteSpeed重建] 查询网站列表失败: %v", err)
 		return err
 	}
 	defer rows.Close()
@@ -802,8 +797,8 @@ func RegenerateAllSitesNginx() error {
 			failures = append(failures, err.Error())
 			continue
 		}
-		if err := RegenerateSiteNginx(siteID); err != nil {
-			log.Printf("[Nginx重建] 站点 %d 更新失败: %v", siteID, err)
+		if err := RegenerateSiteOLSConfig(siteID); err != nil {
+			log.Printf("[OpenLiteSpeed重建] 站点 %d 更新失败: %v", siteID, err)
 			failures = append(failures, err.Error())
 		}
 	}
@@ -811,15 +806,8 @@ func RegenerateAllSitesNginx() error {
 		failures = append(failures, err.Error())
 	}
 	if len(failures) > 0 {
-		return fmt.Errorf("部分站点 Nginx 配置更新失败: %s", strings.Join(failures, "; "))
+		return fmt.Errorf("部分站点 OpenLiteSpeed 配置更新失败: %s", strings.Join(failures, "; "))
 	}
-	log.Printf("[Nginx重建] 全部网站 Nginx 配置已更新")
+	log.Printf("[OpenLiteSpeed重建] 全部网站配置已更新")
 	return nil
-}
-
-// RegenerateAllSitesFPM is kept as an internal compatibility name. LSPHP is
-// configured per OpenLiteSpeed virtual host, so PHP baseline changes require
-// rebuilding those vhosts rather than writing PHP-FPM pool files.
-func RegenerateAllSitesFPM() error {
-	return RegenerateAllSitesNginx()
 }

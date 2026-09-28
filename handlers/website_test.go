@@ -41,8 +41,8 @@ func TestToggleStatusRejectsEnableForErrorSite(t *testing.T) {
 		database.DB = oldDB
 	})
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
-		VALUES ('error site','error.example.com','error','wordpress','u','/www/error','/logs/error','db','u','/php/error','/nginx/error')`)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
+		VALUES ('error site','error.example.com','error','wordpress','u','/www/error','/logs/error','db','u','/php/error','/openlitespeed/error')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,11 +320,11 @@ func setupWebsiteLogFilesHandlerTest(t *testing.T, siteType string) (*gin.Engine
 	result, err := database.GetDB().Exec(`
 		INSERT INTO websites (
 			name, domain, aliases, status, system_user, web_root, log_dir,
-			db_name, db_user, php_pool_path, nginx_conf_path, site_type
+			db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type
 		) VALUES (
 			'example', 'example.com', '', 'active', 'wp_example', ?, ?,
-			'db_example', 'user_example', '/etc/php/8.3/fpm/pool.d/example.conf',
-			'/etc/nginx/sites-available/example.conf', ?
+			'db_example', 'user_example', '/tmp/lshttpd/example.sock',
+			'/etc/openlitespeed/sites-available/example.conf', ?
 		)
 	`, t.TempDir(), logDir, siteType)
 	if err != nil {

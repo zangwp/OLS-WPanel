@@ -64,7 +64,7 @@
                         <li>返回 <span class="text-gray-300">HTTP 429</span> — 超出请求频率限制</li>
                         <li>敏感文件扫描返回 <span class="text-gray-300">404</span> — 如 <code class="text-gray-300">.env</code>、<code class="text-gray-300">.git</code>、<code class="text-gray-300">wp-config.php</code>、<code class="text-gray-300">.sql</code>、压缩包等</li>
                     </ul>
-                    <p class="text-blue-300 mt-2">{{t .Lang "firewall.rule_web_nginx_detail"}}</p>
+                    <p class="text-blue-300 mt-2">{{t .Lang "firewall.rule_web_protection_detail"}}</p>
                     <p class="text-gray-500 mt-1">以上 2 条共用同一条 Fail2ban 规则（jail: <code class="text-gray-300">olswpanel</code>），封禁列表「来源」列只会统一显示「Web防护」，无法从来源反查具体命中哪一条，可结合「原因」列或站点日志判断。</p>
                 </div>
                 <div id="rules-404" class="scroll-mt-4 rounded p-2 -mx-2">
@@ -96,7 +96,7 @@
                     <ul class="space-y-1 ml-2">
                         <li><span class="text-blue-400">Fail2ban</span> — 管理来源「Web防护」封禁（jail: <code class="text-gray-300">olswpanel</code>）、来源「登录防护」封禁（jail: <code class="text-gray-300">olswpanel-login</code>）、来源「404防御」封禁（jail: <code class="text-gray-300">olswpanel-404</code>）、来源「SQL 注入防护」封禁（jail: <code class="text-gray-300">olswpanel-sqli</code>）和来源「SSH防护」封禁（jail: <code class="text-gray-300">olswpanel-sshd</code>，复用与 Web防护相同的阈值，检测 <code class="text-gray-300">/var/log/auth.log</code> 中的 SSH 登录失败），到期自动释放</li>
                         <li><span class="text-purple-400">Nftables 持久</span> — 通过独立 IPv4/IPv6 集合管理管理员手动永久封禁、来源「扫描防御」封禁（jail: <code class="text-gray-300">panel_scan</code>）和来源「面板」封禁（jail: <code class="text-gray-300">panel</code>），独立于 Fail2ban；有期限的记录到期解除，手动永久封禁需管理员解封</li>
-                        <li><span class="text-green-400">面板持久黑名单</span> — Fail2ban 通过面板兼容命令同步到 IPv4/IPv6 nftables 集合；不再生成或维护 Nginx geo 文件</li>
+                        <li><span class="text-green-400">面板持久黑名单</span> — Fail2ban 通过面板命令同步到 IPv4/IPv6 nftables 集合</li>
                     </ul>
                     <p class="text-gray-500 mt-1">Fail2ban 负责判定和到期释放，nftables 负责持久封禁。经 CDN 转发时，只有 OpenLiteSpeed 已确认来源属于受信任代理，面板才采用转发的访客 IP。</p>
                 </div>
@@ -137,7 +137,7 @@
                 </div>
                 <div>
                     <p class="text-white font-semibold mb-1">请求频率限制原理</p>
-                    <p>OLS WPanel v1.0.0 不提供旧版 Nginx 动态请求限速开关。当前页面只展示基于日志证据的 Fail2ban 规则和 nftables 封禁状态。</p>
+                    <p>OLS WPanel v1.0.0 的 Web 防护使用 OpenLiteSpeed 日志、Fail2ban 和 nftables；当前页面展示已生效的检测与封禁状态。</p>
                     <p class="text-green-400 mt-1">需要应用层限流时，请使用 Cloudflare WAF/Rate Limiting 或经验证的 OpenLiteSpeed 原生规则，并先在测试站验证。</p>
                 </div>
                 <div>
@@ -576,7 +576,7 @@ function firewallManager() {
             const status = this.currentBanReadStatus;
             if (!status) return false;
             const fail2ban = status.fail2ban || {};
-            return !status.nftables || !status.nginx || ['olswpanel', 'olswpanel-404', 'olswpanel-login', 'olswpanel-sshd', 'olswpanel-sqli'].some(jail => !fail2ban[jail]);
+            return !status.nftables || ['olswpanel', 'olswpanel-404', 'olswpanel-login', 'olswpanel-sshd', 'olswpanel-sqli'].some(jail => !fail2ban[jail]);
         },
         async fetchHistory() {
             this.historyLoading = true;
@@ -715,7 +715,6 @@ function firewallManager() {
             return event.event_type || '--';
         },
         fileEventSourceLabel(event) {
-            if (event.source === 'nginx') return event.request_method ? (t('firewall.source_nginx') + ' ' + event.request_method) : t('firewall.source_nginx');
             if (event.source === 'scanner') return t('firewall.source_scanner');
             if (event.source === 'integrity') return t('firewall.source_integrity');
             return event.source || '--';
@@ -734,7 +733,6 @@ function firewallManager() {
             if (ban.source_jail === 'panel_scan') return t('firewall.source_scan');
             if (ban.source_jail === 'manual') return t('firewall.source_manual');
             if (ban.source_jail === 'nftables') return t('firewall.source_nftables');
-            if (ban.source_jail === 'nginx') return t('firewall.source_nginx');
             if (ban.ban_level >= 5) return t('firewall.source_nftables');
             return ban.source_jail || '--';
         },

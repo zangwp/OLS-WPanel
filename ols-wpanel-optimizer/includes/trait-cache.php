@@ -61,7 +61,7 @@ trait OLSW_Optimizer_Cache_Trait {
         if (!current_user_can('manage_options')) return;
         check_admin_referer('olsw_cache_preload');
 
-        if (get_option(self::OPTION_FCACHE_ENABLED, '0') !== '1') {
+        if (get_option(self::OPTION_LSCACHE_ENABLED, '0') !== '1') {
             self::redirect_preload_notice('failed', 0);
         }
 
@@ -175,7 +175,7 @@ trait OLSW_Optimizer_Cache_Trait {
         if (get_option(self::OPTION_PRELOAD_ENABLED, '0') !== '1') {
             return 0;
         }
-        if (get_option(self::OPTION_FCACHE_ENABLED, '0') !== '1') {
+        if (get_option(self::OPTION_LSCACHE_ENABLED, '0') !== '1') {
             return 0;
         }
         return self::queue_preload($urls, $reason);

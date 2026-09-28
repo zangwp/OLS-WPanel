@@ -133,7 +133,7 @@ func ingestSecurityLogLine(db *sql.DB, site wpSecuritySite, line string, checker
 	}
 
 	status, _ := strconv.Atoi(m[5])
-	occurred := parseNginxAccessTime(m[2])
+	occurred := parseWebAccessTime(m[2])
 	if occurred.IsZero() {
 		occurred = time.Now().UTC()
 	}

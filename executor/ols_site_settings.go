@@ -12,25 +12,16 @@ import (
 	"github.com/zangwp/OLS-WPanel/models"
 )
 
-var nginxCustomDir = "/www/ols-wpanel/nginx-custom"
-
 var (
-	persistAccessLogMode = saveAccessLogMode
-	applyAccessLogNginx  = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
-		return engine.ApplyNginxConfig(content, targetPath, enabledPath)
+	persistAccessLogMode   = saveAccessLogMode
+	applyAccessLogOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
+		return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 	}
-	persistDocumentRoot    = saveDocumentRoot
-	applyDocumentRootNginx = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
-		return engine.ApplyNginxConfig(content, targetPath, enabledPath)
+	persistDocumentRoot       = saveDocumentRoot
+	applyDocumentRootOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
+		return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 	}
 )
-
-func executeSaveNginxCustom(task *Task) TaskResult {
-	if _, ok := task.Payload.(*SaveNginxCustomPayload); !ok {
-		return TaskResult{Success: false, Message: "任务参数类型错误"}
-	}
-	return TaskResult{Success: false, Message: "OpenLiteSpeed v1.0.0 不支持旧版 Nginx 自定义配置"}
-}
 
 func executeSetAccessLogMode(task *Task) TaskResult {
 	payload, ok := task.Payload.(*SetAccessLogModePayload)
@@ -48,29 +39,29 @@ func executeSetAccessLogMode(task *Task) TaskResult {
 	cfg := config.AppConfig
 
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
-	nginxData, err := nginxDataFromSiteChecked(site)
+	vhostData, err := olsVHostDataFromSiteChecked(site)
 	if err != nil {
 		return taskFailure("CDN 真实 IP 配置无效", err)
 	}
-	nginxData.AccessLogMode = payload.Mode
+	vhostData.AccessLogMode = payload.Mode
 
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	vhostConfig, err := engine.RenderOLSVHostConfig(vhostData)
 	if err != nil {
-		log.Printf("渲染 Nginx 配置失败: %v", err)
-		return taskFailure("渲染 Nginx 配置失败", err)
+		log.Printf("渲染 OpenLiteSpeed 虚拟主机配置失败: %v", err)
+		return taskFailure("渲染 OpenLiteSpeed 虚拟主机配置失败", err)
 	}
 
 	if err := persistAccessLogMode(site.ID, payload.Mode); err != nil {
 		return taskFailure("保存访问日志模式失败", err)
 	}
 
-	if err := applyAccessLogNginx(engine, nginxConfig, site.NginxConfPath,
-		nginxEnabledPath(cfg, site.NginxConfPath, site.Domain)); err != nil {
-		log.Printf("应用 Nginx 配置失败: %v", err)
+	if err := applyAccessLogOLSVHost(engine, vhostConfig, site.OLSVHostConfigPath,
+		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
+		log.Printf("应用 OpenLiteSpeed 虚拟主机配置失败: %v", err)
 		if restoreErr := persistAccessLogMode(site.ID, site.AccessLogMode); restoreErr != nil {
-			return TaskResult{Success: false, Message: "应用 Nginx 配置失败，访问日志状态恢复失败，请人工检查"}
+			return TaskResult{Success: false, Message: "应用 OpenLiteSpeed 配置失败，访问日志状态恢复失败，请人工检查"}
 		}
-		return taskFailure("应用 Nginx 配置失败", err)
+		return taskFailure("应用 OpenLiteSpeed 配置失败", err)
 	}
 
 	// Clear log file when turning off
@@ -139,23 +130,23 @@ func executeSetCDNRealIP(task *Task) TaskResult {
 
 	cfg := config.AppConfig
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
-	nginxData, err := nginxDataFromSiteChecked(&siteCopy)
+	vhostData, err := olsVHostDataFromSiteChecked(&siteCopy)
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	vhostConfig, err := engine.RenderOLSVHostConfig(vhostData)
 	if err != nil {
-		log.Printf("渲染 Nginx 配置失败: %v", err)
-		return taskFailure("渲染 Nginx 配置失败", err)
+		log.Printf("渲染 OpenLiteSpeed 虚拟主机配置失败: %v", err)
+		return taskFailure("渲染 OpenLiteSpeed 虚拟主机配置失败", err)
 	}
 
 	oldEnabled := site.CDNRealIPEnabled
 	oldGroupIDs := cdnRealIPGroupIDs(site.CDNRealIPGroups)
-	oldNginxData, oldDataErr := nginxDataFromSiteChecked(site)
-	var oldNginxConfig string
+	oldVHostData, oldDataErr := olsVHostDataFromSiteChecked(site)
+	var oldVHostConfig string
 	var oldRenderErr error
 	if oldDataErr == nil {
-		oldNginxConfig, oldRenderErr = engine.RenderNginxConfig(oldNginxData)
+		oldVHostConfig, oldRenderErr = engine.RenderOLSVHostConfig(oldVHostData)
 	} else {
 		oldRenderErr = oldDataErr
 	}
@@ -167,19 +158,19 @@ func executeSetCDNRealIP(task *Task) TaskResult {
 		_ = ApplyOLSTrustedProxyList()
 		return taskFailure("CDN 真实 IP 已回滚，OpenLiteSpeed 可信代理配置失败", err)
 	}
-	if err := engine.ApplyNginxConfig(nginxConfig, site.NginxConfPath,
-		nginxEnabledPath(cfg, site.NginxConfPath, site.Domain)); err != nil {
-		log.Printf("应用 Nginx 配置失败: %v", err)
+	if err := engine.ApplyOLSVHostConfig(vhostConfig, site.OLSVHostConfigPath,
+		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
+		log.Printf("应用 OpenLiteSpeed 虚拟主机配置失败: %v", err)
 		_ = SaveWebsiteCDNRealIPSettings(site.ID, oldEnabled, oldGroupIDs)
 		_ = ApplyOLSTrustedProxyList()
-		return taskFailure("应用 Nginx 配置失败", err)
+		return taskFailure("应用 OpenLiteSpeed 虚拟主机配置失败", err)
 	}
 	if err := ApplyFail2banSettings(); err != nil {
 		_ = SaveWebsiteCDNRealIPSettings(site.ID, oldEnabled, oldGroupIDs)
 		_ = ApplyOLSTrustedProxyList()
 		if oldRenderErr == nil {
-			_ = engine.ApplyNginxConfig(oldNginxConfig, site.NginxConfPath,
-				nginxEnabledPath(cfg, site.NginxConfPath, site.Domain))
+			_ = engine.ApplyOLSVHostConfig(oldVHostConfig, site.OLSVHostConfigPath,
+				olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain))
 		}
 		return taskFailure("CDN 真实 IP 已回滚，Fail2ban 白名单应用失败", err)
 	}
@@ -238,28 +229,28 @@ func executeSetDocumentRoot(task *Task) TaskResult {
 
 	siteCopy := *site
 	siteCopy.DocumentRootSubdir = documentRootSubdir
-	nginxData, err := nginxDataFromSiteChecked(&siteCopy)
+	vhostData, err := olsVHostDataFromSiteChecked(&siteCopy)
 	if err != nil {
 		return taskFailure("CDN 真实 IP 配置无效", err)
 	}
 
 	cfg := config.AppConfig
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	vhostConfig, err := engine.RenderOLSVHostConfig(vhostData)
 	if err != nil {
-		log.Printf("渲染 Nginx 配置失败: %v", err)
-		return taskFailure("渲染 Nginx 配置失败", err)
+		log.Printf("渲染 OpenLiteSpeed 虚拟主机配置失败: %v", err)
+		return taskFailure("渲染 OpenLiteSpeed 虚拟主机配置失败", err)
 	}
 	if err := persistDocumentRoot(site.ID, documentRootSubdir); err != nil {
 		return taskFailure("保存 Web 入口目录失败", err)
 	}
-	if err := applyDocumentRootNginx(engine, nginxConfig, site.NginxConfPath,
-		nginxEnabledPath(cfg, site.NginxConfPath, site.Domain)); err != nil {
-		log.Printf("应用 Nginx 配置失败: %v", err)
+	if err := applyDocumentRootOLSVHost(engine, vhostConfig, site.OLSVHostConfigPath,
+		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
+		log.Printf("应用 OpenLiteSpeed 虚拟主机配置失败: %v", err)
 		if restoreErr := persistDocumentRoot(site.ID, site.DocumentRootSubdir); restoreErr != nil {
-			return TaskResult{Success: false, Message: "应用 Nginx 配置失败，Web 入口目录状态恢复失败，请人工检查"}
+			return TaskResult{Success: false, Message: "应用 OpenLiteSpeed 虚拟主机配置失败，Web 入口目录状态恢复失败，请人工检查"}
 		}
-		return taskFailure("应用 Nginx 配置失败", err)
+		return taskFailure("应用 OpenLiteSpeed 虚拟主机配置失败", err)
 	}
 
 	if documentRootSubdir == "" {

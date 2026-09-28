@@ -66,8 +66,8 @@ func TestWPFleetOverviewHandlerReturnsSafePayload(t *testing.T) {
 		t.Fatalf("response = %+v", response)
 	}
 	for _, forbidden := range []string{
-		"system_user", "web_root", "log_dir", "db_name", "db_user", "php_pool_path", "nginx_conf_path",
-		"fastcgi_cache_key", "ssl_last_error", "ssl_cert_path", "ssl_key_path", "collection_id",
+		"system_user", "web_root", "log_dir", "db_name", "db_user", "lsphp_socket_path", "ols_vhost_config_path",
+		"litespeed_cache_key", "ssl_last_error", "ssl_cert_path", "ssl_key_path", "collection_id",
 		"lease_owner", "runner_hash", "runner_version", "last_error_stage", "response", "stdout", "max_rss", "/tmp/",
 	} {
 		if strings.Contains(rec.Body.String(), forbidden) {
@@ -153,7 +153,7 @@ func TestWPFleetOverviewHandlerRefreshAllReturnsMultiStatusForPartialFailure(t *
 		t.Fatal(err)
 	}
 	for id := 1; id <= 101; id++ {
-		if _, err := tx.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/nginx')`, id, fmt.Sprintf("site-%d", id), fmt.Sprintf("site-%d.example", id), fmt.Sprintf("wp_%d", id)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/openlitespeed')`, id, fmt.Sprintf("site-%d", id), fmt.Sprintf("site-%d.example", id), fmt.Sprintf("wp_%d", id)); err != nil {
 			t.Fatal(err)
 		}
 	}

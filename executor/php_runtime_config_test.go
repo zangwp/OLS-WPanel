@@ -112,7 +112,7 @@ func TestEnsurePHPRuntimeConfigFileFreshInstallIncludesOpcacheDefaults(t *testin
 	}
 }
 
-func TestRenderPHPFPMPoolUsesRuntimeConfig(t *testing.T) {
+func TestRenderOLSVHostUsesRuntimeConfig(t *testing.T) {
 	oldPath := phpRuntimeConfigPath
 	phpRuntimeConfigPath = filepath.Join(t.TempDir(), "99-olswpanel.ini")
 	t.Cleanup(func() { phpRuntimeConfigPath = oldPath })
@@ -122,93 +122,57 @@ func TestRenderPHPFPMPoolUsesRuntimeConfig(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	engine := NewTemplateEngine("")
-	rendered, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{
-		Domain:     "example.com",
-		PoolName:   "example_com",
-		SystemUser: "wp_example",
-		WebRoot:    "/www/wwwroot/example.com",
-		SocketPath: "/run/php",
-		SocketName: "example_com",
+	rendered, err := renderOLSVHostConfig(&OLSVHostData{
+		Domain: "example.com", SystemUser: "wp_example",
+		WebRoot: "/www/wwwroot/example.com", LogDir: "/www/wwwlogs/example.com",
+		PHPProxy: "unix:/tmp/lshttpd/example.sock", TemplateVer: "v1.0", SiteType: "wordpress",
 	})
 	if err != nil {
 		t.Fatalf("render pool: %v", err)
 	}
 
 	for _, want := range []string{
-		"php_admin_value[upload_max_filesize] = 128M",
-		"php_admin_value[post_max_size] = 128M",
-		"php_admin_value[max_execution_time] = 100",
-		"php_admin_value[max_input_time] = 100",
-		"php_admin_value[memory_limit] = 512M",
+		"php_admin_value upload_max_filesize 128M",
+		"php_admin_value post_max_size 128M",
+		"php_admin_value max_execution_time 100",
+		"php_admin_value max_input_time 100",
+		"php_admin_value memory_limit 512M",
 	} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered pool missing %q:\n%s", want, rendered)
+			t.Fatalf("rendered vhost missing %q:\n%s", want, rendered)
 		}
 	}
 }
 
-func TestRenderPHPFPMPoolUsesPersistedMaxChildren(t *testing.T) {
-	engine := NewTemplateEngine("")
-	rendered, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{
-		Domain:      "example.com",
-		PoolName:    "example_com",
-		SystemUser:  "wp_example",
-		WebRoot:     "/www/wwwroot/example.com",
-		SocketPath:  "/run/php",
-		SocketName:  "example_com",
-		MaxChildren: "6",
+func TestRenderOLSVHostUsesPersistedMaxChildren(t *testing.T) {
+	rendered, err := renderOLSVHostConfig(&OLSVHostData{
+		Domain: "example.com", SystemUser: "wp_example",
+		WebRoot: "/www/wwwroot/example.com", LogDir: "/www/wwwlogs/example.com",
+		PHPProxy: "unix:/tmp/lshttpd/example.sock", TemplateVer: "v1.0", SiteType: "wordpress", PHPMaxChildren: 6,
 	})
 	if err != nil {
 		t.Fatalf("render pool: %v", err)
 	}
-	if !strings.Contains(rendered, "pm.max_children = 6") {
+	if !strings.Contains(rendered, "maxConns               6") || !strings.Contains(rendered, "PHP_LSAPI_CHILDREN=6") {
 		t.Fatalf("expected persisted MaxChildren to be rendered, got:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "pm.start_servers") || strings.Contains(rendered, "pm.min_spare_servers") || strings.Contains(rendered, "pm.max_spare_servers") {
-		t.Fatalf("expected dead ondemand-mode directives to be removed, got:\n%s", rendered)
+	if strings.Contains(rendered, "pm.max_children") {
+		t.Fatalf("expected legacy pool directives to be absent, got:\n%s", rendered)
 	}
 }
 
-func TestRenderPHPFPMPoolFallsBackToOldDefaultWhenMaxChildrenEmpty(t *testing.T) {
-	engine := NewTemplateEngine("")
-	rendered, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{
-		Domain:     "example.com",
-		PoolName:   "example_com",
-		SystemUser: "wp_example",
-		WebRoot:    "/www/wwwroot/example.com",
-		SocketPath: "/run/php",
-		SocketName: "example_com",
-	})
-	if err != nil {
-		t.Fatalf("render pool: %v", err)
-	}
-	if !strings.Contains(rendered, "pm.max_children = 10") {
-		t.Fatalf("expected fallback default of 10 when MaxChildren is unset, got:\n%s", rendered)
-	}
-}
-
-// TestRenderPHPFPMPoolFallsBackWhenMaxChildrenIsZeroOrInvalid 覆盖代码审核发现的一个
-// 边界情况：如果调用方漏加载 site.PHPFPMMaxChildren（Go 零值是 0），strconv.Itoa(0)
-// 得到的是非空字符串 "0"，只判断"是否为空字符串"的兜底逻辑不会触发，会渲染出
-// pm.max_children = 0（php-fpm8.3 -t 会拒绝，但不该指望语法检查这层保护兜底）。
-func TestRenderPHPFPMPoolFallsBackWhenMaxChildrenIsZeroOrInvalid(t *testing.T) {
-	engine := NewTemplateEngine("")
-	for _, bad := range []string{"0", "-5", "not-a-number"} {
-		rendered, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{
-			Domain:      "example.com",
-			PoolName:    "example_com",
-			SystemUser:  "wp_example",
-			WebRoot:     "/www/wwwroot/example.com",
-			SocketPath:  "/run/php",
-			SocketName:  "example_com",
-			MaxChildren: bad,
+func TestRenderOLSVHostFallsBackWhenMaxChildrenInvalid(t *testing.T) {
+	for _, bad := range []int{0, -5, 1001} {
+		rendered, err := renderOLSVHostConfig(&OLSVHostData{
+			Domain: "example.com", SystemUser: "wp_example",
+			WebRoot: "/www/wwwroot/example.com", LogDir: "/www/wwwlogs/example.com",
+			PHPProxy: "unix:/tmp/lshttpd/example.sock", TemplateVer: "v1.0", SiteType: "wordpress", PHPMaxChildren: bad,
 		})
 		if err != nil {
-			t.Fatalf("render pool with MaxChildren=%q: %v", bad, err)
+			t.Fatalf("render vhost with PHPMaxChildren=%d: %v", bad, err)
 		}
-		if !strings.Contains(rendered, "pm.max_children = 10") {
-			t.Fatalf("expected MaxChildren=%q to fall back to 10, got:\n%s", bad, rendered)
+		if !strings.Contains(rendered, "maxConns               10") || !strings.Contains(rendered, "PHP_LSAPI_CHILDREN=10") {
+			t.Fatalf("expected PHPMaxChildren=%d to fall back to 10, got:\n%s", bad, rendered)
 		}
 	}
 }

@@ -32,25 +32,24 @@ func pathBaseWithoutExt(path, fallback string) string {
 	return base
 }
 
-func phpPoolName(phpPoolPath, domain string) string {
-	return pathBaseWithoutExt(phpPoolPath, buildSiteName(domain))
+func phpSocketPath(cfg *config.Config, persistedPath, domain string) string {
+	if strings.TrimSpace(persistedPath) != "" {
+		return filepath.Clean(persistedPath)
+	}
+	return filepath.Join(cfg.Paths.LSPHPSocketDir, siteConfigBaseName(buildSiteName(domain))+".sock")
 }
 
-func phpSocketPath(cfg *config.Config, phpPoolPath, domain string) string {
-	return filepath.Join(cfg.Paths.PHPFPMSock, phpPoolName(phpPoolPath, domain)+".sock")
-}
-
-func nginxEnabledPath(cfg *config.Config, nginxConfPath, domain string) string {
-	confName := strings.TrimSpace(filepath.Base(nginxConfPath))
+func olsVHostEnabledPath(cfg *config.Config, olsVHostConfigPath, domain string) string {
+	confName := strings.TrimSpace(filepath.Base(olsVHostConfigPath))
 	if confName == "" || confName == "." || confName == string(filepath.Separator) {
 		confName = buildSiteName(domain) + ".conf"
 	}
-	return filepath.Join(cfg.Paths.NginxSitesEnabled, confName)
+	return filepath.Join(cfg.Paths.OLSVHostsEnabled, confName)
 }
 
 func validateUnixSocketPath(path string) error {
 	if len([]byte(path)) > maxUnixSocketPathLen {
-		return fmt.Errorf("PHP-FPM socket 路径过长: %s", path)
+		return fmt.Errorf("LSPHP socket 路径过长: %s", path)
 	}
 	return nil
 }

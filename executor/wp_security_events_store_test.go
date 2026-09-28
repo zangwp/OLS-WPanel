@@ -14,8 +14,8 @@ import (
 func seedWPSecurityEventSite(t *testing.T, logDir string) {
 	t.Helper()
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`,
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`,
 		t.TempDir(), logDir); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestIngestWPSecurityEventsHandlesPartialTrailingLine(t *testing.T) {
 		t.Fatalf("ingest count = %d, want 1 (partial trailing line must not be consumed)", n)
 	}
 
-	// 补全那半行并加上换行符，模拟 nginx 写完了这一行
+	// 补全那半行并加上换行符，模拟 openlitespeed 写完了这一行
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatal(err)

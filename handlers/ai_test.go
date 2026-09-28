@@ -45,8 +45,8 @@ func TestDiagnoseSendsPreparedPromptAndRestoresAliases(t *testing.T) {
 	if err := database.RunMigrations(); err != nil {
 		t.Fatal(err)
 	}
-	result, err := db.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
-		VALUES ('AI Privacy','privacy.example','wp_privacy','/www/wwwroot/privacy.example','/tmp/privacy-logs','wp_privacy','wp_privacy','/tmp/privacy-pool.conf','/tmp/privacy-nginx.conf')`)
+	result, err := db.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
+		VALUES ('AI Privacy','privacy.example','wp_privacy','/www/wwwroot/privacy.example','/tmp/privacy-logs','wp_privacy','wp_privacy','/tmp/privacy-pool.conf','/tmp/privacy-openlitespeed.conf')`)
 	if err != nil {
 		t.Fatal(err)
 	}

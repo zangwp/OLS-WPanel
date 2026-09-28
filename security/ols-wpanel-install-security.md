@@ -4,7 +4,7 @@
 
 ## 1. 首先理解 root 安装器的风险
 
-OLS WPanel 要安装和管理 Nginx、PHP-FPM、MariaDB、Redis、Fail2ban、nftables 与 systemd，因此安装器必须以 root 运行。root 脚本理论上可以修改整台服务器，开源可读不等于下载内容真实，也不等于代码没有缺陷。
+OLS WPanel 要安装和管理 OpenLiteSpeed、LSPHP、MariaDB、Redis、Fail2ban、nftables 与 systemd，因此安装器必须以 root 运行。root 脚本理论上可以修改整台服务器，开源可读不等于下载内容真实，也不等于代码没有缺陷。
 
 生产服务器应使用[验签安装指南](../docs/verified-install.md)：
 
@@ -66,7 +66,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 
 - 现有 MariaDB 已设置未知 root 密码时，fresh install 不会自动导入该密码，可能失败；
 - 由不同发行身份创建的面板不能通过手动改名或 repair 安全迁移，见[升级兼容性说明](../docs/upgrade-compatibility.md)；
-- 云厂商镜像、自定义 APT 源、现有 Nginx/PHP/防火墙策略可能与安装器冲突；
+- 云厂商镜像、自定义 APT 源、现有 OpenLiteSpeed/LSPHP/防火墙策略可能与安装器冲突；
 - 建议先使用可丢弃 VM 验证，再在已有完整快照的主机执行。
 
 最低内存要求为 1 GB。物理内存不超过 8 GB、没有已启用 Swap 且磁盘检查通过时，安装器可能创建 2 GB `/swapfile`。
@@ -77,7 +77,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 
 - 配置当前发行版的软件源并安装/启用系统包；Debian 使用经固定 keyring 校验的 PHP 源，Ubuntu 使用 Noble 原生 PHP 8.3；
 - 写入 sysctl、文件描述符、Swap 与 systemd 配置；
-- 安装并配置 Nginx、PHP-FPM、MariaDB、Redis、Fail2ban 与 nftables/UFW 规则；
+- 安装并配置 OpenLiteSpeed、LSPHP、MariaDB、Redis、Fail2ban 与 nftables/UFW 规则；
 - 创建 `/www/ols-wpanel`、网站/日志/证书目录和面板服务；
 - 创建面板 SQLite 数据库、配置、TLS 私钥和管理凭据；
 - 下载 WordPress 备用包；
@@ -133,7 +133,7 @@ repair 预检会：
 - 验证现有 TLS 配对并保留有效或已过期身份，不会静默替换自定义证书；
 - 在修改前备份关键文件和 SQLite，并记录 SHA-256。
 
-失败时安装器会尝试恢复已备份的二进制、unit、数据库和 TLS 文件，但回滚也可能失败，而且不是整机快照。它不保证恢复面板目录外的所有 Nginx、PHP、Fail2ban、WordPress 插件或站点数据库副作用。repair 前仍应创建主机和业务数据备份。
+失败时安装器会尝试恢复已备份的二进制、unit、数据库和 TLS 文件，但回滚也可能失败，而且不是整机快照。它不保证恢复面板目录外的所有 OpenLiteSpeed、PHP、Fail2ban、WordPress 插件或站点数据库副作用。repair 前仍应创建主机和业务数据备份。
 
 ## 7. 卸载与彻底清理
 
@@ -141,7 +141,7 @@ repair 预检会：
 
 普通卸载的目标是保留 `/www/wwwroot`、`/www/wwwlogs`、站点证书、MariaDB 数据和已安装软件，同时清理已知的 OLS WPanel 服务/任务入口。安装器会删除带有 OLS 所有权标记的专用 APT 源，并恢复它曾禁用且未发生路径冲突的系统源；后来由管理员创建的同名文件不会被覆盖。它不承诺把主机精确恢复到安装前状态，也不替代卸载后审计。
 
-“彻底清空”是面向专用主机的破坏性操作。它会删除所有 Nginx site 配置、PHP-FPM pool、`/www` 下的网站/日志/证书并卸载共享服务，可能破坏非 OLS 工作负载。它不是安全擦除，MariaDB 数据和部分用户、APT、防火墙或自定义配置仍可能残留。只应在已有可恢复整机快照时使用，并认真核对二次确认提示。
+“彻底清空”是面向专用主机的破坏性操作。它会删除所有 OpenLiteSpeed 站点配置、LSPHP 运行资源、`/www` 下的网站/日志/证书并卸载共享服务，可能破坏非 OLS 工作负载。它不是安全擦除，MariaDB 数据和部分用户、APT、防火墙或自定义配置仍可能残留。只应在已有可恢复整机快照时使用，并认真核对二次确认提示。
 
 ## 8. 本地与隔离环境安装
 
@@ -176,4 +176,4 @@ ss -lntp | grep ':8443'
 openssl x509 -in /www/ols-wpanel/certs/panel.crt -noout -fingerprint -sha256
 ```
 
-同时检查 APT 源、防火墙、Nginx/PHP-FPM 配置、计划任务和备份恢复流程。发现问题时先保留日志与快照，不要把重装系统作为默认的第一步。
+同时检查 APT 源、防火墙、OpenLiteSpeed/LSPHP 配置、计划任务和备份恢复流程。发现问题时先保留日志与快照，不要把重装系统作为默认的第一步。

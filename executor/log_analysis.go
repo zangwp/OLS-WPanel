@@ -45,7 +45,7 @@ func ReconcileInterruptedLogAnalysisJobs(db *sql.DB) (int64, error) {
 var combinedLogPattern = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^]]+)\] "(\S+) ([^ ]+) [^"]+" (\d{3}) \S+ "[^"]*" "([^"]*)"`)
 var accessLogPeerPattern = regexp.MustCompile(`(?:^|\s)peer=(\S+)\s*$`)
 var bracketTimePattern = regexp.MustCompile(`^\[([^]]+)\]`)
-var nginxTimePattern = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
+var webTimePattern = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
 var logAnalysisIPv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 var logAnalysisSecretPattern = regexp.MustCompile(`(?i)(password|passwd|token|api[_-]?key|authorization|cookie)([=: ]+)([^\s&"']+)`)
 var logAnalysisWebRootPattern = regexp.MustCompile(`/www/wwwroot/[^/\s]+`)
@@ -293,7 +293,7 @@ func (a *logAnalysisAccumulator) consumeError(line, base string, startAt, endAt 
 	case strings.Contains(lower, "warning") || strings.Contains(lower, "deprecated") || strings.Contains(lower, "notice"):
 		a.report.PHPWarningCount++
 	case strings.HasPrefix(base, "error.log"):
-		a.report.NginxErrorCount++
+		a.report.WebServerErrorCount++
 		if strings.Contains(lower, "upstream") || strings.Contains(lower, "permission denied") || strings.Contains(lower, "connect() failed") {
 			a.addSample(sanitizeLogSample(line))
 		}
@@ -301,7 +301,7 @@ func (a *logAnalysisAccumulator) consumeError(line, base string, startAt, endAt 
 }
 
 func parseErrorLogTime(line string) (time.Time, bool) {
-	if m := nginxTimePattern.FindStringSubmatch(line); len(m) == 2 {
+	if m := webTimePattern.FindStringSubmatch(line); len(m) == 2 {
 		t, err := time.ParseInLocation("2006/01/02 15:04:05", m[1], time.Local)
 		return t, err == nil
 	}

@@ -64,12 +64,12 @@ func RecommendOPcacheMemoryConsumptionMB(facts SystemFacts) int {
 	return result
 }
 
-// RecommendPHPFPMMaxChildren 计算新建站点的 pm.max_children 建议值。
+// RecommendLSPHPMaxChildren 计算新建站点的 LSPHP 子进程上限建议值。
 //
 // 分别按总内存和 CPU 核心数算出两个上限，取较小值。这个值只在建站时计算一次并持久化，
-// 之后不会因为服务器又建了多少个站点而重新计算——pm=ondemand 模式下闲置站点本身不占用
-// 常驻 worker，多站点之间的资源 overcommit 是安全的，所以这里刻意不考虑站点数量维度。
-func RecommendPHPFPMMaxChildren(facts SystemFacts) int {
+// 之后不会因为服务器又建了多少个站点而重新计算。LSPHP 由 OpenLiteSpeed 按需拉起，
+// 闲置站点不常驻 worker，因此这里刻意不考虑站点数量维度。
+func RecommendLSPHPMaxChildren(facts SystemFacts) int {
 	totalMB := int(facts.TotalMemoryBytes / 1024 / 1024)
 
 	var memoryCap int

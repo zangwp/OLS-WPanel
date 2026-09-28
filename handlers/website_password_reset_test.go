@@ -35,8 +35,8 @@ func setupPasswordResetTestSite(t *testing.T, webRoot, systemUser, initialMode s
 		t.Fatalf("RunUpgrades(): %v", err)
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type, password_reset_mode, file_lock_enabled)
-		VALUES (1, 'pr.example.com', 'pr.example.com', 'active', ?, ?, '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress', ?, 0)`,
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, password_reset_mode, file_lock_enabled)
+		VALUES (1, 'pr.example.com', 'pr.example.com', 'active', ?, ?, '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress', ?, 0)`,
 		systemUser, webRoot, initialMode); err != nil {
 		t.Fatalf("insert site: %v", err)
 	}

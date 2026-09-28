@@ -28,10 +28,10 @@ func TestWebsiteListReturnsSeparateMonitoringStates(t *testing.T) {
 		t.Helper()
 		result, err := database.GetDB().Exec(`INSERT INTO websites (
 			name, domain, status, system_user, web_root, log_dir, db_name, db_user,
-			php_pool_path, nginx_conf_path, site_type, monitoring_enabled
+			lsphp_socket_path, ols_vhost_config_path, site_type, monitoring_enabled
 		) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			domain, domain, "user_"+domain, "/www/"+domain, "/logs/"+domain,
-			"db_"+domain, "dbuser_"+domain, "/php/"+domain, "/nginx/"+domain,
+			"db_"+domain, "dbuser_"+domain, "/php/"+domain, "/openlitespeed/"+domain,
 			siteType, monitoringEnabled)
 		if err != nil {
 			t.Fatalf("insert %s: %v", domain, err)

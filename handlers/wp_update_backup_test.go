@@ -180,10 +180,10 @@ func setupWPUpdateBackupTest(t *testing.T) {
 	})
 	for id, domain := range map[int]string{1: "one.example", 2: "two.example"} {
 		_, err := database.GetDB().Exec(`INSERT INTO websites
-			(id,name,domain,aliases,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type)
+			(id,name,domain,aliases,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			id, domain, domain, "", "active", "wp_test", "/www/wwwroot/"+domain, "/www/wwwlogs/"+domain,
-			"db_test", "user_test", "/etc/php/8.3/fpm/pool.d/test.conf", "/etc/nginx/sites-available/test.conf", "wordpress")
+			"db_test", "user_test", "/tmp/lshttpd/test.sock", "/etc/openlitespeed/sites-available/test.conf", "wordpress")
 		if err != nil {
 			t.Fatal(err)
 		}

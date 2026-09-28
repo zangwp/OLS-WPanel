@@ -191,7 +191,7 @@ func aiDevelopmentSiteFromRequest(c *gin.Context) (int, *models.Website, bool) {
 func websiteAIDevelopmentSite(site *models.Website) executor.AIDevelopmentSite {
 	return executor.AIDevelopmentSite{
 		ID: int64(site.ID), Domain: site.Domain, SystemUser: site.SystemUser, WebRoot: site.WebRoot,
-		LogDir: site.LogDir, PHPPoolPath: site.PHPPoolPath, NginxConfPath: site.NginxConfPath,
+		LogDir: site.LogDir, LSPHPSocketPath: site.LSPHPSocketPath, OLSVHostConfigPath: site.OLSVHostConfigPath,
 		DBName: site.DBName, DBUser: site.DBUser,
 	}
 }

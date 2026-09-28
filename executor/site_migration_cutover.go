@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -53,8 +52,8 @@ type siteMigrationCutoverOps interface {
 
 type productionSiteMigrationCutoverOps struct{}
 
-func (productionSiteMigrationCutoverOps) ApplyMarker(nginxPath, enabledPath, block string) error {
-	content, err := os.ReadFile(nginxPath)
+func (productionSiteMigrationCutoverOps) ApplyMarker(olsVHostPath, enabledPath, block string) error {
+	content, err := os.ReadFile(olsVHostPath)
 	if err != nil {
 		return err
 	}
@@ -62,11 +61,11 @@ func (productionSiteMigrationCutoverOps) ApplyMarker(nginxPath, enabledPath, blo
 	if err != nil {
 		return err
 	}
-	return applyMigrationNginxContent(nginxPath, enabledPath, updated)
+	return applyMigrationOLSVHostContent(olsVHostPath, enabledPath, updated)
 }
 
-func (productionSiteMigrationCutoverOps) RemoveMarker(nginxPath, enabledPath string) error {
-	content, err := os.ReadFile(nginxPath)
+func (productionSiteMigrationCutoverOps) RemoveMarker(olsVHostPath, enabledPath string) error {
+	content, err := os.ReadFile(olsVHostPath)
 	if err != nil {
 		return err
 	}
@@ -74,7 +73,7 @@ func (productionSiteMigrationCutoverOps) RemoveMarker(nginxPath, enabledPath str
 	if err != nil {
 		return err
 	}
-	return applyMigrationNginxContent(nginxPath, enabledPath, updated)
+	return applyMigrationOLSVHostContent(olsVHostPath, enabledPath, updated)
 }
 
 func (productionSiteMigrationCutoverOps) RestoreWordPressCron(stagingRoot, webRoot, systemUser string) error {
@@ -134,7 +133,7 @@ func (s *SiteMigrationCutoverService) InstallTargetMarker(ctx context.Context, m
 	issued := s.now().UTC().Unix()
 	marker := SiteMigrationMarkerResponse{Task: migrationSiteID, Role: "target", IssuedAt: issued}
 	marker.Signature = signSiteMigrationMarker(state.MarkerKey, state.MarkerToken, marker)
-	marker, err = s.recordMarkerIntent(ctx, migrationSiteID, state.NginxPath, marker)
+	marker, err = s.recordMarkerIntent(ctx, migrationSiteID, state.OLSVHostPath, marker)
 	if err != nil {
 		return err
 	}
@@ -143,7 +142,7 @@ func (s *SiteMigrationCutoverService) InstallTargetMarker(ctx context.Context, m
 	}
 	payload, _ := json.Marshal(marker)
 	block := renderSiteMigrationTargetMarkerBlock(state.MarkerToken, string(payload))
-	if err := s.ops.ApplyMarker(state.NginxPath, state.EnabledPath, block); err != nil {
+	if err := s.ops.ApplyMarker(state.OLSVHostPath, state.EnabledPath, block); err != nil {
 		return s.cutoverFailed(migrationSiteID, "target_marker_publish_failed", err)
 	}
 	return nil
@@ -313,7 +312,7 @@ func (s *SiteMigrationCutoverService) ResumeActivation(ctx context.Context, migr
 			return s.activationFailed(migrationSiteID, "wp_cron_restore_failed", err)
 		}
 	}
-	if err := s.ops.RemoveMarker(state.NginxPath, state.EnabledPath); err != nil {
+	if err := s.ops.RemoveMarker(state.OLSVHostPath, state.EnabledPath); err != nil {
 		return s.activationFailed(migrationSiteID, "target_marker_remove_failed", err)
 	}
 	var decisionPayload string
@@ -332,10 +331,10 @@ func (s *SiteMigrationCutoverService) ResumeActivation(ctx context.Context, migr
 }
 
 type siteMigrationCutoverState struct {
-	Domain, SiteType, SystemUser, WebRoot string
-	NginxPath, EnabledPath, StagingRoot   string
-	MarkerToken, MarkerKey                string
-	SiteID                                int64
+	Domain, SiteType, SystemUser, WebRoot  string
+	OLSVHostPath, EnabledPath, StagingRoot string
+	MarkerToken, MarkerKey                 string
+	SiteID                                 int64
 }
 
 func (s *SiteMigrationCutoverService) loadCutoverState(ctx context.Context, migrationSiteID, stage string) (siteMigrationCutoverState, error) {
@@ -344,12 +343,12 @@ func (s *SiteMigrationCutoverService) loadCutoverState(ctx context.Context, migr
 	}
 	var state siteMigrationCutoverState
 	var snapshotRaw, outbound string
-	err := s.db.QueryRowContext(ctx, `SELECT ms.target_domain,ms.site_type,ms.target_site_id,ms.settings_snapshot,w.system_user,w.web_root,w.nginx_conf_path,p.outbound_credential
+	err := s.db.QueryRowContext(ctx, `SELECT ms.target_domain,ms.site_type,ms.target_site_id,ms.settings_snapshot,w.system_user,w.web_root,w.ols_vhost_config_path,p.outbound_credential
 		FROM site_migration_sites ms JOIN site_migration_batches mb ON mb.id=ms.batch_id AND mb.direction='target' AND mb.status='active'
 		JOIN site_migration_peers p ON p.id=mb.peer_id AND p.status='paired'
 		JOIN websites w ON w.id=ms.target_site_id
 		JOIN site_migration_locks ml ON ml.migration_site_id=ms.id AND ml.site_id=w.id AND ml.direction='target' AND ml.status='active'
-		WHERE ms.id=? AND ms.stage=?`, migrationSiteID, stage).Scan(&state.Domain, &state.SiteType, &state.SiteID, &snapshotRaw, &state.SystemUser, &state.WebRoot, &state.NginxPath, &outbound)
+		WHERE ms.id=? AND ms.stage=?`, migrationSiteID, stage).Scan(&state.Domain, &state.SiteType, &state.SiteID, &snapshotRaw, &state.SystemUser, &state.WebRoot, &state.OLSVHostPath, &outbound)
 	if err != nil || !IsValidDomain(state.Domain) || len(outbound) < 40 {
 		return siteMigrationCutoverState{}, errors.New("cutover scope unavailable")
 	}
@@ -361,33 +360,33 @@ func (s *SiteMigrationCutoverService) loadCutoverState(ctx context.Context, migr
 		return siteMigrationCutoverState{}, errors.New("cutover marker metadata unavailable")
 	}
 	state.MarkerToken = snapshot.RuntimeSettings.MarkerToken
-	state.EnabledPath = snapshot.TargetSpec.NginxEnabledPath
+	state.EnabledPath = snapshot.TargetSpec.OLSVHostEnabledPath
 	var stagingIdentifier, stagingOwner string
 	if err := s.db.QueryRowContext(ctx, `SELECT identifier,ownership_tag FROM site_migration_resources WHERE migration_site_id=? AND resource_type='target_staging_root' AND status='created'`, migrationSiteID).Scan(&stagingIdentifier, &stagingOwner); err != nil || stagingOwner != migrationSiteID {
 		return siteMigrationCutoverState{}, errors.New("cutover staging ownership unavailable")
 	}
 	state.StagingRoot = filepath.Clean(stagingIdentifier)
-	if state.EnabledPath == "" || state.NginxPath != snapshot.TargetSpec.NginxConfPath {
+	if state.EnabledPath == "" || state.OLSVHostPath != snapshot.TargetSpec.OLSVHostConfigPath {
 		return siteMigrationCutoverState{}, errors.New("cutover target configuration mismatch")
 	}
 	state.MarkerKey = hashMigrationSecret(outbound)
 	return state, nil
 }
 
-func (s *SiteMigrationCutoverService) recordMarkerIntent(ctx context.Context, taskID, nginxPath string, marker SiteMigrationMarkerResponse) (SiteMigrationMarkerResponse, error) {
+func (s *SiteMigrationCutoverService) recordMarkerIntent(ctx context.Context, taskID, olsVHostPath string, marker SiteMigrationMarkerResponse) (SiteMigrationMarkerResponse, error) {
 	message, _ := json.Marshal(marker)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return SiteMigrationMarkerResponse{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO site_migration_resources (migration_site_id,resource_type,identifier,ownership_tag,status,created_at,updated_at) VALUES (?,'target_marker_config',?,?,'created',?,?)`, taskID, nginxPath, taskID, s.now().UTC(), s.now().UTC())
+	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO site_migration_resources (migration_site_id,resource_type,identifier,ownership_tag,status,created_at,updated_at) VALUES (?,'target_marker_config',?,?,'created',?,?)`, taskID, olsVHostPath, taskID, s.now().UTC(), s.now().UTC())
 	if err != nil {
 		return SiteMigrationMarkerResponse{}, err
 	}
 	inserted, _ := result.RowsAffected()
 	var owner, status string
-	if err := tx.QueryRowContext(ctx, `SELECT ownership_tag,status FROM site_migration_resources WHERE migration_site_id=? AND resource_type='target_marker_config' AND identifier=?`, taskID, nginxPath).Scan(&owner, &status); err != nil || owner != taskID || status != "created" {
+	if err := tx.QueryRowContext(ctx, `SELECT ownership_tag,status FROM site_migration_resources WHERE migration_site_id=? AND resource_type='target_marker_config' AND identifier=?`, taskID, olsVHostPath).Scan(&owner, &status); err != nil || owner != taskID || status != "created" {
 		return SiteMigrationMarkerResponse{}, errors.New("target marker intent conflicts")
 	}
 	if inserted == 0 {
@@ -568,7 +567,7 @@ func (s *SiteMigrationCutoverService) activationFailedAtStage(taskID, stage, cod
 }
 
 func renderSiteMigrationTargetMarkerBlock(token, payload string) string {
-	return "    # OLS WPanel migration target marker begin\n    location = /.well-known/ols-wpanel-migration/" + token + " { access_log off; default_type application/json; add_header Cache-Control \"no-store\" always; return 200 '" + payload + "'; }\n    # OLS WPanel migration target marker end\n"
+	return ""
 }
 
 func loadPersistedSiteMigrationTargetMarkerBlock(ctx context.Context, db *sql.DB, migrationSiteID, stage string) (string, string, error) {
@@ -584,7 +583,7 @@ func loadPersistedSiteMigrationTargetMarkerBlock(ctx context.Context, db *sql.DB
 	err = db.QueryRowContext(ctx, `SELECT e.message FROM site_migration_events e
 		JOIN site_migration_resources r ON r.migration_site_id=e.migration_site_id AND r.resource_type='target_marker_config' AND r.identifier=? AND r.ownership_tag=? AND r.status='created'
 		WHERE e.migration_site_id=? AND e.stage='target_marker' AND e.result='info'
-		ORDER BY e.id LIMIT 1`, state.NginxPath, migrationSiteID, migrationSiteID).Scan(&message)
+		ORDER BY e.id LIMIT 1`, state.OLSVHostPath, migrationSiteID, migrationSiteID).Scan(&message)
 	if err != nil {
 		return "", "", errors.New("target marker intent unavailable")
 	}
@@ -597,42 +596,21 @@ func loadPersistedSiteMigrationTargetMarkerBlock(ctx context.Context, db *sql.DB
 }
 
 func injectSiteMigrationTargetMarker(content, block string) (string, error) {
-	serverCount := strings.Count(content, "server {")
-	if serverCount == 0 {
-		return "", errors.New("target marker config unavailable")
-	}
-	if strings.Contains(content, "OLS WPanel migration target marker") {
-		if strings.Count(content, block) != serverCount || strings.Count(content, "OLS WPanel migration target marker begin") != serverCount || strings.Count(content, "OLS WPanel migration target marker end") != serverCount {
-			return "", errors.New("target marker config conflicts")
-		}
-		return content, nil
-	}
-	return strings.ReplaceAll(content, "server {", "server {\n"+block), nil
+	return "", errors.New("website migration target markers are unavailable until their OpenLiteSpeed implementation is complete")
 }
 func removeSiteMigrationTargetMarker(content string) (string, error) {
-	re := regexp.MustCompile(`(?ms)\s*# OLS WPanel migration target marker begin\n.*?# OLS WPanel migration target marker end\n`)
-	updated := re.ReplaceAllString(content, "\n")
-	if updated == content && !strings.Contains(content, "OLS WPanel migration target marker") {
-		return content, nil
-	}
-	if strings.Contains(updated, "OLS WPanel migration target marker") {
-		return "", errors.New("target marker config unavailable")
-	}
-	return updated, nil
+	return content, nil
 }
-func applyMigrationNginxContent(path, enabledPath, content string) error {
+func applyMigrationOLSVHostContent(path, enabledPath, content string) error {
 	engine := NewTemplateEngine(filepath.Join(filepath.Dir(path), ".migration-backups"))
-	if err := engine.writeNginxConfigFile(content, path); err != nil {
+	if err := engine.writeOLSVHostConfigFile(content, path); err != nil {
 		return err
 	}
 	if target, err := os.Readlink(enabledPath); err != nil || filepath.Clean(target) != filepath.Clean(path) {
-		return errors.New("target Nginx symlink changed")
+		return errors.New("target OpenLiteSpeed virtual-host link changed")
 	}
-	out, err := exec.Command("nginx", "-s", "reload").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("reload target marker: %s", strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := reloadOLSManagedRegistry(filepath.Dir(enabledPath))
+	return err
 }
 func signSiteMigrationMarker(key, token string, marker SiteMigrationMarkerResponse) string {
 	mac := hmac.New(sha256.New, []byte(key))

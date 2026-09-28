@@ -152,8 +152,8 @@ func BuildAIDiagnosticPrompt(site *models.Website, symptom string) (systemPrompt
 			"status":                        site.Status,
 			"ssl_enabled":                   site.SSLEnabled,
 			"ssl_last_error":                site.SSLLastError,
-			"fastcgi_cache_enabled":         site.FCacheEnabled,
-			"fastcgi_cache_ttl":             site.FCacheTTL,
+			"litespeed_cache_enabled":       site.LSCacheEnabled,
+			"litespeed_cache_ttl":           site.LSCacheTTL,
 			"monitoring_enabled":            site.MonitoringEnabled,
 			"wp_debug_enabled":              site.WPDebugEnabled,
 			"xmlrpc_enabled":                site.XMLRPCEnabled,
@@ -161,10 +161,10 @@ func BuildAIDiagnosticPrompt(site *models.Website, symptom string) (systemPrompt
 			"access_log_mode":               site.AccessLogMode,
 		},
 		Logs: map[string]aiLogSnippet{
-			"nginx_error": aiReadLogSnippet(site.LogDir, "error.log"),
-			"php_error":   aiReadLogSnippet(site.LogDir, "php-error.log"),
-			"wp_security": aiReadLogSnippet(site.LogDir, "wp-security.log"),
-			"access_5xx":  aiReadAccess5xxSnippet(site.LogDir),
+			"web_server_error": aiReadLogSnippet(site.LogDir, "error.log"),
+			"php_error":        aiReadLogSnippet(site.LogDir, "php-error.log"),
+			"wp_security":      aiReadLogSnippet(site.LogDir, "wp-security.log"),
+			"access_5xx":       aiReadAccess5xxSnippet(site.LogDir),
 		},
 		WPConfigSummary:       aiWPConfigSummary(site),
 		DBCheck:               aiDBCheck(site),
@@ -929,7 +929,7 @@ func aiSystemPrompt() string {
 		"code_suspects 是面板只读扫描当前启用主题、启用插件和少量高价值文件得到的证据。若 code_suspects 中存在 high 且有文件行号，应优先作为可能原因；不要要求用户再手动查同一处证据。",
 		"code_suspects 中 context=conditional_block 的 die/wp_die/exit 表示位于条件代码块内，通常只作为低优先级线索；除非日志或请求条件能直接对应，不要把它写成主要原因。",
 		"当 diagnosis_profile.profile=performance 时，优先分析 performance_summary 中的服务器负载、站点 LSPHP 资源占用、LiteSpeed 页面缓存状态、Redis 对象缓存和活跃插件结构；不要把性能问题默认当成 500 或服务宕机。",
-		"如果 site_summary.fastcgi_cache_enabled=true，表示面板的 LiteSpeed 页面缓存已开启。不能建议安装其他 WordPress 页面缓存插件。当前上下文不包含真实命中率；没有探测证据时不得把缓存未命中列为原因，也不得要求使用 curl、浏览器开发者工具或“网站监控”查看命中率。可建议检查面板已有的缓存配置与清理功能，并排查 Redis 对象缓存、主题插件、数据库查询、图片资源和外部请求。",
+		"如果 site_summary.litespeed_cache_enabled=true，表示面板的 LiteSpeed 页面缓存已开启。不能建议安装其他 WordPress 页面缓存插件。当前上下文不包含真实命中率；没有探测证据时不得把缓存未命中列为原因，也不得要求使用 curl、浏览器开发者工具或“网站监控”查看命中率。可建议检查面板已有的缓存配置与清理功能，并排查 Redis 对象缓存、主题插件、数据库查询、图片资源和外部请求。",
 		"软件管理只能确认服务状态和现有基础配置；当前面板没有 LSPHP worker 饱和历史、慢请求趋势或进程压力监控。没有相应证据时不得断言 worker 耗尽，也不要把调整并发数作为直接操作建议。",
 		"recent_panel_operations 是面板操作审计线索，不是故障原因结论。只有操作类型、时间和日志证据能直接对应时，才可作为可能原因；不要把 CDN 真实 IP、SSL、备份等无直接证据的近期操作表述为原因。",
 		"不要声称已经修改服务器。不要建议任意 shell 命令。不要输出需要 root 权限的操作。",
@@ -1071,7 +1071,7 @@ func aiDiagnosisProfile(symptom string) map[string]interface{} {
 				"先区分服务器资源瓶颈、同机站点资源争抢、当前站点自身优化问题，再给建议。",
 				"没有性能数据时，可以建议用户到“仪表盘”查看已有资源图表，或到“网站详情 -> 网站日志”查看日志；不要建议开启不存在的资源监控设置。",
 				"缓存异常重点分析 LiteSpeed 页面缓存、Redis 对象缓存和其他缓存插件冲突；网站速度慢重点分析资源、插件、主题和缓存命中。",
-				"如果 fastcgi_cache_enabled=true，不要再建议安装其他 WordPress 页面缓存插件；应保留面板自动配置的 LiteSpeed Cache，并检查是否存在重复缓存插件。",
+				"如果 litespeed_cache_enabled=true，不要再建议安装其他 WordPress 页面缓存插件；应保留面板自动配置的 LiteSpeed Cache，并检查是否存在重复缓存插件。",
 			},
 		}
 	}
@@ -1090,10 +1090,10 @@ func aiIsPerformanceSymptom(symptom string) bool {
 }
 
 func aiCacheRecommendationPolicy(site *models.Website) map[string]interface{} {
-	if site != nil && site.FCacheEnabled {
+	if site != nil && site.LSCacheEnabled {
 		return map[string]interface{}{
-			"fastcgi_cache_enabled": true,
-			"rule":                  "OLS WPanel LiteSpeed 页面缓存已开启时，不要建议安装其他 WordPress 页面缓存插件。",
+			"litespeed_cache_enabled": true,
+			"rule":                    "OLS WPanel LiteSpeed 页面缓存已开启时，不要建议安装其他 WordPress 页面缓存插件。",
 			"avoid_recommending": []string{
 				"WP Super Cache 页面缓存",
 				"W3 Total Cache 页面缓存",
@@ -1112,8 +1112,8 @@ func aiCacheRecommendationPolicy(site *models.Website) map[string]interface{} {
 		}
 	}
 	return map[string]interface{}{
-		"fastcgi_cache_enabled": false,
-		"rule":                  "OLS WPanel LiteSpeed 页面缓存未开启时，可优先建议使用面板内置的 LiteSpeed Cache；不要叠加多个页面缓存插件。",
+		"litespeed_cache_enabled": false,
+		"rule":                    "OLS WPanel LiteSpeed 页面缓存未开启时，可优先建议使用面板内置的 LiteSpeed Cache；不要叠加多个页面缓存插件。",
 	}
 }
 
@@ -1426,8 +1426,8 @@ func aiServiceChecks(site *models.Website) map[string]interface{} {
 	if site == nil {
 		return result
 	}
-	result["nginx_conf_exists"] = aiFileExists(site.NginxConfPath)
-	result["php_pool_exists"] = aiFileExists(site.PHPPoolPath)
+	result["ols_vhost_config_exists"] = aiFileExists(site.OLSVHostConfigPath)
+	result["lsphp_socket_exists"] = aiFileExists(site.LSPHPSocketPath)
 	result["web_root_exists"] = aiDirExists(site.WebRoot)
 	result["log_dir_exists"] = aiDirExists(site.LogDir)
 	return result
@@ -1552,11 +1552,11 @@ func aiPerformanceSummary(site *models.Website) map[string]interface{} {
 	result := map[string]interface{}{
 		"checked": true,
 		"panel_optimization": map[string]interface{}{
-			"fastcgi_cache_enabled": site != nil && site.FCacheEnabled,
-			"fastcgi_cache_ttl":     0,
-			"wp_memory_limit":       "",
-			"monitoring_enabled":    site != nil && site.MonitoringEnabled,
-			"access_log_mode":       "",
+			"litespeed_cache_enabled": site != nil && site.LSCacheEnabled,
+			"litespeed_cache_ttl":     0,
+			"wp_memory_limit":         "",
+			"monitoring_enabled":      site != nil && site.MonitoringEnabled,
+			"access_log_mode":         "",
 		},
 		"server_resource_summary": aiServerResourceSummary(),
 		"site_resource_summary":   aiSiteResourceSummary(site),
@@ -1568,11 +1568,11 @@ func aiPerformanceSummary(site *models.Website) map[string]interface{} {
 	}
 	if site != nil {
 		result["panel_optimization"] = map[string]interface{}{
-			"fastcgi_cache_enabled": site.FCacheEnabled,
-			"fastcgi_cache_ttl":     site.FCacheTTL,
-			"wp_memory_limit":       site.WPMemoryLimit,
-			"monitoring_enabled":    site.MonitoringEnabled,
-			"access_log_mode":       site.AccessLogMode,
+			"litespeed_cache_enabled": site.LSCacheEnabled,
+			"litespeed_cache_ttl":     site.LSCacheTTL,
+			"wp_memory_limit":         site.WPMemoryLimit,
+			"monitoring_enabled":      site.MonitoringEnabled,
+			"access_log_mode":         site.AccessLogMode,
 		}
 	}
 	return result
@@ -1729,7 +1729,7 @@ func aiSiteResourceSummary(site *models.Website) map[string]interface{} {
 		return result
 	}
 	result["checked"] = true
-	result["top_php_fpm_sites"] = aiTopSiteResources(resources, 5)
+	result["top_lsphp_sites"] = aiTopSiteResources(resources, 5)
 	if site != nil {
 		result["current_site"] = aiFindSiteResource(resources, site.SystemUser, site.Domain)
 	}
@@ -1877,7 +1877,7 @@ func aiWPPerformanceStructure(site *models.Website) map[string]interface{} {
 	result["builder_plugins"] = builderPlugins
 	result["heavy_plugins"] = heavyPlugins
 	result["multiple_page_cache_plugins"] = len(pageCachePlugins) > 1
-	result["potential_fastcgi_page_cache_overlap"] = site.FCacheEnabled && len(pageCachePlugins) > 0
+	result["potential_litespeed_page_cache_overlap"] = site.LSCacheEnabled && len(pageCachePlugins) > 0
 	result["asset_optimization_overlap"] = len(assetOptimizationPlugins) > 1
 	result["many_active_plugins"] = len(activePlugins) >= 25
 	return result
@@ -2426,8 +2426,6 @@ func aiOperationLabel(operation string) string {
 		return "CDN 真实 IP 设置"
 	case "set_access_log_mode":
 		return "访问日志设置"
-	case "save_nginx_custom":
-		return "OpenLiteSpeed 运行配置"
 	case "change_db_password":
 		return "数据库密码修改"
 	case "update_domains":

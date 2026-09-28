@@ -17,7 +17,7 @@ import (
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
-// WordPress 安全事件类型。sqli_blocked 表示 Nginx 已在 PHP 前拒绝请求；
+// WordPress 安全事件类型。sqli_blocked 表示 OpenLiteSpeed 已在 PHP 前拒绝请求；
 // 其它类型仍是调查证据，不能据此断言站点存在漏洞或攻击已经成功。
 const (
 	SecurityEventSensitiveFileScan = "sensitive_file_scan"
@@ -67,7 +67,7 @@ type searchBotIPChecker struct {
 var (
 	// combined 日志格式：$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"
 	combinedLogRe = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^\]]+)\] "([A-Z]+) ([^" ]+) [^"]*" ([0-9]{3}) \S+ "[^"]*" "([^"]*)"`)
-	nginxErrorRe  = regexp.MustCompile(`client: ([^,]+), server: ([^,]+), request: "([A-Z]+) ([^" ]+) [^"]*"`)
+	webErrorRe    = regexp.MustCompile(`client: ([^,]+), server: ([^,]+), request: "([A-Z]+) ([^" ]+) [^"]*"`)
 
 	// 保守的 SQL 注入探测正则，只记录不拦截；误报率优先于漏报率
 	sqliProbePatterns = []*regexp.Regexp{
@@ -131,7 +131,7 @@ func BuildWPSecurityReport(limit int) ([]WPSecurityReportItem, error) {
 			continue
 		}
 		readWPSecurityLog(site, filepath.Join(site.LogDir, "wp-security.log"), aggregates, checker)
-		readNginxErrorLog(site, filepath.Join(site.LogDir, "error.log"), aggregates)
+		readWebErrorLog(site, filepath.Join(site.LogDir, "error.log"), aggregates)
 	}
 
 	items := make([]WPSecurityReportItem, 0, len(aggregates))
@@ -214,7 +214,7 @@ func readWPSecurityLog(site wpSecuritySite, path string, aggregates map[string]*
 			continue
 		}
 		status, _ := strconv.Atoi(m[5])
-		seen := parseNginxAccessTime(m[2])
+		seen := parseWebAccessTime(m[2])
 		uri := normalizeLoggedURI(m[4])
 		ua := strings.TrimSpace(m[6])
 		ip := strings.TrimSpace(m[1])
@@ -225,9 +225,9 @@ func readWPSecurityLog(site wpSecuritySite, path string, aggregates map[string]*
 	}
 }
 
-func readNginxErrorLog(site wpSecuritySite, path string, aggregates map[string]*wpSecurityAggregate) {
+func readWebErrorLog(site wpSecuritySite, path string, aggregates map[string]*wpSecurityAggregate) {
 	for _, line := range tailLogLines(path, 1000) {
-		m := nginxErrorRe.FindStringSubmatch(line)
+		m := webErrorRe.FindStringSubmatch(line)
 		if len(m) != 5 {
 			continue
 		}
@@ -237,9 +237,9 @@ func readNginxErrorLog(site wpSecuritySite, path string, aggregates map[string]*
 		risk := "low"
 		switch {
 		case strings.Contains(line, "Primary script unknown"):
-			// PHP-FPM 收到了一个不存在的 PHP 脚本请求，这只会在探测 PHP 文件时发生，
+			// LSPHP 收到了一个不存在的 PHP 脚本请求，这只会在探测 PHP 文件时发生，
 			// 单次命中就直接判高危，和分类系统加入之前的行为一致。
-			reason = "Primary script unknown：不存在 PHP 文件进入 PHP-FPM"
+			reason = "Primary script unknown：不存在 PHP 文件进入 LSPHP"
 			eventType = SecurityEventSuspiciousPHP
 			risk = "high"
 		case strings.Contains(line, "open()") && strings.Contains(line, "failed (2: No such file or directory)"):
@@ -255,7 +255,7 @@ func readNginxErrorLog(site wpSecuritySite, path string, aggregates map[string]*
 		default:
 			continue
 		}
-		addWPSecurityEvent(aggregates, site.Domain, strings.TrimSpace(m[1]), parseNginxErrorTime(line), m[3], reqPath, 0, reason, eventType, risk)
+		addWPSecurityEvent(aggregates, site.Domain, strings.TrimSpace(m[1]), parseWebErrorTime(line), m[3], reqPath, 0, reason, eventType, risk)
 	}
 }
 
@@ -316,7 +316,7 @@ func classifySecurityEvent(method, uri, ua, ip string, status int, checker *sear
 		return SecurityEventFakeSearchBot, "medium", "UA 声明为搜索引擎爬虫，但来源 IP 不在官方段"
 	}
 
-	// 3. 敏感文件扫描。Nginx 的 $uri 会解码 %2eenv 后决定写入安全日志，
+	// 3. 敏感文件扫描。OpenLiteSpeed 的 $uri 会解码 %2eenv 后决定写入安全日志，
 	// 但 combined 日志保留原始请求 URI，因此这里同时检查解码后的形式。
 	sensitiveURIs := []string{lowerURI}
 	if decoded, err := url.QueryUnescape(uri); err == nil && decoded != uri {
@@ -370,7 +370,7 @@ func isWordPressCoreSearchRequest(requestURI string) bool {
 }
 
 // isSQLiProbe 对 URI 原文和 URL 解码后的形式都做匹配。
-// nginx 记录的是请求行原文，攻击者常见工具会把空格编码为 %20 或 +，
+// Web 服务器记录的是请求行原文，攻击者常见工具会把空格编码为 %20 或 +，
 // 只匹配原文会漏掉这类编码后的 payload（如 UNION%20SELECT）。
 func isSQLiProbe(uri string) bool {
 	candidates := []string{uri}
@@ -605,12 +605,12 @@ func normalizeLoggedURI(raw string) string {
 	return parsed.RequestURI()
 }
 
-func parseNginxAccessTime(raw string) time.Time {
+func parseWebAccessTime(raw string) time.Time {
 	t, _ := time.Parse("02/Jan/2006:15:04:05 -0700", raw)
 	return t
 }
 
-func parseNginxErrorTime(line string) time.Time {
+func parseWebErrorTime(line string) time.Time {
 	if len(line) < len("2006/01/02 15:04:05") {
 		return time.Time{}
 	}
@@ -696,7 +696,7 @@ func riskWeight(risk string) int {
 	}
 }
 
-// eventRiskWeight 对应 classifySecurityEvent/readNginxErrorLog 使用的英文风险等级
+// eventRiskWeight 对应 classifySecurityEvent/readWebErrorLog 使用的英文风险等级
 // （"high"/"medium"/"low"），与 riskWeight 使用的中文 "高"/"中"/"低" 词表分开维护，
 // 避免两套词表混用导致比较结果恒为 false。
 func eventRiskWeight(risk string) int {

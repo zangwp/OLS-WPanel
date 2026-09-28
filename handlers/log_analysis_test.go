@@ -35,8 +35,8 @@ func TestLogAnalysisDetailsAcceptsOnlyKnownTrafficCategories(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id,name,domain,aliases,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type)
-		VALUES (1,'example','example.com','','active','wp_example','/www/wwwroot/example',?,'db','dbuser','/tmp/pool','/tmp/nginx','wordpress')`, dir); err != nil {
+		(id,name,domain,aliases,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type)
+		VALUES (1,'example','example.com','','active','wp_example','/www/wwwroot/example',?,'db','dbuser','/tmp/pool','/tmp/openlitespeed','wordpress')`, dir); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO log_analysis_jobs

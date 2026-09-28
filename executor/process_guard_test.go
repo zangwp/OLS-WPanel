@@ -80,10 +80,10 @@ func TestClassifyServiceFailure(t *testing.T) {
 		want    string
 	}{
 		{name: "oom", journal: "kernel: Out of memory: Killed process 10 (mariadbd)", want: "系统内存耗尽（OOM）"},
-		{name: "segfault", journal: "php-fpm[10]: segfault at 0", want: "进程发生崩溃（段错误）"},
+		{name: "segfault", journal: "lsphp[10]: segfault at 0", want: "进程发生崩溃（段错误）"},
 		{name: "port", journal: "listen() failed: Address already in use", want: "端口被占用"},
 		{name: "permission", journal: "open() failed (13: Permission denied)", want: "权限不足"},
-		{name: "config", journal: "nginx: configuration file /etc/nginx/nginx.conf test failed", want: "配置检查失败"},
+		{name: "config", journal: "openlitespeed: configuration file /etc/openlitespeed/openlitespeed.conf test failed", want: "配置检查失败"},
 		{name: "signal", state: guardServiceState{exitCode: "killed"}, want: "进程被信号强制终止"},
 		{name: "exit status", state: guardServiceState{exitStatus: "1"}, want: "进程异常退出（状态码 1）"},
 		{name: "unknown", want: "服务意外停止，系统日志未提供明确原因"},
@@ -151,8 +151,8 @@ func TestUnexpectedActiveDoesNotCreateAbnormalAlert(t *testing.T) {
 	mustExec(t, db, `CREATE TABLE security_settings (skey TEXT PRIMARY KEY, svalue TEXT)`)
 	mustExec(t, db, `INSERT INTO security_settings (skey, svalue) VALUES ('alert_service', 'true')`)
 
-	service := &GuardService{Name: "Nginx", ServiceName: "nginx"}
-	logIncident(service, "unexpected_active", "Nginx 在暂停守护期间被外部启动", false)
+	service := &GuardService{Name: "OpenLiteSpeed", ServiceName: "openlitespeed"}
+	logIncident(service, "unexpected_active", "OpenLiteSpeed 在暂停守护期间被外部启动", false)
 
 	var alerts int
 	_ = db.QueryRow("SELECT COUNT(*) FROM alert_log").Scan(&alerts)

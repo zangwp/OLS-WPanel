@@ -271,8 +271,8 @@ func TestBuildWPSecurityReportClassifiesEvents(t *testing.T) {
 	}
 
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`,
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`,
 		t.TempDir(), logDir); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -386,8 +386,8 @@ func TestBuildWPSecurityReportDoesNotFlagSingleMissingStaticAssetAsPHPProbe(t *t
 	logDir := t.TempDir()
 
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`,
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`,
 		t.TempDir(), logDir); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -423,8 +423,8 @@ func TestBuildWPSecurityReportFlagsMissingPHPFileAndPrimaryScriptUnknown(t *test
 	logDir := t.TempDir()
 
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`,
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`,
 		t.TempDir(), logDir); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestBuildWPSecurityReportFlagsMissingPHPFileAndPrimaryScriptUnknown(t *test
 		// 请求路径确实是 .php，应该判定为 suspicious_php / 中风险
 		`2026/01/15 10:00:00 [error] 1234#0: *1 open() "/var/www/example.com/shell.php" failed (2: No such file or directory), client: 203.0.113.6, server: example.com, request: "GET /shell.php HTTP/1.1", host: "example.com"`,
 		// Primary script unknown，单次命中就应该是高风险
-		`2026/01/15 10:00:01 [error] 1234#0: *2 FastCGI sent in stderr: "Primary script unknown" while reading response header from upstream, client: 203.0.113.7, server: example.com, request: "GET /wp-config.php HTTP/1.1", host: "example.com"`,
+		`2026/01/15 10:00:01 [error] 1234#0: *2 LiteSpeed sent in stderr: "Primary script unknown" while reading response header from upstream, client: 203.0.113.7, server: example.com, request: "GET /wp-config.php HTTP/1.1", host: "example.com"`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(logDir, "error.log"), []byte(errorLog), 0644); err != nil {
 		t.Fatal(err)

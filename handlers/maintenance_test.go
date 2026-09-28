@@ -88,7 +88,7 @@ func TestMaintenanceHandlerCrossSiteWindowAndFreeze(t *testing.T) {
 	}
 	h := &MaintenanceHandler{Manager: executor.NewMaintenanceManager(database.GetDB())}
 	keyB, windowB := strings.Repeat("d", 64), uuid.NewString()
-	_, err = database.GetDB().Exec(`INSERT INTO websites(name,domain,site_type,status,plugin_api_key,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES ('B','b.example','wordpress','active',?,'wp_b','/www/wwwroot/b.example','','','','','')`, keyB)
+	_, err = database.GetDB().Exec(`INSERT INTO websites(name,domain,site_type,status,plugin_api_key,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES ('B','b.example','wordpress','active',?,'wp_b','/www/wwwroot/b.example','','','','','')`, keyB)
 	if err != nil {
 		t.Fatal(err)
 	}

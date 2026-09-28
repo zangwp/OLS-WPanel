@@ -18,44 +18,44 @@ func setupWebsiteRuntimeStateTest(t *testing.T, status models.WebsiteStatus, wit
 	openTestDB(t)
 	root := t.TempDir()
 	cfg := &config.Config{Paths: config.PathsConfig{
-		NginxSitesAvailable: filepath.Join(root, "available"),
-		NginxSitesEnabled:   filepath.Join(root, "enabled"),
+		OLSVHostsAvailable: filepath.Join(root, "available"),
+		OLSVHostsEnabled:   filepath.Join(root, "enabled"),
 	}}
-	for _, dir := range []string{cfg.Paths.NginxSitesAvailable, cfg.Paths.NginxSitesEnabled} {
+	for _, dir := range []string{cfg.Paths.OLSVHostsAvailable, cfg.Paths.OLSVHostsEnabled} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	domain := "runtime.example.com"
-	nginxConf := filepath.Join(cfg.Paths.NginxSitesAvailable, domain+".conf")
-	if err := os.WriteFile(nginxConf, []byte("server {}"), 0644); err != nil {
+	openlitespeedConf := filepath.Join(cfg.Paths.OLSVHostsAvailable, domain+".conf")
+	if err := os.WriteFile(openlitespeedConf, []byte("# OpenLiteSpeed vhost placeholder\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	enabledPath := filepath.Join(cfg.Paths.NginxSitesEnabled, domain+".conf")
+	enabledPath := filepath.Join(cfg.Paths.OLSVHostsEnabled, domain+".conf")
 	if withLink {
-		if err := os.Symlink(nginxConf, enabledPath); err != nil {
+		if err := os.Symlink(openlitespeedConf, enabledPath); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := database.GetDB().Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
-		VALUES (81,'runtime',?,?, 'u','/www/runtime','/logs/runtime','db','u','/php/runtime',?)`, domain, status, nginxConf); err != nil {
+	if _, err := database.GetDB().Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
+		VALUES (81,'runtime',?,?, 'u','/www/runtime','/logs/runtime','db','u','/php/runtime',?)`, domain, status, openlitespeedConf); err != nil {
 		t.Fatal(err)
 	}
 	oldCfg := config.AppConfig
-	oldChange, oldReload := changeWebsiteStatus, runWebsiteStateNginxReload
+	oldChange, oldReload := changeWebsiteStatus, runWebsiteStateOLSReload
 	config.AppConfig = cfg
 	t.Cleanup(func() {
 		config.AppConfig = oldCfg
-		changeWebsiteStatus, runWebsiteStateNginxReload = oldChange, oldReload
+		changeWebsiteStatus, runWebsiteStateOLSReload = oldChange, oldReload
 	})
-	return &models.Website{ID: 81, Domain: domain, Status: status, NginxConfPath: nginxConf}, enabledPath
+	return &models.Website{ID: 81, Domain: domain, Status: status, OLSVHostConfigPath: openlitespeedConf}, enabledPath
 }
 
-func TestPauseSiteDatabaseFailureLeavesNginxUntouched(t *testing.T) {
+func TestPauseSiteDatabaseFailureLeavesOpenLiteSpeedUntouched(t *testing.T) {
 	site, enabledPath := setupWebsiteRuntimeStateTest(t, models.StatusActive, true)
 	changeWebsiteStatus = func(int, models.WebsiteStatus, models.WebsiteStatus) error { return errors.New("database failed") }
 	reloadCalled := false
-	runWebsiteStateNginxReload = func() ([]byte, error) { reloadCalled = true; return nil, nil }
+	runWebsiteStateOLSReload = func() ([]byte, error) { reloadCalled = true; return nil, nil }
 	result := executePauseSite(&Task{Payload: &PauseSitePayload{Site: site}})
 	if result.Success || reloadCalled {
 		t.Fatalf("result=%+v reloadCalled=%v", result, reloadCalled)
@@ -67,7 +67,7 @@ func TestPauseSiteDatabaseFailureLeavesNginxUntouched(t *testing.T) {
 
 func TestPauseAndEnableSiteCommitMatchingDatabaseAndLinkState(t *testing.T) {
 	site, enabledPath := setupWebsiteRuntimeStateTest(t, models.StatusActive, true)
-	runWebsiteStateNginxReload = func() ([]byte, error) { return nil, nil }
+	runWebsiteStateOLSReload = func() ([]byte, error) { return nil, nil }
 	if result := executePauseSite(&Task{Payload: &PauseSitePayload{Site: site}}); !result.Success {
 		t.Fatalf("pause result=%+v", result)
 	}
@@ -85,7 +85,7 @@ func TestPauseAndEnableSiteCommitMatchingDatabaseAndLinkState(t *testing.T) {
 	if err := database.GetDB().QueryRow("SELECT status FROM websites WHERE id=81").Scan(&status); err != nil || status != "active" {
 		t.Fatalf("active status=%q err=%v", status, err)
 	}
-	if target, err := os.Readlink(enabledPath); err != nil || filepath.Clean(target) != filepath.Clean(site.NginxConfPath) {
+	if target, err := os.Readlink(enabledPath); err != nil || filepath.Clean(target) != filepath.Clean(site.OLSVHostConfigPath) {
 		t.Fatalf("enabled target=%q err=%v", target, err)
 	}
 }
@@ -98,7 +98,7 @@ func TestPauseSiteReloadFailureRestoresStatusAndLink(t *testing.T) {
 		return nil
 	}
 	call := 0
-	runWebsiteStateNginxReload = func() ([]byte, error) {
+	runWebsiteStateOLSReload = func() ([]byte, error) {
 		call++
 		if call == 1 {
 			return []byte("failed"), errors.New("reload failed")
@@ -122,7 +122,7 @@ func TestEnableSiteReloadFailureRestoresStatusAndDisabledLink(t *testing.T) {
 		return nil
 	}
 	call := 0
-	runWebsiteStateNginxReload = func() ([]byte, error) {
+	runWebsiteStateOLSReload = func() ([]byte, error) {
 		call++
 		if call == 1 {
 			return []byte("failed"), errors.New("reload failed")
@@ -148,7 +148,7 @@ func TestWebsiteRuntimeStateReportsRecoveryFailure(t *testing.T) {
 		}
 		return nil
 	}
-	runWebsiteStateNginxReload = func() ([]byte, error) { return nil, errors.New("reload failed") }
+	runWebsiteStateOLSReload = func() ([]byte, error) { return nil, errors.New("reload failed") }
 	result := executeEnableSite(&Task{Payload: &EnableSitePayload{Site: site}})
 	if result.Success || !strings.Contains(result.Message, "恢复未完成") {
 		t.Fatalf("result=%+v", result)

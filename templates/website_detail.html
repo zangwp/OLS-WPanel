@@ -147,22 +147,22 @@
 
     <!-- Row 2: WordPress优化 | WordPress文件保护 -->
     <!-- 这张卡片对 wordpress 和 php 两种 site_type 都会渲染（见上面的 :class 三元判断），
-         里面混了通用控件（FastCGI 缓存）和多个 WordPress 专属控件。新增/修改任何一个
+         里面混了通用控件（LiteSpeed 缓存）和多个 WordPress 专属控件。新增/修改任何一个
          "仅 WordPress 站点显示"的元素时，必须把本卡片内所有同类元素都加上
          x-show="site.site_type === 'wordpress'"，不能只改自己新加的那一个——
          之前"高级设置"折叠面板就漏加过，导致通用 PHP 站点也看到了停止更新检查等选项。 -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
         <div class="card" :class="site.site_type === 'wordpress' ? '' : 'md:col-span-2'">
-            <h3 class="text-lg font-semibold text-white mb-4" x-text="site.site_type === 'wordpress' ? t('website.wp_optimization') : t('website.fastcgi_cache_title')"></h3>
+            <h3 class="text-lg font-semibold text-white mb-4" x-text="site.site_type === 'wordpress' ? t('website.wp_optimization') : t('website.litespeed_cache_title')"></h3>
             <div class="flex items-center space-x-3 mb-3">
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
-                    <input type="checkbox" x-model="fcacheEnabled">
-                    <span>{{t .Lang "website.enable_fastcgi_cache"}}</span>
+                    <input type="checkbox" x-model="lscacheEnabled">
+                    <span>{{t .Lang "website.enable_litespeed_cache"}}</span>
                 </label>
             </div>
-            <div x-show="fcacheEnabled" class="mb-3 ml-6">
+            <div x-show="lscacheEnabled" class="mb-3 ml-6">
                 <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "website.cache_ttl_seconds"}}</label>
-                <input type="number" x-model="fcacheTTL" class="input-field w-32 text-sm py-1" min="10" max="86400">
+                <input type="number" x-model="lscacheTTL" class="input-field w-32 text-sm py-1" min="10" max="86400">
             </div>
             <details class="mb-4 rounded border border-gray-700 bg-gray-900/30 px-3 py-2" x-show="site.site_type === 'wordpress'">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "website.wp_optimization_advanced"}}</summary>
@@ -220,7 +220,7 @@
             </div>
             <div class="flex items-center space-x-3 mb-3">
                 <button @click="saveWPOptimizations()" :disabled="optimizationSaving || site.file_lock_enabled" class="btn-primary text-sm" x-text="optimizationSaving ? t('common.saving') : t('website.save_settings')"></button>
-                <button x-show="fcacheEnabled" @click="clearFCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_cache"}}</button>
+                <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_cache"}}</button>
             </div>
             <div x-show="site.site_type === 'wordpress'" id="companion-plugin-controls" class="flex flex-wrap items-center gap-3 mb-3">
                 <button x-show="pluginStatus === 'not_installed'" @click="installPlugin()" :disabled="pluginInstalling || site.file_lock_enabled" class="btn-primary text-sm py-1.5" x-text="pluginInstalling ? t('website.installing') : t('website.install_companion_plugin')"></button>
@@ -236,12 +236,12 @@
             <p x-show="site.file_lock_enabled" class="text-xs text-yellow-300 mb-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
 
             <div class="mt-3 p-3 rounded text-xs" style="background-color: #0f172a;">
-                <p class="text-gray-300 font-medium mb-2">{{t .Lang "website.fastcgi_cache_how_it_works"}}</p>
+                <p class="text-gray-300 font-medium mb-2">{{t .Lang "website.litespeed_cache_how_it_works"}}</p>
                 <ul class="text-gray-400 space-y-1 list-disc list-inside">
-                    <li>{{t .Lang "website.fastcgi_cache_point_static"}}</li>
-                    <li>{{t .Lang "website.fastcgi_cache_point_key"}}</li>
-                    <li x-show="site.site_type === 'wordpress'">{{t .Lang "website.fastcgi_cache_point_wp_skip"}}</li>
-                    <li x-show="site.site_type === 'php'">{{t .Lang "website.fastcgi_cache_point_php_skip"}}</li>
+                    <li>{{t .Lang "website.litespeed_cache_point_static"}}</li>
+                    <li>{{t .Lang "website.litespeed_cache_point_key"}}</li>
+                    <li x-show="site.site_type === 'wordpress'">{{t .Lang "website.litespeed_cache_point_wp_skip"}}</li>
+                    <li x-show="site.site_type === 'php'">{{t .Lang "website.litespeed_cache_point_php_skip"}}</li>
                 </ul>
                 <p class="text-gray-500 mt-2" x-show="site.site_type === 'wordpress'">{{t .Lang "website.wp_optimizer_plugin_help"}}</p>
             </div>
@@ -714,8 +714,8 @@ function websiteDetail() {
         logLineLimit: 200,
         logFiles: [],
         logFullscreen: false,
-        fcacheEnabled: false,
-        fcacheTTL: 300,
+        lscacheEnabled: false,
+        lscacheTTL: 300,
         disableWPUpdates: false,
         savedDisableWPUpdates: false,
         disableFileEditing: false,
@@ -777,8 +777,8 @@ function websiteDetail() {
 						this.loadMaintenance(true);
 						this.maintenanceTimer = setInterval(() => this.loadMaintenance(), 10000);
 					}
-                    this.fcacheEnabled = r.data.fastcgi_cache_enabled;
-                    this.fcacheTTL = r.data.fastcgi_cache_ttl || 300;
+                    this.lscacheEnabled = r.data.litespeed_cache_enabled;
+                    this.lscacheTTL = r.data.litespeed_cache_ttl || 300;
                     this.disableWPUpdates = r.data.disable_wp_updates || false;
                     this.savedDisableWPUpdates = this.disableWPUpdates;
                     this.disableFileEditing = r.data.disable_file_editing || false;
@@ -1338,8 +1338,8 @@ function websiteDetail() {
                 await api('/websites/' + this.site.id + '/wp-optimizations', {
                     method: 'PUT',
                     body: {
-                        fcache_enabled: this.fcacheEnabled,
-                        fcache_ttl: parseInt(this.fcacheTTL) || 300,
+                        litespeed_cache_enabled: this.lscacheEnabled,
+                        litespeed_cache_ttl: parseInt(this.lscacheTTL) || 300,
                         disable_wp_updates: this.disableWPUpdates,
                         expected_disable_wp_updates: this.savedDisableWPUpdates,
                         disable_file_editing: this.disableFileEditing,
@@ -1393,7 +1393,7 @@ function websiteDetail() {
                 });
             } catch(e) {}
         },
-        async clearFCache() {
+        async clearLSCache() {
             if (!await confirmModal(t('website.confirm_clear_cache'))) return;
             try {
                 await api('/websites/' + this.site.id + '/cache', { method: 'DELETE' });

@@ -2,7 +2,7 @@ package executor
 
 // RecommendInnoDBBufferPoolSizeMB 计算 MariaDB innodb_buffer_pool_size 建议值（单位 MB）。
 //
-// ols-wpanel 部署场景是 MariaDB 和 PHP-FPM、Redis、Nginx、面板自身共用同一台宿主机，
+// ols-wpanel 部署场景是 MariaDB、LSPHP、Redis、OpenLiteSpeed 和面板自身共用同一台宿主机，
 // 不是专用数据库服务器，所以这里按总内存分档取值，比专用 MariaDB 服务器常见的
 // 60%~70% 保守得多（大致在总内存的 12.5%~25% 区间），避免挤占其它组件的内存。
 // 最后统一夹一层"不超过总内存 30%"的硬上限，防止分档表本身配置不合理时

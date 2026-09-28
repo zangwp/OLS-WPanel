@@ -20,13 +20,13 @@ func setupSoftwareReloadTest(t *testing.T, content string) (string, *gin.Engine)
 		t.Fatal(err)
 	}
 	oldPath := softwarePHPRuntimeConfigPath
-	oldRegenerate := softwareRegenerateAllSitesFPM
+	oldRegenerate := softwareRegenerateAllSitesOLSConfigs
 	oldRunner := runSoftwareShellCommand
 	softwarePHPRuntimeConfigPath = func() string { return path }
-	softwareRegenerateAllSitesFPM = func() error { return nil }
+	softwareRegenerateAllSitesOLSConfigs = func() error { return nil }
 	t.Cleanup(func() {
 		softwarePHPRuntimeConfigPath = oldPath
-		softwareRegenerateAllSitesFPM = oldRegenerate
+		softwareRegenerateAllSitesOLSConfigs = oldRegenerate
 		runSoftwareShellCommand = oldRunner
 	})
 	gin.SetMode(gin.TestMode)
@@ -42,14 +42,14 @@ func setupSoftwarePHPRebuildTest(t *testing.T, content string, regenerate func()
 		t.Fatal(err)
 	}
 	oldPath := softwarePHPRuntimeConfigPath
-	oldRegenerate := softwareRegenerateAllSitesFPM
+	oldRegenerate := softwareRegenerateAllSitesOLSConfigs
 	oldRunner := runSoftwareShellCommand
 	softwarePHPRuntimeConfigPath = func() string { return path }
-	softwareRegenerateAllSitesFPM = regenerate
+	softwareRegenerateAllSitesOLSConfigs = regenerate
 	runSoftwareShellCommand = func(string) ([]byte, error) { return nil, nil }
 	t.Cleanup(func() {
 		softwarePHPRuntimeConfigPath = oldPath
-		softwareRegenerateAllSitesFPM = oldRegenerate
+		softwareRegenerateAllSitesOLSConfigs = oldRegenerate
 		runSoftwareShellCommand = oldRunner
 	})
 	gin.SetMode(gin.TestMode)

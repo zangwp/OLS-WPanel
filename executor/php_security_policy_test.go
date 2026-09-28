@@ -32,31 +32,27 @@ func TestSitePHPRunnerOpenBaseDir(t *testing.T) {
 	}
 }
 
-func TestRenderPHPFPMPoolUsesSharedSecurityPolicy(t *testing.T) {
-	engine := NewTemplateEngine("")
-	rendered, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{
-		Domain:     "example.com",
-		PoolName:   "example_com",
-		SystemUser: "wp_example",
-		WebRoot:    "/www/wwwroot/example.com",
-		SocketPath: "/run/php",
-		SocketName: "example_com",
+func TestRenderOLSVHostUsesSharedSecurityPolicy(t *testing.T) {
+	rendered, err := renderOLSVHostConfig(&OLSVHostData{
+		Domain: "example.com", SystemUser: "wp_example",
+		WebRoot: "/www/wwwroot/example.com", LogDir: "/www/wwwlogs/example.com",
+		PHPProxy: "unix:/tmp/lshttpd/example.sock", TemplateVer: "v1.0", SiteType: "wordpress",
 	})
 	if err != nil {
-		t.Fatalf("render PHP-FPM pool: %v", err)
+		t.Fatalf("render OpenLiteSpeed vhost: %v", err)
 	}
 
 	wantLines := []string{
-		"php_admin_value[open_basedir] = " + sitePHPOpenBaseDir("/www/wwwroot/example.com", "example.com"),
-		"php_admin_value[disable_functions] = " + sitePHPDisabledFunctions(),
-		"php_admin_flag[allow_url_include] = Off",
+		"php_admin_value open_basedir \"" + sitePHPOpenBaseDir("/www/wwwroot/example.com", "example.com") + "\"",
+		"php_admin_value disable_functions \"" + sitePHPDisabledFunctions() + "\"",
+		"php_admin_flag allow_url_include Off",
 	}
 	for _, line := range wantLines {
 		if count := strings.Count(rendered, line); count != 1 {
-			t.Fatalf("rendered pool contains %q %d times, want exactly once:\n%s", line, count, rendered)
+			t.Fatalf("rendered vhost contains %q %d times, want exactly once:\n%s", line, count, rendered)
 		}
 	}
 	if strings.Contains(rendered, "%!") {
-		t.Fatalf("rendered pool contains a template formatting error:\n%s", rendered)
+		t.Fatalf("rendered vhost contains a template formatting error:\n%s", rendered)
 	}
 }

@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,39 +11,39 @@ import (
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
-// installStubNginx keeps the compatibility-named regeneration helpers isolated
+// installStubOpenLiteSpeed keeps the compatibility-named regeneration helpers isolated
 // from a host OpenLiteSpeed installation.
-func installStubNginx(t *testing.T) {
+func installStubOpenLiteSpeed(t *testing.T) {
 	t.Helper()
 	oldRunOLSCommand := runOLSCommand
 	runOLSCommand = func(string, ...string) ([]byte, error) { return nil, nil }
 	t.Cleanup(func() { runOLSCommand = oldRunOLSCommand })
 }
 
-func TestUpdateSiteFastCGICachePublishesBeforeSuccess(t *testing.T) {
+func TestUpdateSiteLiteSpeedCachePublishesBeforeSuccess(t *testing.T) {
 	openTestDB(t)
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,fastcgi_cache_enabled,fastcgi_cache_ttl)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,litespeed_cache_enabled,litespeed_cache_ttl)
 		VALUES ('site','cache.test','active','wordpress','nobody','/tmp/cache.test','','','','','','0',300)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	id, _ := result.LastInsertId()
 
-	oldRegenerate := regenerateSiteNginxForCache
-	regenerateSiteNginxForCache = func(siteID int) error {
+	oldRegenerate := regenerateSiteOLSForCache
+	regenerateSiteOLSForCache = func(siteID int) error {
 		if siteID != int(id) {
 			t.Fatalf("siteID=%d", siteID)
 		}
 		return nil
 	}
-	t.Cleanup(func() { regenerateSiteNginxForCache = oldRegenerate })
+	t.Cleanup(func() { regenerateSiteOLSForCache = oldRegenerate })
 
-	if err := UpdateSiteFastCGICache(int(id), 1, 600); err != nil {
+	if err := UpdateSiteLiteSpeedCache(int(id), 1, 600); err != nil {
 		t.Fatal(err)
 	}
 	var enabled, ttl int
-	if err := database.GetDB().QueryRow(`SELECT fastcgi_cache_enabled,fastcgi_cache_ttl FROM websites WHERE id=?`, id).Scan(&enabled, &ttl); err != nil {
+	if err := database.GetDB().QueryRow(`SELECT litespeed_cache_enabled,litespeed_cache_ttl FROM websites WHERE id=?`, id).Scan(&enabled, &ttl); err != nil {
 		t.Fatal(err)
 	}
 	if enabled != 1 || ttl != 600 {
@@ -52,32 +51,32 @@ func TestUpdateSiteFastCGICachePublishesBeforeSuccess(t *testing.T) {
 	}
 }
 
-func TestUpdateSiteFastCGICacheRestoresOldSettingsOnPublishFailure(t *testing.T) {
+func TestUpdateSiteLiteSpeedCacheRestoresOldSettingsOnPublishFailure(t *testing.T) {
 	openTestDB(t)
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,fastcgi_cache_enabled,fastcgi_cache_ttl)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,litespeed_cache_enabled,litespeed_cache_ttl)
 		VALUES ('site','cache.test','active','wordpress','nobody','/tmp/cache.test','','','','','','1',300)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	id, _ := result.LastInsertId()
 
-	oldRegenerate := regenerateSiteNginxForCache
+	oldRegenerate := regenerateSiteOLSForCache
 	calls := 0
-	regenerateSiteNginxForCache = func(int) error {
+	regenerateSiteOLSForCache = func(int) error {
 		calls++
 		if calls == 1 {
-			return errors.New("nginx test failed")
+			return errors.New("openlitespeed test failed")
 		}
 		return nil
 	}
-	t.Cleanup(func() { regenerateSiteNginxForCache = oldRegenerate })
+	t.Cleanup(func() { regenerateSiteOLSForCache = oldRegenerate })
 
-	if err := UpdateSiteFastCGICache(int(id), 0, 900); err == nil || !strings.Contains(err.Error(), "已恢复") {
+	if err := UpdateSiteLiteSpeedCache(int(id), 0, 900); err == nil || !strings.Contains(err.Error(), "已恢复") {
 		t.Fatalf("error=%v", err)
 	}
 	var enabled, ttl int
-	if err := database.GetDB().QueryRow(`SELECT fastcgi_cache_enabled,fastcgi_cache_ttl FROM websites WHERE id=?`, id).Scan(&enabled, &ttl); err != nil {
+	if err := database.GetDB().QueryRow(`SELECT litespeed_cache_enabled,litespeed_cache_ttl FROM websites WHERE id=?`, id).Scan(&enabled, &ttl); err != nil {
 		t.Fatal(err)
 	}
 	if enabled != 1 || ttl != 300 || calls != 2 {
@@ -88,29 +87,29 @@ func TestUpdateSiteFastCGICacheRestoresOldSettingsOnPublishFailure(t *testing.T)
 func TestClearSiteCacheRestoresOldKeyOnPublishFailure(t *testing.T) {
 	openTestDB(t)
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,fastcgi_cache_key)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,litespeed_cache_key)
 		VALUES ('site','cache.test','active','wordpress','nobody','/tmp/cache.test','','','','','','old-key')`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	id, _ := result.LastInsertId()
 
-	oldRegenerate := regenerateSiteNginxForCache
+	oldRegenerate := regenerateSiteOLSForCache
 	calls := 0
-	regenerateSiteNginxForCache = func(int) error {
+	regenerateSiteOLSForCache = func(int) error {
 		calls++
 		if calls == 1 {
 			return errors.New("reload failed")
 		}
 		return nil
 	}
-	t.Cleanup(func() { regenerateSiteNginxForCache = oldRegenerate })
+	t.Cleanup(func() { regenerateSiteOLSForCache = oldRegenerate })
 
 	if err := ClearSiteCache(int(id)); err == nil || !strings.Contains(err.Error(), "已恢复") {
 		t.Fatalf("error=%v", err)
 	}
 	var key string
-	if err := database.GetDB().QueryRow(`SELECT fastcgi_cache_key FROM websites WHERE id=?`, id).Scan(&key); err != nil {
+	if err := database.GetDB().QueryRow(`SELECT litespeed_cache_key FROM websites WHERE id=?`, id).Scan(&key); err != nil {
 		t.Fatal(err)
 	}
 	if key != "old-key" || calls != 2 {
@@ -126,7 +125,7 @@ func TestCompanionAutomaticUpgradeRequiresExistingPluginAndActiveSite(t *testing
 		t.Fatal(err)
 	}
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,plugin_api_key)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,plugin_api_key)
 		VALUES ('site','site.test','active','wordpress','nobody',?,'','','','','','managed-key')`, root)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +232,7 @@ func TestCompanionUpgradeIgnoresAIAndMaintenanceWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := database.GetDB().Exec(`INSERT INTO websites
-		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,plugin_api_key,maintenance_security)
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,plugin_api_key,maintenance_security)
 		VALUES ('site','managed.test','active','wordpress','nobody',?,'','','','','','managed-key',?)`, root,
 		`{"window":{"id":"11111111-1111-4111-8111-111111111111","state":"unlocked","expires":4102444800}}`)
 	if err != nil {
@@ -276,13 +275,13 @@ func TestCompanionPluginReleaseVersionUsesHeaderNotSourceHash(t *testing.T) {
 	}
 }
 
-func insertRegenTestWebsite(t *testing.T, domain, nginxConfPath, status string) int {
+func insertRegenTestWebsite(t *testing.T, domain, olsVHostConfigPath, status string) int {
 	t.Helper()
 	res, err := database.GetDB().Exec(
-		`INSERT INTO websites (name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+		`INSERT INTO websites (name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		domain, domain, status, "wp_"+buildSiteName(domain), "/www/wwwroot/"+domain, "/www/wwwlogs/"+domain,
-		"db_"+domain, "dbuser_"+domain, "/www/server/php/83/etc/php-fpm.d/"+domain+".conf", nginxConfPath,
+		"db_"+domain, "dbuser_"+domain, filepath.Join("/tmp/lshttpd", buildSiteName(domain)+".sock"), olsVHostConfigPath,
 	)
 	if err != nil {
 		t.Fatalf("insert website %s: %v", domain, err)
@@ -294,14 +293,14 @@ func insertRegenTestWebsite(t *testing.T, domain, nginxConfPath, status string) 
 	return int(id)
 }
 
-// TestRegenerateAllSitesNginxKeepsPausedSitesDisabled reproduces the bug where
-// restarting the panel (e.g. after a self-update) ran RegenerateAllSitesNginx
-// for every site regardless of status, which recreated the Nginx
+// TestRegenerateAllSitesOLSConfigsKeepsPausedSitesDisabled reproduces the bug where
+// restarting the panel (e.g. after a self-update) ran RegenerateAllSitesOLSConfigs
+// for every site regardless of status, which recreated the OpenLiteSpeed
 // sites-enabled symlink for paused sites and silently made them reachable
 // again while the DB/UI still showed them as paused.
-func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
+func TestRegenerateAllSitesOLSConfigsKeepsPausedSitesDisabled(t *testing.T) {
 	openTestDB(t)
-	installStubNginx(t)
+	installStubOpenLiteSpeed(t)
 
 	baseDir := t.TempDir()
 	sitesAvailable := filepath.Join(baseDir, "sites-available")
@@ -317,12 +316,12 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: backupDir},
 		Paths: config.PathsConfig{
-			NginxSitesAvailable: sitesAvailable,
-			NginxSitesEnabled:   sitesEnabled,
-			PHPFPMSock:          filepath.Join(baseDir, "lsphp"),
-			OLSManagedConfig:    filepath.Join(baseDir, "ols", "sites.conf"),
-			OLSListenerCert:     filepath.Join(baseDir, "tls", "default.crt"),
-			OLSListenerKey:      filepath.Join(baseDir, "tls", "default.key"),
+			OLSVHostsAvailable: sitesAvailable,
+			OLSVHostsEnabled:   sitesEnabled,
+			LSPHPSocketDir:     filepath.Join(baseDir, "lsphp"),
+			OLSManagedConfig:   filepath.Join(baseDir, "ols", "sites.conf"),
+			OLSListenerCert:    filepath.Join(baseDir, "tls", "default.crt"),
+			OLSListenerKey:     filepath.Join(baseDir, "tls", "default.key"),
 		},
 	}
 	t.Cleanup(func() { config.AppConfig = oldConfig })
@@ -349,8 +348,8 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 	}
 	insertRegenTestWebsite(t, "active.example.com", activeConf, "active")
 
-	if err := RegenerateAllSitesNginx(); err != nil {
-		t.Fatalf("RegenerateAllSitesNginx: %v", err)
+	if err := RegenerateAllSitesOLSConfigs(); err != nil {
+		t.Fatalf("RegenerateAllSitesOLSConfigs: %v", err)
 	}
 
 	// The paused site must stay disabled: no sites-enabled symlink...
@@ -380,132 +379,5 @@ func TestRegenerateAllSitesNginxKeepsPausedSitesDisabled(t *testing.T) {
 	}
 	if strings.Contains(string(activeContent), oldPlaceholder) || !strings.Contains(string(activeContent), "active.example.com") {
 		t.Fatalf("expected active site config to be refreshed with rendered template, got:\n%s", activeContent)
-	}
-}
-
-func legacyRegenerateSiteNginxPreservesActiveTargetMigrationMarker(t *testing.T) {
-	openTestDB(t)
-	installStubNginx(t)
-
-	baseDir := t.TempDir()
-	sitesAvailable := filepath.Join(baseDir, "sites-available")
-	sitesEnabled := filepath.Join(baseDir, "sites-enabled")
-	backupDir := filepath.Join(baseDir, "backups")
-	for _, dir := range []string{sitesAvailable, sitesEnabled, backupDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
-	}
-
-	oldConfig := config.AppConfig
-	config.AppConfig = &config.Config{
-		Panel: config.PanelConfig{BackupDir: backupDir},
-		Paths: config.PathsConfig{
-			NginxSitesAvailable: sitesAvailable,
-			NginxSitesEnabled:   sitesEnabled,
-		},
-	}
-	t.Cleanup(func() { config.AppConfig = oldConfig })
-
-	const domain = "target-migration.example.com"
-	nginxConf := filepath.Join(sitesAvailable, domain+".conf")
-	enabledPath := filepath.Join(sitesEnabled, domain+".conf")
-	const markerToken = "marker_0000000000000000000000000000000000000000"
-	const outboundCredential = "credential_0000000000000000000000000000000000000000"
-	marker := SiteMigrationMarkerResponse{Task: "migration_0000001", Role: "target", IssuedAt: 123}
-	marker.Signature = signSiteMigrationMarker(hashMigrationSecret(outboundCredential), markerToken, marker)
-	markerPayload, err := json.Marshal(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	markerBlock := renderSiteMigrationTargetMarkerBlock(markerToken, string(markerPayload))
-	markerConfig, err := injectSiteMigrationTargetMarker("server {\n}\n", markerBlock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(nginxConf, []byte(markerConfig), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(nginxConf, enabledPath); err != nil {
-		t.Fatal(err)
-	}
-	siteID := insertRegenTestWebsite(t, domain, nginxConf, "active")
-	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO site_migration_peers(id,status,outbound_credential,protocol_version) VALUES ('peer_00000000001','paired',?,?)`, outboundCredential, siteMigrationProtocolVersion); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO site_migration_batches(id,peer_id,direction,status) VALUES ('batch_0000000001','peer_00000000001','target','active')`); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := json.Marshal(map[string]any{
-		"runtime_settings": map[string]any{"marker_token": markerToken},
-		"target_spec": map[string]any{
-			"nginx_conf_path": nginxConf, "nginx_enabled_path": enabledPath,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO site_migration_sites(id,batch_id,target_site_id,source_domain,target_domain,site_type,status,stage,settings_snapshot)
-		VALUES ('migration_0000001','batch_0000000001',?,?,?,'wordpress','awaiting_cutover','awaiting_cutover',?)`, siteID, domain, domain, string(snapshot)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO site_migration_locks(domain,site_id,migration_site_id,direction,status)
-		VALUES (?,?,'migration_0000001','target','active')`, domain, siteID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO site_migration_resources(migration_site_id,resource_type,identifier,ownership_tag,status)
-		VALUES ('migration_0000001','target_staging_root',?,'migration_0000001','created'),
-		('migration_0000001','target_marker_config',?,'migration_0000001','created')`, filepath.Join(baseDir, "staging"), nginxConf); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO site_migration_events(migration_site_id,stage,result,message)
-		VALUES ('migration_0000001','target_marker','info',?)`, string(markerPayload)); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := RegenerateSiteNginx(siteID); err != nil {
-		t.Fatal(err)
-	}
-	content, err := os.ReadFile(nginxConf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) == markerConfig || !strings.Contains(string(content), markerBlock) {
-		t.Fatalf("active target migration config was overwritten:\n%s", content)
-	}
-	target, err := os.Readlink(enabledPath)
-	if err != nil || target != nginxConf {
-		t.Fatalf("enabled target=%q err=%v", target, err)
-	}
-	if _, err := db.Exec(`UPDATE site_migration_sites SET status='cleanup_failed',stage='cancelling' WHERE id='migration_0000001'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := RegenerateSiteNginx(siteID); err == nil {
-		t.Fatal("cancelling target migration marker was restored")
-	}
-	afterCancelling, err := os.ReadFile(nginxConf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(afterCancelling) != string(content) {
-		t.Fatal("rejected cancelling marker recovery changed the active config")
-	}
-	if _, err := db.Exec(`UPDATE site_migration_sites SET status='awaiting_cutover',stage='awaiting_cutover' WHERE id='migration_0000001'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE site_migration_events SET message='{"task":"migration_0000001","role":"target","issued_at":123,"signature":"tampered"}'
-		WHERE migration_site_id='migration_0000001' AND stage='target_marker'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := RegenerateSiteNginx(siteID); err == nil {
-		t.Fatal("tampered target marker intent was accepted")
-	}
-	afterRejected, err := os.ReadFile(nginxConf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(afterRejected) != string(content) {
-		t.Fatal("failed target marker recovery changed the active config")
 	}
 }

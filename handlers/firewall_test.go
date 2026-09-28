@@ -107,11 +107,9 @@ func TestBuildCurrentBanViewUsesLiveEnforcementAndKeepsAnomaliesSeparate(t *test
 	state := executor.CurrentBanEnforcement{
 		Fail2ban: map[executor.CurrentBanKey]bool{{IP: "203.0.113.10", Source: "olswpanel"}: true},
 		Persist:  map[string]bool{},
-		Nginx:    map[string]bool{"203.0.113.10": true},
 		Status: executor.CurrentBanReadStatus{
 			Fail2ban: map[string]bool{"olswpanel": true, "olswpanel-404": true, "olswpanel-login": true, "olswpanel-sshd": true},
 			Nftables: true,
-			Nginx:    true,
 		},
 	}
 	current, anomalies := buildCurrentBanView(receipts, state)
@@ -128,8 +126,7 @@ func TestBuildCurrentBanViewPreservesUnknownLiveIPAndReadFailure(t *testing.T) {
 	state := executor.CurrentBanEnforcement{
 		Fail2ban: map[executor.CurrentBanKey]bool{},
 		Persist:  map[string]bool{"203.0.113.40": true},
-		Nginx:    map[string]bool{},
-		Status:   executor.CurrentBanReadStatus{Fail2ban: map[string]bool{}, Nftables: true, Nginx: true},
+		Status:   executor.CurrentBanReadStatus{Fail2ban: map[string]bool{}, Nftables: true},
 	}
 	current, anomalies := buildCurrentBanView([]models.FirewallBan{receipt}, state)
 	if len(current) != 1 || current[0].IPAddress != "203.0.113.40" || current[0].SourceJail != "nftables" || current[0].BanLevel != nil {
@@ -140,15 +137,13 @@ func TestBuildCurrentBanViewPreservesUnknownLiveIPAndReadFailure(t *testing.T) {
 	}
 }
 
-func TestBuildCurrentBanViewMergesFail2banAndNginxWithoutReceipt(t *testing.T) {
+func TestBuildCurrentBanViewKeepsFail2banWithoutReceipt(t *testing.T) {
 	state := executor.CurrentBanEnforcement{
 		Fail2ban: map[executor.CurrentBanKey]bool{{IP: "203.0.113.50", Source: "olswpanel"}: true},
 		Persist:  map[string]bool{},
-		Nginx:    map[string]bool{"203.0.113.50": true},
 		Status: executor.CurrentBanReadStatus{
 			Fail2ban: map[string]bool{"olswpanel": true},
 			Nftables: true,
-			Nginx:    true,
 		},
 	}
 	current, anomalies := buildCurrentBanView(nil, state)
@@ -168,8 +163,7 @@ func TestBuildCurrentBanViewMatchesEquivalentIPv6Text(t *testing.T) {
 	state := executor.CurrentBanEnforcement{
 		Fail2ban: map[executor.CurrentBanKey]bool{},
 		Persist:  map[string]bool{"2604:a880:cad:d0::1:a6db:2001": true},
-		Nginx:    map[string]bool{},
-		Status:   executor.CurrentBanReadStatus{Fail2ban: map[string]bool{}, Nftables: true, Nginx: true},
+		Status:   executor.CurrentBanReadStatus{Fail2ban: map[string]bool{}, Nftables: true},
 	}
 	current, anomalies := buildCurrentBanView([]models.FirewallBan{receipt}, state)
 	if len(current) != 1 || current[0].IPAddress != receipt.IPAddress || current[0].SourceJail != "panel_scan" {

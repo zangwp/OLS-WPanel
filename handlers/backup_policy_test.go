@@ -15,7 +15,7 @@ import (
 
 func insertBackupPolicySite(t *testing.T, id int, domain string) {
 	t.Helper()
-	if _, err := database.GetDB().Exec(`INSERT INTO websites(id,name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
+	if _, err := database.GetDB().Exec(`INSERT INTO websites(id,name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
 		VALUES(?,?,?,?,?,?,?,?,?,?)`, id, domain, domain, "u1", "/www/"+domain, "/logs/"+domain, "db1", "u1", "/p", "/n"); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}

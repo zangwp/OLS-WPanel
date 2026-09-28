@@ -19,53 +19,57 @@ import (
 	"github.com/zangwp/OLS-WPanel/config"
 )
 
-type siteMigrationNginxRunner interface {
+type siteMigrationOLSRunner interface {
 	Test(context.Context) error
 	Reload(context.Context) error
 	Verify(context.Context, string, bool, string) error
 }
 
-type productionSiteMigrationNginxRunner struct{}
+type productionSiteMigrationOLSRunner struct{}
 
-func (productionSiteMigrationNginxRunner) Test(context.Context) error {
-	_, err := Execute("nginx", "-t")
+func (productionSiteMigrationOLSRunner) Test(context.Context) error {
+	paths := currentOLSRuntimePaths()
+	out, err := runOLSCommand(paths.binary, "-t")
+	if err != nil {
+		return fmt.Errorf("OpenLiteSpeed configuration check failed: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (productionSiteMigrationOLSRunner) Reload(context.Context) error {
+	_, err := testAndRestartOpenLiteSpeed()
 	return err
 }
 
-func (productionSiteMigrationNginxRunner) Reload(context.Context) error {
-	_, err := Execute("nginx", "-s", "reload")
-	return err
-}
-
-func (productionSiteMigrationNginxRunner) Verify(ctx context.Context, domain string, useSSL bool, markerToken string) error {
+func (productionSiteMigrationOLSRunner) Verify(ctx context.Context, domain string, useSSL bool, markerToken string) error {
 	return verifySiteMigrationMaintenance(ctx, domain, useSSL, markerToken)
 }
 
 type siteMigrationFreezer struct {
 	db        *sql.DB
 	cfg       *config.Config
-	runner    siteMigrationNginxRunner
+	runner    siteMigrationOLSRunner
 	now       func() time.Time
 	removeAll func(string) error
 }
 
 type siteMigrationFreezeSite struct {
-	SiteID                                   int
-	Domain, Aliases, WebRoot, NginxConfPath  string
-	SiteType, DocumentRootSubdir             string
-	SSLEnabled                               bool
-	SSLCertPath, SSLKeyPath, Stage, Snapshot string
-	OriginalTarget                           string
+	SiteID                                       int
+	Domain, Aliases, WebRoot, OLSVHostConfigPath string
+	SiteType, DocumentRootSubdir                 string
+	SSLEnabled                                   bool
+	SSLCertPath, SSLKeyPath, Stage, Snapshot     string
+	OriginalTarget                               string
 }
 
 // ReconcileMigratedWebsiteStatuses recognizes source sites completed by older
 // builds that already removed their one-time task but left the managed
 // migration maintenance symlink in place.
 func ReconcileMigratedWebsiteStatuses(ctx context.Context, db *sql.DB, cfg *config.Config) (int64, error) {
-	if db == nil || cfg == nil || cfg.Paths.NginxSitesAvailable == "" || cfg.Paths.NginxSitesEnabled == "" {
+	if db == nil || cfg == nil || cfg.Paths.OLSVHostsAvailable == "" || cfg.Paths.OLSVHostsEnabled == "" {
 		return 0, errors.New("invalid migrated website reconciliation configuration")
 	}
-	rows, err := db.QueryContext(ctx, `SELECT w.id,w.domain,w.nginx_conf_path FROM websites w
+	rows, err := db.QueryContext(ctx, `SELECT w.id,w.domain,w.ols_vhost_config_path FROM websites w
 		WHERE w.status='active' AND NOT EXISTS (
 			SELECT 1 FROM site_migration_locks ml WHERE ml.status='active' AND (ml.site_id=w.id OR ml.domain=w.domain)
 		) ORDER BY w.id`)
@@ -74,13 +78,13 @@ func ReconcileMigratedWebsiteStatuses(ctx context.Context, db *sql.DB, cfg *conf
 	}
 	defer rows.Close()
 	type candidate struct {
-		id                int
-		domain, nginxConf string
+		id                   int
+		domain, olsVHostPath string
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.id, &item.domain, &item.nginxConf); err != nil {
+		if err := rows.Scan(&item.id, &item.domain, &item.olsVHostPath); err != nil {
 			return 0, err
 		}
 		candidates = append(candidates, item)
@@ -90,11 +94,11 @@ func ReconcileMigratedWebsiteStatuses(ctx context.Context, db *sql.DB, cfg *conf
 	}
 	var changed int64
 	for _, item := range candidates {
-		nginxConf, err := managedSubpath(cfg.Paths.NginxSitesAvailable, item.nginxConf, "Nginx配置")
+		olsVHostPath, err := managedSubpath(cfg.Paths.OLSVHostsAvailable, item.olsVHostPath, "OpenLiteSpeed配置")
 		if err != nil {
 			continue
 		}
-		enabledPath, err := managedSubpath(cfg.Paths.NginxSitesEnabled, nginxEnabledPath(cfg, nginxConf, item.domain), "Nginx启用链接")
+		enabledPath, err := managedSubpath(cfg.Paths.OLSVHostsEnabled, olsVHostEnabledPath(cfg, olsVHostPath, item.domain), "OpenLiteSpeed启用链接")
 		if err != nil {
 			continue
 		}
@@ -102,7 +106,7 @@ func ReconcileMigratedWebsiteStatuses(ctx context.Context, db *sql.DB, cfg *conf
 		if err != nil || !strings.HasPrefix(filepath.Base(target), ".ols-wpanel-migration-") {
 			continue
 		}
-		if _, err := managedSubpath(cfg.Paths.NginxSitesAvailable, target, "迁移维护配置"); err != nil {
+		if _, err := managedSubpath(cfg.Paths.OLSVHostsAvailable, target, "迁移维护配置"); err != nil {
 			continue
 		}
 		result, err := db.ExecContext(ctx, `UPDATE websites SET status='migrated',updated_at=CURRENT_TIMESTAMP
@@ -120,8 +124,8 @@ func ReconcileMigratedWebsiteStatuses(ctx context.Context, db *sql.DB, cfg *conf
 
 var siteMigrationMarkerPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{40,128}$`)
 
-func newSiteMigrationFreezer(db *sql.DB, cfg *config.Config, runner siteMigrationNginxRunner) (*siteMigrationFreezer, error) {
-	if db == nil || cfg == nil || runner == nil || cfg.Paths.NginxSitesAvailable == "" || cfg.Paths.NginxSitesEnabled == "" {
+func newSiteMigrationFreezer(db *sql.DB, cfg *config.Config, runner siteMigrationOLSRunner) (*siteMigrationFreezer, error) {
+	if db == nil || cfg == nil || runner == nil || cfg.Paths.OLSVHostsAvailable == "" || cfg.Paths.OLSVHostsEnabled == "" {
 		return nil, errors.New("invalid site migration freezer configuration")
 	}
 	return &siteMigrationFreezer{db: db, cfg: cfg, runner: runner, now: time.Now, removeAll: os.RemoveAll}, nil
@@ -169,41 +173,23 @@ func renderSiteMigrationMaintenance(site *siteMigrationFreezeSite, migrationSite
 	if site == nil || !IsValidDomain(site.Domain) || !validSiteMigrationID(migrationSiteID) || !siteMigrationMarkerPattern.MatchString(markerToken) {
 		return "", errors.New("invalid migration maintenance data")
 	}
-	serverNames := []string{site.Domain}
 	for _, alias := range splitAliases(site.Aliases) {
 		if !IsValidDomain(alias) {
 			return "", errors.New("invalid source site alias")
 		}
-		serverNames = append(serverNames, alias)
 	}
-	markerPath := "/.well-known/ols-wpanel-migration/" + markerToken
-	body := "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Site maintenance</title></head><body><h1>Site migration in progress</h1><p>Please try again later.</p></body></html>"
-	block := func(listen, tls string) string {
-		return "server {\n" + listen + "    server_name " + strings.Join(serverNames, " ") + ";\n" + tls +
-			"    root " + EffectiveDocumentRoot(site.WebRoot, site.SiteType, site.DocumentRootSubdir) + ";\n" +
-			"    location ^~ /.well-known/acme-challenge/ { try_files $uri =404; }\n" +
-			"    location = " + markerPath + " { access_log off; default_type application/json; add_header Cache-Control \"no-store\" always; return 200 '{\"role\":\"source\",\"task\":\"" + migrationSiteID + "\"}'; }\n" +
-			"    location / { default_type text/html; add_header Cache-Control \"no-store, no-cache, max-age=0, must-revalidate\" always; add_header Retry-After \"300\" always; return 503 '" + body + "'; }\n}\n"
-	}
-	content := "# OLS WPanel migration maintenance: " + migrationSiteID + "\n" + block("    listen 80;\n    listen [::]:80;\n", "")
-	if site.SSLEnabled {
-		if site.SSLCertPath == "" || site.SSLKeyPath == "" {
-			return "", errors.New("source SSL paths unavailable")
-		}
-		content += block("    listen 443 ssl;\n    listen [::]:443 ssl;\n", "    ssl_certificate "+site.SSLCertPath+";\n    ssl_certificate_key "+site.SSLKeyPath+";\n")
-	}
-	return content, nil
+	return "", errors.New("website migration maintenance mode is unavailable until its OpenLiteSpeed implementation is complete")
 }
 
 func (f *siteMigrationFreezer) load(ctx context.Context, migrationSiteID string) (*siteMigrationFreezeSite, error) {
 	var site siteMigrationFreezeSite
 	var ssl int
-	err := f.db.QueryRowContext(ctx, `SELECT w.id,w.domain,w.aliases,w.web_root,w.nginx_conf_path,w.site_type,w.document_root_subdir,
+	err := f.db.QueryRowContext(ctx, `SELECT w.id,w.domain,w.aliases,w.web_root,w.ols_vhost_config_path,w.site_type,w.document_root_subdir,
 		w.ssl_enabled,w.ssl_cert_path,w.ssl_key_path,ms.stage,ms.settings_snapshot,
 		COALESCE((SELECT ownership_tag FROM site_migration_resources WHERE migration_site_id=ms.id AND resource_type='source_maintenance_config' LIMIT 1),'')
 		FROM site_migration_sites ms JOIN site_migration_batches mb ON mb.id=ms.batch_id AND mb.direction='source'
 		JOIN websites w ON w.id=ms.source_site_id JOIN site_migration_locks ml ON ml.migration_site_id=ms.id AND ml.site_id=w.id AND ml.status='active'
-		WHERE ms.id=?`, migrationSiteID).Scan(&site.SiteID, &site.Domain, &site.Aliases, &site.WebRoot, &site.NginxConfPath,
+		WHERE ms.id=?`, migrationSiteID).Scan(&site.SiteID, &site.Domain, &site.Aliases, &site.WebRoot, &site.OLSVHostConfigPath,
 		&site.SiteType, &site.DocumentRootSubdir, &ssl, &site.SSLCertPath, &site.SSLKeyPath, &site.Stage, &site.Snapshot, &site.OriginalTarget)
 	if err != nil {
 		return nil, fmt.Errorf("load source migration site: %w", err)
@@ -228,22 +214,22 @@ func (f *siteMigrationFreezer) FreezeSource(ctx context.Context, migrationSiteID
 	}
 	defer ReleaseSiteOpLock(site.SiteID)
 
-	originalPath, err := managedSubpath(f.cfg.Paths.NginxSitesAvailable, site.NginxConfPath, "Nginx配置")
+	originalPath, err := managedSubpath(f.cfg.Paths.OLSVHostsAvailable, site.OLSVHostConfigPath, "OpenLiteSpeed配置")
 	if err != nil {
 		return err
 	}
-	enabledPath, err := managedSubpath(f.cfg.Paths.NginxSitesEnabled, nginxEnabledPath(f.cfg, originalPath, site.Domain), "Nginx启用链接")
+	enabledPath, err := managedSubpath(f.cfg.Paths.OLSVHostsEnabled, olsVHostEnabledPath(f.cfg, originalPath, site.Domain), "OpenLiteSpeed启用链接")
 	if err != nil {
 		return err
 	}
-	maintenancePath, err := managedSubpath(f.cfg.Paths.NginxSitesAvailable,
-		filepath.Join(f.cfg.Paths.NginxSitesAvailable, ".ols-wpanel-migration-"+migrationSiteID+".conf"), "迁移维护配置")
+	maintenancePath, err := managedSubpath(f.cfg.Paths.OLSVHostsAvailable,
+		filepath.Join(f.cfg.Paths.OLSVHostsAvailable, ".ols-wpanel-migration-"+migrationSiteID+".conf"), "迁移维护配置")
 	if err != nil {
 		return err
 	}
 	originalTarget, err := os.Readlink(enabledPath)
 	if err != nil {
-		return fmt.Errorf("source site must have an enabled Nginx symlink: %w", err)
+		return fmt.Errorf("source site must have an enabled OpenLiteSpeed symlink: %w", err)
 	}
 	if filepath.Clean(originalTarget) == filepath.Clean(maintenancePath) && site.Stage == "source_freezing" {
 		if site.OriginalTarget == "" {
@@ -261,14 +247,14 @@ func (f *siteMigrationFreezer) FreezeSource(ctx context.Context, migrationSiteID
 			}
 			if reloadErr := f.runner.Reload(context.Background()); reloadErr != nil {
 				_ = atomicReplaceSymlink(enabledPath, maintenancePath)
-				return errors.Join(err, fmt.Errorf("restore source Nginx runtime: %w", reloadErr))
+				return errors.Join(err, fmt.Errorf("restore source OpenLiteSpeed runtime: %w", reloadErr))
 			}
 			return fmt.Errorf("verify recovered migration maintenance response: %w", err)
 		}
 		return f.markFrozen(ctx, migrationSiteID)
 	}
 	if filepath.Clean(originalTarget) != filepath.Clean(originalPath) {
-		return errors.New("source Nginx symlink does not point to the managed config")
+		return errors.New("source OpenLiteSpeed symlink does not point to the managed config")
 	}
 	content, err := renderSiteMigrationMaintenance(site, migrationSiteID, markerToken)
 	if err != nil {
@@ -282,12 +268,12 @@ func (f *siteMigrationFreezer) FreezeSource(ctx context.Context, migrationSiteID
 	rollback := func() error {
 		if switched {
 			if err := atomicReplaceSymlink(enabledPath, originalTarget); err != nil {
-				return fmt.Errorf("restore source Nginx symlink: %w", err)
+				return fmt.Errorf("restore source OpenLiteSpeed symlink: %w", err)
 			}
 			if activated {
 				if err := f.runner.Reload(context.Background()); err != nil {
 					_ = atomicReplaceSymlink(enabledPath, maintenancePath)
-					return fmt.Errorf("restore source Nginx runtime: %w", err)
+					return fmt.Errorf("restore source OpenLiteSpeed runtime: %w", err)
 				}
 			}
 		}
@@ -337,7 +323,7 @@ func (f *siteMigrationFreezer) recordIntent(ctx context.Context, migrationSiteID
 		}
 	}
 	snapshot["source_marker_token"] = markerToken
-	snapshot["original_nginx_target"] = originalTarget
+	snapshot["original_ols_vhost_target"] = originalTarget
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
@@ -392,15 +378,15 @@ func (f *siteMigrationFreezer) AbandonSource(ctx context.Context, migrationSiteI
 	if err != nil || site.OriginalTarget == "" {
 		return errors.New("source migration maintenance ownership unavailable")
 	}
-	maintenancePath, err = managedSubpath(f.cfg.Paths.NginxSitesAvailable, maintenancePath, "迁移维护配置")
+	maintenancePath, err = managedSubpath(f.cfg.Paths.OLSVHostsAvailable, maintenancePath, "迁移维护配置")
 	if err != nil {
 		return err
 	}
-	originalTarget, err := managedSubpath(f.cfg.Paths.NginxSitesAvailable, site.OriginalTarget, "原 Nginx 配置")
+	originalTarget, err := managedSubpath(f.cfg.Paths.OLSVHostsAvailable, site.OriginalTarget, "原 OpenLiteSpeed 配置")
 	if err != nil {
 		return err
 	}
-	enabledPath, err := managedSubpath(f.cfg.Paths.NginxSitesEnabled, nginxEnabledPath(f.cfg, originalTarget, site.Domain), "Nginx启用链接")
+	enabledPath, err := managedSubpath(f.cfg.Paths.OLSVHostsEnabled, olsVHostEnabledPath(f.cfg, originalTarget, site.Domain), "OpenLiteSpeed启用链接")
 	if err != nil {
 		return err
 	}

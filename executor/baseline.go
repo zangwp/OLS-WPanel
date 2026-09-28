@@ -10,7 +10,7 @@ import (
 
 func EnsureWordPressBaseline() {
 	ensurePHPBaseline()
-	ensureNginxBaseline()
+	ensureOpenLiteSpeedBaseline()
 	ensureMariaDBBaseline()
 	ensureRedisBaseline()
 }
@@ -22,26 +22,11 @@ func ensurePHPBaseline() {
 	}
 }
 
-func ensureNginxBaseline() {
+func ensureOpenLiteSpeedBaseline() {
 	paths := currentOLSRuntimePaths()
 	if out, err := exec.Command(paths.binary, "-t").CombinedOutput(); err != nil {
 		log.Printf("[OLS-WPanel] OpenLiteSpeed 配置检查失败: %s", strings.TrimSpace(string(out)))
 	}
-}
-
-// ensureNginxCacheBypassMap 定义 $wp_cache_skip_args，供每个站点的 FastCGI 缓存绕过
-// 判断复用（站点模板里引用了这个全局变量，不能在每个站点自己的配置文件里各定义一份——
-// map 指令只能在 http{} 顶层出现一次，两个站点各定义一份同名变量会导致 nginx -t 报重复定义）。
-//
-// 语义：只要查询字符串完全由已知的营销/统计追踪参数组成（utm_*/fbclid/gclid 等），就不算
-// "真实查询参数"，仍然允许命中缓存；只要出现任何一个不在名单里的参数，$wp_cache_skip_args
-// 就会保留原始 $args（非空），触发跳过缓存——这样从广告点击进来的流量不会把缓存打穿。
-func ensureNginxCacheBypassMap() {
-	// OpenLiteSpeed + LSCWP handles cache bypass rules in each site's .htaccess.
-}
-
-func ensureNginxSSLDefaultServer() {
-	// The shared HTTPS listener uses the panel-managed fallback certificate.
 }
 
 func ensureMariaDBBaseline() {

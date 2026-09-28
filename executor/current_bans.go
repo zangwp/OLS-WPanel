@@ -16,13 +16,11 @@ type CurrentBanKey struct {
 type CurrentBanReadStatus struct {
 	Fail2ban map[string]bool `json:"fail2ban"`
 	Nftables bool            `json:"nftables"`
-	Nginx    bool            `json:"nginx"`
 }
 
 type CurrentBanEnforcement struct {
 	Fail2ban map[CurrentBanKey]bool
 	Persist  map[string]bool
-	Nginx    map[string]bool
 	Status   CurrentBanReadStatus
 }
 
@@ -37,7 +35,6 @@ func readCurrentBanEnforcement(snapshot fail2banSnapshot) CurrentBanEnforcement 
 	state := CurrentBanEnforcement{
 		Fail2ban: make(map[CurrentBanKey]bool),
 		Persist:  make(map[string]bool),
-		Nginx:    make(map[string]bool),
 		Status: CurrentBanReadStatus{
 			Fail2ban: make(map[string]bool),
 		},
@@ -66,9 +63,6 @@ func readCurrentBanEnforcement(snapshot fail2banSnapshot) CurrentBanEnforcement 
 		}
 	}
 	state.Status.Nftables = allFamiliesRead
-	// Kept true for the v1 API compatibility field: the obsolete Nginx
-	// enforcement layer has been intentionally retired, not failed.
-	state.Status.Nginx = true
 	return state
 }
 

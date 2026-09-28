@@ -400,8 +400,8 @@ func TestWPInventoryWorkerNonRefreshTriggersDoNotForceUpdateChecks(t *testing.T)
 func insertWPInventoryWorkerSite(t *testing.T, store *wpInventoryStore, domain string) int {
 	t.Helper()
 	result, err := store.db.Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-		VALUES (?, ?, 'active', 'wp_worker', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`, domain, domain)
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+		VALUES (?, ?, 'active', 'wp_worker', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`, domain, domain)
 	if err != nil {
 		t.Fatalf("insert worker site %s: %v", domain, err)
 	}

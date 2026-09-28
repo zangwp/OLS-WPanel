@@ -21,10 +21,6 @@ import (
 
 type SoftwareHandler struct{}
 
-// Retained for database/test compatibility with pre-OLS builds. Runtime
-// configuration no longer reads or writes this Nginx file.
-var softwareNginxConfigPath = "/etc/nginx/conf.d/olswpanel.conf"
-
 var runSoftwareShellCommand = func(command string) ([]byte, error) {
 	return exec.Command("bash", "-c", command).CombinedOutput()
 }
@@ -258,8 +254,8 @@ var softConfigAllowed = map[string]map[string]bool{
 }
 
 var (
-	softwarePHPRuntimeConfigPath  = executor.PHPRuntimeConfigPath
-	softwareRegenerateAllSitesFPM = executor.RegenerateAllSitesFPM
+	softwarePHPRuntimeConfigPath         = executor.PHPRuntimeConfigPath
+	softwareRegenerateAllSitesOLSConfigs = executor.RegenerateAllSitesOLSConfigs
 )
 
 var (
@@ -285,7 +281,7 @@ func validateSoftwareConfigValue(lang, name, key, value string) string {
 	return ""
 }
 
-func phpConfigRequiresPoolRebuild(key string) bool {
+func phpConfigRequiresVHostRegeneration(key string) bool {
 	switch key {
 	case "memory_limit", "upload_max_filesize", "post_max_size", "max_execution_time", "max_input_time":
 		return true
@@ -436,8 +432,8 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 	}
 
 	// Reload
-	if req.Name == "PHP" && phpConfigRequiresPoolRebuild(req.Key) {
-		if applyErr := softwareRegenerateAllSitesFPM(); applyErr != nil {
+	if req.Name == "PHP" && phpConfigRequiresVHostRegeneration(req.Key) {
+		if applyErr := softwareRegenerateAllSitesOLSConfigs(); applyErr != nil {
 			restoreErr := os.WriteFile(configPath, data, 0644)
 			if restoreErr == nil {
 				if recoveryOut, err := runSoftwareShellCommand(checkCmd); err != nil {
@@ -448,7 +444,7 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 				}
 			}
 			if restoreErr == nil {
-				restoreErr = softwareRegenerateAllSitesFPM()
+				restoreErr = softwareRegenerateAllSitesOLSConfigs()
 			}
 			log.Printf("PHP 配置应用失败并恢复: apply=%v recovery=%v", applyErr, restoreErr)
 			if restoreErr != nil {
@@ -659,36 +655,6 @@ func replaceIniValue(content, key, value string) string {
 	return strings.Join(lines, "\n")
 }
 
-func replaceNginxValue(content, key, value string) string {
-	lines := strings.Split(content, "\n")
-	found := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key) {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-				lines[i] = indent + key + " " + value + ";"
-				found = true
-			}
-		}
-	}
-	if !found {
-		// Add inside http block if possible, otherwise append
-		for i, line := range lines {
-			if strings.Contains(line, "http {") {
-				lines[i] = line + "\n    " + key + " " + value + ";"
-				found = true
-				break
-			}
-		}
-		if !found {
-			lines = append(lines, key+" "+value+";")
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 func findPHPIniValue(content, key string) string {
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -699,19 +665,6 @@ func findPHPIniValue(content, key string) string {
 			parts := strings.SplitN(trimmed, "=", 2)
 			if len(parts) == 2 {
 				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
-	return ""
-}
-
-func findNginxValue(content, key string) string {
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key) {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				return strings.TrimRight(parts[1], ";")
 			}
 		}
 	}

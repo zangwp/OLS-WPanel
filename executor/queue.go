@@ -344,8 +344,6 @@ func (q *TaskQueue) worker() {
 				result = executeChangeDBPassword(task)
 			case TaskUpdateDomains:
 				result = executeUpdateDomains(task)
-			case TaskSaveNginxCustom:
-				result = executeSaveNginxCustom(task)
 			case TaskSetAccessLogMode:
 				result = executeSetAccessLogMode(task)
 			case TaskSetCDNRealIP:
@@ -515,10 +513,6 @@ func logOp(task *Task, result TaskResult) {
 		}
 	case TaskUpdateDomains:
 		if p, ok := task.Payload.(*UpdateDomainsPayload); ok && p.Site != nil {
-			target = p.Site.Domain
-		}
-	case TaskSaveNginxCustom:
-		if p, ok := task.Payload.(*SaveNginxCustomPayload); ok && p.Site != nil {
 			target = p.Site.Domain
 		}
 	case TaskSetAccessLogMode:

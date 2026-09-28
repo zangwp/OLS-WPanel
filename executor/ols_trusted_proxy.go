@@ -9,8 +9,6 @@ import (
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
-const nginxRealIPPath = "/etc/nginx/conf.d/olswpanel-realip.conf"
-
 const olsTrustedIPListPath = "/usr/local/lsws/conf/trusted-ip-list"
 
 func EnsureCloudflareRealIPConfig() error {
@@ -34,7 +32,7 @@ func DeployCloudflareRealIPConfig(cfIPs []string) error {
 		}
 	}
 	// OLS WPanel uses the cached official ranges for Fail2ban allowlists. It
-	// intentionally does not write Nginx real_ip directives on an OLS host.
+	// intentionally does not write OpenLiteSpeed real_ip directives on an OLS host.
 	cacheCloudflareRealIPRanges(cfIPs)
 	return nil
 }
@@ -95,30 +93,4 @@ func cacheCloudflareRealIPRanges(cfIPs []string) {
 		return
 	}
 	database.GetDB().Exec(`UPDATE security_settings SET svalue = ?, updated_at = CURRENT_TIMESTAMP WHERE skey = 'cloudflare_realip_ips'`, strings.Join(cfIPs, "\n"))
-}
-
-func renderCloudflareRealIPConfig(cfIPs []string) string {
-	seen := make(map[string]bool)
-	var ips []string
-	for _, ip := range cfIPs {
-		ip = strings.TrimSpace(ip)
-		if ip == "" || seen[ip] || !isValidIPOrCIDR(ip) {
-			continue
-		}
-		seen[ip] = true
-		ips = append(ips, ip)
-	}
-	sort.Strings(ips)
-
-	var b strings.Builder
-	b.WriteString("# OLS WPanel Generated - Cloudflare real client IP\n")
-	b.WriteString("# Trust only official Cloudflare proxy ranges.\n")
-	for _, ip := range ips {
-		b.WriteString("set_real_ip_from ")
-		b.WriteString(ip)
-		b.WriteString(";\n")
-	}
-	b.WriteString("real_ip_header CF-Connecting-IP;\n")
-	b.WriteString("real_ip_recursive on;\n")
-	return b.String()
 }

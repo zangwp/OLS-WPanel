@@ -20,8 +20,8 @@ if (!defined('ABSPATH')) exit;
 
 register_uninstall_hook(__FILE__, 'olsw_optimizer_uninstall');
 function olsw_optimizer_uninstall() {
-    delete_option('olsw_optimizer_fcache_enabled');
-    delete_option('olsw_optimizer_fcache_ttl');
+    delete_option('olsw_optimizer_litespeed_cache_enabled');
+    delete_option('olsw_optimizer_litespeed_cache_ttl');
     delete_option('olsw_optimizer_no_updates');
     delete_option('olsw_optimizer_no_file_edit');
     delete_option('olsw_optimizer_verified');
@@ -70,8 +70,8 @@ class OLS_WPanel_Optimizer {
 
     const VERSION = '1.1.28';
 
-    const OPTION_FCACHE_ENABLED = 'olsw_optimizer_fcache_enabled';
-    const OPTION_FCACHE_TTL     = 'olsw_optimizer_fcache_ttl';
+    const OPTION_LSCACHE_ENABLED = 'olsw_optimizer_litespeed_cache_enabled';
+    const OPTION_LSCACHE_TTL     = 'olsw_optimizer_litespeed_cache_ttl';
     const OPTION_NO_UPDATES     = 'olsw_optimizer_no_updates';
     const OPTION_NO_FILE_EDIT   = 'olsw_optimizer_no_file_edit';
     const OPTION_VERIFIED       = 'olsw_optimizer_verified';

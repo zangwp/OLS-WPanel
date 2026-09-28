@@ -25,11 +25,9 @@ import (
 var syncMu sync.Mutex
 var fail2banSettingsApplyMu sync.Mutex
 var sshRecordActionPending atomic.Bool
-var manualAddNginxBan = AddPersistBan
-var manualRemoveNginxBan = RemovePersistBan
-var syncReplaceNginxBannedIPs = func(map[string]bool) error { return nil }
-var unbanAllReplaceNginxBannedIPs = func(map[string]bool) error { return nil }
-var conditionalRemoveNginxBan = RemovePersistBan
+var manualAddPersistBan = AddPersistBan
+var manualRemovePersistBan = RemovePersistBan
+var conditionalRemoveWebPersistBan = RemovePersistBan
 var syncAddPersistBan = AddPersistBan
 var syncRemovePersistBan = RemovePersistBan
 
@@ -48,7 +46,7 @@ var googlebotHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // fail2banFilterConfig 只负责全站洪泛/探测信号（429 限流、敏感文件 404 探测）。
 // 登录/XML-RPC 认证爆破信号已经拆分到 fail2banLoginFilterConfig + olswpanel-login
-// jail，读取的是 Nginx 基于规范化 $uri 单独生成的 wp-login-security.log，不再
+// jail，读取的是 OpenLiteSpeed 基于规范化 $uri 单独生成的 wp-login-security.log，不再
 // 从这里的 access.log 里用 $request 原始文本匹配——避免同一次登录失败被两个
 // jail 分别计数、触发两次独立封禁。
 const fail2banSensitive404Regex = `(?i)^<HOST> - - \[.*\] "(?:GET|POST) .*(?:\.env(?:\.[^/?\s"]+)?|\.git|config\.bak|wp-config\.php|secrets\.(?:json|ya?ml)|settings\.py|application\.properties|config\.toml|\.sql|\.tar|\.gz|\.zip|\.old|\.swp|\.save|\.ds_store)(?:[/?\s"]|$).*" 404 .*$`
@@ -62,7 +60,7 @@ ignoreregex =
 
 // fail2banLoginFilterConfig 承载 wp-login.php 登录失败（200）和被禁用的
 // xmlrpc.php 认证请求（403）两类信号。这两类事件能不能进入 wp-login-security.log，
-// 已经由 Nginx 侧的 $wp_login_attempt_loggable map（基于规范化后的 $uri，而不是
+// 已经由 OpenLiteSpeed 侧的 $wp_login_attempt_loggable map（基于规范化后的 $uri，而不是
 // 客户端原始 $request 文本）判断完毕，所以这里的 failregex 只做轻量结构校验
 // （POST + 状态码），不再要求路径斜杠数量——防止模板被误改导致这个文件意外
 // 写入无关请求时被 Fail2ban 全部当成攻击，但不会重新引入"单斜杠才算数"的老问题。
@@ -70,8 +68,8 @@ ignoreregex =
 // ignoreregex 是从旧 fail2banFilterConfig 原样搬过来的，用于放行
 // lostpassword/register/logout 等合法 WordPress 核心 action；这段正则专门处理了
 // 重复 action 参数时 WordPress/PHP 取最后一个、而非第一个的语义（已用局域网实测
-// 确认 Nginx 的 $arg_action 取的是第一个，两者不一致，所以这段判断必须留在
-// Fail2ban 侧解析完整 $request 文本，不能挪到 Nginx map 里用 $arg_action 做）。
+// 确认 OpenLiteSpeed 的 $arg_action 取的是第一个，两者不一致，所以这段判断必须留在
+// Fail2ban 侧解析完整 $request 文本，不能挪到 OpenLiteSpeed map 里用 $arg_action 做）。
 const fail2banLoginFilterConfig = `# OLS WPanel Generated — DO NOT EDIT MANUALLY
 [Definition]
 failregex = ^<HOST> .* "POST [^"]*" 200 .*$
@@ -111,13 +109,12 @@ func deployFail2ban(webWhitelistIPs, sshWhitelistIPs string, maxRetry, findTime,
 	ensureLogFiles()
 	jailPath := filepath.Join(jailDir, "olswpanel.conf")
 	localPath := "/etc/fail2ban/fail2ban.local"
-	actionPath := filepath.Join(actionDir, "olswpanel-nginx.conf")
 	recordActionPath := filepath.Join(actionDir, "olswpanel-record.conf")
 	filterPath := filepath.Join(filterDir, "olswpanel.conf")
 	filter404Path := filepath.Join(filterDir, "olswpanel-404.conf")
 	filterLoginPath := filepath.Join(filterDir, "olswpanel-login.conf")
 	filterSQLiPath := filepath.Join(filterDir, "olswpanel-sqli.conf")
-	backups, err := backupFail2banConfigFiles(jailPath, actionPath, recordActionPath, filterPath, filter404Path, filterLoginPath, filterSQLiPath, localPath)
+	backups, err := backupFail2banConfigFiles(jailPath, recordActionPath, filterPath, filter404Path, filterLoginPath, filterSQLiPath, localPath)
 	if err != nil {
 		return err
 	}
@@ -246,15 +243,6 @@ ignoreip = %s
 		return rollbackDeploy(fmt.Errorf("写入 fail2ban 本地配置失败: %w", err))
 	}
 
-	actionConfig := `# OLS WPanel Generated - DO NOT EDIT MANUALLY
-[Definition]
-actionban = /usr/local/bin/ols-wpanel --record-fail2ban <ip> --ban-jail <name> --ban-bantime <bantime> --ban-count <bancount> --ban-restored=<restored>
-actionunban = /usr/local/bin/ols-wpanel --unban-fail2ban <ip> --ban-jail <name>
-`
-
-	if err := os.WriteFile(actionPath, []byte(actionConfig), 0644); err != nil {
-		return rollbackDeploy(fmt.Errorf("写入 Web 封禁记录 action 配置失败: %w", err))
-	}
 	recordActionConfig := `# OLS WPanel Generated - DO NOT EDIT MANUALLY
 [Definition]
 actionban = /usr/local/bin/ols-wpanel --record-fail2ban <ip> --ban-jail <name> --ban-bantime <bantime> --ban-count <bancount> --ban-restored=<restored>
@@ -623,15 +611,6 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
 
-	// googlebot_ips/bingbot_ips 缓存已更新，重新生成日志 map 配置，
-	// 让方案 D 阶段二的伪装爬虫探测（$wp_security_verified_bot_ip）使用最新官方 IP 段。
-	// 这一步只是让探测规则更及时，不是白名单刷新本身的核心目的：
-	// 即使这里失败，Cloudflare/Fail2ban 白名单已经成功更新，不应该让整个任务
-	// 报失败——那样会让管理员误以为白名单刷新失败，实际上只是日志规则没同步上。
-	if err := EnsureLogMap(); err != nil {
-		details = append(details, "安全探测规则同步失败: "+err.Error())
-	}
-
 	return TaskResult{
 		Success: true,
 		Message: fmt.Sprintf("共获取 %d 条（%s）", len(allIPs), strings.Join(details, "；")),
@@ -970,9 +949,6 @@ func syncFail2banSnapshot(snapshot fail2banSnapshot) {
 	db := database.GetDB()
 	reconcileFail2banBans(db, snapshot)
 	reconcilePanelManagedBans(db, time.Now(), snapshot.webBanned)
-	if snapshot.webStatusRead || len(snapshot.webBanned) > 0 {
-		_ = syncReplaceNginxBannedIPs(snapshot.webBanned)
-	}
 }
 
 func reconcileFail2banBans(db *sql.DB, snapshot fail2banSnapshot) {
@@ -1299,12 +1275,12 @@ func RecordFail2banUnban(ip, jail string) error {
 		return err
 	}
 	if isWebBanSource(jail) {
-		return MaybeRemoveNginxBan(ip)
+		return maybeRemoveWebPersistBan(ip)
 	}
 	return nil
 }
 
-func MaybeRemoveNginxBan(ip string) error {
+func maybeRemoveWebPersistBan(ip string) error {
 	ip = strings.TrimSpace(ip)
 	if net.ParseIP(ip) == nil {
 		return fmt.Errorf("invalid IP: %s", ip)
@@ -1316,7 +1292,7 @@ func MaybeRemoveNginxBan(ip string) error {
 	if err != nil || activeWebBans > 0 {
 		return err
 	}
-	return conditionalRemoveNginxBan(ip)
+	return conditionalRemoveWebPersistBan(ip)
 }
 
 func MaybeRemovePersistBan(ip string) error {
@@ -1811,13 +1787,13 @@ func executeManualBan(task *Task) TaskResult {
 		expires = time.Now().Add(time.Duration(duration) * time.Second)
 	}
 
-	if err := manualAddNginxBan(ip); err != nil {
+	if err := manualAddPersistBan(ip); err != nil {
 		return TaskResult{Success: false, Message: "封禁失败: " + err.Error()}
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		_ = manualRemoveNginxBan(ip)
+		_ = manualRemovePersistBan(ip)
 		return TaskResult{Success: false, Message: "封禁记录写入失败"}
 	}
 	defer tx.Rollback()
@@ -1826,15 +1802,15 @@ func executeManualBan(task *Task) TaskResult {
 		 VALUES (?, ?, '管理员手动封禁', ?, 1, 1, ?)`,
 		ip, banLevel, jail, expires,
 	); err != nil {
-		_ = manualRemoveNginxBan(ip)
+		_ = manualRemovePersistBan(ip)
 		return TaskResult{Success: false, Message: "封禁记录写入失败"}
 	}
 	if err := insertFirewallBanHistory(tx, ip, banLevel, "管理员手动封禁", jail, 1, true, duration); err != nil {
-		_ = manualRemoveNginxBan(ip)
+		_ = manualRemovePersistBan(ip)
 		return TaskResult{Success: false, Message: "封禁历史写入失败"}
 	}
 	if err := tx.Commit(); err != nil {
-		_ = manualRemoveNginxBan(ip)
+		_ = manualRemovePersistBan(ip)
 		return TaskResult{Success: false, Message: "封禁记录写入失败"}
 	}
 
@@ -1904,8 +1880,6 @@ func UnbanAllIPs() string {
 			log.Printf("清空 %s 持久封禁集合失败: %v", family, err)
 		}
 	}
-	_ = unbanAllReplaceNginxBannedIPs(map[string]bool{})
-
 	for _, jail := range []string{"olswpanel", "olswpanel-404", "olswpanel-login", "olswpanel-sshd", "olswpanel-sqli"} {
 		out, err := executeCommand("fail2ban-client", "status", jail)
 		if err == nil && out != "" {
@@ -1947,7 +1921,7 @@ func CleanExpiredBans() {
 			log.Printf("清理已过期 IP %s 的持久封禁失败，请检查执行层: %v", ip, err)
 		}
 		if isWebBanSource(jail) {
-			_ = MaybeRemoveNginxBan(ip)
+			_ = maybeRemoveWebPersistBan(ip)
 		}
 	}
 }

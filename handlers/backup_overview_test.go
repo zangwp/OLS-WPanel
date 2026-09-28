@@ -63,7 +63,7 @@ func TestGetBackupOverviewReturnsSitesAndPanelBackups(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 
 	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', 'overview.example.com', 'u1', '/www/wwwroot/overview.example.com', '/www/wwwlogs/overview.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestGetBackupOverviewReportsLocalFileExistence(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 
 	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', 'localcheck.example.com', 'u1', '/www/wwwroot/localcheck.example.com', '/www/wwwlogs/localcheck.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestFileBackupDownloadAndDelete(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 
 	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', 'download-file.example.com', 'u1', '/www/wwwroot/download-file.example.com', '/www/wwwlogs/download-file.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestDBBackupDeleteRemovesFileAndRecord(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 
 	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', 'delete-db-backup.example.com', 'u1', '/www/wwwroot/delete-db-backup.example.com', '/www/wwwlogs/delete-db-backup.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestDeleteMissingDBBackupCleansRecord(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 
 	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', 'missing-db-backup.example.com', 'u1', '/www/wwwroot/missing-db-backup.example.com', '/www/wwwlogs/missing-db-backup.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestDeleteMissingFileBackupCleansRecord(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 
 	db := database.GetDB()
-	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := db.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (1, 'site', 'missing-file.example.com', 'u1', '/www/wwwroot/missing-file.example.com', '/www/wwwlogs/missing-file.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}

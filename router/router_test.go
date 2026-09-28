@@ -616,7 +616,7 @@ const site = (id, domain, siteType, status, health, siteInventory, createdAt) =>
     monitoring_enabled: false,
     backup_enabled: false,
     file_lock_enabled: false,
-    fastcgi_cache_enabled: false,
+    litespeed_cache_enabled: false,
     access_log_mode: 'off',
     update_checks_disabled: false,
     health: { level: health, issues: [] },
@@ -1486,8 +1486,8 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 	if monitoring < 0 || ssl < 0 || monitoring >= ssl {
 		t.Fatalf("runtime configuration order = monitoring:%d ssl:%d", monitoring, ssl)
 	}
-	if bytes.Contains(source, []byte(`website.nginx_custom_config`)) {
-		t.Fatal("website detail still exposes the disabled Nginx custom configuration card")
+	if bytes.Contains(source, []byte(`website.openlitespeed_custom_config`)) {
+		t.Fatal("website detail still exposes the disabled OpenLiteSpeed custom configuration card")
 	}
 	if !bytes.Contains(source, []byte(`'/databases/' + site.id`)) {
 		t.Fatal("website detail is missing the direct database management link")

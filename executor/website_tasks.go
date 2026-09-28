@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -55,7 +54,7 @@ func requireDomainTargetAvailable(path, label string) error {
 }
 
 const createWebsiteInsertSQL = `INSERT INTO websites (name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
-	 db_name, db_user, php_pool_path, nginx_conf_path, site_type, ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, template_version, access_log_mode, disable_application_passwords, log_retention_days, php_fpm_max_children, expires_at)
+	 db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, template_version, access_log_mode, disable_application_passwords, log_retention_days, lsphp_max_children, expires_at)
 	 VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1.0', 'error_only', 1, ?, ?, ?)`
 
 func moveSiteLogDir(oldLogDir, newLogDir string) error {
@@ -126,7 +125,7 @@ func managedSubpath(rootPath, targetPath, label string) (string, error) {
 	return target, nil
 }
 
-func ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbUser, phpPoolPath, nginxConfPath, nginxEnabledPath, phpSockPath string) error {
+func ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbUser, olsVHostConfigPath, olsVHostEnabledPath, phpSockPath string) error {
 	db := database.GetDB()
 	if db != nil {
 		var domain string
@@ -138,10 +137,10 @@ func ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbU
 			   OR log_dir = ?
 			   OR db_name = ?
 			   OR db_user = ?
-			   OR php_pool_path = ?
-			   OR nginx_conf_path = ?
+			   OR lsphp_socket_path = ?
+			   OR ols_vhost_config_path = ?
 			LIMIT 1
-		`, systemUser, webRoot, logDir, dbName, dbUser, phpPoolPath, nginxConfPath).Scan(&domain)
+		`, systemUser, webRoot, logDir, dbName, dbUser, phpSockPath, olsVHostConfigPath).Scan(&domain)
 		if err == nil {
 			return fmt.Errorf("internal resource is already used by site %s", domain)
 		}
@@ -157,10 +156,9 @@ func ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbU
 	for label, path := range map[string]string{
 		"web root":            webRoot,
 		"log dir":             logDir,
-		"php-fpm pool":        phpPoolPath,
-		"nginx config":        nginxConfPath,
-		"nginx enabled link":  nginxEnabledPath,
-		"php-fpm socket file": phpSockPath,
+		"OpenLiteSpeed vhost": olsVHostConfigPath,
+		"OLS enabled link":    olsVHostEnabledPath,
+		"LSPHP socket":        phpSockPath,
 	} {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("%s already exists: %s", label, path)
@@ -219,15 +217,14 @@ func executeCreateSite(task *Task) TaskResult {
 	dbName := "db_" + siteName
 	dbUser := "user_" + siteName
 	configBase := siteConfigBaseName(siteName)
-	phpPoolPath := filepath.Join(cfg.Paths.PHPFPMPool, configBase+".conf")
-	nginxConfPath := filepath.Join(cfg.Paths.NginxSitesAvailable, configBase+".conf")
-	nginxEnabledPath := filepath.Join(cfg.Paths.NginxSitesEnabled, configBase+".conf")
-	phpSockPath := filepath.Join(cfg.Paths.PHPFPMSock, configBase+".sock")
+	olsVHostConfigPath := filepath.Join(cfg.Paths.OLSVHostsAvailable, configBase+".conf")
+	olsVHostEnabledPath := filepath.Join(cfg.Paths.OLSVHostsEnabled, configBase+".conf")
+	phpSockPath := filepath.Join(cfg.Paths.LSPHPSocketDir, configBase+".sock")
 	if err := validateUnixSocketPath(phpSockPath); err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
 
-	if err := ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbUser, phpPoolPath, nginxConfPath, nginxEnabledPath, phpSockPath); err != nil {
+	if err := ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbUser, olsVHostConfigPath, olsVHostEnabledPath, phpSockPath); err != nil {
 		log.Printf("站点资源名冲突 domain=%s: %v", domain, err)
 		return TaskResult{Success: false, Message: "站点资源名冲突: " + err.Error()}
 	}
@@ -306,40 +303,17 @@ func executeCreateSite(task *Task) TaskResult {
 		return TaskResult{Success: false, Message: "设置站点安全权限失败"}
 	}
 
-	// Step 7: Generate OpenLiteSpeed vhost + per-site LSPHP settings.
+	// Step 7: Generate the OpenLiteSpeed vhost. The vhost owns the per-site
+	// LSPHP process, Unix socket, PHP limits and isolation settings.
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
 
 	allServerNames := buildServerNames(domain, payload.Aliases)
 
-	// pm.max_children 按建站当时的服务器内存/CPU 计算一次，随即持久化到 websites 表，
-	// 此后固定不变，不随服务器后续新增/删除站点而改变（见 PHPFPMPoolData.MaxChildren 注释）。
-	maxChildren := RecommendPHPFPMMaxChildren(CollectSystemFacts())
+	// LSPHP 子进程上限按建站当时的服务器内存/CPU 计算一次并持久化，
+	// 此后固定不变，不随服务器后续新增/删除站点而改变。
+	maxChildren := RecommendLSPHPMaxChildren(CollectSystemFacts())
 
-	phpData := &PHPFPMPoolData{
-		Domain:      domain,
-		PoolName:    configBase,
-		SystemUser:  systemUser,
-		WebRoot:     webRoot,
-		SocketPath:  cfg.Paths.PHPFPMSock,
-		SocketName:  configBase,
-		MaxChildren: strconv.Itoa(maxChildren),
-	}
-	phpConfig, err := engine.RenderPHPFPMPool(phpData)
-	if err != nil {
-		rollback()
-		log.Printf("渲染 LSPHP 站点参数失败: %v", err)
-		return taskFailure("渲染 LSPHP 站点参数失败", err)
-	}
-	if err := engine.ApplyPHPFPMPool(phpConfig, phpPoolPath, logDir, phpSockPath); err != nil {
-		rollback()
-		log.Printf("应用 LSPHP 站点参数失败: %v", err)
-		return taskFailure("应用 LSPHP 站点参数失败", err)
-	}
-	rollbacks = append(rollbacks, rollbackStep{"删除LSPHP站点参数 " + phpPoolPath, func() error {
-		return os.Remove(phpPoolPath)
-	}})
-
-	nginxData := &NginxSiteData{
+	olsVHostData := &OLSVHostData{
 		Domain:         domain,
 		Aliases:        payload.Aliases,
 		ServerNames:    allServerNames,
@@ -354,22 +328,22 @@ func executeCreateSite(task *Task) TaskResult {
 		PHPMaxChildren: maxChildren,
 	}
 
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
 	if err != nil {
 		rollback()
 		log.Printf("渲染 OpenLiteSpeed 配置失败: %v", err)
 		return taskFailure("渲染 OpenLiteSpeed 配置失败", err)
 	}
 
-	if err := engine.ApplyNginxConfig(nginxConfig, nginxConfPath, nginxEnabledPath); err != nil {
+	if err := engine.ApplyOLSVHostConfig(olsVHostConfig, olsVHostConfigPath, olsVHostEnabledPath); err != nil {
 		rollback()
 		log.Printf("应用 OpenLiteSpeed 配置失败: %v", err)
 		return taskFailure("应用 OpenLiteSpeed 配置失败", err)
 	}
-	rollbacks = append(rollbacks, rollbackStep{"删除OpenLiteSpeed配置 " + nginxConfPath, func() error {
-		os.Remove(nginxEnabledPath)
-		os.Remove(nginxConfPath)
-		_, reloadErr := reloadOLSManagedRegistry(cfg.Paths.NginxSitesEnabled)
+	rollbacks = append(rollbacks, rollbackStep{"删除OpenLiteSpeed配置 " + olsVHostConfigPath, func() error {
+		os.Remove(olsVHostEnabledPath)
+		os.Remove(olsVHostConfigPath)
+		_, reloadErr := reloadOLSManagedRegistry(cfg.Paths.OLSVHostsEnabled)
 		return reloadErr
 	}})
 
@@ -394,7 +368,7 @@ func executeCreateSite(task *Task) TaskResult {
 			sslWarning = FriendlySSLError(sslErr)
 			os.RemoveAll(certDir)
 		} else {
-			sslData := &NginxSiteData{
+			sslData := &OLSVHostData{
 				Domain:         domain,
 				Aliases:        payload.Aliases,
 				ServerNames:    allServerNames,
@@ -411,15 +385,15 @@ func executeCreateSite(task *Task) TaskResult {
 				PHPMaxChildren: maxChildren,
 			}
 
-			httpsConfig, sslErr := engine.RenderNginxConfig(sslData)
+			httpsConfig, sslErr := engine.RenderOLSVHostConfig(sslData)
 			if sslErr != nil {
 				log.Printf("渲染 HTTPS 配置失败: %v", sslErr)
 				sslWarning = "渲染 HTTPS 配置失败：" + sslErr.Error()
 				os.RemoveAll(certDir)
-			} else if sslErr := engine.ApplyNginxConfig(httpsConfig, nginxConfPath, nginxEnabledPath); sslErr != nil {
+			} else if sslErr := engine.ApplyOLSVHostConfig(httpsConfig, olsVHostConfigPath, olsVHostEnabledPath); sslErr != nil {
 				log.Printf("应用 HTTPS 配置失败: %v", sslErr)
 				os.RemoveAll(certDir)
-				if restoreErr := engine.ApplyNginxConfig(nginxConfig, nginxConfPath, nginxEnabledPath); restoreErr != nil {
+				if restoreErr := engine.ApplyOLSVHostConfig(olsVHostConfig, olsVHostConfigPath, olsVHostEnabledPath); restoreErr != nil {
 					rollback()
 					log.Printf("恢复 HTTP 配置失败: %v", restoreErr)
 					return taskFailure("应用 HTTPS 配置失败，且恢复 HTTP 配置失败", restoreErr)
@@ -461,7 +435,7 @@ func executeCreateSite(task *Task) TaskResult {
 	insertResult, err := db.Exec(
 		createWebsiteInsertSQL,
 		siteName, domain, strings.Join(payload.Aliases, "\n"), systemUser,
-		webRoot, documentRootSubdir, logDir, dbName, dbUser, phpPoolPath, nginxConfPath, payload.SiteType, sslEnabled,
+		webRoot, documentRootSubdir, logDir, dbName, dbUser, phpSockPath, olsVHostConfigPath, payload.SiteType, sslEnabled,
 		certPath, keyPath, sslExpiry, sslWarning, sslCertSource, defaultSiteLogRetentionDays, maxChildren, nilIfEmpty(payload.ExpiresAt),
 	)
 	if err != nil {
@@ -548,16 +522,16 @@ func executeDeleteSite(task *Task) TaskResult {
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
-	phpPoolPath, err := managedSubpath(cfg.Paths.PHPFPMPool, site.PHPPoolPath, "PHP-FPM配置")
+	phpSocketPath, err := managedSubpath(cfg.Paths.LSPHPSocketDir, site.LSPHPSocketPath, "LSPHP Socket")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
-	nginxConfPath, err := managedSubpath(cfg.Paths.NginxSitesAvailable, site.NginxConfPath, "Nginx配置")
+	olsVHostConfigPath, err := managedSubpath(cfg.Paths.OLSVHostsAvailable, site.OLSVHostConfigPath, "OpenLiteSpeed配置")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
-	enabledPath := nginxEnabledPath(cfg, nginxConfPath, site.Domain)
-	enabledPath, err = managedSubpath(cfg.Paths.NginxSitesEnabled, enabledPath, "Nginx启用链接")
+	enabledPath := olsVHostEnabledPath(cfg, olsVHostConfigPath, site.Domain)
+	enabledPath, err = managedSubpath(cfg.Paths.OLSVHostsEnabled, enabledPath, "OpenLiteSpeed启用链接")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
@@ -574,12 +548,12 @@ func executeDeleteSite(task *Task) TaskResult {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
 	db := database.GetDB()
-	maintenancePaths, err := terminalSourceMigrationMaintenancePaths(db, site.ID, cfg.Paths.NginxSitesAvailable)
+	maintenancePaths, err := terminalSourceMigrationMaintenancePaths(db, site.ID, cfg.Paths.OLSVHostsAvailable)
 	if err != nil {
 		return TaskResult{Success: false, Message: "检查网站搬家维护配置失败"}
 	}
 	if currentTarget, readErr := os.Readlink(enabledPath); readErr == nil && strings.HasPrefix(filepath.Base(currentTarget), ".ols-wpanel-migration-") {
-		currentTarget, pathErr := managedSubpath(cfg.Paths.NginxSitesAvailable, currentTarget, "迁移维护配置")
+		currentTarget, pathErr := managedSubpath(cfg.Paths.OLSVHostsAvailable, currentTarget, "迁移维护配置")
 		if pathErr != nil {
 			return TaskResult{Success: false, Message: pathErr.Error()}
 		}
@@ -611,14 +585,14 @@ func executeDeleteSite(task *Task) TaskResult {
 		dbCleanupWarning = "，但数据库清理失败，请检查 MariaDB 后手动清理"
 	}
 
-	os.Remove(phpPoolPath)
+	os.Remove(phpSocketPath)
 	os.Remove(enabledPath)
-	os.Remove(nginxConfPath)
+	os.Remove(olsVHostConfigPath)
 	for _, maintenancePath := range maintenancePaths {
 		os.Remove(maintenancePath)
 	}
 
-	if _, reloadErr := reloadOLSManagedRegistry(cfg.Paths.NginxSitesEnabled); reloadErr != nil {
+	if _, reloadErr := reloadOLSManagedRegistry(cfg.Paths.OLSVHostsEnabled); reloadErr != nil {
 		return TaskResult{Success: false, Message: "刷新 OpenLiteSpeed 站点注册表失败: " + reloadErr.Error()}
 	}
 
@@ -661,7 +635,7 @@ func markWebsiteDeleting(db *sql.DB, siteID int) error {
 	return nil
 }
 
-func terminalSourceMigrationMaintenancePaths(db *sql.DB, siteID int, nginxRoot string) ([]string, error) {
+func terminalSourceMigrationMaintenancePaths(db *sql.DB, siteID int, olsVHostRoot string) ([]string, error) {
 	rows, err := db.Query(`SELECT r.identifier FROM site_migration_resources r
 		JOIN site_migration_sites ms ON ms.id=r.migration_site_id AND ms.source_site_id=?
 		WHERE ms.status IN ('completed','abandoned') AND r.resource_type='source_maintenance_config' AND r.status='created'`, siteID)
@@ -675,7 +649,7 @@ func terminalSourceMigrationMaintenancePaths(db *sql.DB, siteID int, nginxRoot s
 		if err := rows.Scan(&path); err != nil {
 			return nil, err
 		}
-		path, err = managedSubpath(nginxRoot, path, "迁移维护配置")
+		path, err = managedSubpath(olsVHostRoot, path, "迁移维护配置")
 		if err != nil {
 			return nil, err
 		}
@@ -753,12 +727,12 @@ func executePauseSite(task *Task) TaskResult {
 	}
 	cfg := config.AppConfig
 
-	nginxConfPath, err := managedSubpath(cfg.Paths.NginxSitesAvailable, site.NginxConfPath, "Nginx配置")
+	olsVHostConfigPath, err := managedSubpath(cfg.Paths.OLSVHostsAvailable, site.OLSVHostConfigPath, "OpenLiteSpeed配置")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
-	enabledPath := nginxEnabledPath(cfg, nginxConfPath, site.Domain)
-	enabledPath, err = managedSubpath(cfg.Paths.NginxSitesEnabled, enabledPath, "Nginx启用链接")
+	enabledPath := olsVHostEnabledPath(cfg, olsVHostConfigPath, site.Domain)
+	enabledPath, err = managedSubpath(cfg.Paths.OLSVHostsEnabled, enabledPath, "OpenLiteSpeed启用链接")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
@@ -772,32 +746,32 @@ func executePauseSite(task *Task) TaskResult {
 	if _, err := os.Lstat(enabledPath); err == nil {
 		if err := os.Remove(enabledPath); err != nil {
 			if restoreErr := restoreStatus(); restoreErr != nil {
-				return TaskResult{Success: false, Message: "移除Nginx启用链接失败，网站状态恢复失败，请人工检查"}
+				return TaskResult{Success: false, Message: "移除OpenLiteSpeed启用链接失败，网站状态恢复失败，请人工检查"}
 			}
-			return TaskResult{Success: false, Message: "移除Nginx启用链接失败: " + err.Error()}
+			return TaskResult{Success: false, Message: "移除OpenLiteSpeed启用链接失败: " + err.Error()}
 		}
 		removedEnabled = true
 	} else if !os.IsNotExist(err) {
 		if restoreErr := restoreStatus(); restoreErr != nil {
-			return TaskResult{Success: false, Message: "检查Nginx启用链接失败，网站状态恢复失败，请人工检查"}
+			return TaskResult{Success: false, Message: "检查OpenLiteSpeed启用链接失败，网站状态恢复失败，请人工检查"}
 		}
-		return TaskResult{Success: false, Message: "检查Nginx启用链接失败: " + err.Error()}
+		return TaskResult{Success: false, Message: "检查OpenLiteSpeed启用链接失败: " + err.Error()}
 	}
 
-	if out, err := runWebsiteStateNginxReload(); err != nil {
+	if out, err := runWebsiteStateOLSReload(); err != nil {
 		var linkRestoreErr, reloadRestoreErr error
 		if removedEnabled {
-			if linkRestoreErr = os.Symlink(nginxConfPath, enabledPath); linkRestoreErr != nil {
-				log.Printf("暂停失败后恢复Nginx启用链接失败 path=%s: %v", enabledPath, linkRestoreErr)
+			if linkRestoreErr = os.Symlink(olsVHostConfigPath, enabledPath); linkRestoreErr != nil {
+				log.Printf("暂停失败后恢复OpenLiteSpeed启用链接失败 path=%s: %v", enabledPath, linkRestoreErr)
 			} else {
-				_, reloadRestoreErr = runWebsiteStateNginxReload()
+				_, reloadRestoreErr = runWebsiteStateOLSReload()
 			}
 		}
 		statusRestoreErr := restoreStatus()
 		if linkRestoreErr != nil || reloadRestoreErr != nil || statusRestoreErr != nil {
-			return TaskResult{Success: false, Message: "Nginx 重载失败，网站原状态恢复未完成，请人工检查"}
+			return TaskResult{Success: false, Message: "OpenLiteSpeed 重载失败，网站原状态恢复未完成，请人工检查"}
 		}
-		return TaskResult{Success: false, Message: "Nginx 重载失败: " + string(out)}
+		return TaskResult{Success: false, Message: "OpenLiteSpeed 重载失败: " + string(out)}
 	}
 
 	return TaskResult{Success: true, Message: "网站 " + site.Domain + " 已暂停"}
@@ -819,12 +793,12 @@ func executeEnableSite(task *Task) TaskResult {
 	}
 	cfg := config.AppConfig
 
-	nginxConfPath, err := managedSubpath(cfg.Paths.NginxSitesAvailable, site.NginxConfPath, "Nginx配置")
+	olsVHostConfigPath, err := managedSubpath(cfg.Paths.OLSVHostsAvailable, site.OLSVHostConfigPath, "OpenLiteSpeed配置")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
-	enabledPath := nginxEnabledPath(cfg, nginxConfPath, site.Domain)
-	enabledPath, err = managedSubpath(cfg.Paths.NginxSitesEnabled, enabledPath, "Nginx启用链接")
+	enabledPath := olsVHostEnabledPath(cfg, olsVHostConfigPath, site.Domain)
+	enabledPath, err = managedSubpath(cfg.Paths.OLSVHostsEnabled, enabledPath, "OpenLiteSpeed启用链接")
 	if err != nil {
 		return TaskResult{Success: false, Message: err.Error()}
 	}
@@ -833,18 +807,18 @@ func executeEnableSite(task *Task) TaskResult {
 		oldTarget = target
 		hadOldLink = true
 	} else if !os.IsNotExist(err) {
-		return TaskResult{Success: false, Message: "检查Nginx启用链接失败: " + err.Error()}
+		return TaskResult{Success: false, Message: "检查OpenLiteSpeed启用链接失败: " + err.Error()}
 	}
 	maintenancePath := ""
 	if site.Status == models.StatusMigrated {
 		if !hadOldLink {
 			return TaskResult{Success: false, Message: "搬家维护配置不可用"}
 		}
-		if filepath.Clean(oldTarget) != filepath.Clean(nginxConfPath) {
+		if filepath.Clean(oldTarget) != filepath.Clean(olsVHostConfigPath) {
 			if !strings.HasPrefix(filepath.Base(oldTarget), ".ols-wpanel-migration-") {
 				return TaskResult{Success: false, Message: "搬家维护配置已变化"}
 			}
-			maintenancePath, err = managedSubpath(cfg.Paths.NginxSitesAvailable, oldTarget, "迁移维护配置")
+			maintenancePath, err = managedSubpath(cfg.Paths.OLSVHostsAvailable, oldTarget, "迁移维护配置")
 			if err != nil {
 				return TaskResult{Success: false, Message: err.Error()}
 			}
@@ -856,7 +830,7 @@ func executeEnableSite(task *Task) TaskResult {
 	restoreStatus := func() error {
 		return changeWebsiteStatus(site.ID, models.StatusActive, site.Status)
 	}
-	if err := atomicReplaceSymlink(enabledPath, nginxConfPath); err != nil {
+	if err := atomicReplaceSymlink(enabledPath, olsVHostConfigPath); err != nil {
 		log.Printf("创建软链接失败: %v", err)
 		if restoreErr := restoreStatus(); restoreErr != nil {
 			return TaskResult{Success: false, Message: "创建软链接失败，网站状态恢复失败，请人工检查"}
@@ -864,26 +838,26 @@ func executeEnableSite(task *Task) TaskResult {
 		return TaskResult{Success: false, Message: "创建软链接失败"}
 	}
 
-	if out, err := runWebsiteStateNginxReload(); err != nil {
+	if out, err := runWebsiteStateOLSReload(); err != nil {
 		var linkRestoreErr, reloadRestoreErr error
 		if hadOldLink {
 			if linkRestoreErr = atomicReplaceSymlink(enabledPath, oldTarget); linkRestoreErr != nil {
-				log.Printf("启用失败后恢复Nginx启用链接失败 path=%s: %v", enabledPath, linkRestoreErr)
+				log.Printf("启用失败后恢复OpenLiteSpeed启用链接失败 path=%s: %v", enabledPath, linkRestoreErr)
 			} else {
-				_, reloadRestoreErr = runWebsiteStateNginxReload()
+				_, reloadRestoreErr = runWebsiteStateOLSReload()
 			}
 		} else {
 			linkRestoreErr = os.Remove(enabledPath)
 			if linkRestoreErr == nil || os.IsNotExist(linkRestoreErr) {
 				linkRestoreErr = nil
-				_, reloadRestoreErr = runWebsiteStateNginxReload()
+				_, reloadRestoreErr = runWebsiteStateOLSReload()
 			}
 		}
 		statusRestoreErr := restoreStatus()
 		if linkRestoreErr != nil || reloadRestoreErr != nil || statusRestoreErr != nil {
-			return TaskResult{Success: false, Message: "Nginx 重载失败，网站原状态恢复未完成，请人工检查"}
+			return TaskResult{Success: false, Message: "OpenLiteSpeed 重载失败，网站原状态恢复未完成，请人工检查"}
 		}
-		return TaskResult{Success: false, Message: "Nginx 重载失败: " + string(out)}
+		return TaskResult{Success: false, Message: "OpenLiteSpeed 重载失败: " + string(out)}
 	}
 	if maintenancePath != "" {
 		if err := os.Remove(maintenancePath); err != nil && !os.IsNotExist(err) {
@@ -910,21 +884,17 @@ func enableSiteSSLWarning(site *models.Website, now time.Time) string {
 	return ""
 }
 
-var runWebsiteStateNginxReload = func() ([]byte, error) {
+var runWebsiteStateOLSReload = func() ([]byte, error) {
 	if config.AppConfig == nil {
 		return nil, errors.New("面板配置未加载")
 	}
-	return reloadOLSManagedRegistry(config.AppConfig.Paths.NginxSitesEnabled)
+	return reloadOLSManagedRegistry(config.AppConfig.Paths.OLSVHostsEnabled)
 }
 
 var changeWebsiteStatus = updateWebsiteStatus
 
-var applyPrimaryDomainPHP = func(engine *TemplateEngine, content, targetPath, logDir, socketPath string) error {
-	return engine.ApplyPHPFPMPool(content, targetPath, logDir, socketPath)
-}
-
-var applyPrimaryDomainNginx = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
-	return engine.ApplyNginxConfig(content, targetPath, enabledPath)
+var applyPrimaryDomainOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
+	return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 }
 
 var updatePrimaryDomainWPSiteURLs = UpdateWPSiteURLs
@@ -933,17 +903,11 @@ var readPrimaryDomainWPSiteURLs = ReadWPSiteURLs
 
 var changeWebsitePrimaryDomain = updateWebsitePrimaryDomain
 
-var reloadPrimaryDomainPHP = func() error {
-	// LSPHP external applications are part of each OpenLiteSpeed vhost. There is
-	// no independent PHP-FPM service to reload.
-	return nil
-}
-
-var reloadPrimaryDomainNginx = func() error {
+var reloadPrimaryDomainOLS = func() error {
 	if config.AppConfig == nil {
 		return errors.New("面板配置未加载")
 	}
-	if _, err := reloadOLSManagedRegistry(config.AppConfig.Paths.NginxSitesEnabled); err != nil {
+	if _, err := reloadOLSManagedRegistry(config.AppConfig.Paths.OLSVHostsEnabled); err != nil {
 		return fmt.Errorf("reload OpenLiteSpeed: %w", err)
 	}
 	return nil
@@ -951,10 +915,10 @@ var reloadPrimaryDomainNginx = func() error {
 
 func updateWebsitePrimaryDomain(siteID int, fromDomain string, site *models.Website) error {
 	result, err := database.GetDB().Exec(`UPDATE websites SET domain = ?, aliases = ?, web_root = ?, log_dir = ?,
-		nginx_conf_path = ?, php_pool_path = ?, ssl_cert_path = ?, ssl_key_path = ?,
+		ols_vhost_config_path = ?, lsphp_socket_path = ?, ssl_cert_path = ?, ssl_key_path = ?,
 		updated_at = CURRENT_TIMESTAMP WHERE id = ? AND domain = ?`,
 		site.Domain, site.Aliases, site.WebRoot, site.LogDir,
-		site.NginxConfPath, site.PHPPoolPath, site.SSLCertPath, site.SSLKeyPath, siteID, fromDomain)
+		site.OLSVHostConfigPath, site.LSPHPSocketPath, site.SSLCertPath, site.SSLKeyPath, siteID, fromDomain)
 	if err != nil {
 		return err
 	}
@@ -1032,23 +996,19 @@ func executeUpdateDomains(task *Task) TaskResult {
 	if domainChanged {
 		oldWebRoot := site.WebRoot
 		oldLogDir := site.LogDir
-		oldNginxConf := site.NginxConfPath
-		oldPHPPool := site.PHPPoolPath
+		oldOLSVHostConfig := site.OLSVHostConfigPath
+		lsphpSocket := site.LSPHPSocketPath
 		oldCertDir := filepath.Join(cfg.Paths.Certificates, oldDomain)
-		oldEnabledLink := nginxEnabledPath(cfg, oldNginxConf, oldDomain)
+		oldEnabledLink := olsVHostEnabledPath(cfg, oldOLSVHostConfig, oldDomain)
 
 		newWebRoot := filepath.Join(cfg.Paths.WWWRoot, newDomain)
 		newLogDir := filepath.Join(cfg.Paths.WWWLogs, newDomain)
-		newNginxConf := oldNginxConf
-		newPHPPool := oldPHPPool
+		newOLSVHostConfig := oldOLSVHostConfig
 		newCertDir := filepath.Join(cfg.Paths.Certificates, newDomain)
-		newEnabledLink := nginxEnabledPath(cfg, newNginxConf, newDomain)
+		newEnabledLink := olsVHostEnabledPath(cfg, newOLSVHostConfig, newDomain)
 		oldBackupDir := filepath.Join(cfg.Panel.BackupDir, oldDomain)
 		newBackupDir := filepath.Join(cfg.Panel.BackupDir, newDomain)
-		oldCustomPaths := []string{filepath.Join(nginxCustomDir, oldDomain+".pre.conf"), filepath.Join(nginxCustomDir, oldDomain+".conf")}
-		newCustomPaths := []string{filepath.Join(nginxCustomDir, newDomain+".pre.conf"), filepath.Join(nginxCustomDir, newDomain+".conf")}
-		poolName := phpPoolName(newPHPPool, newDomain)
-		if err := validateUnixSocketPath(phpSocketPath(cfg, newPHPPool, newDomain)); err != nil {
+		if err := validateUnixSocketPath(phpSocketPath(cfg, lsphpSocket, newDomain)); err != nil {
 			return TaskResult{Success: false, Message: err.Error()}
 		}
 
@@ -1086,50 +1046,21 @@ func executeUpdateDomains(task *Task) TaskResult {
 		} else if !os.IsNotExist(err) {
 			return taskFailure("检查原备份目录失败", err)
 		}
-		for i, oldPath := range oldCustomPaths {
-			if _, err := os.Lstat(oldPath); err == nil {
-				if err := requireDomainTargetAvailable(newCustomPaths[i], "新自定义 Nginx 文件"); err != nil {
-					return taskFailure("主域名预检查失败", err)
-				}
-			} else if !os.IsNotExist(err) {
-				return taskFailure("检查原自定义 Nginx 文件失败", err)
-			}
-		}
-		oldPoolContent, err := os.ReadFile(oldPHPPool)
+		oldOLSVHostContent, err := os.ReadFile(oldOLSVHostConfig)
 		if err != nil {
-			return taskFailure("读取原 PHP-FPM 配置失败", err)
-		}
-		oldNginxContent, err := os.ReadFile(oldNginxConf)
-		if err != nil {
-			return taskFailure("读取原 Nginx 配置失败", err)
+			return taskFailure("读取原 OpenLiteSpeed 配置失败", err)
 		}
 		oldEnabledTarget, oldEnabledErr := os.Readlink(oldEnabledLink)
 		if oldEnabledErr != nil {
-			return taskFailure("读取原 Nginx 启用链接失败", oldEnabledErr)
+			return taskFailure("读取原 OpenLiteSpeed 启用链接失败", oldEnabledErr)
 		}
 		if newEnabledLink != oldEnabledLink {
-			if err := requireDomainTargetAvailable(newEnabledLink, "新 Nginx 启用链接"); err != nil {
+			if err := requireDomainTargetAvailable(newEnabledLink, "新 OpenLiteSpeed 启用链接"); err != nil {
 				return taskFailure("主域名预检查失败", err)
 			}
 		}
 
 		engine := NewTemplateEngine(cfg.Panel.BackupDir)
-		phpData := &PHPFPMPoolData{
-			Domain:     newDomain,
-			PoolName:   poolName,
-			SystemUser: site.SystemUser,
-			WebRoot:    newWebRoot,
-			SocketPath: cfg.Paths.PHPFPMSock,
-			SocketName: poolName,
-			// 改域名不等于服务器规格变化，沿用建站时已经持久化的 pm.max_children，
-			// 不重新计算——否则每次改域名都会悄悄改变这个站点的并发上限。
-			MaxChildren: strconv.Itoa(site.PHPFPMMaxChildren),
-		}
-		phpConfig, err := engine.RenderPHPFPMPool(phpData)
-		if err != nil {
-			return taskFailure("渲染 PHP-FPM 配置失败", err)
-		}
-
 		proposed := *site
 		proposed.WebRoot = newWebRoot
 		proposed.LogDir = newLogDir
@@ -1139,13 +1070,13 @@ func executeUpdateDomains(task *Task) TaskResult {
 			proposed.SSLCertPath = filepath.Join(newCertDir, "fullchain.pem")
 			proposed.SSLKeyPath = filepath.Join(newCertDir, "privkey.pem")
 		}
-		nginxData, err := nginxDataFromSiteChecked(&proposed)
+		olsVHostData, err := olsVHostDataFromSiteChecked(&proposed)
 		if err != nil {
 			return taskFailure("CDN 真实 IP 配置无效", err)
 		}
-		nginxConfig, err := engine.RenderNginxConfig(nginxData)
+		olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
 		if err != nil {
-			return taskFailure("渲染 Nginx 配置失败", err)
+			return taskFailure("渲染 OpenLiteSpeed 配置失败", err)
 		}
 
 		// 切换：每完成一步才登记对应恢复动作。
@@ -1163,7 +1094,8 @@ func executeUpdateDomains(task *Task) TaskResult {
 			return os.Rename(newLogDir, oldLogDir)
 		}})
 
-		// 插件身份目录仍随面板主域名管理，但插件通过 PHP-FPM 注入的明确路径读取，
+		// 插件身份目录仍随面板主域名管理，但插件通过 OpenLiteSpeed LSPHP
+		// 外部应用注入的明确路径读取，
 		// 不再依赖 WordPress home URL。目标目录存在时拒绝覆盖，避免误删其他身份。
 		identityMoved, err := moveSitePluginIdentity(oldDomain, newDomain)
 		if err != nil {
@@ -1184,39 +1116,6 @@ func executeUpdateDomains(task *Task) TaskResult {
 				return os.Rename(newBackupDir, oldBackupDir)
 			}})
 		}
-		if err := os.MkdirAll(nginxCustomDir, 0755); err != nil {
-			return domainUpdateFailure("准备自定义 Nginx 目录失败", err, rollbacks)
-		}
-		for i, oldPath := range oldCustomPaths {
-			newPath := newCustomPaths[i]
-			if _, err := os.Lstat(oldPath); err == nil {
-				if err := os.Rename(oldPath, newPath); err != nil {
-					return domainUpdateFailure("重命名自定义 Nginx 文件失败", err, rollbacks)
-				}
-				rollbacks = append(rollbacks, rollbackStep{"恢复自定义 Nginx 文件", func() error {
-					return os.Rename(newPath, oldPath)
-				}})
-			} else {
-				if err := os.WriteFile(newPath, nil, 0644); err != nil {
-					return domainUpdateFailure("创建新自定义 Nginx 文件失败", err, rollbacks)
-				}
-				rollbacks = append(rollbacks, rollbackStep{"删除新自定义 Nginx 文件", func() error {
-					return os.Remove(newPath)
-				}})
-			}
-		}
-
-		// 身份目录搬迁后立即切换 PHP-FPM 指针，缩短旧运行配置与新身份路径不一致的窗口。
-		if err := applyPrimaryDomainPHP(engine, phpConfig, newPHPPool, newLogDir, phpSocketPath(cfg, newPHPPool, newDomain)); err != nil {
-			return domainUpdateFailure("应用 PHP-FPM 配置失败", err, rollbacks)
-		}
-		phpRB := rollbackStep{"恢复PHP-FPM Pool " + oldPHPPool, func() error {
-			if err := os.WriteFile(oldPHPPool, oldPoolContent, 0644); err != nil {
-				return err
-			}
-			return reloadPrimaryDomainPHP()
-		}}
-		rollbacks = append(rollbacks, phpRB)
 
 		if _, err := os.Stat(oldCertDir); err == nil {
 			if err := os.Rename(oldCertDir, newCertDir); err != nil {
@@ -1228,11 +1127,11 @@ func executeUpdateDomains(task *Task) TaskResult {
 			rollbacks = append(rollbacks, certRB)
 		}
 
-		if err := applyPrimaryDomainNginx(engine, nginxConfig, newNginxConf, newEnabledLink); err != nil {
-			return domainUpdateFailure("应用 Nginx 配置失败", err, rollbacks)
+		if err := applyPrimaryDomainOLSVHost(engine, olsVHostConfig, newOLSVHostConfig, newEnabledLink); err != nil {
+			return domainUpdateFailure("应用 OpenLiteSpeed 配置失败", err, rollbacks)
 		}
-		rollbacks = append(rollbacks, rollbackStep{"恢复 Nginx 配置", func() error {
-			if err := os.WriteFile(oldNginxConf, oldNginxContent, 0644); err != nil {
+		rollbacks = append(rollbacks, rollbackStep{"恢复 OpenLiteSpeed 配置", func() error {
+			if err := os.WriteFile(oldOLSVHostConfig, oldOLSVHostContent, 0644); err != nil {
 				return err
 			}
 			if newEnabledLink != oldEnabledLink {
@@ -1244,7 +1143,7 @@ func executeUpdateDomains(task *Task) TaskResult {
 			if err := os.Symlink(oldEnabledTarget, oldEnabledLink); err != nil {
 				return err
 			}
-			return reloadPrimaryDomainNginx()
+			return reloadPrimaryDomainOLS()
 		}})
 
 		if payload.NewWPSiteURL != "" || payload.NewWPHomeURL != "" {
@@ -1278,8 +1177,8 @@ func executeUpdateDomains(task *Task) TaskResult {
 				return domainUpdateFailure("主域名切换验证失败："+label+"不可用", err, rollbacks)
 			}
 		}
-		if target, err := os.Readlink(newEnabledLink); err != nil || filepath.Clean(target) != filepath.Clean(newNginxConf) {
-			return domainUpdateFailure("主域名切换验证失败：Nginx 启用链接异常", err, rollbacks)
+		if target, err := os.Readlink(newEnabledLink); err != nil || filepath.Clean(target) != filepath.Clean(newOLSVHostConfig) {
+			return domainUpdateFailure("主域名切换验证失败：OpenLiteSpeed 启用链接异常", err, rollbacks)
 		}
 
 		*site = proposed
@@ -1308,29 +1207,29 @@ func executeUpdateDomains(task *Task) TaskResult {
 	site.Aliases = aliasStr
 
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
-	nginxData, err := nginxDataFromSiteChecked(site)
+	olsVHostData, err := olsVHostDataFromSiteChecked(site)
 	if err != nil {
 		return taskFailure("CDN 真实 IP 配置无效", err)
 	}
 
-	nginxConfig, err := engine.RenderNginxConfig(nginxData)
+	olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
 	if err != nil {
-		log.Printf("渲染 Nginx 配置失败: %v", err)
-		return taskFailure("渲染 Nginx 配置失败", err)
+		log.Printf("渲染 OpenLiteSpeed 配置失败: %v", err)
+		return taskFailure("渲染 OpenLiteSpeed 配置失败", err)
 	}
 
 	if err := changeWebsiteAliases(site.ID, oldAliases, aliasStr); err != nil {
 		site.Aliases = oldAliases
 		return taskFailure("保存网站别名失败", err)
 	}
-	if err := applyAliasNginx(engine, nginxConfig, site.NginxConfPath,
-		nginxEnabledPath(cfg, site.NginxConfPath, newDomain)); err != nil {
-		log.Printf("应用 Nginx 配置失败: %v", err)
+	if err := applyAliasOLSVHost(engine, olsVHostConfig, site.OLSVHostConfigPath,
+		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, newDomain)); err != nil {
+		log.Printf("应用 OpenLiteSpeed 配置失败: %v", err)
 		site.Aliases = oldAliases
 		if restoreErr := changeWebsiteAliases(site.ID, aliasStr, oldAliases); restoreErr != nil {
-			return TaskResult{Success: false, Message: "应用 Nginx 配置失败，网站别名状态恢复失败，请人工检查"}
+			return TaskResult{Success: false, Message: "应用 OpenLiteSpeed 配置失败，网站别名状态恢复失败，请人工检查"}
 		}
-		return taskFailure("应用 Nginx 配置失败", err)
+		return taskFailure("应用 OpenLiteSpeed 配置失败", err)
 	}
 
 	msg := "别名已更新"
@@ -1341,8 +1240,8 @@ func executeUpdateDomains(task *Task) TaskResult {
 	return TaskResult{Success: true, Message: msg}
 }
 
-var applyAliasNginx = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
-	return engine.ApplyNginxConfig(content, targetPath, enabledPath)
+var applyAliasOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
+	return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 }
 
 var changeWebsiteAliases = updateWebsiteAliases

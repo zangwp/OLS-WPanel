@@ -405,8 +405,8 @@ func TestExecuteSetFileLockMarksIncompleteApply(t *testing.T) {
 	openTestDB(t)
 	missingRoot := filepath.Join(t.TempDir(), "missing")
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
-		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress')`, missingRoot); err != nil {
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
+		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress')`, missingRoot); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
 	site := &models.Website{ID: 1, Domain: "example.com", WebRoot: missingRoot, SystemUser: "wp_demo", SiteType: "wordpress"}

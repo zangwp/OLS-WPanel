@@ -83,7 +83,7 @@ func ApplyWPPasswordResetMode(webRoot, systemUser, mode string) error {
 
 	systemUser = strings.TrimSpace(systemUser)
 	if systemUser != "" {
-		// mu-plugin 文件必须归属站点用户，否则以站点用户运行的 PHP-FPM 无法
+		// mu-plugin 文件必须归属站点用户，否则以站点用户运行的 LSPHP 无法
 		// 读取它，表现为"面板保存成功但实际不生效"。chown 失败应直接报错，
 		// 而不是静默吞掉让运维难以排查。
 		if chErr := ChownSitePath(pluginPath, webRoot, systemUser); chErr != nil {

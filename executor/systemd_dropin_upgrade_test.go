@@ -29,8 +29,8 @@ func TestRepairManagedServiceDropInsUpdatesOnlyLegacyContent(t *testing.T) {
 	if got := readDropIn(t, root, "mariadb"); got != "[Service]\nRestart=on-failure\nRestartSec=2s\nStartLimitIntervalSec=0\n" {
 		t.Fatalf("custom mariadb drop-in was overwritten: %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, "nginx.service.d", "ols-wpanel.conf")); !os.IsNotExist(err) {
-		t.Fatalf("legacy nginx drop-in stat err = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(root, "openlitespeed.service.d", "ols-wpanel.conf")); !os.IsNotExist(err) {
+		t.Fatalf("legacy openlitespeed drop-in stat err = %v, want not exist", err)
 	}
 }
 

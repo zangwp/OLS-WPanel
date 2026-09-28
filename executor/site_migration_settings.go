@@ -17,8 +17,8 @@ type SiteMigrationRuntimeSettings struct {
 	SSLCertSource               string                         `json:"ssl_cert_source"`
 	TemplateVersion             string                         `json:"template_version"`
 	AccessLogMode               string                         `json:"access_log_mode"`
-	FastCGICacheEnabled         bool                           `json:"fastcgi_cache_enabled"`
-	FastCGICacheTTL             int                            `json:"fastcgi_cache_ttl"`
+	LiteSpeedCacheEnabled       bool                           `json:"litespeed_cache_enabled"`
+	LiteSpeedCacheTTL           int                            `json:"litespeed_cache_ttl"`
 	MonitoringEnabled           bool                           `json:"monitoring_enabled"`
 	MonitoringInterval          int                            `json:"monitoring_interval"`
 	DisableWPUpdates            bool                           `json:"disable_wp_updates"`
@@ -33,7 +33,7 @@ type SiteMigrationRuntimeSettings struct {
 	PasswordResetMode           string                         `json:"password_reset_mode"`
 	LogRetentionDays            int                            `json:"log_retention_days"`
 	CDNRealIPEnabled            bool                           `json:"cdn_realip_enabled"`
-	PHPFPMMaxChildren           int                            `json:"php_fpm_max_children"`
+	LSPHPMaxChildren            int                            `json:"lsphp_max_children"`
 	ExpiresAt                   string                         `json:"expires_at"`
 	RemoteBackupReconfigure     bool                           `json:"remote_backup_reconfigure"`
 	CronJobs                    []SiteMigrationCronSetting     `json:"cron_jobs,omitempty"`
@@ -83,28 +83,28 @@ func (s *SiteMigrationSettingsService) SourceSettings(ctx context.Context, migra
 	}
 	var settings SiteMigrationRuntimeSettings
 	var aliases, expires, snapshotRaw string
-	var ssl, fastcgi, monitoring, disableUpdates, disableEditing, xmlrpc, disableApplicationPasswords, debug, fileLock, cdn int
+	var ssl, litespeed, monitoring, disableUpdates, disableEditing, xmlrpc, disableApplicationPasswords, debug, fileLock, cdn int
 	err := s.db.QueryRowContext(ctx, `SELECT w.aliases,w.document_root_subdir,w.ssl_enabled,w.ssl_cert_source,w.template_version,w.access_log_mode,
-		w.fastcgi_cache_enabled,w.fastcgi_cache_ttl,w.monitoring_enabled,w.monitoring_interval,w.disable_wp_updates,
+		w.litespeed_cache_enabled,w.litespeed_cache_ttl,w.monitoring_enabled,w.monitoring_interval,w.disable_wp_updates,
 		w.disable_file_editing,w.xmlrpc_enabled,w.disable_application_passwords,w.wp_debug_enabled,w.wp_post_revisions,w.wp_memory_limit,
 		w.file_lock_enabled,w.file_lock_mode,w.password_reset_mode,w.log_retention_days,w.cdn_realip_enabled,
-		w.php_fpm_max_children,COALESCE(CAST(w.expires_at AS TEXT),''),ms.settings_snapshot
+		w.lsphp_max_children,COALESCE(CAST(w.expires_at AS TEXT),''),ms.settings_snapshot
 		FROM site_migration_sites ms
 		JOIN site_migration_batches mb ON mb.id=ms.batch_id AND mb.direction='source' AND mb.status='active'
 		JOIN site_migration_locks ml ON ml.migration_site_id=ms.id AND ml.site_id=ms.source_site_id AND ml.direction='source' AND ml.status='active'
 		JOIN websites w ON w.id=ms.source_site_id
 		WHERE ms.id=? AND ms.stage IN ('source_frozen','manifest_ready','transferring_files','transferring_database')`, migrationSiteID).Scan(
 		&aliases, &settings.DocumentRootSubdir, &ssl, &settings.SSLCertSource, &settings.TemplateVersion, &settings.AccessLogMode,
-		&fastcgi, &settings.FastCGICacheTTL, &monitoring, &settings.MonitoringInterval, &disableUpdates,
+		&litespeed, &settings.LiteSpeedCacheTTL, &monitoring, &settings.MonitoringInterval, &disableUpdates,
 		&disableEditing, &xmlrpc, &disableApplicationPasswords, &debug, &settings.WPPostRevisions, &settings.WPMemoryLimit,
 		&fileLock, &settings.FileLockMode, &settings.PasswordResetMode, &settings.LogRetentionDays, &cdn,
-		&settings.PHPFPMMaxChildren, &expires, &snapshotRaw)
+		&settings.LSPHPMaxChildren, &expires, &snapshotRaw)
 	if err != nil {
 		return SiteMigrationRuntimeSettings{}, errors.New("source migration settings unavailable")
 	}
 	settings.Aliases = splitMigrationAliases(aliases)
 	settings.SSLEnabled = ssl == 1
-	settings.FastCGICacheEnabled = fastcgi == 1
+	settings.LiteSpeedCacheEnabled = litespeed == 1
 	settings.MonitoringEnabled = monitoring == 1
 	settings.DisableWPUpdates = disableUpdates == 1
 	settings.DisableFileEditing = disableEditing == 1
@@ -219,7 +219,7 @@ func splitMigrationAliases(raw string) []string {
 }
 
 func validateSiteMigrationRuntimeSettings(settings *SiteMigrationRuntimeSettings) error {
-	if settings == nil || !siteMigrationMarkerPattern.MatchString(settings.MarkerToken) || settings.FastCGICacheTTL < 10 || settings.FastCGICacheTTL > 86400 || settings.MonitoringInterval <= 0 || settings.LogRetentionDays < 0 || settings.PHPFPMMaxChildren <= 0 {
+	if settings == nil || !siteMigrationMarkerPattern.MatchString(settings.MarkerToken) || settings.LiteSpeedCacheTTL < 10 || settings.LiteSpeedCacheTTL > 86400 || settings.MonitoringInterval <= 0 || settings.LogRetentionDays < 0 || settings.LSPHPMaxChildren <= 0 {
 		return errors.New("invalid migration runtime settings")
 	}
 	if settings.TemplateVersion == "" {

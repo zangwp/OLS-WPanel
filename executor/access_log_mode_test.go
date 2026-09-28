@@ -28,11 +28,11 @@ func withAccessLogModeStubs(t *testing.T) {
 	oldConfig := config.AppConfig
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: t.TempDir()},
-		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir(), PHPFPMSock: t.TempDir()},
+		Paths: config.PathsConfig{OLSVHostsEnabled: t.TempDir(), LSPHPSocketDir: t.TempDir()},
 	}
-	oldPersist, oldApply := persistAccessLogMode, applyAccessLogNginx
+	oldPersist, oldApply := persistAccessLogMode, applyAccessLogOLSVHost
 	t.Cleanup(func() {
-		persistAccessLogMode, applyAccessLogNginx = oldPersist, oldApply
+		persistAccessLogMode, applyAccessLogOLSVHost = oldPersist, oldApply
 		config.AppConfig = oldConfig
 		database.DB = oldDB
 		db.Close()
@@ -71,32 +71,32 @@ func runAccessLogModeTask(t *testing.T, site *models.Website, mode string) TaskR
 	if site.SiteType == "" {
 		site.SiteType = "wordpress"
 	}
-	if site.PHPPoolPath == "" {
-		site.PHPPoolPath = filepath.Join(root, "lsphp.conf")
+	if site.LSPHPSocketPath == "" {
+		site.LSPHPSocketPath = filepath.Join(root, "lsphp.conf")
 	}
-	if site.NginxConfPath == "" {
-		site.NginxConfPath = filepath.Join(root, "example.com.conf")
+	if site.OLSVHostConfigPath == "" {
+		site.OLSVHostConfigPath = filepath.Join(root, "example.com.conf")
 	}
 	return executeSetAccessLogMode(&Task{Payload: &SetAccessLogModePayload{Site: site, Mode: mode}})
 }
 
-func TestSetAccessLogModeDatabaseFailureDoesNotApplyNginx(t *testing.T) {
+func TestSetAccessLogModeDatabaseFailureDoesNotApplyOpenLiteSpeed(t *testing.T) {
 	withAccessLogModeStubs(t)
 	site := &models.Website{ID: 1, Domain: "example.com", AccessLogMode: "error_only"}
-	nginxCalled := false
+	openlitespeedCalled := false
 	persistAccessLogMode = func(int, string) error { return errors.New("database failed") }
-	applyAccessLogNginx = func(*TemplateEngine, string, string, string) error {
-		nginxCalled = true
+	applyAccessLogOLSVHost = func(*TemplateEngine, string, string, string) error {
+		openlitespeedCalled = true
 		return nil
 	}
 
 	result := runAccessLogModeTask(t, site, "full")
-	if result.Success || nginxCalled {
-		t.Fatalf("result=%+v nginxCalled=%v", result, nginxCalled)
+	if result.Success || openlitespeedCalled {
+		t.Fatalf("result=%+v openlitespeedCalled=%v", result, openlitespeedCalled)
 	}
 }
 
-func TestSetAccessLogModeNginxFailureRestoresDatabase(t *testing.T) {
+func TestSetAccessLogModeOpenLiteSpeedFailureRestoresDatabase(t *testing.T) {
 	withAccessLogModeStubs(t)
 	site := &models.Website{ID: 1, Domain: "example.com", AccessLogMode: "error_only"}
 	var savedModes []string
@@ -104,8 +104,8 @@ func TestSetAccessLogModeNginxFailureRestoresDatabase(t *testing.T) {
 		savedModes = append(savedModes, mode)
 		return nil
 	}
-	applyAccessLogNginx = func(*TemplateEngine, string, string, string) error {
-		return errors.New("nginx failed")
+	applyAccessLogOLSVHost = func(*TemplateEngine, string, string, string) error {
+		return errors.New("openlitespeed failed")
 	}
 
 	result := runAccessLogModeTask(t, site, "full")
@@ -128,12 +128,12 @@ func TestSetAccessLogModeReportsDatabaseRecoveryFailure(t *testing.T) {
 		}
 		return nil
 	}
-	applyAccessLogNginx = func(*TemplateEngine, string, string, string) error {
-		return errors.New("nginx failed")
+	applyAccessLogOLSVHost = func(*TemplateEngine, string, string, string) error {
+		return errors.New("openlitespeed failed")
 	}
 
 	result := runAccessLogModeTask(t, site, "full")
-	if result.Success || result.Message != "应用 Nginx 配置失败，访问日志状态恢复失败，请人工检查" {
+	if result.Success || result.Message != "应用 OpenLiteSpeed 配置失败，访问日志状态恢复失败，请人工检查" {
 		t.Fatalf("result=%+v", result)
 	}
 }
@@ -146,14 +146,14 @@ func TestSetAccessLogModeSuccessPersistsAndApplies(t *testing.T) {
 		savedMode = mode
 		return nil
 	}
-	nginxCalled := false
-	applyAccessLogNginx = func(*TemplateEngine, string, string, string) error {
-		nginxCalled = true
+	openlitespeedCalled := false
+	applyAccessLogOLSVHost = func(*TemplateEngine, string, string, string) error {
+		openlitespeedCalled = true
 		return nil
 	}
 
 	result := runAccessLogModeTask(t, site, "full")
-	if !result.Success || savedMode != "full" || !nginxCalled {
-		t.Fatalf("result=%+v savedMode=%q nginxCalled=%v", result, savedMode, nginxCalled)
+	if !result.Success || savedMode != "full" || !openlitespeedCalled {
+		t.Fatalf("result=%+v savedMode=%q openlitespeedCalled=%v", result, savedMode, openlitespeedCalled)
 	}
 }

@@ -53,8 +53,6 @@ func main() {
 	resetAdmin := flag.Bool("reset-admin", false, "一键重置管理员账号密码")
 	refreshWhitelist := flag.Bool("refresh-whitelist", false, "手动触发白名单刷新")
 	unbanAll := flag.Bool("unban-all", false, "一键清空所有IP封禁记录")
-	banIPNginx := flag.String("banip-nginx", "", "内部兼容：将指定 IP 加入持久 nftables 黑名单")
-	unbanIPNginx := flag.String("unbanip-nginx", "", "内部兼容：从持久 nftables 黑名单移除指定 IP")
 	recordFail2banIP := flag.String("record-fail2ban", "", "记录 Fail2ban 封禁 IP")
 	banJail := flag.String("ban-jail", "", "Fail2ban jail 名称")
 	banTime := flag.Int("ban-bantime", 0, "Fail2ban 本次封禁秒数")
@@ -158,8 +156,8 @@ func main() {
 		}
 		return
 	}
-	if *banIPNginx != "" || *unbanIPNginx != "" || *recordFail2banIP != "" || *unbanFail2banIP != "" {
-		handleFail2banCLI(*configPath, *banIPNginx, *unbanIPNginx, *recordFail2banIP, *unbanFail2banIP, *banJail, *banTime, *banCount, *banRestored)
+	if *recordFail2banIP != "" || *unbanFail2banIP != "" {
+		handleFail2banCLI(*configPath, *recordFail2banIP, *unbanFail2banIP, *banJail, *banTime, *banCount, *banRestored)
 		return
 	}
 
@@ -301,8 +299,8 @@ func main() {
 		coreUpdateWorker = candidate
 		log.Println("WordPress 更新后台任务已启动")
 	}
-	// v1.0.0 intentionally does not start the legacy Nginx-based migration
-	// worker. A future OLS-native migration protocol must be audited and tested
+	// v1.0.0 intentionally does not start the legacy site-migration worker.
+	// A future OLS-native migration protocol must be audited and tested
 	// before this feature is exposed again.
 	log.Println("网站搬家功能在 OpenLiteSpeed v1.0.0 中未启用")
 
@@ -313,12 +311,11 @@ func main() {
 	}
 	executor.EnsureOperationLogRetention()
 	executor.EnsureAllSiteLogrotateConfigs()
-	executor.EnsureFastCGICacheConfig()
 	// WordPress safety baseline (idempotent, only writes if not present)
 	executor.EnsureWordPressBaseline()
 	// 升级后重建全部 OpenLiteSpeed 虚拟主机，确保新模板和 LSPHP 设置生效。
 	executor.GoSafe(func() {
-		if err := executor.RegenerateAllSitesNginx(); err != nil {
+		if err := executor.RegenerateAllSitesOLSConfigs(); err != nil {
 			log.Printf("OpenLiteSpeed 虚拟主机批量重建部分失败: %v", err)
 		}
 	})
@@ -456,21 +453,7 @@ func stopWPCoreUpdateWorker(worker wpCoreUpdateWorkerLifecycle, timeout time.Dur
 	return worker.Stop(ctx)
 }
 
-func handleFail2banCLI(configPath, banIP, unbanIP, recordIP, unbanRecordIP, jail string, banTime, banCount int, restored bool) {
-	if banIP != "" {
-		if err := executor.AddNginxBan(banIP); err != nil {
-			log.Fatalf("nftables 封禁失败: %v", err)
-		}
-	}
-	if unbanIP != "" {
-		if err := executor.RemoveNginxBan(unbanIP); err != nil {
-			log.Fatalf("nftables 解封失败: %v", err)
-		}
-	}
-	if recordIP == "" && unbanRecordIP == "" {
-		return
-	}
-
+func handleFail2banCLI(configPath, recordIP, unbanRecordIP, jail string, banTime, banCount int, restored bool) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)

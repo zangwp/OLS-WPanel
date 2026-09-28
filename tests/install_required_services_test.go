@@ -48,9 +48,9 @@ func TestInstallRequiredWebServicesUseSharedStartHelper(t *testing.T) {
 
 	for _, forbidden := range []string{
 		"systemctl restart php8.3-fpm",
-		"systemctl restart nginx",
+		"systemctl restart openlitespeed",
 		"systemctl_start_required php8.3-fpm",
-		"systemctl_start_required nginx",
+		"systemctl_start_required openlitespeed",
 	} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("install.sh contains forbidden restart command %q", forbidden)

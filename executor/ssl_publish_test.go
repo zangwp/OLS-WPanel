@@ -13,9 +13,9 @@ import (
 
 func withSSLPublishStubs(t *testing.T) {
 	t.Helper()
-	oldApply, oldPersist, oldRestoreState, oldRestoreDir := applySSLNginxConfig, persistSSLState, restoreSSLState, restoreSSLCertDir
+	oldApply, oldPersist, oldRestoreState, oldRestoreDir := applySSLOLSVHostConfig, persistSSLState, restoreSSLState, restoreSSLCertDir
 	t.Cleanup(func() {
-		applySSLNginxConfig, persistSSLState = oldApply, oldPersist
+		applySSLOLSVHostConfig, persistSSLState = oldApply, oldPersist
 		restoreSSLState, restoreSSLCertDir = oldRestoreState, oldRestoreDir
 	})
 }
@@ -54,20 +54,20 @@ func readPublishedCert(t *testing.T, certDir string) string {
 	return string(data)
 }
 
-func TestPublishSSLCertificateDoesNotTouchNginxWhenDatabaseSaveFails(t *testing.T) {
+func TestPublishSSLCertificateDoesNotTouchOpenLiteSpeedWhenDatabaseSaveFails(t *testing.T) {
 	withSSLPublishStubs(t)
 	certDir, stageDir := sslPublishDirs(t, true)
-	nginxCalled := false
+	openlitespeedCalled := false
 	persistSSLState = func(int, string, string, time.Time, string) error { return errors.New("database failed") }
-	applySSLNginxConfig = func(*models.Website, string, string) error {
-		nginxCalled = true
+	applySSLOLSVHostConfig = func(*models.Website, string, string) error {
+		openlitespeedCalled = true
 		return nil
 	}
 
 	err := publishSSLCertificate(&models.Website{ID: 1}, certDir, stageDir,
 		filepath.Join(certDir, "fullchain.pem"), filepath.Join(certDir, "privkey.pem"), time.Now(), "auto")
-	if err == nil || nginxCalled {
-		t.Fatalf("err=%v nginxCalled=%v", err, nginxCalled)
+	if err == nil || openlitespeedCalled {
+		t.Fatalf("err=%v openlitespeedCalled=%v", err, openlitespeedCalled)
 	}
 	if got := readPublishedCert(t, certDir); got != "old-cert" {
 		t.Fatalf("certificate=%q, want old certificate", got)
@@ -77,28 +77,28 @@ func TestPublishSSLCertificateDoesNotTouchNginxWhenDatabaseSaveFails(t *testing.
 func TestPublishSSLCertificateRemovesNewCertificateWhenFirstEnableDatabaseSaveFails(t *testing.T) {
 	withSSLPublishStubs(t)
 	certDir, stageDir := sslPublishDirs(t, false)
-	nginxCalled := false
+	openlitespeedCalled := false
 	persistSSLState = func(int, string, string, time.Time, string) error { return errors.New("database failed") }
-	applySSLNginxConfig = func(*models.Website, string, string) error {
-		nginxCalled = true
+	applySSLOLSVHostConfig = func(*models.Website, string, string) error {
+		openlitespeedCalled = true
 		return nil
 	}
 
 	err := publishSSLCertificate(&models.Website{ID: 1}, certDir, stageDir,
 		filepath.Join(certDir, "fullchain.pem"), filepath.Join(certDir, "privkey.pem"), time.Now(), "auto")
-	if err == nil || nginxCalled {
-		t.Fatalf("err=%v nginxCalled=%v", err, nginxCalled)
+	if err == nil || openlitespeedCalled {
+		t.Fatalf("err=%v openlitespeedCalled=%v", err, openlitespeedCalled)
 	}
 	if _, statErr := os.Stat(certDir); !os.IsNotExist(statErr) {
 		t.Fatalf("certificate directory still exists after rollback: %v", statErr)
 	}
 }
 
-func TestPublishSSLCertificateRestoresDatabaseAndCertificateWhenNginxFails(t *testing.T) {
+func TestPublishSSLCertificateRestoresDatabaseAndCertificateWhenOpenLiteSpeedFails(t *testing.T) {
 	withSSLPublishStubs(t)
 	certDir, stageDir := sslPublishDirs(t, true)
 	persistSSLState = func(int, string, string, time.Time, string) error { return nil }
-	applySSLNginxConfig = func(*models.Website, string, string) error { return errors.New("nginx failed") }
+	applySSLOLSVHostConfig = func(*models.Website, string, string) error { return errors.New("openlitespeed failed") }
 	databaseRestored := false
 	restoreSSLState = func(*models.Website) error {
 		databaseRestored = true
@@ -119,7 +119,7 @@ func TestPublishSSLCertificateCommitsNewCertificate(t *testing.T) {
 	withSSLPublishStubs(t)
 	certDir, stageDir := sslPublishDirs(t, true)
 	persistSSLState = func(int, string, string, time.Time, string) error { return nil }
-	applySSLNginxConfig = func(*models.Website, string, string) error { return nil }
+	applySSLOLSVHostConfig = func(*models.Website, string, string) error { return nil }
 
 	if err := publishSSLCertificate(&models.Website{ID: 1}, certDir, stageDir,
 		filepath.Join(certDir, "fullchain.pem"), filepath.Join(certDir, "privkey.pem"), time.Now(), "auto"); err != nil {

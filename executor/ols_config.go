@@ -152,7 +152,7 @@ func olsSocketAddress(proxy string) (string, error) {
 // renderOLSVHostConfig renders an OpenLiteSpeed plain-text virtual-host file.
 // The first four metadata lines are consumed only by OLS WPanel when it
 // atomically rebuilds the shared HTTP/HTTPS listener mappings.
-func renderOLSVHostConfig(data *NginxSiteData) (string, error) {
+func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	if data == nil {
 		return "", errors.New("站点配置为空")
 	}
@@ -292,10 +292,10 @@ func renderOLSVHostConfig(data *NginxSiteData) (string, error) {
 
 	if data.SiteType != "php" {
 		cacheEnabled := 0
-		if data.FCacheEnabled {
+		if data.LSCacheEnabled {
 			cacheEnabled = 1
 		}
-		cacheTTL := data.FCacheTTL
+		cacheTTL := data.LSCacheTTL
 		if cacheTTL < 30 || cacheTTL > 604800 {
 			cacheTTL = 3600
 		}
@@ -408,8 +408,8 @@ func renderOLSManagedRegistry(enabledDir string) (string, error) {
 	seenNames := map[string]bool{}
 	seenDomains := map[string]bool{}
 	availableDir := filepath.Join(filepath.Dir(filepath.Clean(enabledDir)), "sites-available")
-	if config.AppConfig != nil && strings.TrimSpace(config.AppConfig.Paths.NginxSitesAvailable) != "" {
-		availableDir = filepath.Clean(config.AppConfig.Paths.NginxSitesAvailable)
+	if config.AppConfig != nil && strings.TrimSpace(config.AppConfig.Paths.OLSVHostsAvailable) != "" {
+		availableDir = filepath.Clean(config.AppConfig.Paths.OLSVHostsAvailable)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".conf") {

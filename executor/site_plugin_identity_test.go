@@ -45,19 +45,19 @@ func useTemporarySiteSecretsRoot(t *testing.T) string {
 	return siteSecretsRoot
 }
 
-func TestRenderPHPFPMPoolPublishesPluginIdentityPath(t *testing.T) {
+func TestRenderOLSVHostPublishesPluginIdentityPath(t *testing.T) {
 	root := useTemporarySiteSecretsRoot(t)
-	engine := NewTemplateEngine(t.TempDir())
-	rendered, err := engine.RenderPHPFPMPool(&PHPFPMPoolData{
-		Domain: "example.com", PoolName: "example", SystemUser: "example",
-		WebRoot: "/www/wwwroot/example.com", SocketPath: "/run/php", MaxChildren: "10",
+	rendered, err := renderOLSVHostConfig(&OLSVHostData{
+		Domain: "example.com", SystemUser: "wp_example",
+		WebRoot: "/www/wwwroot/example.com", LogDir: "/www/wwwlogs/example.com",
+		PHPProxy: "unix:/tmp/lshttpd/example.sock", TemplateVer: "v1.0", SiteType: "wordpress",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "env[OLS_WPANEL_CONFIG_PATH] = " + filepath.Join(root, "example.com", sitePluginConfigFileName)
+	want := "env                    OLS_WPANEL_CONFIG_PATH=" + filepath.Join(root, "example.com", sitePluginConfigFileName)
 	if !strings.Contains(rendered, want) {
-		t.Fatalf("rendered PHP-FPM pool does not contain %q:\n%s", want, rendered)
+		t.Fatalf("rendered OpenLiteSpeed vhost does not contain %q:\n%s", want, rendered)
 	}
 }
 

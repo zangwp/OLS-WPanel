@@ -209,7 +209,7 @@ func TestCronJobRuntimeSuspendedResolvesRunAsUser(t *testing.T) {
 	}
 
 	mustExec(t, db, `INSERT INTO websites
-		(id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path)
+		(id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
 		VALUES(2,'duplicate','duplicate.example.com','active','wp_paused','/www/duplicate','/logs/duplicate','db2','u2','/p2','/n2')`)
 	if _, _, _, err := CronJobRuntimeSuspended(12); err == nil {
 		t.Fatal("duplicate system_user must fail closed")

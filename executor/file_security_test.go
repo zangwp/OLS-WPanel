@@ -98,8 +98,8 @@ func TestImportSiteRuntimePHPAccessEventsAggregatesLogEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type, file_lock_enabled, file_lock_enabled_at)
-		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress', 1, ?)`,
+		(id, name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, file_lock_enabled, file_lock_enabled_at)
+		VALUES (1, 'demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress', 1, ?)`,
 		t.TempDir(), logDir, lockAt); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestImportSiteRuntimePHPAccessEventsAggregatesLogEntries(t *testing.T) {
 	if uploadEvent == nil {
 		t.Fatalf("missing upload runtime PHP event: %+v", events)
 	}
-	if uploadEvent.EventType != FileSecurityEventRuntimePHPAccess || uploadEvent.Source != "nginx" || uploadEvent.EventCount != 1 {
+	if uploadEvent.EventType != FileSecurityEventRuntimePHPAccess || uploadEvent.Source != "openlitespeed" || uploadEvent.EventCount != 1 {
 		t.Fatalf("unexpected upload event: %+v", *uploadEvent)
 	}
 	parseSeen := func(raw string) time.Time {
@@ -227,8 +227,8 @@ func TestRefreshFileSecurityEventsScansRuntimePHPFiles(t *testing.T) {
 	}
 
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type, file_lock_enabled, file_lock_enabled_at)
-		VALUES ('demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 'wordpress', 1, ?)`,
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, file_lock_enabled, file_lock_enabled_at)
+		VALUES ('demo', 'example.com', 'active', 'wp_demo', ?, ?, 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 'wordpress', 1, ?)`,
 		webRoot, filepath.Join(t.TempDir(), "logs"), lockAt); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
@@ -291,8 +291,8 @@ func TestClearFileSecurityEvents(t *testing.T) {
 	openTestDB(t)
 
 	if _, err := database.GetDB().Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-		VALUES ('demo', 'example.com', 'active', 'wp_demo', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`); err != nil {
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+		VALUES ('demo', 'example.com', 'active', 'wp_demo', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
 

@@ -110,22 +110,11 @@ func TestUninstallCleanupUsesExactOLSOwnedResources(t *testing.T) {
 		"/etc/systemd/system/mariadb.service.d/ols-wpanel.conf",
 		"/etc/systemd/system/redis-server.service.d/ols-wpanel.conf",
 		"/etc/fail2ban/jail.d/olswpanel.conf",
-		"/etc/fail2ban/action.d/olswpanel-nginx.conf",
 		"/etc/fail2ban/action.d/olswpanel-record.conf",
 		"/etc/fail2ban/filter.d/olswpanel.conf",
 		"/etc/fail2ban/filter.d/olswpanel-404.conf",
 		"/etc/fail2ban/filter.d/olswpanel-login.conf",
 		"/etc/fail2ban/filter.d/olswpanel-sqli.conf",
-		"/etc/nginx/conf.d/olswpanel.conf",
-		"/etc/nginx/conf.d/olswpanel-cache-bypass.conf",
-		"/etc/nginx/conf.d/olswpanel-ssl-default.conf",
-		"/etc/nginx/conf.d/olswpanel-ratelimit.conf",
-		"/etc/nginx/conf.d/olswpanel-botlimit.conf",
-		"/etc/nginx/conf.d/olswpanel-limit-status.conf",
-		"/etc/nginx/conf.d/olswpanel-cache.conf",
-		"/etc/nginx/conf.d/olswpanel-log.conf",
-		"/etc/nginx/conf.d/olswpanel-realip.conf",
-		"/etc/nginx/conf.d/olswpanel-banned-ips.conf",
 		"-maxdepth 1 -type f -name 'olswpanel-*' -print0",
 		"^# OLS WPanel Generated - [A-Za-z0-9._-]+$",
 	} {
@@ -142,7 +131,7 @@ func TestUninstallCleanupUsesExactOLSOwnedResources(t *testing.T) {
 		"rm -rf /etc/fail2ban",
 		"rm -f /etc/systemd/system/olswpanel-*",
 		"rm -rf /etc/systemd/system",
-		"rm -f /etc/nginx/conf.d/olswpanel-*",
+		"rm -f /etc/openlitespeed/conf.d/olswpanel-*",
 	} {
 		if strings.Contains(cleanup, forbidden) {
 			t.Errorf("OLS integration cleanup contains overly broad deletion %q", forbidden)

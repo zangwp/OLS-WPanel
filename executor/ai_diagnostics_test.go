@@ -159,17 +159,17 @@ func TestParseAIReportFlexibleStringEvidence(t *testing.T) {
 		"risk_level": "medium",
 		"likely_causes": [
 			{
-				"title": "未启用 FastCGI 缓存且无 WordPress 缓存插件",
+				"title": "未启用 LiteSpeed 缓存且无 WordPress 缓存插件",
 				"confidence": "high",
-				"evidence": "fastcgi_cache_enabled 为 false，page_cache_plugins 为空"
+				"evidence": "litespeed_cache_enabled 为 false，page_cache_plugins 为空"
 			}
 		],
 		"recommended_actions": [
 			{
-				"label": "启用 FastCGI 缓存",
+				"label": "启用 LiteSpeed 缓存",
 				"description": "降低 PHP 动态请求压力",
 				"risk": "low",
-				"manual_steps": "进入网站详情启用 FastCGI 缓存",
+				"manual_steps": "进入网站详情启用 LiteSpeed 缓存",
 				"panel_action_hint": "网站详情 -> WordPress优化"
 			}
 		],
@@ -182,7 +182,7 @@ func TestParseAIReportFlexibleStringEvidence(t *testing.T) {
 	if report == nil || len(report.LikelyCauses) != 1 || len(report.LikelyCauses[0].Evidence) != 1 {
 		t.Fatalf("unexpected report causes: %#v", report)
 	}
-	if report.LikelyCauses[0].Evidence[0] != "fastcgi_cache_enabled 为 false，page_cache_plugins 为空" {
+	if report.LikelyCauses[0].Evidence[0] != "litespeed_cache_enabled 为 false，page_cache_plugins 为空" {
 		t.Fatalf("evidence = %#v", report.LikelyCauses[0].Evidence)
 	}
 	if len(report.RecommendedActions) != 1 || len(report.RecommendedActions[0].ManualSteps) != 1 {
@@ -419,15 +419,15 @@ define('WP_DEBUG', true);
 		t.Fatal(err)
 	}
 	site := &models.Website{
-		ID:            1,
-		Domain:        "example.com",
-		SiteType:      "wordpress",
-		WebRoot:       root,
-		LogDir:        logDir,
-		DBName:        "db_example",
-		DBUser:        "user_example",
-		PHPPoolPath:   filepath.Join(root, "pool.conf"),
-		NginxConfPath: filepath.Join(root, "nginx.conf"),
+		ID:                 1,
+		Domain:             "example.com",
+		SiteType:           "wordpress",
+		WebRoot:            root,
+		LogDir:             logDir,
+		DBName:             "db_example",
+		DBUser:             "user_example",
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 	}
 	_, prompt, err := BuildAIDiagnosticPrompt(site, models.AIDiagnosisSite500)
 	if err != nil {
@@ -463,15 +463,15 @@ func TestBuildAIDiagnosticPromptIncludesWPConfigSyntaxError(t *testing.T) {
 		t.Fatal(err)
 	}
 	site := &models.Website{
-		ID:            1,
-		Domain:        "example.com",
-		SiteType:      "wordpress",
-		WebRoot:       root,
-		LogDir:        logDir,
-		DBName:        "db_example",
-		DBUser:        "user_example",
-		PHPPoolPath:   filepath.Join(root, "pool.conf"),
-		NginxConfPath: filepath.Join(root, "nginx.conf"),
+		ID:                 1,
+		Domain:             "example.com",
+		SiteType:           "wordpress",
+		WebRoot:            root,
+		LogDir:             logDir,
+		DBName:             "db_example",
+		DBUser:             "user_example",
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 	}
 
 	_, prompt, err := BuildAIDiagnosticPrompt(site, models.AIDiagnosisSite500)
@@ -606,10 +606,10 @@ func TestAIPromptWithinBudgetPreservesHighCodeSuspect(t *testing.T) {
 		SiteSummary:    map[string]interface{}{"domain": "example.com"},
 		LocalChecks:    map[string]interface{}{"has_hits": true},
 		Logs: map[string]aiLogSnippet{
-			"nginx_error": {Source: "error.log", Status: "ok", Lines: logLines},
-			"php_error":   {Source: "php-error.log", Status: "ok", Lines: logLines},
-			"wp_security": {Source: "wp-security.log", Status: "ok", Lines: logLines},
-			"access_5xx":  {Source: "access.log", Status: "ok", Lines: logLines},
+			"openlitespeed_error": {Source: "error.log", Status: "ok", Lines: logLines},
+			"php_error":           {Source: "php-error.log", Status: "ok", Lines: logLines},
+			"wp_security":         {Source: "wp-security.log", Status: "ok", Lines: logLines},
+			"access_5xx":          {Source: "access.log", Status: "ok", Lines: logLines},
 		},
 		WPConfigSummary: map[string]interface{}{"checked": true},
 		DBCheck:         map[string]interface{}{"checked": true, "ok": true},
@@ -671,15 +671,15 @@ func TestBuildAIDiagnosticPromptIncludesOLSWPanelBoundaries(t *testing.T) {
 	root := t.TempDir()
 	logDir := t.TempDir()
 	site := &models.Website{
-		ID:            1,
-		Domain:        "example.com",
-		SiteType:      "wordpress",
-		WebRoot:       root,
-		LogDir:        logDir,
-		DBName:        "db_example",
-		DBUser:        "user_example",
-		PHPPoolPath:   filepath.Join(root, "pool.conf"),
-		NginxConfPath: filepath.Join(root, "nginx.conf"),
+		ID:                 1,
+		Domain:             "example.com",
+		SiteType:           "wordpress",
+		WebRoot:            root,
+		LogDir:             logDir,
+		DBName:             "db_example",
+		DBUser:             "user_example",
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 	}
 
 	systemPrompt, userPrompt, err := BuildAIDiagnosticPrompt(site, models.AIDiagnosisWPAdminDown)
@@ -746,13 +746,13 @@ func TestBuildAIDiagnosticPromptIncludesPerformanceSummary(t *testing.T) {
 		WebRoot:            root,
 		DBName:             "db_example",
 		DBUser:             "user_example",
-		FCacheEnabled:      false,
-		FCacheTTL:          300,
+		LSCacheEnabled:     false,
+		LSCacheTTL:         300,
 		MonitoringEnabled:  true,
 		AccessLogMode:      "full",
 		WPMemoryLimit:      "256M",
-		PHPPoolPath:        filepath.Join(root, "pool.conf"),
-		NginxConfPath:      filepath.Join(root, "nginx.conf"),
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 		LogDir:             t.TempDir(),
 		WPDebugEnabled:     false,
 		XMLRPCEnabled:      true,
@@ -769,14 +769,14 @@ func TestBuildAIDiagnosticPromptIncludesPerformanceSummary(t *testing.T) {
 		"performance_summary",
 		"server_resource_summary",
 		"site_resource_summary",
-		"top_php_fpm_sites",
+		"top_lsphp_sites",
 		"noisy.com",
 		"page_cache_plugins",
 		"asset_optimization_plugins",
 		"WP Rocket",
 		"Autoptimize",
 		`"multiple_page_cache_plugins": false`,
-		`"fastcgi_cache_enabled": false`,
+		`"litespeed_cache_enabled": false`,
 	} {
 		if !strings.Contains(userPrompt, want) {
 			t.Fatalf("performance prompt missing %q:\n%s", want, userPrompt)
@@ -805,19 +805,19 @@ func TestBuildAIDiagnosticPromptForbidsDuplicatePageCacheWhenLiteSpeedEnabled(t 
 		t.Fatal(err)
 	}
 	site := &models.Website{
-		ID:            1,
-		Domain:        "demo.com",
-		SiteType:      "wordpress",
-		Status:        "active",
-		SystemUser:    "wp_demo",
-		WebRoot:       root,
-		LogDir:        t.TempDir(),
-		DBName:        "db_example",
-		DBUser:        "user_example",
-		FCacheEnabled: true,
-		FCacheTTL:     300,
-		PHPPoolPath:   filepath.Join(root, "pool.conf"),
-		NginxConfPath: filepath.Join(root, "nginx.conf"),
+		ID:                 1,
+		Domain:             "demo.com",
+		SiteType:           "wordpress",
+		Status:             "active",
+		SystemUser:         "wp_demo",
+		WebRoot:            root,
+		LogDir:             t.TempDir(),
+		DBName:             "db_example",
+		DBUser:             "user_example",
+		LSCacheEnabled:     true,
+		LSCacheTTL:         300,
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 	}
 
 	systemPrompt, userPrompt, err := BuildAIDiagnosticPrompt(site, models.AIDiagnosisPerformance)
@@ -834,7 +834,7 @@ func TestBuildAIDiagnosticPromptForbidsDuplicatePageCacheWhenLiteSpeedEnabled(t 
 		}
 	}
 	for _, want := range []string{
-		`"fastcgi_cache_enabled": true`,
+		`"litespeed_cache_enabled": true`,
 		"cache_recommendation_policy",
 		"OLS WPanel LiteSpeed 页面缓存已开启时，不要建议安装其他 WordPress 页面缓存插件。",
 		"WP Super Cache 页面缓存",
@@ -859,15 +859,15 @@ func TestBuildAIDiagnosticPromptIncludesCurrentHTTPChecksOverHistorical5xx(t *te
 		t.Fatal(err)
 	}
 	site := &models.Website{
-		ID:            1,
-		Domain:        "example.com",
-		SiteType:      "wordpress",
-		WebRoot:       root,
-		LogDir:        logDir,
-		DBName:        "db_example",
-		DBUser:        "user_example",
-		PHPPoolPath:   filepath.Join(root, "pool.conf"),
-		NginxConfPath: filepath.Join(root, "nginx.conf"),
+		ID:                 1,
+		Domain:             "example.com",
+		SiteType:           "wordpress",
+		WebRoot:            root,
+		LogDir:             logDir,
+		DBName:             "db_example",
+		DBUser:             "user_example",
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 	}
 
 	systemPrompt, userPrompt, err := BuildAIDiagnosticPrompt(site, models.AIDiagnosisSite500)
@@ -900,15 +900,15 @@ func TestBuildAIFollowupPromptIncludesConversationAndCurrentContext(t *testing.T
 		t.Fatal(err)
 	}
 	site := &models.Website{
-		ID:            1,
-		Domain:        "example.com",
-		SiteType:      "wordpress",
-		WebRoot:       root,
-		LogDir:        logDir,
-		DBName:        "db_example",
-		DBUser:        "user_example",
-		PHPPoolPath:   filepath.Join(root, "pool.conf"),
-		NginxConfPath: filepath.Join(root, "nginx.conf"),
+		ID:                 1,
+		Domain:             "example.com",
+		SiteType:           "wordpress",
+		WebRoot:            root,
+		LogDir:             logDir,
+		DBName:             "db_example",
+		DBUser:             "user_example",
+		LSPHPSocketPath:    filepath.Join(root, "pool.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "openlitespeed.conf"),
 	}
 	session := &models.AISessionDetail{
 		ID:        10,
@@ -1018,10 +1018,10 @@ func setupAIPerformanceTestDB(t *testing.T) {
 	})
 
 	_, err := database.GetDB().Exec(`
-		INSERT INTO websites (id, name, domain, aliases, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, site_type)
+		INSERT INTO websites (id, name, domain, aliases, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type)
 		VALUES
-		(1, 'demo', 'demo.com', '', 'active', 'wp_demo', '/tmp/demo', '/tmp/logs/demo', 'db_example', 'user_example', '/tmp/demo.conf', '/tmp/demo.nginx', 'wordpress'),
-		(2, 'noisy', 'noisy.com', '', 'active', 'wp_noisy', '/tmp/noisy', '/tmp/logs/noisy', 'db_noisy', 'user_noisy', '/tmp/noisy.conf', '/tmp/noisy.nginx', 'wordpress')
+		(1, 'demo', 'demo.com', '', 'active', 'wp_demo', '/tmp/demo', '/tmp/logs/demo', 'db_example', 'user_example', '/tmp/demo.conf', '/tmp/demo.openlitespeed', 'wordpress'),
+		(2, 'noisy', 'noisy.com', '', 'active', 'wp_noisy', '/tmp/noisy', '/tmp/logs/noisy', 'db_noisy', 'user_noisy', '/tmp/noisy.conf', '/tmp/noisy.openlitespeed', 'wordpress')
 	`)
 	if err != nil {
 		t.Fatalf("insert websites: %v", err)

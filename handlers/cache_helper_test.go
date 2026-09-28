@@ -13,16 +13,16 @@ import (
 	"github.com/zangwp/OLS-WPanel/database"
 )
 
-func TestUpdateCacheSettingsReportsNginxPublishFailure(t *testing.T) {
+func TestUpdateCacheSettingsReportsOpenLiteSpeedPublishFailure(t *testing.T) {
 	setupCacheHelperTestDB(t)
-	oldUpdate := updateSiteFastCGICache
-	updateSiteFastCGICache = func(siteID, enabled, ttl int) error {
+	oldUpdate := updateSiteLiteSpeedCache
+	updateSiteLiteSpeedCache = func(siteID, enabled, ttl int) error {
 		if siteID != 1 || enabled != 0 || ttl != 600 {
 			t.Fatalf("update args=(%d,%d,%d)", siteID, enabled, ttl)
 		}
-		return errors.New("nginx reload failed")
+		return errors.New("openlitespeed reload failed")
 	}
-	t.Cleanup(func() { updateSiteFastCGICache = oldUpdate })
+	t.Cleanup(func() { updateSiteLiteSpeedCache = oldUpdate })
 
 	router := gin.New()
 	router.PUT("/api/cache", (&CacheHelperHandler{}).UpdateCacheSettings)
@@ -44,7 +44,7 @@ func TestClearByDomainReportsCacheClearFailure(t *testing.T) {
 		if siteID != 1 {
 			t.Fatalf("siteID=%d", siteID)
 		}
-		return errors.New("nginx reload failed")
+		return errors.New("openlitespeed reload failed")
 	}
 	t.Cleanup(func() { clearSiteCache = oldClear })
 
@@ -132,10 +132,10 @@ func setupCacheHelperTestDB(t *testing.T) {
 	_, err := database.GetDB().Exec(`
 		INSERT INTO websites (
 			name, domain, aliases, status, system_user, web_root, log_dir,
-			db_name, db_user, php_pool_path, nginx_conf_path, site_type, plugin_api_key
+			db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type, plugin_api_key
 		) VALUES (
 			'example', 'example.com', '', 'active', 'wp_example', '/www/wwwroot/example.com', '/www/wwwlogs/example.com',
-			'db_example', 'user_example', '/etc/php/8.3/fpm/pool.d/example.conf', '/etc/nginx/sites-available/example.conf',
+			'db_example', 'user_example', '/tmp/lshttpd/example.sock', '/etc/openlitespeed/sites-available/example.conf',
 			'wordpress', 'secret'
 		)
 	`)

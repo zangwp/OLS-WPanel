@@ -236,7 +236,7 @@ func scanSiteSuspiciousRuntimeFiles(db *sql.DB, site fileSecuritySite) (int, err
 			seen[relPath] = true
 			count++
 			riskLevel := "high"
-			message := "运行数据目录中发现 PHP 可执行文件。Nginx 会阻止直接执行，请确认来源后删除或隔离。"
+			message := "运行数据目录中发现 PHP 可执行文件。OpenLiteSpeed 会阻止直接执行，请确认来源后删除或隔离。"
 			if site.LockMode == FileLockModeLegacy && isLanguageL10nRuntimePHP(relPath) {
 				riskLevel = "medium"
 				message = "旧版锁定规则的翻译目录中发现锁定后生成的 .l10n.php 文件。该格式可能是正常翻译缓存，也可能被 WordPress 内部加载，请核实来源并迁移到新版锁定规则。"
@@ -282,7 +282,7 @@ func importSiteRuntimePHPAccessEvents(db *sql.DB, site fileSecuritySite) (int, e
 			continue
 		}
 		status, _ := strconv.Atoi(m[5])
-		accessTime := parseNginxAccessTime(m[2])
+		accessTime := parseWebAccessTime(m[2])
 		if accessTime.IsZero() {
 			continue
 		}
@@ -297,14 +297,14 @@ func importSiteRuntimePHPAccessEvents(db *sql.DB, site fileSecuritySite) (int, e
 				SiteID:        site.ID,
 				Domain:        site.Domain,
 				EventType:     FileSecurityEventRuntimePHPAccess,
-				Source:        "nginx",
+				Source:        "openlitespeed",
 				RiskLevel:     "high",
 				Path:          requestPath,
 				RequestMethod: m[3],
 				IPAddress:     m[1],
 				UserAgent:     m[6],
 				Status:        status,
-				Message:       "运行数据目录 PHP 执行请求已被 Nginx 拦截。建议检查是否存在同名可疑文件，并结合 IP 来源判断是否封禁。",
+				Message:       "运行数据目录 PHP 执行请求已被 OpenLiteSpeed 拦截。建议检查是否存在同名可疑文件，并结合 IP 来源判断是否封禁。",
 				FirstSeen:     seenAt,
 				LastSeen:      seenAt,
 			}

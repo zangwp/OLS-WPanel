@@ -742,7 +742,7 @@ func TestWPAnomalyAdmissionAndValidation(t *testing.T) {
 
 func TestWPAnomalySchedulerCadenceAndSiteIsolation(t *testing.T) {
 	m, id, now := anomalyFixture(t)
-	result, err := m.db.Exec(`INSERT INTO websites(name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES('B','b.example','active','wp_b','/tmp/b','','','','','')`)
+	result, err := m.db.Exec(`INSERT INTO websites(name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES('B','b.example','active','wp_b','/tmp/b','','','','','')`)
 	if err != nil {
 		t.Fatal(err)
 	}

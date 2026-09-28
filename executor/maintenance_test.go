@@ -344,7 +344,7 @@ func TestMaintenanceStartReportsIncompleteRecovery(t *testing.T) {
 func TestMaintenanceStartFailureIsIsolatedBySite(t *testing.T) {
 	m, firstID, _, _, _ := maintenanceFixture(t)
 	result, err := m.db.Exec(`INSERT INTO websites
-		(name,domain,site_type,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,file_lock_enabled,file_lock_mode,file_lock_apply_status)
+		(name,domain,site_type,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,file_lock_enabled,file_lock_mode,file_lock_apply_status)
 		VALUES ('second','second.test','wordpress','active','wp_second','/tmp/second','','','','','',1,'strict','ready')`)
 	if err != nil {
 		t.Fatal(err)

@@ -8,7 +8,7 @@ import (
 	"github.com/zangwp/OLS-WPanel/models"
 )
 
-func nginxDataFromSiteChecked(site *models.Website) (*NginxSiteData, error) {
+func olsVHostDataFromSiteChecked(site *models.Website) (*OLSVHostData, error) {
 	cfg := config.AppConfig
 	aliases := splitAliases(site.Aliases)
 	accessLogMode := site.AccessLogMode
@@ -19,12 +19,12 @@ func nginxDataFromSiteChecked(site *models.Website) (*NginxSiteData, error) {
 	if templateVer == "" {
 		templateVer = "v1.0"
 	}
-	fCacheTTL := site.FCacheTTL
-	if fCacheTTL <= 0 {
-		fCacheTTL = 300
+	lsCacheTTL := site.LSCacheTTL
+	if lsCacheTTL <= 0 {
+		lsCacheTTL = 300
 	}
 
-	data := &NginxSiteData{
+	data := &OLSVHostData{
 		Domain:         site.Domain,
 		Aliases:        aliases,
 		ServerNames:    buildServerNames(site.Domain, aliases),
@@ -35,14 +35,14 @@ func nginxDataFromSiteChecked(site *models.Website) (*NginxSiteData, error) {
 		SiteType:       site.SiteType,
 		SSLCertPath:    site.SSLCertPath,
 		SSLKeyPath:     site.SSLKeyPath,
-		PHPProxy:       "unix:" + phpSocketPath(cfg, site.PHPPoolPath, site.Domain),
+		PHPProxy:       "unix:" + phpSocketPath(cfg, site.LSPHPSocketPath, site.Domain),
 		TemplateVer:    templateVer,
 		AccessLogMode:  accessLogMode,
-		FCacheEnabled:  site.FCacheEnabled,
-		FCacheTTL:      fCacheTTL,
-		FCacheKey:      site.FCacheKey,
+		LSCacheEnabled: site.LSCacheEnabled,
+		LSCacheTTL:     lsCacheTTL,
+		LSCacheKey:     site.LSCacheKey,
 		XMLRPCEnabled:  site.XMLRPCEnabled,
-		PHPMaxChildren: site.PHPFPMMaxChildren,
+		PHPMaxChildren: site.LSPHPMaxChildren,
 	}
 	if data.PHPMaxChildren <= 0 {
 		data.PHPMaxChildren = 10

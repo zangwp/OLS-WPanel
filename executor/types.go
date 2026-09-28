@@ -20,7 +20,6 @@ const (
 	TaskRemoveSSL        TaskType = "remove_ssl"
 	TaskChangeDBPassword TaskType = "change_db_password"
 	TaskUpdateDomains    TaskType = "update_domains"
-	TaskSaveNginxCustom  TaskType = "save_nginx_custom"
 	TaskSetAccessLogMode TaskType = "set_access_log_mode"
 	TaskSetCDNRealIP     TaskType = "set_cdn_realip"
 	TaskSetDocumentRoot  TaskType = "set_document_root"
@@ -111,12 +110,6 @@ type UpdateDomainsPayload struct {
 	OldWPHomeURL string          `json:"old_wp_home_url,omitempty"`
 	NewWPSiteURL string          `json:"new_wp_site_url,omitempty"`
 	NewWPHomeURL string          `json:"new_wp_home_url,omitempty"`
-}
-
-type SaveNginxCustomPayload struct {
-	Site       *models.Website `json:"-"`
-	PreContent string          `json:"pre_content"`
-	Content    string          `json:"content"`
 }
 
 type SetAccessLogModePayload struct {

@@ -62,7 +62,7 @@ func TestFreshInstallRunsMigrationsAndRecordsLatestVersion(t *testing.T) {
 	if oomAlertEnabled != "true" {
 		t.Fatalf("alert_oom = %q, want true", oomAlertEnabled)
 	}
-	if _, err := DB.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES ('new','new.example','wp_new','/var/www/new','/var/log/new','db_new','user_new','/etc/php/new.conf','/etc/nginx/new.conf')`); err != nil {
+	if _, err := DB.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES ('new','new.example','wp_new','/var/www/new','/var/log/new','db_new','user_new','/etc/php/new.conf','/etc/openlitespeed/new.conf')`); err != nil {
 		t.Fatalf("insert fresh website: %v", err)
 	}
 	var disableApplicationPasswords int
@@ -70,7 +70,7 @@ func TestFreshInstallRunsMigrationsAndRecordsLatestVersion(t *testing.T) {
 		t.Fatalf("fresh website disable_application_passwords = %d, want 1, err=%v", disableApplicationPasswords, err)
 	}
 
-	for _, col := range []string{"php_pool_path", "nginx_conf_path", "wp_memory_limit", "file_lock_enabled", "file_lock_enabled_at", "file_lock_mode", "file_lock_apply_status", "cdn_realip_enabled", "ssl_last_error", "ssl_cert_source", "ssl_export_enabled", "document_root_subdir", "password_reset_mode"} {
+	for _, col := range []string{"lsphp_socket_path", "ols_vhost_config_path", "wp_memory_limit", "file_lock_enabled", "file_lock_enabled_at", "file_lock_mode", "file_lock_apply_status", "cdn_realip_enabled", "ssl_last_error", "ssl_cert_source", "ssl_export_enabled", "document_root_subdir", "password_reset_mode"} {
 		var exists int
 		if err := DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('websites') WHERE name = ?", col).Scan(&exists); err != nil {
 			t.Fatalf("query websites column %s: %v", col, err)
@@ -196,7 +196,7 @@ func TestUpgradeApplicationPasswordPolicyPreservesExistingWebsites(t *testing.T)
 	if _, err := DB.Exec(`ALTER TABLE websites DROP COLUMN disable_application_passwords`); err != nil {
 		t.Fatalf("prepare legacy websites table: %v", err)
 	}
-	if _, err := DB.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES ('existing','existing.example','wp_existing','/var/www/existing','/var/log/existing','db_existing','user_existing','/etc/php/existing.conf','/etc/nginx/existing.conf')`); err != nil {
+	if _, err := DB.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES ('existing','existing.example','wp_existing','/var/www/existing','/var/log/existing','db_existing','user_existing','/etc/php/existing.conf','/etc/openlitespeed/existing.conf')`); err != nil {
 		t.Fatalf("insert legacy website: %v", err)
 	}
 	if _, err := DB.Exec(`DELETE FROM schema_version`); err != nil {
@@ -212,7 +212,7 @@ func TestUpgradeApplicationPasswordPolicyPreservesExistingWebsites(t *testing.T)
 	if err := DB.QueryRow(`SELECT disable_application_passwords FROM websites WHERE domain='existing.example'`).Scan(&disabled); err != nil || disabled != 0 {
 		t.Fatalf("existing website disable_application_passwords = %d, want 0, err=%v", disabled, err)
 	}
-	if _, err := DB.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES ('new-after-upgrade','new-after-upgrade.example','wp_new','/var/www/new','/var/log/new','db_new','user_new','/etc/php/new.conf','/etc/nginx/new.conf')`); err != nil {
+	if _, err := DB.Exec(`INSERT INTO websites (name,domain,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES ('new-after-upgrade','new-after-upgrade.example','wp_new','/var/www/new','/var/log/new','db_new','user_new','/etc/php/new.conf','/etc/openlitespeed/new.conf')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := DB.QueryRow(`SELECT disable_application_passwords FROM websites WHERE domain='new-after-upgrade.example'`).Scan(&disabled); err != nil || disabled != 1 {
@@ -307,8 +307,8 @@ func TestUpgradeAddsWPInventorySchemaFrom1030(t *testing.T) {
 	}
 
 	if _, err := DB.Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-		VALUES ('existing.example.com', 'existing.example.com', 'active', 'wp_existing', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`); err != nil {
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+		VALUES ('existing.example.com', 'existing.example.com', 'active', 'wp_existing', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`); err != nil {
 		t.Fatalf("insert existing website: %v", err)
 	}
 	for _, table := range []string{
@@ -531,7 +531,7 @@ func TestUpgrade1041BackfillsInventoryJobPriorities(t *testing.T) {
 	}
 	for id, trigger := range []string{"update_followup", "site_created", "manual", "scheduled"} {
 		siteID := id + 1
-		if _, err := DB.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/nginx')`, siteID, trigger, trigger+".example", "wp_"+trigger); err != nil {
+		if _, err := DB.Exec(`INSERT INTO websites (id,name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path) VALUES (?,?,?,'active',?,'/tmp/www','/tmp/log','db','user','/tmp/php','/tmp/openlitespeed')`, siteID, trigger, trigger+".example", "wp_"+trigger); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := DB.Exec(`INSERT INTO site_wp_inventory_jobs (id,site_id,trigger_type,status,requested_at,not_before) VALUES (?,?,?,'queued','2026-08-01 00:00:00','2026-08-01 00:00:00')`, fmt.Sprintf("%032d", siteID), siteID, trigger); err != nil {
@@ -937,8 +937,8 @@ func TestUpgradeAddsFileLockModesAndBackfillsLegacySites(t *testing.T) {
 		{"unlocked.example.com", 0},
 	} {
 		if _, err := DB.Exec(`INSERT INTO websites
-			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, file_lock_enabled)
-			VALUES (?, ?, 'active', 'wp_demo', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', ?)`,
+			(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, file_lock_enabled)
+			VALUES (?, ?, 'active', 'wp_demo', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', ?)`,
 			site.domain, site.domain, site.enabled); err != nil {
 			t.Fatalf("insert %s: %v", site.domain, err)
 		}
@@ -1071,8 +1071,8 @@ func TestUpgradeAddsFileLockEnabledAtColumnToExistingSchema(t *testing.T) {
 		t.Fatalf("drop file_lock_enabled_at: %v", err)
 	}
 	if _, err := DB.Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path, file_lock_enabled)
-		VALUES ('demo', 'example.com', 'active', 'wp_demo', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf', 1)`); err != nil {
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path, file_lock_enabled)
+		VALUES ('demo', 'example.com', 'active', 'wp_demo', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf', 1)`); err != nil {
 		t.Fatalf("insert legacy file-lock-enabled site: %v", err)
 	}
 
@@ -1433,7 +1433,7 @@ func TestFreshInstallHasFileBackupsTable(t *testing.T) {
 
 func insertMinimalWebsiteForBackfill(t *testing.T, id int, domain string) {
 	t.Helper()
-	if _, err := DB.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
+	if _, err := DB.Exec(`INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
 		VALUES (?, 'site', ?, 'u1', ?, ?, 'db1', 'u1', '/p', '/n')`,
 		id, domain, "/www/wwwroot/"+domain, "/www/wwwlogs/"+domain); err != nil {
 		t.Fatalf("insert website: %v", err)

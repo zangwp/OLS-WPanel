@@ -576,8 +576,8 @@ func newWPUpdateStoreTest(t *testing.T) (*wpUpdateStore, int) {
 		t.Fatal(err)
 	}
 	result, err := database.DB.Exec(`INSERT INTO websites
-		(name,domain,status,system_user,web_root,log_dir,db_name,db_user,php_pool_path,nginx_conf_path,site_type)
-		VALUES ('update.example.com','update.example.com','active','wp_update','/tmp/www','/tmp/log','db','dbuser','/tmp/php','/tmp/nginx','wordpress')`)
+		(name,domain,status,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,site_type)
+		VALUES ('update.example.com','update.example.com','active','wp_update','/tmp/www','/tmp/log','db','dbuser','/tmp/php','/tmp/openlitespeed','wordpress')`)
 	if err != nil {
 		t.Fatal(err)
 	}

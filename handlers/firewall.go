@@ -262,34 +262,6 @@ func buildCurrentBanView(receipts []models.FirewallBan, enforcement executor.Cur
 			add(ip, "nftables", nil)
 		}
 	}
-	for ip := range enforcement.Nginx {
-		ip = currentBanLookupIP(ip)
-		matched := false
-		for _, jail := range []string{"olswpanel", "olswpanel-404", "olswpanel-login", "olswpanel-sqli"} {
-			if !enforcement.Fail2ban[executor.CurrentBanKey{IP: ip, Source: jail}] {
-				continue
-			}
-			matched = true
-			receipt, ok := metadata[currentBanKey{ip, jail}]
-			if ok {
-				add(ip, jail, &receipt)
-			} else {
-				add(ip, jail, nil)
-			}
-		}
-		if !matched {
-			for _, receipt := range byIP[ip] {
-				if receipt.SourceJail == "olswpanel" || receipt.SourceJail == "olswpanel-404" || receipt.SourceJail == "olswpanel-login" || receipt.SourceJail == "olswpanel-sqli" || receipt.SourceJail == "manual" {
-					matched = true
-					add(ip, receipt.SourceJail, &receipt)
-				}
-			}
-		}
-		if !matched {
-			add(ip, "nginx", nil)
-		}
-	}
-
 	current := make([]models.CurrentFirewallBan, 0, len(rows))
 	for _, row := range rows {
 		current = append(current, row)
@@ -364,7 +336,7 @@ func sortCurrentBanView(rows []models.CurrentFirewallBan) {
 
 func isAllowedBanSourceFilter(source string) bool {
 	switch source {
-	case "olswpanel", "olswpanel-404", "olswpanel-login", "olswpanel-sshd", "olswpanel-sqli", "panel", "panel_scan", "manual", "nftables", "nginx":
+	case "olswpanel", "olswpanel-404", "olswpanel-login", "olswpanel-sshd", "olswpanel-sqli", "panel", "panel_scan", "manual", "nftables":
 		return true
 	default:
 		return false
@@ -456,9 +428,6 @@ func (h *FirewallHandler) Unban(c *gin.Context) {
 	}
 
 	executor.GoSafe(func() {
-		if jail == "olswpanel" || jail == "olswpanel-404" || jail == "olswpanel-login" || jail == "olswpanel-sqli" || jail == "manual" {
-			_ = executor.MaybeRemoveNginxBan(ip)
-		}
 		if err := executor.MaybeRemovePersistBan(ip); err != nil {
 			log.Printf("解封 IP %s 后移除持久封禁失败，请检查执行层: %v", ip, err)
 		}
@@ -532,9 +501,5 @@ func (h *FirewallHandler) PermanentBan(c *gin.Context) {
 			log.Printf("永久封禁 IP %s 已写入数据库，但持久封禁层应用失败，将等待同步重试: %v", ip, err)
 		}
 	})
-	if jail == "olswpanel" || jail == "olswpanel-404" || jail == "olswpanel-login" || jail == "olswpanel-sqli" || jail == "manual" {
-		executor.GoSafe(func() { executor.AddNginxBan(ip) })
-	}
-
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "IP " + ip + " 已加入永久黑名单"}))
 }

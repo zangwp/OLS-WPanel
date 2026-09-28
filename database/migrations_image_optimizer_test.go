@@ -17,8 +17,8 @@ func TestUpgradeAddsImageOptimizerSchemaFrom1048(t *testing.T) {
 	}
 
 	if _, err := DB.Exec(`INSERT INTO websites
-		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, php_pool_path, nginx_conf_path)
-		VALUES ('existing.example.com', 'existing.example.com', 'active', 'wp_existing', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/nginx.conf')`); err != nil {
+		(name, domain, status, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+		VALUES ('existing.example.com', 'existing.example.com', 'active', 'wp_existing', '/tmp/www', '/tmp/log', 'db', 'dbuser', '/tmp/php.conf', '/tmp/openlitespeed.conf')`); err != nil {
 		t.Fatalf("insert existing website: %v", err)
 	}
 

@@ -29,10 +29,10 @@ func setupBackupUsageTestDB(t *testing.T) {
 	_, err := database.GetDB().Exec(`
 		INSERT INTO websites (
 			id, name, domain, aliases, status, system_user, web_root, log_dir,
-			db_name, db_user, php_pool_path, nginx_conf_path, site_type
+			db_name, db_user, lsphp_socket_path, ols_vhost_config_path, site_type
 		) VALUES (
 			1, 'example', 'example.com', '', 'active', 'wp_example', '/www/wwwroot/example.com', '/www/wwwlogs/example.com',
-			'db_example', 'user_example', '/etc/php/8.3/fpm/pool.d/example.conf', '/etc/nginx/sites-available/example.conf',
+			'db_example', 'user_example', '/tmp/lshttpd/example.sock', '/etc/openlitespeed/sites-available/example.conf',
 			'wordpress'
 		)
 	`)
