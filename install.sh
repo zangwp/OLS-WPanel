@@ -70,6 +70,8 @@ MIN_PANEL_VERSION="v1.0.0"
 LITESPEED_DEBIAN_KEY_SHA256="b465f0e857d1574ca9e045282a1b8113eebd7a8d2401bdb204803d0e0a9241aa"
 LITESPEED_REPO_KEY_SHA256="186cd78298b9349134c38130f48b015e87fc228b9a9ca9aeb0c65e47630ed2d5"
 MARIADB_APT_KEY_FINGERPRINT="177F4010FE56CA3336300305F1656F24C74CD1D8"
+REDIS_APT_KEY_SHA256="817b5a78358d00ed6b71884d70ad5d2eab9934badca1a34299fdc6a2e4a8ad20"
+MIN_REDIS_PACKAGE_VERSION="6:8.10.2"
 PANEL_ASSET_MAX_BYTES=$((256 * 1024 * 1024))
 CHECKSUM_ASSET_MAX_BYTES=$((4 * 1024))
 SIGNATURE_ASSET_MAX_BYTES=64
@@ -1425,9 +1427,49 @@ LITESPEEDSOURCEEOF
 	for package in openlitespeed \
 		lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick \
 		lsphp84 lsphp84-common lsphp84-mysql lsphp84-curl lsphp84-intl lsphp84-redis lsphp84-opcache lsphp84-imagick \
-		lsphp85 lsphp85-common lsphp85-mysql lsphp85-curl lsphp85-intl lsphp85-redis lsphp85-opcache lsphp85-imagick; do
+		lsphp85 lsphp85-common lsphp85-mysql lsphp85-curl lsphp85-intl lsphp85-redis lsphp85-imagick; do
 		apt_package_available "$package" || log_error "LiteSpeed 仓库缺少 ${package}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	done
+	# LiteSpeed currently bundles PHP 8.5 without publishing a separate
+	# OPcache Debian package for that branch. Keep the explicit package for 8.3/8.4,
+	# but do not reject an otherwise complete 8.5 repository.
+}
+
+configure_redis_repository() {
+	local key_download="$INSTALL_WORKDIR/redis-archive-keyring.asc"
+	local keyring="/usr/share/keyrings/ols-wpanel-redis-archive-keyring.asc"
+	local source_file="/etc/apt/sources.list.d/ols-wpanel-redis.sources"
+	local actual=""
+	local candidate=""
+
+	log_info "配置 Redis 官方 APT 仓库（HTTPS + 固定公钥哈希）..."
+	assert_managed_source_target "$source_file"
+	download_file "https://packages.redis.io/gpg" "$key_download" 60 16384 || \
+		log_error "下载 Redis APT 公钥失败"
+	actual=$(sha256sum "$key_download" | awk '{print $1}')
+	[[ "$actual" == "$REDIS_APT_KEY_SHA256" ]] || \
+		log_error "Redis APT 公钥哈希不匹配，拒绝继续"
+	if [[ -L "$keyring" ]] || { [[ -e "$keyring" ]] && [[ ! -f "$keyring" ]]; }; then
+		log_error "Redis APT 公钥路径不是普通文件，拒绝覆盖: $keyring"
+	fi
+	install -o root -g root -m 0644 "$key_download" "$keyring"
+	cat > "$source_file" << REDISSOURCEEOF
+# Managed by OLS WPanel
+Types: deb
+URIs: https://packages.redis.io/deb
+Suites: ${PLATFORM_CODENAME}
+Components: main
+Signed-By: ${keyring}
+REDISSOURCEEOF
+	APT_SOURCES_MUTATED=true
+	apt-get update
+	apt_package_available redis-server || \
+		log_error "Redis 官方仓库缺少 redis-server（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
+	candidate=$(LC_ALL=C apt-cache policy redis-server 2>/dev/null | awk '/Candidate:/ {print $2; exit}' || true)
+	[[ -n "$candidate" ]] && [[ "$candidate" != "(none)" ]] || \
+		log_error "无法解析 Redis APT 候选版本"
+	dpkg --compare-versions "$candidate" ge "$MIN_REDIS_PACKAGE_VERSION" || \
+		log_error "Redis APT 候选版本 ${candidate} 低于所需稳定版本 8.10.2"
 }
 
 resolve_mariadb_series() {
@@ -1659,8 +1701,12 @@ restore_managed_apt_sources() {
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-ubuntu.sources
 	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-litespeed.sources
 	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-mariadb.sources
+	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-redis.sources
 	if [[ ! -e /etc/apt/sources.list.d/ols-wpanel-mariadb.sources ]] && [[ ! -L /etc/apt/sources.list.d/ols-wpanel-mariadb.sources ]]; then
 		rm -f -- /usr/share/keyrings/ols-wpanel-mariadb-archive-keyring.gpg
+	fi
+	if [[ ! -e /etc/apt/sources.list.d/ols-wpanel-redis.sources ]] && [[ ! -L /etc/apt/sources.list.d/ols-wpanel-redis.sources ]]; then
+		rm -f -- /usr/share/keyrings/ols-wpanel-redis-archive-keyring.asc
 	fi
     for original in \
         /etc/apt/sources.list.d/debian.sources \
@@ -1925,9 +1971,11 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl systemd
     init_install_workdir
     configure_litespeed_repository
+	configure_redis_repository
     apt-get install -y --no-install-recommends \
         openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl \
-        lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick
+        lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick \
+		redis-server redis-tools
     /usr/local/lsws/bin/openlitespeed -v
     /usr/local/lsws/lsphp83/bin/lsphp -v
     /usr/local/lsws/lsphp83/bin/php --ini
@@ -2309,6 +2357,7 @@ apt-get install -y curl wget unzip ca-certificates gnupg lsb-release
 # HTTPS 下载并使用本发布内固定的 SHA-256 校验。
 configure_litespeed_repository
 configure_selected_mariadb_repository
+configure_redis_repository
 
 # ============================================================
 # 安装基础组件

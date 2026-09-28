@@ -191,6 +191,12 @@
 
                 <p x-show="sw.version_policy" class="text-xs text-gray-500 mb-3" x-text="sw.version_policy"></p>
 
+                <div x-show="sw.upstream_version" class="runtime-detail mb-3 rounded border border-gray-700 p-3 text-xs">
+                    <span class="text-gray-500">{{t .Lang "software.upstream_stable"}}</span>
+                    <span class="runtime-version ml-2" x-text="sw.upstream_version"></span>
+                    <span class="text-gray-500 ml-2">{{t .Lang "software.upstream_reference_only"}}</span>
+                </div>
+
                 <div x-show="sw.supported_series && sw.supported_series.length" class="flex flex-wrap items-center gap-2 mb-3 text-xs">
                     <span class="text-gray-500">{{t .Lang "software.fresh_install_series"}}</span>
                     <template x-for="series in (sw.supported_series || [])" :key="series">

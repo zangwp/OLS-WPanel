@@ -469,6 +469,7 @@ func TestInstallerPinsSupportedRuntimeRepositories(t *testing.T) {
 	for _, required := range []string{
 		`lsphp84 lsphp84-common lsphp84-mysql`,
 		`lsphp85 lsphp85-common lsphp85-mysql`,
+		`lsphp85-intl lsphp85-redis lsphp85-imagick`,
 		`10.11|11.4|11.8) ;;`,
 		`--mariadb-version|--mariadbver)`,
 		`--check-mariadb-packages)`,
@@ -478,10 +479,16 @@ func TestInstallerPinsSupportedRuntimeRepositories(t *testing.T) {
 		`https://mirror.mariadb.org/repo/${MARIADB_SERIES}/${PLATFORM_ID}`,
 		`Signed-By: ${keyring}`,
 		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-mariadb.sources`,
+		`REDIS_APT_KEY_SHA256="817b5a78358d00ed6b71884d70ad5d2eab9934badca1a34299fdc6a2e4a8ad20"`,
+		`https://packages.redis.io/deb`,
+		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-redis.sources`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("install.sh missing runtime repository control %q", required)
 		}
+	}
+	if strings.Contains(script, `lsphp85-opcache`) {
+		t.Fatal("LiteSpeed does not publish a separate lsphp85-opcache package")
 	}
 	if strings.Contains(script, `curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup |`) {
 		t.Fatal("installer must not pipe an unverified MariaDB setup script to a shell")

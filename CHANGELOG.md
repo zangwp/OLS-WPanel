@@ -5,7 +5,10 @@
 - Adds independently installable LSPHP 8.3, 8.4, and 8.5 runtimes with per-site selection for new and existing sites.
 - Preserves the selected PHP runtime across SSL renewal, OpenLiteSpeed regeneration, WordPress inventory, administrator management, component updates, and site migration health checks.
 - Adds fresh-install MariaDB series selection (10.11/11.4/11.8 on Ubuntu 24.04; 11.8 on Debian 13) using the official repository only after its signing-key fingerprint is verified; existing databases are never silently downgraded.
+- Installs Redis 8.10.2 or newer from Redis' official signed APT repository on both supported operating systems and architectures.
 - Shows APT candidate updates for OpenLiteSpeed, LSPHP, MariaDB, Redis, nftables, and Fail2ban while keeping service updates within authenticated package repositories.
+- Shows the current upstream stable references for Redis 8.10.2, nftables 1.1.7, and Fail2ban 1.1.1 without unsafe source-level replacement of distribution firewall packages.
+- Matches the official LiteSpeed packaging matrix where LSPHP 8.5 has no separate `lsphp85-opcache` package.
 - Strengthens light-theme contrast for muted labels, table content, status values, and inline legacy colors.
 - Adds schema, renderer, architecture, installer, and release-pinning regression coverage for the expanded runtime matrix.
 

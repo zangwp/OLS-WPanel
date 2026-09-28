@@ -143,6 +143,30 @@ func EnsureLSPHPRuntimeConfig(version string) error {
 	return os.WriteFile(path, []byte(defaultPHPRuntimeConfigContent()), 0644)
 }
 
+func lsphpRuntimePackages(version string) ([]string, error) {
+	version, err := normalizeLSPHPVersion(version)
+	if err != nil {
+		return nil, err
+	}
+	suffix := strings.ReplaceAll(version, ".", "")
+	prefix := "lsphp" + suffix
+	packages := []string{
+		prefix,
+		prefix + "-common",
+		prefix + "-mysql",
+		prefix + "-curl",
+		prefix + "-intl",
+		prefix + "-redis",
+	}
+	// LiteSpeed does not publish lsphp85-opcache in its Noble or Trixie
+	// repositories. PHP 8.3 and 8.4 still ship OPcache as a separate package.
+	if version != "8.5" {
+		packages = append(packages, prefix+"-opcache")
+	}
+	packages = append(packages, prefix+"-imagick")
+	return packages, nil
+}
+
 func InstallLSPHPRuntime(ctx context.Context, version string) (LSPHPRuntime, error) {
 	version, err := normalizeLSPHPVersion(version)
 	if err != nil {
@@ -153,8 +177,10 @@ func InstallLSPHPRuntime(ctx context.Context, version string) (LSPHPRuntime, err
 	if runtime, _ := lsphpRuntimeForVersion(version); runtime.Installed {
 		return runtime, nil
 	}
-	suffix := strings.ReplaceAll(version, ".", "")
-	packages := []string{"lsphp" + suffix, "lsphp" + suffix + "-common", "lsphp" + suffix + "-mysql", "lsphp" + suffix + "-curl", "lsphp" + suffix + "-intl", "lsphp" + suffix + "-redis", "lsphp" + suffix + "-opcache", "lsphp" + suffix + "-imagick"}
+	packages, err := lsphpRuntimePackages(version)
+	if err != nil {
+		return LSPHPRuntime{}, err
+	}
 	aptOptions := []string{"-o", "Acquire::Retries=3", "-o", "DPkg::Lock::Timeout=300"}
 	if out, err := exec.CommandContext(ctx, "apt-get", append(aptOptions, "update")...).CombinedOutput(); err != nil {
 		return LSPHPRuntime{}, fmt.Errorf("apt update failed: %w: %s", err, strings.TrimSpace(string(out)))

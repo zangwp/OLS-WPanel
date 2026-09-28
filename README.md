@@ -183,7 +183,7 @@ WordPress 官方推荐 MariaDB 10.6 或更高版本。Ubuntu 24.04 全新安装�
 
 **服务版本如何更新？**
 
-“系统更新”安装当前 APT 软件源提供的稳定补丁和安全更新。OpenLiteSpeed 与 LSPHP 来自 LiteSpeed 官方源；MariaDB 使用安装时选定的发行版或 MariaDB 官方系列；Redis、nftables 与 Fail2ban 使用目标系统仓库。软件管理会同时显示已安装版本和 APT 候选版本。上游项目发布的最新源码版本不等于当前系统已有可验证的软件包，因此面板不会绕过包管理器直接覆盖生产服务。
+“系统更新”安装当前 APT 软件源提供的稳定补丁和安全更新。OpenLiteSpeed 与 LSPHP 来自 LiteSpeed 官方源；MariaDB 使用安装时选定的发行版或 MariaDB 官方系列；Redis 使用经固定公钥哈希校验的 Redis 官方源（v1.1.0 首发基线为 8.10.2）；nftables 与 Fail2ban 使用目标系统仓库。软件管理会同时显示已安装版本、APT 候选版本，以及 Redis 8.10.2、nftables 1.1.7、Fail2ban 1.1.1 的上游稳定版本参考。上游项目发布的最新源码版本不等于当前系统已有可验证的软件包，因此面板不会绕过包管理器直接覆盖生产服务。
 
 **为什么没有开放 OpenLiteSpeed WebAdmin 7080？**
 
@@ -202,8 +202,8 @@ OLS WPanel 会生成并维护服务器级与网站级 OpenLiteSpeed 配置，因
 | LSPHP 8.3 / 8.4 / 8.5 | LiteSpeed 官方 HTTPS 软件源；8.3 默认安装，其他版本按需安装；每个网站使用独立 LSAPI socket、系统用户和进程上限 |
 | MariaDB 10.11 / 11.4 / 11.8 | 全新安装可选；Ubuntu 24.04 支持三种系列，Debian 13 支持 11.8；使用目标系统发行版仓库或经验证的 MariaDB 官方仓库 |
 | OpenLiteSpeed | LiteSpeed 官方 HTTPS 软件源；每站点独立虚拟主机，并自动安装官方 LiteSpeed Cache 插件 |
-| Redis | 当前发行版系统源 |
-| Fail2ban + nftables | 当前发行版系统源 |
+| Redis 8.10.2+ | Redis 官方签名 APT 软件源；支持 Noble/Trixie 与 amd64/arm64 |
+| Fail2ban + nftables | 当前发行版系统源；界面同时显示上游稳定版本参考，避免源码覆盖系统防火墙组件 |
 
 ## 技术架构
 
