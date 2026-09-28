@@ -556,7 +556,9 @@ func TestWPFleetOverviewPanelAPIContract(t *testing.T) {
 	for _, required := range [][]byte{
 		[]byte(`api('/wp-fleet/overview', { signal: controller.signal, suppressToast: true })`),
 		[]byte(`api('/wp-fleet/inventory-refresh', { method: 'POST' })`),
+		[]byte(`api('/websites/' + site.id + '/wp-inventory/refresh', { method: 'POST', suppressToast: true })`),
 		[]byte(`api('/websites/' + site.id + '/wp-update-checks'`),
+		[]byte(`inventory?.failure_code`),
 		[]byte(`new TextEncoder().encode(query).length > 128`),
 		[]byte(`toLocaleDateString(currentLocale())`),
 		[]byte(`toLocaleString(currentLocale())`),
@@ -567,7 +569,6 @@ func TestWPFleetOverviewPanelAPIContract(t *testing.T) {
 	}
 	for _, forbidden := range [][]byte{
 		[]byte(`setInterval(`),
-		[]byte(`/wp-inventory`),
 		[]byte(`toLocaleDateString('zh-CN')`),
 		[]byte(`toLocaleString('zh-CN')`),
 	} {
@@ -675,6 +676,9 @@ const data = (nextSites = sites, nextCounts = counts) => ({ generated_at: '2026-
     assert(['active', 'paused', 'error', 'creating', 'deleting'].map(value => panel.statusKey(value)).join(',') === [
         'wp_fleet.status_active', 'wp_fleet.status_paused', 'wp_fleet.status_error', 'wp_fleet.status_creating', 'wp_fleet.status_deleting'
     ].join(','), 'five website statuses');
+	assert(panel.inventoryErrorKey({ failure_code: 'php_cli_unavailable' }) === 'wp_inventory.error_php_runtime', 'fleet exposes actionable LSPHP error');
+	assert(panel.inventoryErrorKey({ failure_code: 'insufficient_privileges' }) === 'wp_inventory.error_permissions', 'fleet exposes actionable permissions error');
+	assert(panel.inventoryErrorKey({ failure_code: 'future_error' }) === 'wp_inventory.error_unknown', 'fleet error fallback');
 
     let usedLocale = '';
     const originalDate = Date.prototype.toLocaleDateString;
@@ -1305,6 +1309,10 @@ global.clearTimeout = id => { global.clearedTimer = id; };
     assert(panel.errorKey({ code: 'wordpress_terminated' }) === 'wp_inventory.error_terminated', 'terminated error key');
     assert(panel.errorKey({ code: 'inventory_limit_exceeded' }) === 'wp_inventory.error_inventory_limit', 'inventory limit error key');
     assert(panel.errorKey({ code: 'runner_start_failed' }) === 'wp_inventory.error_start_failed', 'start failed error key');
+	assert(panel.errorKey({ code: 'php_cli_unavailable' }) === 'wp_inventory.error_php_runtime', 'LSPHP runtime error key');
+	assert(panel.errorKey({ code: 'invalid_site_path' }) === 'wp_inventory.error_site_path', 'site path error key');
+	assert(panel.errorKey({ code: 'site_user_unavailable' }) === 'wp_inventory.error_site_user', 'site user error key');
+	assert(panel.errorKey({ code: 'insufficient_privileges' }) === 'wp_inventory.error_permissions', 'permissions error key');
     assert(panel.retryHintKey({ code: 'memory_limit_exhausted' }) === 'wp_inventory.retry_useless', 'hard limit retry is useless');
     assert(panel.retryHintKey({ code: 'runner_timeout' }) === 'wp_inventory.retry_hint', 'transient error retry hint');
     panel.summary = { core_upgrade_available: false, counts: { plugin_updates: 0, theme_updates: 0 }, update_checks: { core: false, plugins: false, themes: false } };
@@ -1544,6 +1552,26 @@ func TestBaseProvidesPersistentLightDarkThemeToggle(t *testing.T) {
 	}
 	if bytes.Contains(source, []byte(`href="/{{$.RandomSuffix}}/extensions"`)) {
 		t.Fatal("removed extension configuration still appears in the sidebar")
+	}
+}
+
+func TestLightThemeOverridesCompiledComponentColors(t *testing.T) {
+	source, err := os.ReadFile("../static/css/theme.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range [][]byte{
+		[]byte(`html[data-theme="light"] .table-cell`),
+		[]byte(`html[data-theme="light"] .table-header`),
+		[]byte(`html[data-theme="light"] .label`),
+		[]byte(`html[data-theme="light"] .input-field::placeholder`),
+		[]byte(`--panel-muted: #475569`),
+		[]byte(`html[data-theme="light"] .runtime-version`),
+		[]byte(`color: #166534 !important`),
+	} {
+		if !bytes.Contains(source, required) {
+			t.Fatalf("light theme contrast override is missing %q", required)
+		}
 	}
 }
 

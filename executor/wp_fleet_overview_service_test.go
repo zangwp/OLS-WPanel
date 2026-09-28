@@ -136,6 +136,7 @@ func TestWPFleetOverviewEmptyAndMixedSites(t *testing.T) {
 	failed := byID[4]
 	if failed.Status != "deleting" || failed.Inventory == nil || failed.Inventory.Status != "failed" ||
 		!failed.Inventory.HasSuccessfulInventory || failed.Inventory.WordPressVersion != "6.9" ||
+		failed.Inventory.FailureCode != "runner_timeout" ||
 		!failed.Inventory.Stale || failed.SSLState != "expiring" ||
 		!equalStrings(failed.Health.Issues, []string{"ssl_expiring", "inventory_failed", "inventory_stale"}) {
 		t.Fatalf("failed site = %+v", failed)

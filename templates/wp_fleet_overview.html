@@ -155,6 +155,7 @@
                                     </td>
                                     <td class="table-cell min-w-36 text-xs">
                                         <div x-text="site.inventory && site.inventory.last_success_at ? displayTime(site.inventory.last_success_at) : t('wp_fleet.never')"></div>
+                                        <div x-show="site.inventory && site.inventory.status === 'failed'" class="mt-1 max-w-56 text-red-300" style="white-space:normal" x-text="inventoryErrorMessage(site.inventory)"></div>
                                         <div x-show="site.inventory && site.inventory.status === 'failed' && site.inventory.has_successful_inventory" class="mt-1 text-yellow-300">{{t .Lang "wp_fleet.showing_previous_inventory"}}</div>
                                         <div x-show="site.inventory && site.inventory.stale" class="mt-1 text-yellow-300">{{t .Lang "wp_fleet.inventory_stale"}}</div>
                                     </td>
@@ -162,6 +163,7 @@
                                         <div class="flex flex-wrap gap-2">
                                             <a :href="'/{{$.RandomSuffix}}/websites/' + site.id + '/wordpress'" class="btn-secondary px-2 py-1 text-xs">{{t .Lang "website.details"}}</a>
                                             <a :href="'/{{$.RandomSuffix}}/websites/' + site.id" class="rounded bg-blue-900/60 px-2 py-1 text-xs text-blue-200 hover:bg-blue-800/70">{{t .Lang "website.manage"}}</a>
+                                            <button type="button" @click="refreshSite(site)" :disabled="bulkRefresh.running || isSiteRefreshing(site)" class="btn-secondary px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60" x-text="isSiteRefreshing(site) ? t('wp_fleet.site_refresh_running') : t('wp_fleet.site_refresh')"></button>
                                         </div>
                                     </td>
                                 </tr>
@@ -196,6 +198,7 @@ function wpFleetOverview() {
         requestGeneration: 0,
         requestController: null,
         updateCheckSavingSiteID: null,
+        siteRefreshes: {},
         bulkRefresh: { running: false, finished: false, total: 0, completed: 0, succeeded: 0, restricted: 0, failed: 0, enqueueFailed: 0, existing: 0, siteIDs: [], error: '' },
         mount() {
             return this.loadOverview();
@@ -301,6 +304,73 @@ function wpFleetOverview() {
             } finally {
                 this.updateCheckSavingSiteID = null;
             }
+        },
+        isSiteRefreshing(site) {
+            return !!(site && (this.siteRefreshes[site.id] || (site.inventory && ['queued', 'running'].includes(site.inventory.status))));
+        },
+        async refreshSite(site) {
+            if (!site || this.bulkRefresh.running || this.isSiteRefreshing(site)) return;
+            this.siteRefreshes[site.id] = true;
+            try {
+                const response = await api('/websites/' + site.id + '/wp-inventory/refresh', { method: 'POST', suppressToast: true });
+                if (!response.data || !response.data.task || response.data.task.site_id !== site.id || !['queued', 'running'].includes(response.data.task.status)) {
+                    throw new Error(t('wp_fleet.site_refresh_failed'));
+                }
+                if (site.inventory) site.inventory.status = response.data.task.status;
+                showToast(t(response.data.created ? 'wp_fleet.site_refresh_created' : 'wp_fleet.site_refresh_existing'), 'success');
+                await this.pollSiteRefresh(site.id);
+            } catch (error) {
+                showToast(error && error.message ? error.message : t('wp_fleet.site_refresh_failed'), 'error');
+            } finally {
+                delete this.siteRefreshes[site.id];
+            }
+        },
+        async pollSiteRefresh(siteID) {
+            let consecutiveFailures = 0;
+            for (let attempt = 0; attempt < 120; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                const loaded = await this.loadOverview();
+                if (loaded === null) continue;
+                if (loaded === false) {
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= 4) throw new Error(this.loadError || t('wp_fleet.site_refresh_failed'));
+                    continue;
+                }
+                consecutiveFailures = 0;
+                const refreshed = this.overview.sites.find(item => item.id === siteID);
+                if (!refreshed || !refreshed.inventory || !['queued', 'running'].includes(refreshed.inventory.status)) return;
+            }
+            throw new Error(t('wp_fleet.site_refresh_timeout'));
+        },
+        inventoryErrorKey(inventory) {
+            const code = inventory?.failure_code || '';
+            const direct = {
+                php_cli_unavailable: 'wp_inventory.error_php_runtime',
+                invalid_site_path: 'wp_inventory.error_site_path',
+                site_user_unavailable: 'wp_inventory.error_site_user',
+                insufficient_privileges: 'wp_inventory.error_permissions',
+                runner_policy_mismatch: 'wp_inventory.error_policy_mismatch',
+                runner_timeout: 'wp_inventory.error_timeout',
+                runner_canceled: 'wp_inventory.error_timeout',
+                wordpress_bootstrap_failed: 'wp_inventory.error_bootstrap',
+                wordpress_terminated: 'wp_inventory.error_terminated',
+                memory_limit_exhausted: 'wp_inventory.error_memory_limit',
+                inventory_limit_exceeded: 'wp_inventory.error_inventory_limit',
+                stdout_limit_exceeded: 'wp_inventory.error_output_limit',
+                stderr_limit_exceeded: 'wp_inventory.error_output_limit',
+                protocol_limit_exceeded: 'wp_inventory.error_output_limit',
+                protocol_invalid: 'wp_inventory.error_protocol',
+                runner_internal_error: 'wp_inventory.error_protocol',
+                runner_start_failed: 'wp_inventory.error_start_failed',
+            };
+            if (direct[code]) return direct[code];
+            if (['unsupported_platform', 'invalid_site', 'runuser_unavailable', 'runner_prepare_failed', 'runner_integrity_failed', 'runner_lock_failed'].includes(code)) return 'wp_inventory.error_policy';
+            if (code === 'site_changed_during_collection') return 'wp_inventory.error_site_changed';
+            if (code === 'inventory_worker_repeated_crash') return 'wp_inventory.error_worker';
+            return 'wp_inventory.error_unknown';
+        },
+        inventoryErrorMessage(inventory) {
+            return t(this.inventoryErrorKey(inventory));
         },
         tileTone(count, color) {
             if (!(count > 0)) return { box: 'border-gray-700 bg-gray-800/70', label: 'text-gray-400', value: 'text-gray-200' };

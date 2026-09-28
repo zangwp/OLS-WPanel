@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.2 — 2026-09-28
+
+- Fixes WordPress inventory scans on OpenLiteSpeed hosts by trusting the configured LSPHP CLI directory instead of incorrectly requiring `/usr/bin`.
+- Exposes a sanitized, actionable scan failure reason in the fleet overview and adds a per-site rescan action with bounded progress polling.
+- Improves light-theme contrast for compiled table/label components, form placeholders, muted text, and version badges.
+- Links service update information in Software Management to the existing signed and validated System Updates workflow.
+
 ## v1.0.1 — 2026-09-28
 
 - Makes system-package updates wait for APT locks, retry repository downloads, wait for restarted services, and expose sanitized failure details and progress states in the panel.

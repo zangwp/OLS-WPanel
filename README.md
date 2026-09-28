@@ -27,6 +27,8 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 短域名入口固定到已发布的 Release；Cloudflare Worker 会先验证 `bootstrap.sh` 的 Ed25519 签名和 SHA-256。脚本下载后会自动检查并补装 `wget`、`curl`、`ca-certificates`、`openssl` 等引导依赖，再次验签固定版本的 `install.sh`，最后才启动安装。它不会执行 GitHub `main` 分支上的可变脚本。
 
+当前稳定版本：`v1.0.2`。
+
 ### 极简系统 / 下载失败处理
 
 如果系统提示 `curl: command not found`、TLS/证书错误，或使用的是未预装下载与验签工具的精简镜像，请先执行完整兼容命令：

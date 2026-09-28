@@ -126,6 +126,25 @@ func TestWPInventoryEmbeddedSource(t *testing.T) {
 	}
 }
 
+func TestNewWPInventoryRunnerTrustsConfiguredLSPHPDirectory(t *testing.T) {
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{
+		LSPHPCLI: "/usr/local/lsws/lsphp84/bin/php",
+	}}
+	t.Cleanup(func() { config.AppConfig = oldConfig })
+
+	runner, err := NewWPInventoryRunner()
+	if err != nil {
+		t.Fatalf("create inventory runner: %v", err)
+	}
+	if runner.phpPath != "/usr/local/lsws/lsphp84/bin/php" {
+		t.Fatalf("php path = %q", runner.phpPath)
+	}
+	if runner.phpDir != "/usr/local/lsws/lsphp84/bin" {
+		t.Fatalf("trusted php directory = %q", runner.phpDir)
+	}
+}
+
 func TestWPInventoryRunErrorDoesNotLeakCause(t *testing.T) {
 	err := runError(WPInventoryProtocolInvalid, WPInventoryStageProtocol, 17, false, errors.New("/secret/path plugin output"))
 	if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "plugin") {

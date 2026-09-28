@@ -141,7 +141,7 @@ func TestInitialOLSDistributionBoundariesRemainExplicit(t *testing.T) {
 		"README.en.md": {
 			"OpenLiteSpeed",
 			"LSPHP 8.3",
-			"v1.0.1",
+			"v1.0.2",
 		},
 		"docs/upgrade-compatibility.md": {
 			"v1.0.0",
@@ -150,7 +150,7 @@ func TestInitialOLSDistributionBoundariesRemainExplicit(t *testing.T) {
 			"/usr/local/bin/ols-wpanel",
 		},
 		"docs/verified-install.md": {
-			"version='v1.0.1'",
+			"version='v1.0.2'",
 			"install.sh.sha256.sig",
 			"openssl pkeyutl -verify",
 			"Do not replace the fixed release URL",

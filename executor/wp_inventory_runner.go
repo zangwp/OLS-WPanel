@@ -254,10 +254,11 @@ type WPInventoryRunner struct {
 }
 
 func NewWPInventoryRunner() (*WPInventoryRunner, error) {
+	phpPath := LSPHPBinaryPath()
 	return newWPInventoryRunner(wpInventoryRunnerOptions{
 		source: wpInventoryRunnerSource, runnerRoot: wpInventoryRunnerRoot, trustedRoot: "/var",
-		phpPath: LSPHPBinaryPath(), runuserPath: wpInventoryRunuserPath,
-		phpDir: "/usr/bin", runuserDir: "/usr/sbin",
+		phpPath: phpPath, runuserPath: wpInventoryRunuserPath,
+		phpDir: filepath.Dir(phpPath), runuserDir: "/usr/sbin",
 		requireRoot: true, ownerUID: 0, ownerGID: 0, lookupUser: user.Lookup, now: time.Now,
 	})
 }

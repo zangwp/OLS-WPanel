@@ -461,9 +461,13 @@ function wpInventoryPanel() {
                 runner_internal_error: 'wp_inventory.error_protocol',
                 json_encode_failed: 'wp_inventory.error_protocol',
                 runner_start_failed: 'wp_inventory.error_start_failed',
+                php_cli_unavailable: 'wp_inventory.error_php_runtime',
+                invalid_site_path: 'wp_inventory.error_site_path',
+                site_user_unavailable: 'wp_inventory.error_site_user',
+                insufficient_privileges: 'wp_inventory.error_permissions',
             };
             if (direct[code]) return direct[code];
-            if (['unsupported_platform', 'invalid_site', 'invalid_site_path', 'site_user_unavailable', 'insufficient_privileges', 'php_cli_unavailable', 'runuser_unavailable', 'runner_prepare_failed', 'runner_integrity_failed', 'runner_lock_failed'].includes(code)) return 'wp_inventory.error_policy';
+            if (['unsupported_platform', 'invalid_site', 'runuser_unavailable', 'runner_prepare_failed', 'runner_integrity_failed', 'runner_lock_failed'].includes(code)) return 'wp_inventory.error_policy';
             if (code === 'site_changed_during_collection') return 'wp_inventory.error_site_changed';
             if (code === 'inventory_worker_repeated_crash') return 'wp_inventory.error_worker';
             return 'wp_inventory.error_unknown';

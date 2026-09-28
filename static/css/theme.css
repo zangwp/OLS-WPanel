@@ -20,7 +20,8 @@ html[data-theme="light"] {
     --panel-sidebar: rgba(255, 255, 255, 0.97);
     --panel-border: rgba(15, 23, 42, 0.12);
     --panel-text: #172033;
-    --panel-muted: #64748b;
+    --panel-muted: #475569;
+    --panel-subtle: #64748b;
     --panel-accent: #2563eb;
     --panel-accent-soft: rgba(37, 99, 235, 0.09);
     --panel-surface-soft: #f8fafc;
@@ -217,9 +218,30 @@ html[data-theme="light"] .text-gray-300 {
 }
 
 html[data-theme="light"] .text-gray-400,
-html[data-theme="light"] .text-gray-500,
-html[data-theme="light"] .text-gray-600 {
+html[data-theme="light"] .text-gray-500 {
     color: var(--panel-muted) !important;
+}
+
+html[data-theme="light"] .text-gray-600 {
+    color: #334155 !important;
+}
+
+/* Component classes in main.css contain compiled dark-theme colors, so they
+   need explicit light-theme mappings in addition to the utility classes. */
+html[data-theme="light"] .table-cell,
+html[data-theme="light"] .label {
+    color: var(--panel-text) !important;
+}
+
+html[data-theme="light"] .table-header {
+    color: var(--panel-muted) !important;
+}
+
+html[data-theme="light"] .input-field::placeholder,
+html[data-theme="light"] input::placeholder,
+html[data-theme="light"] textarea::placeholder {
+    color: var(--panel-subtle) !important;
+    opacity: 1;
 }
 
 html[data-theme="light"] .border-gray-800,
@@ -339,6 +361,12 @@ html[data-theme="light"] .badge-success { background: #dcfce7 !important; color:
 html[data-theme="light"] .badge-danger { background: #fee2e2 !important; color: #991b1b !important; }
 html[data-theme="light"] .badge-warning { background: #fef3c7 !important; color: #92400e !important; }
 html[data-theme="light"] .badge-info { background: #dbeafe !important; color: #1e40af !important; }
+html[data-theme="light"] .version-pill,
+html[data-theme="light"] .runtime-version {
+    background: #dcfce7 !important;
+    border-color: #86efac !important;
+    color: #166534 !important;
+}
 
 .software-update-notice,
 .system-update-running {

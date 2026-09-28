@@ -53,6 +53,7 @@ type WPFleetInventory struct {
 	UpdateTotal            int        `json:"update_total"`
 	LastAttemptAt          *time.Time `json:"last_attempt_at"`
 	LastSuccessAt          *time.Time `json:"last_success_at"`
+	FailureCode            string     `json:"failure_code,omitempty"`
 	Stale                  bool       `json:"stale"`
 }
 

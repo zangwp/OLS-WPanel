@@ -272,7 +272,8 @@ func wpFleetInventoryModel(row wpFleetOverviewRow, generatedAt time.Time) (*mode
 		Status: status, HasSuccessfulInventory: state.CollectionID != "", WordPressVersion: state.WordPressVersion,
 		PluginUpdates: row.pluginUpdates, ThemeUpdates: row.themeUpdates,
 		CoreUpgradeAvailable: row.coreUpgradeAvailable, UpdateTotal: updateTotal,
-		LastAttemptAt: lastAttemptAt, LastSuccessAt: lastSuccessAt, Stale: stale,
+		LastAttemptAt: lastAttemptAt, LastSuccessAt: lastSuccessAt,
+		FailureCode: state.LastErrorCode, Stale: stale,
 	}, nil
 }
 
