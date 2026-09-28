@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-This is the initial `v1.0.0` release line.
+The current stable release is `v1.0.1`.
 
 ### Minimal images / download failures
 
@@ -72,5 +72,11 @@ o unban           clear managed IP bans
 - Each generated OpenLiteSpeed configuration is validated before activation and updated atomically with rollback.
 - The management service uses its own TLS listener and does not expose OpenLiteSpeed WebAdmin.
 - Optional telemetry is disabled by default.
+
+## Runtime updates and OpenLiteSpeed administration
+
+System Update installs stable patch and security updates from the configured APT repositories. OpenLiteSpeed follows the official LiteSpeed repository, while MariaDB and Redis follow the selected Debian or Ubuntu release. LSPHP remains on the tested PHP 8.3 major line. Cross-major PHP or database changes are migrations—not routine updates—and require compatibility, backup, rollback, and recovery validation before the panel can offer them safely.
+
+OLS WPanel owns the generated server and per-site OpenLiteSpeed configuration, so WebAdmin on port 7080 is disabled by default to avoid conflicting edits and an extra public administration endpoint. The installer enables Gzip, Brotli, and HTTP/3/QUIC, and WordPress sites receive LiteSpeed Cache and Redis configuration automatically. The Software page reports their effective status.
 
 See [README.md](README.md) for the complete Chinese guide, [NOTICE.md](NOTICE.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

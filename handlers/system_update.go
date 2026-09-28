@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -42,7 +43,12 @@ func (h *SystemUpdateHandler) Check(c *gin.Context) {
 	}
 	sysPkgCache.mu.Unlock()
 
-	pkgs := getUpgradablePackages()
+	pkgs, err := getUpgradablePackages()
+	if err != nil {
+		log.Printf("查询系统更新失败: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "settings.system_update_check_failed")))
+		return
+	}
 
 	sysPkgCache.mu.Lock()
 	sysPkgCache.expireAt = time.Now().Add(5 * time.Minute)
@@ -130,18 +136,23 @@ func systemUpdateStatusResponse(c *gin.Context, status executor.SystemPackageUpd
 		"stage":       status.Stage,
 		"message":     message,
 		"message_key": status.MessageKey,
+		"detail":      status.Detail,
 		"started_at":  status.StartedAt,
 		"updated_at":  status.UpdatedAt,
 	}
 }
 
-func getUpgradablePackages() []systemPackage {
+func getUpgradablePackages() ([]systemPackage, error) {
 	out, err := exec.Command("bash", "-c", "apt list --upgradable 2>/dev/null").Output()
 	if err != nil {
-		return []systemPackage{}
+		return nil, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return parseUpgradablePackages(string(out)), nil
+}
+
+func parseUpgradablePackages(output string) []systemPackage {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	var pkgs []systemPackage
 	for _, line := range lines {
 		line = strings.TrimSpace(line)

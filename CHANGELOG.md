@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.1 — 2026-09-28
+
+- Makes system-package updates wait for APT locks, retry repository downloads, wait for restarted services, and expose sanitized failure details and progress states in the panel.
+- Corrects MariaDB and OpenLiteSpeed version parsing and shows available APT candidate updates without presenting unsafe cross-major upgrades as routine actions.
+- Shows the effective Gzip, Brotli, HTTP/3/QUIC, and WebAdmin state managed by OLS WPanel.
+- Completes light-theme coverage for tables, hover states, status cards, badges, and semantic alert panels.
+
 ## v1.0.0 — 2026-09-27
 
 Initial OLS WPanel release.

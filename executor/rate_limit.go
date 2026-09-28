@@ -33,7 +33,7 @@ func EnsureBotRateLimit(enabled bool, rpm, burst int) error {
 
 func ensureOLSRateLimitCompatibility(ipEnabled bool, ipRPM, ipBurst int, botEnabled bool, botRPM, botBurst int) error {
 	if ipEnabled || botEnabled {
-		return fmt.Errorf("OpenLiteSpeed v1.0.0 暂不支持面板动态请求限速；请保持该选项关闭")
+		return fmt.Errorf("当前 OpenLiteSpeed 版本暂不支持面板动态请求限速；请保持该选项关闭")
 	}
 	return nil
 }

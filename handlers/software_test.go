@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -11,6 +13,51 @@ func TestFindPHPIniValueSkipsComments(t *testing.T) {
 	content := "; memory_limit = 128M\n# memory_limit = 192M\nmemory_limit = 256M\n"
 	if got := findPHPIniValue(content, "memory_limit"); got != "256M" {
 		t.Fatalf("findPHPIniValue() = %q, want 256M", got)
+	}
+}
+
+func TestParseMariaDBVersionUsesDistributionVersion(t *testing.T) {
+	input := "mariadb from 11.8.3-MariaDB, client 15.2 for debian-linux-gnu (x86_64) using EditLine wrapper"
+	if got := parseMariaDBVersion(input); got != "11.8.3-MariaDB" {
+		t.Fatalf("parseMariaDBVersion() = %q, want 11.8.3-MariaDB", got)
+	}
+	input = "mariadb  Ver 15.1 Distrib 10.11.13-MariaDB, for debian-linux-gnu (x86_64) using EditLine wrapper"
+	if got := parseMariaDBVersion(input); got != "10.11.13-MariaDB" {
+		t.Fatalf("parseMariaDBVersion() = %q, want 10.11.13-MariaDB", got)
+	}
+}
+
+func TestParseOpenLiteSpeedVersion(t *testing.T) {
+	input := "LiteSpeed/1.9.2 Open (BUILD built: Tue Aug 25 15:48:28 UTC 2026)"
+	if got := parseOpenLiteSpeedVersion(input); got != "1.9.2" {
+		t.Fatalf("parseOpenLiteSpeedVersion() = %q, want 1.9.2", got)
+	}
+}
+
+func TestParseAptCandidateVersion(t *testing.T) {
+	input := "openlitespeed:\n  Installed: 1.9.2-1\n  Candidate: 1.9.3-1\n"
+	if got := parseAptCandidateVersion(input); got != "1.9.3-1" {
+		t.Fatalf("parseAptCandidateVersion() = %q, want 1.9.3-1", got)
+	}
+}
+
+func TestOpenLiteSpeedRuntimeDetails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "httpd_config.conf")
+	content := "disableWebAdmin 1\nenableGzipCompress 1\nenableDynGzipCompress 1\nenableBrCompress 4\nquicEnable 1\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	details := openLiteSpeedRuntimeDetails("zh-CN", path)
+	if len(details) != 4 {
+		t.Fatalf("details length = %d, want 4", len(details))
+	}
+	for i := 0; i < 3; i++ {
+		if details[i].Tone != "success" || details[i].Value != "已启用" {
+			t.Fatalf("detail %d = %+v, want enabled/success", i, details[i])
+		}
+	}
+	if details[3].Value != "已禁用（由面板管理）" || details[3].Tone != "info" {
+		t.Fatalf("webadmin detail = %+v", details[3])
 	}
 }
 

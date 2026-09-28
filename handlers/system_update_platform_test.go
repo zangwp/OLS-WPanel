@@ -35,3 +35,17 @@ func TestParseSystemPackageCatalogUsesSupportedDistribution(t *testing.T) {
 		})
 	}
 }
+
+func TestParseUpgradablePackages(t *testing.T) {
+	input := "Listing...\nopenlitespeed/stable 1.9.3-1 amd64 [upgradable from: 1.9.2-1]\nlibssl3/noble-security 3.0.13-0ubuntu3.5 amd64 [upgradable from: 3.0.13-0ubuntu3.4]\n"
+	got := parseUpgradablePackages(input)
+	if len(got) != 2 {
+		t.Fatalf("package count = %d, want 2", len(got))
+	}
+	if got[0].Name != "openlitespeed" || got[0].Repo != "stable" || got[0].Version != "1.9.3-1" {
+		t.Fatalf("first package = %+v", got[0])
+	}
+	if got[1].Name != "libssl3" || got[1].Repo != "noble-security" {
+		t.Fatalf("second package = %+v", got[1])
+	}
+}

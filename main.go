@@ -299,10 +299,10 @@ func main() {
 		coreUpdateWorker = candidate
 		log.Println("WordPress 更新后台任务已启动")
 	}
-	// v1.0.0 intentionally does not start the legacy site-migration worker.
+	// The OLS release line intentionally does not start the legacy site-migration worker.
 	// A future OLS-native migration protocol must be audited and tested
 	// before this feature is exposed again.
-	log.Println("网站搬家功能在 OpenLiteSpeed v1.0.0 中未启用")
+	log.Println("网站搬家功能在当前 OpenLiteSpeed 版本中未启用")
 
 	collector.Start()
 

@@ -1292,7 +1292,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	db := database.GetDB()
 	r.Use(middleware.ScanDefense(db, cfg.Panel.RandomSuffix))
 
-	// Site migration remains disabled for v1.0.0. The inherited protocol edits
+	// Site migration remains disabled for the OLS release line. The inherited protocol edits
 	// OpenLiteSpeed/LSPHP state and must not be reachable until it has an OLS-native
 	// implementation and recovery tests.
 

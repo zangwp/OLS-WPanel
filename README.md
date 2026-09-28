@@ -169,6 +169,14 @@ WordPress 官方推荐 PHP 8.3 或更高版本。8.3 在 WordPress 生态中经�
 
 WordPress 官方推荐 MariaDB 10.6 或更高版本。当前支持的 Debian 与 Ubuntu 系统源提供兼容版本。MariaDB 是由社区驱动的 GPL 分支，兼容 MySQL，并可直接获得发行版软件源提供的安全更新，无需添加第三方数据库仓库。
 
+**服务版本如何更新？**
+
+“系统更新”安装当前 APT 软件源提供的稳定补丁和安全更新：OpenLiteSpeed 来自 LiteSpeed 官方源，MariaDB 与 Redis 来自对应的 Debian/Ubuntu 系统源。LSPHP 当前锁定在经过完整验证的 8.3 主版本。面板不会把“安装补丁”伪装成 PHP 或数据库跨主版本迁移；跨主版本会涉及扩展、站点兼容性、数据库格式、回滚和备份验证，需要单独的迁移流程与测试后才能提供。
+
+**为什么没有开放 OpenLiteSpeed WebAdmin 7080？**
+
+OLS WPanel 会生成并维护服务器级与网站级 OpenLiteSpeed 配置，因此默认关闭 WebAdmin，避免两个后台互相覆盖配置，并减少一个公网管理入口。安装器已启用 Gzip、Brotli、HTTP/3/QUIC，并为 WordPress 网站生成 LiteSpeed Cache 与 Redis 配置；“软件管理”页会直接显示这些能力的实际状态。若确有高级配置需求，应先在面板中实现带校验和回滚的对应选项，而不是同时修改 WebAdmin 与面板管理的文件。
+
 **为什么是自己编的 Go 二进制，不用 Docker/PM2？**
 
 面板应用以单个静态 Go 二进制分发并由 `systemd` 守护，不需要 Docker/PM2。完整功能仍依赖安装器列出的系统服务和命令。它不与 OpenLiteSpeed 共用管理端口，也没有容器运行时开销。

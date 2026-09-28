@@ -37,18 +37,28 @@ type guardResponse struct {
 
 var versionCmds = map[string]string{
 	"lsws":         "/usr/local/lsws/bin/openlitespeed -v 2>&1 | head -1",
-	"mariadb":      "mariadb --version 2>/dev/null | awk '{print $3}' | cut -d, -f1",
+	"mariadb":      "mariadb --version 2>/dev/null | head -1",
 	"redis-server": "redis-server --version 2>/dev/null | awk '{print $3}' | cut -d= -f2",
 	"nftables":     "nft --version 2>/dev/null | awk '{print $2}' | cut -dv -f2",
 	"fail2ban":     "fail2ban-client --version 2>/dev/null | awk '{print $2}'",
 }
 
 type softwareItem struct {
-	Name       string           `json:"name"`
-	Version    string           `json:"version"`
-	Status     string           `json:"status"`
-	Configs    []softwareConfig `json:"configs"`
-	ConfigPath string           `json:"-"`
+	Name             string           `json:"name"`
+	Version          string           `json:"version"`
+	Status           string           `json:"status"`
+	Configs          []softwareConfig `json:"configs"`
+	Details          []softwareDetail `json:"details"`
+	VersionPolicy    string           `json:"version_policy"`
+	CandidateVersion string           `json:"candidate_version,omitempty"`
+	UpdateAvailable  bool             `json:"update_available"`
+	ConfigPath       string           `json:"-"`
+}
+
+type softwareDetail struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Tone  string `json:"tone"`
 }
 
 type softwareConfig struct {
@@ -79,6 +89,10 @@ func (h *SoftwareHandler) List(c *gin.Context) {
 	for i := range items {
 		populateConfigValues(&items[i])
 	}
+	applyPackageUpdateInfo(&items[0], "lsphp83")
+	applyPackageUpdateInfo(&items[1], "openlitespeed")
+	applyPackageUpdateInfo(&items[2], "mariadb-server")
+	applyPackageUpdateInfo(&items[3], "redis-server")
 	c.JSON(http.StatusOK, models.SuccessResponse(items))
 }
 
@@ -204,10 +218,17 @@ func (h *SoftwareHandler) GetGuardStatus(c *gin.Context) {
 	svcs := executor.GetGuardStatus()
 	result := make([]guardResponse, len(svcs))
 	for i, s := range svcs {
+		version := strings.TrimSpace(runCmd(versionCmds[s.ServiceName]))
+		switch s.ServiceName {
+		case "lsws":
+			version = parseOpenLiteSpeedVersion(version)
+		case "mariadb":
+			version = parseMariaDBVersion(version)
+		}
 		result[i] = guardResponse{
 			Name:         s.Name,
 			Service:      s.ServiceName,
-			Version:      strings.TrimSpace(runCmd(versionCmds[s.ServiceName])),
+			Version:      version,
 			Running:      s.Running,
 			Paused:       s.Paused,
 			Restarts:     s.Restarts,
@@ -573,10 +594,11 @@ func getPHPInfo(lang string) softwareItem {
 		extCount = strconv.Itoa(len(strings.Fields(string(out))))
 	}
 	return softwareItem{
-		Name:       "PHP",
-		Version:    strings.TrimSpace(ver),
-		Status:     i18n.T(lang, "software.php_installed_extensions", i18n.P{"count": strings.TrimSpace(extCount)}),
-		ConfigPath: executor.PHPRuntimeConfigPath(),
+		Name:          "PHP",
+		Version:       strings.TrimSpace(ver),
+		Status:        i18n.T(lang, "software.php_installed_extensions", i18n.P{"count": strings.TrimSpace(extCount)}),
+		VersionPolicy: i18n.T(lang, "software.php_runtime_version_policy"),
+		ConfigPath:    executor.PHPRuntimeConfigPath(),
 		Configs: []softwareConfig{
 			{Key: "memory_limit", Label: i18n.T(lang, "software.memory_limit_label"), Hint: i18n.T(lang, "software.memory_limit_hint")},
 			{Key: "upload_max_filesize", Label: i18n.T(lang, "software.upload_max_filesize_label"), Hint: i18n.T(lang, "software.upload_max_filesize_hint")},
@@ -592,24 +614,27 @@ func getPHPInfo(lang string) softwareItem {
 func getOpenLiteSpeedInfo(lang string) softwareItem {
 	ver := ""
 	if out, err := exec.Command(executor.OpenLiteSpeedBinaryPath(), "-v").CombinedOutput(); err == nil {
-		ver = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+		ver = parseOpenLiteSpeedVersion(string(out))
 	}
 	return softwareItem{
-		Name:       "OpenLiteSpeed",
-		Version:    strings.TrimSpace(ver),
-		Status:     i18n.T(lang, "software.installed"),
-		ConfigPath: "",
-		Configs:    nil,
+		Name:          "OpenLiteSpeed",
+		Version:       strings.TrimSpace(ver),
+		Status:        i18n.T(lang, "software.installed"),
+		VersionPolicy: i18n.T(lang, "software.ols_runtime_version_policy"),
+		ConfigPath:    "",
+		Configs:       []softwareConfig{},
+		Details:       openLiteSpeedRuntimeDetails(lang, "/usr/local/lsws/conf/httpd_config.conf"),
 	}
 }
 
 func getMariaDBInfo(lang string) softwareItem {
-	ver := runCmd("mariadb --version 2>/dev/null | awk '{print $3}' | cut -d, -f1")
+	ver := parseMariaDBVersion(runCmd("mariadb --version 2>/dev/null | head -1"))
 	return softwareItem{
-		Name:       "MariaDB",
-		Version:    strings.TrimSpace(ver),
-		Status:     i18n.T(lang, "software.installed"),
-		ConfigPath: "/etc/mysql/mariadb.conf.d/99-olswpanel.cnf",
+		Name:          "MariaDB",
+		Version:       strings.TrimSpace(ver),
+		Status:        i18n.T(lang, "software.installed"),
+		VersionPolicy: i18n.T(lang, "software.mariadb_runtime_version_policy"),
+		ConfigPath:    "/etc/mysql/mariadb.conf.d/99-olswpanel.cnf",
 		Configs: []softwareConfig{
 			{Key: "innodb_buffer_pool_size", Label: i18n.T(lang, "software.innodb_buffer_pool_size_label"), Hint: i18n.T(lang, "software.innodb_buffer_pool_size_hint")},
 		},
@@ -623,14 +648,100 @@ func getRedisInfo(lang string) softwareItem {
 		status = i18n.T(lang, "software.stopped")
 	}
 	return softwareItem{
-		Name:       "Redis",
-		Version:    strings.TrimSpace(ver),
-		Status:     status,
-		ConfigPath: "/etc/redis/redis.conf",
+		Name:          "Redis",
+		Version:       strings.TrimSpace(ver),
+		Status:        status,
+		VersionPolicy: i18n.T(lang, "software.redis_runtime_version_policy"),
+		ConfigPath:    "/etc/redis/redis.conf",
 		Configs: []softwareConfig{
 			{Key: "maxmemory", Label: i18n.T(lang, "software.maxmemory_label"), Hint: i18n.T(lang, "software.maxmemory_hint")},
 		},
 	}
+}
+
+var (
+	openLiteSpeedVersionRE = regexp.MustCompile(`(?i)LiteSpeed/([^\s]+)`)
+	mariaDBDistribRE       = regexp.MustCompile(`(?i)\bDistrib\s+([^,\s]+)`)
+	mariaDBVersionRE       = regexp.MustCompile(`(?i)\b([0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9.+~:_-]+)?)\b`)
+)
+
+func parseOpenLiteSpeedVersion(output string) string {
+	if match := openLiteSpeedVersionRE.FindStringSubmatch(output); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	return strings.TrimSpace(strings.SplitN(output, "\n", 2)[0])
+}
+
+func parseMariaDBVersion(output string) string {
+	output = strings.TrimSpace(strings.SplitN(output, "\n", 2)[0])
+	if match := mariaDBDistribRE.FindStringSubmatch(output); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	if match := mariaDBVersionRE.FindStringSubmatch(output); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	return output
+}
+
+func parseAptCandidateVersion(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && key == "Candidate" {
+			candidate := strings.TrimSpace(value)
+			if candidate != "(none)" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func applyPackageUpdateInfo(item *softwareItem, packageName string) {
+	if item == nil || packageName == "" {
+		return
+	}
+	installedOut, installedErr := exec.Command("dpkg-query", "-W", "-f=${Version}", packageName).Output()
+	candidateOut, candidateErr := exec.Command("apt-cache", "policy", packageName).Output()
+	if installedErr != nil || candidateErr != nil {
+		return
+	}
+	installed := strings.TrimSpace(string(installedOut))
+	candidate := parseAptCandidateVersion(string(candidateOut))
+	if installed == "" || candidate == "" {
+		return
+	}
+	item.CandidateVersion = candidate
+	item.UpdateAvailable = exec.Command("dpkg", "--compare-versions", installed, "lt", candidate).Run() == nil
+}
+
+func openLiteSpeedRuntimeDetails(lang, path string) []softwareDetail {
+	content, _ := os.ReadFile(path)
+	text := string(content)
+	state := func(enabled bool) (string, string) {
+		if enabled {
+			return i18n.T(lang, "software.enabled"), "success"
+		}
+		return i18n.T(lang, "software.disabled"), "muted"
+	}
+	match := func(pattern string) bool {
+		return regexp.MustCompile(pattern).MatchString(text)
+	}
+	details := make([]softwareDetail, 0, 4)
+	value, tone := state(match(`(?m)^\s*enableGzipCompress\s+1\s*$`) && match(`(?m)^\s*enableDynGzipCompress\s+1\s*$`))
+	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_gzip"), Value: value, Tone: tone})
+	value, tone = state(match(`(?m)^\s*enableBrCompress\s+[1-9][0-9]*\s*$`))
+	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_brotli"), Value: value, Tone: tone})
+	value, tone = state(match(`(?m)^\s*quicEnable\s+1\s*$`))
+	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_http3"), Value: value, Tone: tone})
+	webAdminDisabled := match(`(?m)^\s*disableWebAdmin\s+1\s*$`)
+	webAdminValue := i18n.T(lang, "software.ols_webadmin_disabled")
+	webAdminTone := "info"
+	if !webAdminDisabled {
+		webAdminValue = i18n.T(lang, "software.ols_webadmin_enabled")
+		webAdminTone = "warning"
+	}
+	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_webadmin"), Value: webAdminValue, Tone: webAdminTone})
+	return details
 }
 
 func runCmd(cmd string) string {

@@ -23,6 +23,8 @@ html[data-theme="light"] {
     --panel-muted: #64748b;
     --panel-accent: #2563eb;
     --panel-accent-soft: rgba(37, 99, 235, 0.09);
+    --panel-surface-soft: #f8fafc;
+    --panel-row-hover: #eef4ff;
     --panel-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
 
@@ -179,16 +181,32 @@ table tbody tr:hover {
 }
 
 html[data-theme="light"] .bg-gray-950,
-html[data-theme="light"] .bg-gray-900 {
+html[data-theme="light"] .bg-gray-900,
+html[data-theme="light"] .bg-gray-950\/40,
+html[data-theme="light"] .bg-gray-950\/60,
+html[data-theme="light"] .bg-gray-950\/80,
+html[data-theme="light"] .bg-gray-900\/30,
+html[data-theme="light"] .bg-gray-900\/40,
+html[data-theme="light"] .bg-gray-900\/50,
+html[data-theme="light"] .bg-gray-900\/60,
+html[data-theme="light"] .bg-gray-900\/70 {
     background-color: var(--panel-bg) !important;
 }
 
 html[data-theme="light"] .bg-gray-800,
 html[data-theme="light"] .bg-gray-800\/50,
 html[data-theme="light"] .bg-gray-800\/60,
+html[data-theme="light"] .bg-gray-800\/70,
 html[data-theme="light"] .bg-gray-700,
+html[data-theme="light"] .bg-gray-700\/40,
+html[data-theme="light"] .bg-gray-700\/50,
 html[data-theme="light"] [style*="background-color: #0f172a"] {
     background-color: var(--panel-surface-strong) !important;
+}
+
+html[data-theme="light"] .bg-gray-500,
+html[data-theme="light"] .bg-gray-600 {
+    background-color: #e2e8f0 !important;
 }
 
 html[data-theme="light"] .text-white,
@@ -210,6 +228,137 @@ html[data-theme="light"] .border-gray-700\/50,
 html[data-theme="light"] .border-gray-600,
 html[data-theme="light"] .divide-gray-800 > :not([hidden]) ~ :not([hidden]) {
     border-color: var(--panel-border) !important;
+}
+
+html[data-theme="light"] [style*="border: 1px solid #1e293b"],
+html[data-theme="light"] [style*="border: 1px solid #334155"] {
+    border-color: var(--panel-border) !important;
+}
+
+html[data-theme="light"] table tbody tr:hover,
+html[data-theme="light"] .hover\:bg-gray-600:hover,
+html[data-theme="light"] .hover\:bg-gray-700\/40:hover,
+html[data-theme="light"] .hover\:bg-gray-800\/50:hover,
+html[data-theme="light"] .hover\:bg-gray-800\/60:hover {
+    background-color: var(--panel-row-hover) !important;
+}
+
+/* Keep semantic panels readable in light mode instead of inheriting their
+   dark-theme navy/red/yellow fills. */
+html[data-theme="light"] .bg-blue-900\/20,
+html[data-theme="light"] .bg-blue-900\/30,
+html[data-theme="light"] .bg-blue-900\/60,
+html[data-theme="light"] .bg-blue-950,
+html[data-theme="light"] .bg-blue-950\/20,
+html[data-theme="light"] .bg-blue-950\/30,
+html[data-theme="light"] .bg-blue-950\/60 {
+    background-color: #eff6ff !important;
+}
+
+html[data-theme="light"] .bg-green-900,
+html[data-theme="light"] .bg-green-900\/30,
+html[data-theme="light"] .bg-green-900\/40,
+html[data-theme="light"] .bg-green-900\/50,
+html[data-theme="light"] .bg-green-900\/60,
+html[data-theme="light"] .bg-green-950\/20,
+html[data-theme="light"] .bg-green-950\/30,
+html[data-theme="light"] .bg-green-950\/60 {
+    background-color: #f0fdf4 !important;
+}
+
+html[data-theme="light"] .bg-red-900,
+html[data-theme="light"] .bg-red-900\/20,
+html[data-theme="light"] .bg-red-900\/50,
+html[data-theme="light"] .bg-red-900\/60,
+html[data-theme="light"] .bg-red-950\/20,
+html[data-theme="light"] .bg-red-950\/30,
+html[data-theme="light"] .bg-red-950\/40 {
+    background-color: #fef2f2 !important;
+}
+
+html[data-theme="light"] .bg-yellow-900,
+html[data-theme="light"] .bg-yellow-900\/10,
+html[data-theme="light"] .bg-yellow-900\/30,
+html[data-theme="light"] .bg-yellow-900\/40,
+html[data-theme="light"] .bg-yellow-900\/50,
+html[data-theme="light"] .bg-yellow-900\/60,
+html[data-theme="light"] .bg-yellow-950\/20,
+html[data-theme="light"] .bg-yellow-950\/30,
+html[data-theme="light"] .bg-yellow-950\/40,
+html[data-theme="light"] .bg-orange-950\/20 {
+    background-color: #fffbeb !important;
+}
+
+html[data-theme="light"] .bg-purple-900\/60,
+html[data-theme="light"] .bg-purple-950\/40 {
+    background-color: #faf5ff !important;
+}
+
+html[data-theme="light"] .text-blue-100,
+html[data-theme="light"] .text-blue-200,
+html[data-theme="light"] .text-blue-300,
+html[data-theme="light"] .text-blue-400 { color: #1d4ed8 !important; }
+html[data-theme="light"] .text-green-200,
+html[data-theme="light"] .text-green-300,
+html[data-theme="light"] .text-green-400 { color: #15803d !important; }
+html[data-theme="light"] .text-red-100,
+html[data-theme="light"] .text-red-200,
+html[data-theme="light"] .text-red-300,
+html[data-theme="light"] .text-red-400 { color: #b91c1c !important; }
+html[data-theme="light"] .text-yellow-100,
+html[data-theme="light"] .text-yellow-200,
+html[data-theme="light"] .text-yellow-300,
+html[data-theme="light"] .text-yellow-400,
+html[data-theme="light"] .text-yellow-500 { color: #a16207 !important; }
+html[data-theme="light"] .text-orange-200,
+html[data-theme="light"] .text-orange-300 { color: #c2410c !important; }
+html[data-theme="light"] .text-purple-100,
+html[data-theme="light"] .text-purple-200,
+html[data-theme="light"] .text-purple-300,
+html[data-theme="light"] .text-purple-400 { color: #7e22ce !important; }
+
+html[data-theme="light"] .btn-primary,
+html[data-theme="light"] .btn-danger,
+html[data-theme="light"] .btn-success,
+html[data-theme="light"] .bg-blue-500.text-white,
+html[data-theme="light"] .bg-blue-600.text-white,
+html[data-theme="light"] .bg-green-500.text-white,
+html[data-theme="light"] .bg-green-600.text-white,
+html[data-theme="light"] .bg-red-500.text-white,
+html[data-theme="light"] .bg-red-700.text-white,
+html[data-theme="light"] .bg-orange-500.text-white,
+html[data-theme="light"] .bg-purple-500.text-white {
+    color: #ffffff !important;
+}
+
+html[data-theme="light"] .hover\:bg-blue-800\/70:hover {
+    background-color: #dbeafe !important;
+}
+
+html[data-theme="light"] .badge-success { background: #dcfce7 !important; color: #166534 !important; }
+html[data-theme="light"] .badge-danger { background: #fee2e2 !important; color: #991b1b !important; }
+html[data-theme="light"] .badge-warning { background: #fef3c7 !important; color: #92400e !important; }
+html[data-theme="light"] .badge-info { background: #dbeafe !important; color: #1e40af !important; }
+
+.software-update-notice,
+.system-update-running {
+    background: rgba(37, 99, 235, 0.08);
+    border-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+.system-update-success {
+    background: rgba(34, 197, 94, 0.08);
+    border-color: rgba(34, 197, 94, 0.28) !important;
+}
+
+.system-update-failed {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.28) !important;
+}
+
+html[data-theme="light"] .runtime-detail,
+html[data-theme="light"] .ols-managed-notice {
+    background: var(--panel-surface-soft);
 }
 
 html[data-theme="light"] pre,
