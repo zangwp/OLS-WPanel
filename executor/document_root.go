@@ -9,6 +9,11 @@ import (
 
 const DocumentRootPublic = "public"
 
+var setEffectiveDocumentRootOwner = func(systemUser, documentRoot string) error {
+	_, err := executeCommand("chown", "-R", siteOwner(systemUser), documentRoot)
+	return err
+}
+
 func NormalizeDocumentRootSubdir(siteType, subdir string) (string, error) {
 	subdir = strings.TrimSpace(subdir)
 	if siteType != "php" || subdir == "" || subdir == "." {
@@ -43,7 +48,7 @@ func EnsureEffectiveDocumentRoot(projectRoot, siteType, subdir, systemUser strin
 		return "", fmt.Errorf("创建Web入口目录失败: %w", err)
 	}
 	if strings.TrimSpace(systemUser) != "" {
-		if _, err := executeCommand("chown", "-R", siteOwner(systemUser), documentRoot); err != nil {
+		if err := setEffectiveDocumentRootOwner(systemUser, documentRoot); err != nil {
 			return "", fmt.Errorf("设置Web入口目录权限失败: %w", err)
 		}
 	}

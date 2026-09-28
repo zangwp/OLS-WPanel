@@ -28,13 +28,16 @@ func withDocumentRootStubs(t *testing.T) {
 	oldDB := database.DB
 	oldConfig := config.AppConfig
 	oldPersist, oldApply := persistDocumentRoot, applyDocumentRootNginx
+	oldSetOwner := setEffectiveDocumentRootOwner
 	database.DB = db
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: t.TempDir()},
 		Paths: config.PathsConfig{NginxSitesEnabled: t.TempDir(), PHPFPMSock: t.TempDir()},
 	}
+	setEffectiveDocumentRootOwner = func(string, string) error { return nil }
 	t.Cleanup(func() {
 		persistDocumentRoot, applyDocumentRootNginx = oldPersist, oldApply
+		setEffectiveDocumentRootOwner = oldSetOwner
 		config.AppConfig = oldConfig
 		database.DB = oldDB
 		db.Close()
@@ -46,7 +49,7 @@ func documentRootTestSite(t *testing.T) *models.Website {
 	root := t.TempDir()
 	return &models.Website{
 		ID: 1, Domain: "example.com", SiteType: "php", WebRoot: root,
-		SystemUser: "root", LogDir: filepath.Join(root, "logs"),
+		SystemUser: "wp_example", LogDir: filepath.Join(root, "logs"),
 		PHPPoolPath:   filepath.Join(root, "lsphp.conf"),
 		NginxConfPath: filepath.Join(root, "example.com.conf"),
 	}

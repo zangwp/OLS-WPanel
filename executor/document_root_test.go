@@ -1,7 +1,9 @@
 package executor
 
 import (
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +39,22 @@ func TestNormalizeDocumentRootSubdir(t *testing.T) {
 				t.Fatalf("NormalizeDocumentRootSubdir() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEnsureEffectiveDocumentRootReportsOwnershipFailure(t *testing.T) {
+	oldSetOwner := setEffectiveDocumentRootOwner
+	setEffectiveDocumentRootOwner = func(user, path string) error {
+		if user != "wp_example" || !strings.HasSuffix(path, string(filepath.Separator)+"public") {
+			t.Fatalf("unexpected ownership request user=%q path=%q", user, path)
+		}
+		return errors.New("injected chown failure")
+	}
+	t.Cleanup(func() { setEffectiveDocumentRootOwner = oldSetOwner })
+
+	_, err := EnsureEffectiveDocumentRoot(filepath.Join(t.TempDir(), "example.com"), "php", "public", "wp_example")
+	if err == nil || !strings.Contains(err.Error(), "设置Web入口目录权限失败") {
+		t.Fatalf("EnsureEffectiveDocumentRoot() error = %v", err)
 	}
 }
 
