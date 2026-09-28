@@ -439,12 +439,12 @@ func TestInstallerUsesSeparateRestorableDistributionSources(t *testing.T) {
 		`DEBIAN_REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/debian"`,
 		`DEBIAN_REPO_URL="https://deb.debian.org/debian"`,
 		`DEBIAN_SECURITY_URL="https://security.debian.org/debian-security"`,
-		`Ubuntu 24.04 使用系统原生 PHP 8.3 软件包`,
+		`OpenLiteSpeed and LSPHP 8.3 are installed together from LiteSpeed's`,
 		`# Managed by OLS WPanel`,
-		`assert_managed_source_target /etc/apt/sources.list.d/ols-wpanel-php.sources`,
+		`assert_managed_source_target /etc/apt/sources.list.d/ols-wpanel-litespeed.sources`,
 		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-debian.sources`,
 		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-ubuntu.sources`,
-		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-php.sources`,
+		`remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-litespeed.sources`,
 		`restore_managed_apt_sources`,
 	} {
 		if !strings.Contains(script, required) {

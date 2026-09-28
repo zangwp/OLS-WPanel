@@ -1100,7 +1100,9 @@ func reconcilePanelManagedBans(db *sql.DB, now time.Time, webBannedSet map[strin
 			expiredIPs[ip] = true
 			continue
 		}
-		if level >= 3 {
+		// Manual bans are always backed by the persistent nftables set. The
+		// level threshold applies only to automatically escalated panel bans.
+		if jail == "manual" || level >= 3 {
 			if err := syncAddPersistBan(ip); err != nil {
 				persistErrors = append(persistErrors, err)
 			}
@@ -1126,7 +1128,8 @@ func removePanelManagedPersistBanIfUnused(db *sql.DB, ip string) error {
 	var panelManagedCount int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM firewall_bans
 		WHERE ip_address=? AND source_jail IN ('panel','panel_scan','manual') AND unbanned_at IS NULL
-		AND ban_level>=3 AND (expires_at IS NULL OR expires_at > datetime('now'))`, ip).Scan(&panelManagedCount)
+		AND (source_jail='manual' OR ban_level>=3)
+		AND (expires_at IS NULL OR expires_at > datetime('now'))`, ip).Scan(&panelManagedCount)
 	if panelManagedCount == 0 {
 		return syncRemovePersistBan(ip)
 	}

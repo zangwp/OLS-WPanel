@@ -101,7 +101,7 @@ func TestSetDocumentRootReportsDatabaseRecoveryFailure(t *testing.T) {
 	}
 	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error { return errors.New("openlitespeed failed") }
 	result := runDocumentRootTask(documentRootTestSite(t))
-	if result.Success || result.Message != "应用 OpenLiteSpeed 配置失败，Web 入口目录状态恢复失败，请人工检查" {
+	if result.Success || result.Message != "应用 OpenLiteSpeed 虚拟主机配置失败，Web 入口目录状态恢复失败，请人工检查" {
 		t.Fatalf("result=%+v", result)
 	}
 }

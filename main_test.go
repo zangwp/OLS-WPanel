@@ -136,7 +136,7 @@ func TestPrivilegedCLIModesPassRuntimeIdentityGate(t *testing.T) {
 	gate := strings.Index(source, "executor.ValidateRuntimeDistributionIdentity")
 	systemUpdate := strings.Index(source, `if *systemPackageUpdatePlan != "" {`)
 	databaseRestore := strings.Index(source, `if *panelDBRestorePlan != "" {`)
-	fail2ban := strings.Index(source, `if *banIPOpenLiteSpeed != "" || *unbanIPOpenLiteSpeed != ""`)
+	fail2ban := strings.Index(source, `if *recordFail2banIP != "" || *unbanFail2banIP != ""`)
 	watchdogDatabaseOpen := strings.Index(source[watchdogGate:], "database.Open(cfg.SQLite.Path)")
 	if watchdogDatabaseOpen >= 0 {
 		watchdogDatabaseOpen += watchdogGate

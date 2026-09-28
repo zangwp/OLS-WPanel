@@ -1378,6 +1378,7 @@ configure_litespeed_repository() {
 	local actual=""
 
 	log_info "配置 LiteSpeed 官方 APT 仓库（HTTPS + 固定公钥哈希）..."
+	assert_managed_source_target /etc/apt/sources.list.d/ols-wpanel-litespeed.sources
 	download_file "https://rpms.litespeedtech.com/debian/lst_debian_repo.gpg" "$key1" 60 8192 || \
 		log_error "下载 LiteSpeed APT 公钥失败"
 	actual=$(sha256sum "$key1" | awk '{print $1}')
@@ -1403,8 +1404,9 @@ LITESPEEDSOURCEEOF
 	apt-get update
 
 	local package=""
-	# LiteSpeed's PHP 8.3 build includes GD, mbstring, XML and ZIP in the
-	# lsphp83 base package. They are not published as separate Debian packages.
+	# OpenLiteSpeed and LSPHP 8.3 are installed together from LiteSpeed's
+	# authenticated repository. The LSPHP base package includes GD, mbstring,
+	# XML and ZIP; those modules are not published as separate Debian packages.
 	for package in openlitespeed lsphp83 lsphp83-common lsphp83-mysql lsphp83-curl lsphp83-intl lsphp83-redis lsphp83-opcache lsphp83-imagick; do
 		apt_package_available "$package" || log_error "LiteSpeed 仓库缺少 ${package}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	done
@@ -1585,6 +1587,7 @@ restore_managed_apt_sources() {
 
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-debian.sources
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-ubuntu.sources
+	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-litespeed.sources
     for original in \
         /etc/apt/sources.list.d/debian.sources \
         /etc/apt/sources.list.d/ubuntu.sources; do
