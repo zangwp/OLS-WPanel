@@ -2,7 +2,7 @@
 
 <p><img src="static/logo.png" alt="OLS WPanel" width="120"></p>
 
-面向 WordPress 的轻量服务器管理面板，集成 OpenLiteSpeed、LSPHP、LiteSpeed Cache、MariaDB 和 Redis。支持 Debian 13 / Ubuntu 24.04 LTS 的 amd64 与 arm64 系统。
+面向 WordPress 的轻量服务器管理面板，集成 OpenLiteSpeed、LSPHP、LiteSpeed Cache、MariaDB 和 Redis。支持 Debian 13 / Ubuntu 24.04、26.04 LTS 的 amd64 与 arm64 系统。
 
 [English](README.en.md) · [问题反馈](https://github.com/zangwp/OLS-WPanel/issues) · [安全报告](https://github.com/zangwp/OLS-WPanel/security)
 
@@ -11,7 +11,7 @@
 
 ## 🚀 快速安装
 
-> 仅用于全新的 Debian 13 (Trixie) 或 Ubuntu 24.04 LTS (Noble) 服务器，使用 `root` 执行。
+> 仅用于全新的 Debian 13 (Trixie)、Ubuntu 24.04 LTS (Noble) 或 Ubuntu 26.04 LTS (Resolute) 服务器，使用 `root` 执行。
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
@@ -56,7 +56,7 @@ OLS WPanel 不提供邮件服务器、FTP、Docker 编排或通用 Java/Python �
 
 | 项目 | 要求 |
 |---|---|
-| 操作系统 | Debian 13 (Trixie) 或 Ubuntu 24.04 LTS (Noble) |
+| 操作系统 | Debian 13 (Trixie)、Ubuntu 24.04 LTS (Noble) 或 Ubuntu 26.04 LTS (Resolute) |
 | 架构 | amd64/x86_64 或 arm64/aarch64 |
 | CPU | 1 核及以上 |
 | 内存 | 1 GiB 及以上 |

@@ -95,6 +95,8 @@ func parseSystemPackageCatalog(osRelease string) systemPackageCatalog {
 		return systemPackageCatalog{Distribution: "Debian 13", BaseURL: "https://packages.debian.org/trixie/"}
 	case "ubuntu:24.04:noble":
 		return systemPackageCatalog{Distribution: "Ubuntu 24.04 LTS", BaseURL: "https://packages.ubuntu.com/noble/"}
+	case "ubuntu:26.04:resolute":
+		return systemPackageCatalog{Distribution: "Ubuntu 26.04 LTS", BaseURL: "https://packages.ubuntu.com/resolute/"}
 	default:
 		return systemPackageCatalog{}
 	}

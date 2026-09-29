@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.0 — 2026-09-29
+
+- Adds fresh-install support for Ubuntu 26.04 LTS (Resolute) on amd64 and arm64 alongside Debian 13 and Ubuntu 24.04 LTS.
+- Verifies the Resolute repositories for OpenLiteSpeed/LSPHP 8.3–8.5, MariaDB 11.8, and Redis before release instead of reusing packages from an older Ubuntu release.
+- Links system-update package details to the Ubuntu 26.04 catalog and extends the signed bootstrap platform gate.
+- Adds native-architecture CI and release checks for Ubuntu 26.04 platform detection and required runtime packages.
+
 ## v1.2.5 — 2026-09-29
 
 - Fixes fresh installs stopping at OpenLiteSpeed configuration validation because the no-site fallback root was owned by a privileged UID.

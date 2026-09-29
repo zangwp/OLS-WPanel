@@ -2,7 +2,7 @@
 
 ## Quick installation
 
-On a clean Debian 13 or Ubuntu 24.04 LTS server (amd64 or arm64), run as `root`:
+On a clean Debian 13, Ubuntu 24.04 LTS, or Ubuntu 26.04 LTS server (amd64 or arm64), run as `root`:
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
@@ -54,6 +54,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 
 - Debian 13 (Trixie), amd64 or arm64
 - Ubuntu 24.04 LTS (Noble), amd64 or arm64
+- Ubuntu 26.04 LTS (Resolute), amd64 or arm64
 - `root` access and a clean server are required
 - ARM64 currently requires a 4 KiB or 8 KiB kernel page size because the official OpenLiteSpeed ARM64 build is not compatible with 16 KiB page-size kernels
 

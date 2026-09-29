@@ -22,8 +22,14 @@ func TestParseSystemPackageCatalogUsesSupportedDistribution(t *testing.T) {
 			baseURL:      "https://packages.ubuntu.com/noble/",
 		},
 		{
+			name:         "ubuntu 26.04",
+			osRelease:    "ID=ubuntu\nVERSION_ID=26.04\nVERSION_CODENAME=resolute\n",
+			distribution: "Ubuntu 26.04 LTS",
+			baseURL:      "https://packages.ubuntu.com/resolute/",
+		},
+		{
 			name:      "unsupported release stays unlinked",
-			osRelease: "ID=ubuntu\nVERSION_ID=26.04\nVERSION_CODENAME=resolute\n",
+			osRelease: "ID=ubuntu\nVERSION_ID=25.10\nVERSION_CODENAME=questing\n",
 		},
 	}
 	for _, test := range tests {

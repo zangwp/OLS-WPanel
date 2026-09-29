@@ -35,7 +35,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 `install.sh` 在第一次持久化系统写入前执行以下步骤：
 
 1. 要求 root；
-2. 严格检查 Debian 13/Trixie 或 Ubuntu 24.04/Noble，并要求 `amd64`/`arm64` 内核与 dpkg 用户空间架构一致；
+2. 严格检查 Debian 13/Trixie、Ubuntu 24.04/Noble 或 Ubuntu 26.04/Resolute，并要求 `amd64`/`arm64` 内核与 dpkg 用户空间架构一致；
 3. 创建权限为 `0700` 的随机临时目录，并注册精确清理逻辑；
 4. 从与安装器相同的固定 GitHub Release（或同目录离线包）获取面板二进制和许可归档及各自的校验清单与签名；
 5. 使用内置 Ed25519 公钥验证两份清单签名；
@@ -62,7 +62,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 
 ## 3. 支持范围
 
-安装器面向专用、干净的 Debian 13/Trixie 或 Ubuntu 24.04/Noble 主机，支持 amd64 与 arm64。它不是通用的“接管任意现有 LEMP 环境”工具，也不会把支持范围自动延伸到其他大版本。
+安装器面向专用、干净的 Debian 13/Trixie、Ubuntu 24.04/Noble 或 Ubuntu 26.04/Resolute 主机，支持 amd64 与 arm64。它不是通用的“接管任意现有 LEMP 环境”工具，也不会把支持范围自动延伸到其他大版本。
 
 - 现有 MariaDB 已设置未知 root 密码时，fresh install 不会自动导入该密码，可能失败；
 - 由不同发行身份创建的面板不能通过手动改名或 repair 安全迁移，见[升级兼容性说明](../docs/upgrade-compatibility.md)；
@@ -113,7 +113,7 @@ openssl x509 -in /www/ols-wpanel/certs/panel.crt -noout -fingerprint -sha256
 | Debian 包与元数据 | Debian 官方源或所选镜像 | 部分 APT 镜像 URL 使用 HTTP，完整性依赖 APT 签名链 |
 | Ubuntu 包与元数据 | Ubuntu 官方源或所选镜像 | amd64 使用 Ubuntu archive，arm64 使用 Ubuntu ports；完整性依赖 APT 签名链 |
 | OpenLiteSpeed / LSPHP 仓库 | `rpms.litespeedtech.com` | 两把仓库公钥均使用发布内固定 SHA-256 校验，支持 LSPHP 8.3/8.4/8.5 |
-| MariaDB 仓库 | `mirror.mariadb.org`、`supplychain.mariadb.com` | 全新安装默认启用 11.8；Ubuntu 24.04 可显式选择 10.11/11.4，Debian 13 支持 11.8，公钥完整指纹必须匹配 |
+| MariaDB 仓库 | `mirror.mariadb.org`、`supplychain.mariadb.com` | 全新安装统一启用 11.8；公钥完整指纹必须匹配，现有数据库不自动跨系列升级或降级 |
 | WordPress 备用包 | wordpress.org | 下载失败时安装可继续，但后续建站仍需网络并可能失败 |
 | 公网地址显示 | ip.sb、ifconfig.me | 仅用于安装完成页；服务会看到连接源 IP |
 
