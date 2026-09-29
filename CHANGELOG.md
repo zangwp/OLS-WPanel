@@ -1,12 +1,19 @@
 # Changelog
 
+## v1.4.1 — 2026-09-29
+
+- Fixes the Settings system-update list so large package sets stay inside a bounded scrolling region in the released UI instead of stretching the page.
+- Adds All, Security, and Regular package filters with live counts, plus an explicit show/hide control for the package list.
+- Keeps refresh/update actions and task results outside the scrolling region and lets the account and server-settings cards size independently.
+- Adds a regression test that rejects the previously uncompiled `max-h-80` dependency and verifies the compact layout contract.
+
 ## v1.4.0 — 2026-09-29
 
 - Adds a Ports & Firewall workspace with listener inventory, SSH/panel port discovery, host-policy visibility, and persistent or time-limited nftables allow rules.
 - Restricts OpenLiteSpeed WebAdmin port 7080 to an explicit management IP/CIDR and only creates or removes rules owned by OLS WPanel; active UFW and firewalld installations remain read-only to avoid conflicting managers.
 - Validates nftables changes before applying them, reconciles managed rules after restart, records changes in the operation log, and retains expired rules when kernel removal fails so access is never silently left unmanaged.
 - Adds alert-channel and rule summaries, searchable alert history, more useful empty states for AI Diagnostics and Log Analysis, and a compact troubleshooting/help area with privacy reminders.
-- Keeps the system-update package list in an internal scrolling region so large update sets no longer stretch the entire Settings page.
+- Prepares a compact system-update package list; v1.4.1 completes the released scrolling and filtering behavior.
 
 ## v1.3.1 — 2026-09-29
 

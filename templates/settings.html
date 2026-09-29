@@ -3,7 +3,7 @@
 <div x-data="panelSettings()" x-init="fetchSettings()">
     <h2 class="text-xl font-bold text-white mb-6">{{t .Lang "nav.settings"}}</h2>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-6">
         <div class="card">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "settings.account_security"}}</h3>
 
@@ -173,26 +173,39 @@
             <div id="system-updates" x-data="systemUpdate()" x-init="init()" class="scroll-mt-4">
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-sm text-gray-400">{{t .Lang "settings.system_updates"}}</span>
-                        <span class="text-sm text-white font-mono" x-show="checked && count > 0" x-text="t('settings.available_count', { count })"></span>
+                    <span class="text-sm text-white font-mono" x-show="checked && count > 0" x-text="t('settings.available_count', { count })"></span>
                     <span class="text-xs text-gray-500" x-show="checked && count === 0">{{t .Lang "settings.up_to_date"}}</span>
                 </div>
-                <div x-show="count > 0" class="mb-3 space-y-2 max-h-80 overflow-y-auto pr-1 overscroll-contain">
-                    <template x-for="pkg in packages" :key="pkg.name">
-                        <div class="flex items-center justify-between p-2 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm text-white font-mono" x-text="pkg.name"></span>
-                                <span class="text-xs" :class="pkg.repo.includes('security') ? 'text-red-400' : 'text-gray-500'" x-text="pkg.repo"></span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <span class="text-xs text-gray-400" x-text="pkg.version"></span>
-                                <a x-show="packageCatalogURL" :href="packageDetailsURL(pkg.name)" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:text-blue-300" title="{{t .Lang "settings.package_detail_title"}}">{{t .Lang "settings.query"}}</a>
-                            </div>
+                <div x-show="count > 0" class="mb-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button type="button" @click="filter = 'all'" :class="filter === 'all' ? 'btn-primary text-xs' : 'btn-secondary text-xs'" x-text="t('settings.update_filter_all') + ' (' + count + ')' "></button>
+                            <button type="button" @click="filter = 'security'" :class="filter === 'security' ? 'btn-primary text-xs' : 'btn-secondary text-xs'" x-text="t('settings.update_filter_security') + ' (' + securityCount + ')' "></button>
+                            <button type="button" @click="filter = 'regular'" :class="filter === 'regular' ? 'btn-primary text-xs' : 'btn-secondary text-xs'" x-text="t('settings.update_filter_regular') + ' (' + regularCount + ')' "></button>
                         </div>
-                    </template>
+                        <button type="button" @click="listOpen = !listOpen" class="text-xs text-blue-400 hover:text-blue-300" x-text="listOpen ? t('settings.hide_update_list') : t('settings.show_update_list')"></button>
+                    </div>
+                    <div x-show="listOpen" class="p-2 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
+                        <div class="space-y-2 pr-1" style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;">
+                            <template x-for="pkg in filteredPackages" :key="pkg.name">
+                                <div class="flex flex-wrap items-center justify-between gap-3 p-2 rounded" style="background-color: #111827; border: 1px solid #1e293b;">
+                                    <div class="min-w-0 flex flex-wrap items-center gap-2">
+                                        <span class="text-sm text-white font-mono" x-text="pkg.name"></span>
+                                        <span class="text-xs" :class="isSecurity(pkg) ? 'text-red-400' : 'text-gray-500'" x-text="pkg.repo"></span>
+                                    </div>
+                                    <div class="flex shrink-0 items-center space-x-3">
+                                        <span class="text-xs text-gray-400" x-text="pkg.version"></span>
+                                        <a x-show="packageCatalogURL" :href="packageDetailsURL(pkg.name)" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:text-blue-300" title="{{t .Lang "settings.package_detail_title"}}">{{t .Lang "settings.query"}}</a>
+                                    </div>
+                                </div>
+                            </template>
+                            <p x-show="filteredPackages.length === 0" class="p-3 text-center text-xs text-gray-500" x-text="t('settings.no_matching_updates')"></p>
+                        </div>
+                    </div>
                     <p class="text-xs text-gray-500 mt-2">{{t .Lang "settings.system_update_help"}}</p>
                 </div>
-                <div class="sticky bottom-0 flex items-center space-x-3 py-2" style="background-color: #1e293b;">
-                    <button @click="check()" :disabled="checking || updating" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.refresh')"></button>
+                <div class="flex flex-wrap items-center gap-3 py-2" style="background-color: #1e293b;">
+                    <button @click="check(true)" :disabled="checking || updating" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.refresh')"></button>
                     <button @click="doUpdate()" x-show="count > 0" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.one_click_update')"></button>
                 </div>
                 <p x-show="count > 0" class="text-xs text-yellow-500 mt-2">{{t .Lang "settings.system_update_warning"}}</p>
@@ -879,6 +892,8 @@ function operationLogs() {
 function systemUpdate() {
     return {
         packages: [],
+        filter: 'all',
+        listOpen: true,
         count: 0,
         checked: false,
         checking: false,
@@ -891,6 +906,20 @@ function systemUpdate() {
         distribution: '',
         packageCatalogURL: '',
         pollTimer: null,
+        isSecurity(pkg) {
+            return String(pkg && pkg.repo || '').toLowerCase().includes('security');
+        },
+        get securityCount() {
+            return this.packages.filter(pkg => this.isSecurity(pkg)).length;
+        },
+        get regularCount() {
+            return this.packages.length - this.securityCount;
+        },
+        get filteredPackages() {
+            if (this.filter === 'security') return this.packages.filter(pkg => this.isSecurity(pkg));
+            if (this.filter === 'regular') return this.packages.filter(pkg => !this.isSecurity(pkg));
+            return this.packages;
+        },
         init() {
             this.resume();
             this.scheduleCheck();
