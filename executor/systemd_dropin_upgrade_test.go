@@ -74,6 +74,47 @@ func TestRepairManagedServiceDropInsBoundedReplacesOnlyPanelPolicies(t *testing.
 	}
 }
 
+func TestRepairManagedOpenLiteSpeedDropInTracksActualPIDFile(t *testing.T) {
+	root := t.TempDir()
+	writeDropIn(t, root, "lshttpd", managedServiceDropInBoundedContent)
+
+	changed, err := repairManagedOpenLiteSpeedDropIn(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	if got := readDropIn(t, root, "lshttpd"); got != managedOLSServiceDropInContent {
+		t.Fatalf("lshttpd drop-in = %q, want PID-compatible policy", got)
+	}
+
+	changed, err = repairManagedOpenLiteSpeedDropIn(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("second repair changed an already-compatible policy")
+	}
+}
+
+func TestRepairManagedOpenLiteSpeedDropInPreservesCustomPolicy(t *testing.T) {
+	root := t.TempDir()
+	custom := "[Service]\nPIDFile=/run/custom-openlitespeed.pid\nKillMode=control-group\n"
+	writeDropIn(t, root, "lshttpd", custom)
+
+	changed, err := repairManagedOpenLiteSpeedDropIn(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("changed = true for administrator-authored policy")
+	}
+	if got := readDropIn(t, root, "lshttpd"); got != custom {
+		t.Fatalf("custom OpenLiteSpeed policy was overwritten: %q", got)
+	}
+}
+
 func writeDropIn(t *testing.T, root, svc, content string) {
 	t.Helper()
 	dir := filepath.Join(root, svc+".service.d")

@@ -761,6 +761,10 @@ var upgrades = []Upgrade{
 		Version:     "1.0.68",
 		Description: "为受管服务启用有界的失败重启策略",
 	},
+	{
+		Version:     "1.0.69",
+		Description: "修正 OpenLiteSpeed systemd PID 跟踪与停止策略",
+	},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

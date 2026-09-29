@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.4 — 2026-09-29
+
+- Fixes OpenLiteSpeed startup timeouts on Ubuntu 24.04 by aligning the panel-owned systemd drop-in with the PID file actually maintained by `lswsctrl`.
+- Replaces the deprecated `KillMode=none` behavior with bounded `KillMode=mixed` cleanup while preserving OpenLiteSpeed's graceful stop path.
+- Defers the first required OpenLiteSpeed restart until after the fallback virtual host has been written and the complete configuration has passed validation.
+- Migrates only recognized OLS WPanel drop-ins and preserves administrator-authored service policies.
+
 ## v1.2.3 — 2026-09-29
 
 - Keeps OpenLiteSpeed runnable before the first website exists by installing a static, no-script fallback virtual host and mapping it to the managed HTTP/HTTPS listeners.

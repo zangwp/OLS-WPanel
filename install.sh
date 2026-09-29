@@ -2418,7 +2418,7 @@ fi
 log_info "配置 systemd 进程守护..."
 
 if ! $REPAIR_MODE; then
-for svc in lshttpd mariadb redis-server; do
+for svc in mariadb redis-server; do
     DROPDIR="/etc/systemd/system/${svc}.service.d"
     mkdir -p "$DROPDIR"
     cat > "$DROPDIR/ols-wpanel.conf" << SYSTEMDEOF
@@ -2432,13 +2432,32 @@ RestartSec=5s
 SYSTEMDEOF
 done
 
+# The upstream unit tracks /var/run/openlitespeed.pid while lswsctrl writes
+# /tmp/lshttpd/lshttpd.pid by default.  On current Ubuntu/systemd this can make
+# a healthy daemon look like a vanished or zombie main process until startup
+# times out.  Keep the vendor unit intact and correct only the panel-owned
+# drop-in.  mixed preserves the graceful ExecStop path while allowing systemd
+# to clean up remaining children after the stop timeout.
+DROPDIR="/etc/systemd/system/lshttpd.service.d"
+mkdir -p "$DROPDIR"
+cat > "$DROPDIR/ols-wpanel.conf" << 'OLSSYSTEMDEOF'
+[Unit]
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+PIDFile=/tmp/lshttpd/lshttpd.pid
+KillMode=mixed
+Restart=on-failure
+RestartSec=5s
+OLSSYSTEMDEOF
+
 systemctl daemon-reload
 log_info "systemd 进程守护配置完成"
 
 systemctl_enable_best_effort lshttpd
 systemctl_enable_best_effort mariadb
 systemctl_enable_best_effort redis-server
-systemctl_start_required lshttpd
 systemctl_start_required redis-server
 else
     log_info "repair模式保留OpenLiteSpeed、MariaDB和Redis的systemd配置与状态"
@@ -2650,6 +2669,7 @@ chmod 0640 "$OLS_MAIN_CONF" "$OLS_MANAGED_CONF" "$OLS_DEFAULT_CONF"
 mkdir -p /tmp/lshttpd/swap
 chown -R nobody:nogroup /tmp/lshttpd
 /usr/local/lsws/bin/openlitespeed -t || log_error "OpenLiteSpeed 基础配置检查失败"
+systemctl reset-failed lshttpd 2>/dev/null || true
 systemctl restart lshttpd || log_error "OpenLiteSpeed 重启失败"
 systemctl_wait_active_required lshttpd
 require_ols_listeners

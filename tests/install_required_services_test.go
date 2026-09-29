@@ -16,14 +16,15 @@ func TestInstallRequiredWebServicesOrder(t *testing.T) {
 
 	guardConfigured := requiredIndex(t, script, `log_info "systemd 进程守护配置完成"`)
 	daemonReload := requiredLastIndexBefore(t, script, "systemctl daemon-reload", guardConfigured)
-	olsStart := requiredIndex(t, script, "systemctl_start_required lshttpd")
 	redisStart := requiredIndex(t, script, "systemctl_start_required redis-server")
+	olsRestart := requiredLastIndex(t, script, "systemctl restart lshttpd")
+	olsConfigCheck := requiredLastIndexBefore(t, script, "/usr/local/lsws/bin/openlitespeed -t", olsRestart)
 	mariaDBStart := requiredIndex(t, script, "systemctl_start_required mariadb")
 	panelStart := requiredIndex(t, script, "systemctl_start_required ols-wpanel")
 
-	if !(daemonReload < guardConfigured && guardConfigured < olsStart && olsStart < redisStart && redisStart < mariaDBStart && mariaDBStart < panelStart) {
-		t.Fatalf("required service order is invalid: daemon_reload=%d guard_log=%d lsws=%d redis=%d mariadb=%d panel=%d",
-			daemonReload, guardConfigured, olsStart, redisStart, mariaDBStart, panelStart)
+	if !(daemonReload < guardConfigured && guardConfigured < redisStart && redisStart < olsConfigCheck && olsConfigCheck < olsRestart && olsRestart < mariaDBStart && mariaDBStart < panelStart) {
+		t.Fatalf("required service order is invalid: daemon_reload=%d guard_log=%d redis=%d ols_check=%d ols_restart=%d mariadb=%d panel=%d",
+			daemonReload, guardConfigured, redisStart, olsConfigCheck, olsRestart, mariaDBStart, panelStart)
 	}
 }
 
@@ -35,7 +36,6 @@ func TestInstallRequiredWebServicesUseSharedStartHelper(t *testing.T) {
 		t.Fatalf("systemctl_start_required helper definitions = %d, want 1", got)
 	}
 	for _, call := range []string{
-		"systemctl_start_required lshttpd",
 		"systemctl_start_required redis-server",
 	} {
 		if got := countExactLine(script, call); got != 1 {
@@ -60,7 +60,7 @@ func TestInstallRequiredWebServicesUseSharedStartHelper(t *testing.T) {
 
 func TestManagedServiceDropInUsesSystemdSections(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
-	required := `cat > "$DROPDIR/ols-wpanel.conf" << SYSTEMDEOF
+	shared := `cat > "$DROPDIR/ols-wpanel.conf" << SYSTEMDEOF
 [Unit]
 StartLimitIntervalSec=60
 StartLimitBurst=5
@@ -69,8 +69,22 @@ StartLimitBurst=5
 Restart=on-failure
 RestartSec=5s
 SYSTEMDEOF`
-	if got := strings.Count(script, required); got != 1 {
+	if got := strings.Count(script, shared); got != 1 {
 		t.Fatalf("managed-service systemd drop-in definitions = %d, want exact [Unit]/[Service] layout once", got)
+	}
+	ols := `cat > "$DROPDIR/ols-wpanel.conf" << 'OLSSYSTEMDEOF'
+[Unit]
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+PIDFile=/tmp/lshttpd/lshttpd.pid
+KillMode=mixed
+Restart=on-failure
+RestartSec=5s
+OLSSYSTEMDEOF`
+	if got := strings.Count(script, ols); got != 1 {
+		t.Fatalf("OpenLiteSpeed systemd drop-in definitions = %d, want one PID-compatible policy", got)
 	}
 	if strings.Contains(script, "[Service]\nRestart=always\nRestartSec=5s\nStartLimitIntervalSec=0") {
 		t.Fatal("StartLimitIntervalSec must not be emitted in the [Service] section")
@@ -115,6 +129,15 @@ func requiredLastIndexBefore(t *testing.T, script, text string, before int) int 
 	index := strings.LastIndex(script[:before], text)
 	if index < 0 {
 		t.Fatalf("install.sh missing %q before offset %d", text, before)
+	}
+	return index
+}
+
+func requiredLastIndex(t *testing.T, script, text string) int {
+	t.Helper()
+	index := strings.LastIndex(script, text)
+	if index < 0 {
+		t.Fatalf("install.sh missing %q", text)
 	}
 	return index
 }
