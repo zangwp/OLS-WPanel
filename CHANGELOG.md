@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.1 — 2026-09-29
+
+- Reorganizes Software Management into focused Runtime, Performance, and Developer Tools sections to reduce page length and visual noise.
+- Replaces repeated repository-status sentences with update notices shown only when a signed APT candidate is actually available.
+- Distinguishes the panel's primary LSPHP runtime from installed compatibility runtimes and keeps per-site usage visible.
+- Removes empty nftables and Fail2ban configuration cards, prevents undefined values from rendering, and lets configuration cards size independently.
+- Improves service-status badges and adds confirmation before stopping or restarting managed services.
+
 ## v1.3.0 — 2026-09-29
 
 - Adds fresh-install support for Ubuntu 26.04 LTS (Resolute) on amd64 and arm64 alongside Debian 13 and Ubuntu 24.04 LTS.

@@ -1,28 +1,24 @@
 {{template "base" .}}
 {{define "software_content"}}
 <div x-data="softwareManager()" x-init="fetchList()">
-    <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold text-white">{{t .Lang "nav.software"}}</h2>
-        <button @click="showHelp = true" class="btn-secondary text-sm">{{t .Lang "software.wp_config_advice"}}</button>
-    </div>
-
-    <div class="info-strip p-4 mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-                <p class="text-xs text-gray-500 mb-1">{{t .Lang "software.runtime_stack"}}</p>
-                <p class="text-white font-medium">OpenLiteSpeed + LSPHP 8.3/8.4/8.5 + MariaDB + Redis</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500 mb-1">{{t .Lang "software.php_version_policy"}}</p>
-                <p class="text-gray-300">{{t .Lang "software.php_version_policy_help"}}</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500 mb-1">WP-CLI</p>
-                <p class="text-gray-300">{{t .Lang "software.wp_cli_not_cron"}}</p>
-            </div>
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-5">
+        <div>
+            <h2 class="text-xl font-bold text-white">{{t .Lang "nav.software"}}</h2>
+            <p class="text-sm text-gray-500 mt-1">{{t .Lang "software.page_help"}}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "software.manage_service_updates"}}</a>
+            <button @click="showHelp = true" class="btn-secondary text-sm">{{t .Lang "software.wp_config_advice"}}</button>
         </div>
     </div>
 
+    <nav class="software-tabs mb-6" aria-label="{{t .Lang "nav.software"}}">
+        <button type="button" @click="activeSection = 'runtime'" :class="{ 'active': activeSection === 'runtime' }">{{t .Lang "software.tab_runtime"}}</button>
+        <button type="button" @click="activeSection = 'tuning'" :class="{ 'active': activeSection === 'tuning' }">{{t .Lang "software.tab_tuning"}}</button>
+        <button type="button" @click="activeSection = 'tools'" :class="{ 'active': activeSection === 'tools' }">{{t .Lang "software.tab_tools"}}</button>
+    </nav>
+
+    <section x-show="activeSection === 'runtime'" x-cloak>
     <div class="card mb-6">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
             <div>
@@ -31,14 +27,15 @@
             </div>
             <a href="/{{.RandomSuffix}}/websites" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.assign_php_per_site"}}</a>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <template x-for="runtime in phpRuntimes" :key="runtime.version">
                 <div class="runtime-detail rounded border border-gray-700 p-4">
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <div class="flex items-center gap-2">
                                 <span class="font-semibold text-white" x-text="'LSPHP ' + runtime.version"></span>
-                                <span x-show="runtime.recommended" class="badge-success text-xs">{{t .Lang "software.recommended"}}</span>
+                                <span x-show="runtime.primary" class="badge-info text-xs">{{t .Lang "software.primary_runtime"}}</span>
+                                <span x-show="runtime.recommended && !runtime.primary" class="badge-success text-xs">{{t .Lang "software.recommended_default"}}</span>
                             </div>
                             <p class="text-xs text-gray-500 mt-2" x-text="t('software.php_runtime_site_count', { count: runtime.active_sites })"></p>
                         </div>
@@ -51,89 +48,11 @@
         <p class="text-xs text-yellow-300 mt-4">{{t .Lang "software.php_runtime_install_notice"}}</p>
     </div>
 
-    <div x-show="showHelp" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="showHelp = false">
-        <div class="modal-content p-6 w-full mx-4 max-h-[85vh] overflow-y-auto" style="max-width:900px">
-            <h3 class="text-lg font-bold text-white mb-4">{{t .Lang "software.advice_title"}}</h3>
-            <p class="text-xs text-gray-500 mb-4">{{t .Lang "software.advice_intro"}}</p>
-
-            <div class="overflow-x-auto">
-                <table class="w-full text-xs">
-                    <thead class="border-b border-gray-600 text-gray-300">
-                        <tr>
-                            <th class="py-2 text-left">{{t .Lang "software.advice_scene"}}</th>
-                            <th class="py-2 text-left">PHP memory_limit</th>
-                            <th class="py-2 text-left">upload / post</th>
-                        </tr>
-                    </thead>
-                    <tbody class="text-gray-400">
-                        <tr class="border-b border-gray-700/50">
-                            <td class="py-2">{{t .Lang "software.advice_simple"}}</td>
-                            <td class="py-2 text-green-400">128M</td>
-                            <td class="py-2">32M / 32M</td>
-                        </tr>
-                        <tr class="border-b border-gray-700/50">
-                            <td class="py-2">{{t .Lang "software.advice_standard"}}</td>
-                            <td class="py-2 text-blue-400">256M</td>
-                            <td class="py-2">64M / 64M</td>
-                        </tr>
-                        <tr class="border-b border-gray-700/50">
-                            <td class="py-2">{{t .Lang "software.advice_heavy"}}</td>
-                            <td class="py-2 text-yellow-400">512M</td>
-                            <td class="py-2">128M / 128M</td>
-                        </tr>
-                        <tr class="border-b border-gray-700/50">
-                            <td class="py-2">{{t .Lang "software.advice_large"}}</td>
-                            <td class="py-2 text-yellow-400">512M</td>
-                            <td class="py-2">256M / 256M</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="mt-4 p-3 rounded text-xs" style="background-color: #0f172a;">
-                <p class="text-gray-300 font-medium mb-2">{{t .Lang "software.advice_principles"}}</p>
-                <ul class="text-gray-400 space-y-1 list-disc list-inside">
-                    <li>{{t .Lang "software.advice_upload_rule"}}</li>
-                    <li>{{t .Lang "software.advice_execution_rule"}}</li>
-                    <li>{{t .Lang "software.advice_input_rule"}}</li>
-                    <li>{{t .Lang "software.advice_dynamic_rule"}}</li>
-                </ul>
-            </div>
-
-            <div class="mt-5 text-right">
-                <button @click="showHelp = false" class="btn-primary text-sm">{{t .Lang "software.got_it"}}</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="card mb-6">
-        <div class="mb-4">
-            <h3 class="text-lg font-semibold text-white">{{t .Lang "software.development_tools"}}</h3>
-            <p class="text-xs text-gray-500 mt-1">{{t .Lang "software.development_tools_help"}}</p>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <template x-for="tool in developmentTools" :key="tool.id">
-                <div class="rounded border border-gray-700 p-4">
-                    <div class="flex items-start justify-between gap-3">
-                        <div>
-                            <div class="flex items-center gap-2"><span class="font-medium text-white" x-text="tool.name"></span><span x-show="tool.recommended" class="text-xs text-green-400">{{t .Lang "software.recommended"}}</span></div>
-                            <p class="text-xs text-gray-500 mt-1" x-text="tool.id === 'wp-cli' ? t('software.wp_cli_development_help') : t('software.nodejs_development_help')"></p>
-                            <p x-show="tool.installed" class="text-xs text-gray-400 mt-2" x-text="tool.version"></p>
-                        </div>
-                        <button x-show="!tool.installed" @click="installDevelopmentTool(tool)" :disabled="tool._installing" class="btn-primary text-xs" x-text="tool._installing ? t('software.installing') : t('software.install')"></button>
-                        <span x-show="tool.installed" class="badge-success text-xs">{{t .Lang "software.installed"}}</span>
-                    </div>
-                </div>
-            </template>
-        </div>
-    </div>
-
     <div x-data="processGuard()" x-init="deferTask(() => fetchStatus(), 700)" class="card mb-6">
         <div class="flex items-center justify-between mb-3">
-            <h3 class="text-lg font-semibold text-white">{{t .Lang "software.process_guard"}}</h3>
+            <h3 class="text-lg font-semibold text-white">{{t .Lang "software.service_status"}}</h3>
             <div class="flex items-center gap-3">
                 <span class="text-xs text-gray-500">{{t .Lang "software.auto_check_30s"}}</span>
-                <a href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs text-blue-400 hover:text-blue-300 hover:underline">{{t .Lang "software.manage_service_updates"}}</a>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -159,9 +78,9 @@
                                 <span class="text-xs text-gray-400" x-text="s.version"></span>
                             </td>
                             <td class="py-2.5 pr-4">
-                                <span x-show="s.running && !s.paused" class="text-green-400 text-xs">{{t .Lang "software.running"}}</span>
-                                <span x-show="s.paused" class="text-yellow-400 text-xs">{{t .Lang "software.manually_stopped"}}</span>
-                                <span x-show="!s.running && !s.paused" class="text-red-400 text-xs">{{t .Lang "software.stopped"}}</span>
+                                <span x-show="s.running && !s.paused" class="badge-success text-xs">{{t .Lang "software.running"}}</span>
+                                <span x-show="s.paused" class="badge-warning text-xs">{{t .Lang "software.manually_stopped"}}</span>
+                                <span x-show="!s.running && !s.paused" class="badge-danger text-xs">{{t .Lang "software.stopped"}}</span>
                             </td>
                             <td class="py-2.5 text-right whitespace-nowrap">
                                 <button x-show="s.running && !s.paused" @click="action(s.service, 'stop')" :disabled="s._acting" class="btn-secondary text-xs py-1 px-2.5">{{t .Lang "software.stop"}}</button>
@@ -177,10 +96,12 @@
             {{t .Lang "software.process_guard_help"}}
         </div>
     </div>
+    </section>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <template x-for="sw in software" :key="sw.name">
-            <div class="card">
+    <section x-show="activeSection === 'tuning'" x-cloak>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <template x-for="sw in configurableSoftware()" :key="sw.name">
+            <div class="card self-start">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center space-x-3">
                         <h3 class="text-lg font-semibold text-white" x-text="sw.name"></h3>
@@ -198,10 +119,6 @@
                     </div>
                 </div>
 
-                <p x-show="sw.candidate_version && !sw.update_available" class="text-xs text-green-400 mb-3">
-                    {{t .Lang "software.repository_current"}}
-                </p>
-
                 <div x-show="sw.details && sw.details.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
                     <template x-for="detail in (sw.details || [])" :key="detail.label">
                         <div class="runtime-detail rounded border border-gray-700 p-3">
@@ -215,12 +132,12 @@
 
                 <p x-show="sw.name === 'OpenLiteSpeed'" class="ols-managed-notice text-xs text-gray-500 mb-3 rounded border border-gray-700 p-3">{{t .Lang "software.ols_managed_notice"}}</p>
 
-                <div class="space-y-3">
+                <div class="software-config-grid" :class="{ 'software-config-grid-wide': sw.name === 'PHP' }">
                     <template x-for="cfg in sw.configs" :key="cfg.key">
                         <div>
                             <div class="flex items-center justify-between mb-1">
                                 <label class="text-xs text-gray-400" x-text="cfg.label"></label>
-                                <span class="text-xs text-gray-600" x-text="t('software.current_value', { value: cfg.value })"></span>
+                                <span x-show="cfg.value !== undefined && cfg.value !== null && cfg.value !== ''" class="text-xs text-gray-600" x-text="t('software.current_value', { value: cfg.value })"></span>
                             </div>
                             <input type="text" x-model="cfg._value" class="input-field w-full text-sm py-1.5">
                             <p class="text-xs text-gray-500 mt-0.5" x-text="cfg.hint"></p>
@@ -228,7 +145,7 @@
                     </template>
                 </div>
 
-                <div class="flex space-x-2 mt-4">
+                <div class="flex flex-wrap gap-2 mt-4">
                     <button x-show="sw.configs && sw.configs.length" @click="saveConfig(sw)" :disabled="sw._saving" class="btn-primary text-sm">
                         <span x-show="!sw._saving">{{t .Lang "software.save_reload"}}</span>
                         <span x-show="sw._saving && sw.name === 'PHP'">{{t .Lang "software.save_rebuild_fpm"}}</span>
@@ -246,6 +163,71 @@
                 </div>
             </div>
         </template>
+    </div>
+    </section>
+
+    <section x-show="activeSection === 'tools'" x-cloak>
+    <div class="card mb-6">
+        <div class="mb-4">
+            <h3 class="text-lg font-semibold text-white">{{t .Lang "software.development_tools"}}</h3>
+            <p class="text-xs text-gray-500 mt-1">{{t .Lang "software.development_tools_help"}}</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <template x-for="tool in developmentTools" :key="tool.id">
+                <div class="runtime-detail rounded border border-gray-700 p-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <div class="flex items-center gap-2"><span class="font-medium text-white" x-text="tool.name"></span><span x-show="tool.recommended" class="badge-success text-xs">{{t .Lang "software.recommended"}}</span></div>
+                            <p class="text-xs text-gray-500 mt-1" x-text="tool.id === 'wp-cli' ? t('software.wp_cli_development_help') : t('software.nodejs_development_help')"></p>
+                            <p x-show="tool.installed" class="text-xs text-gray-400 mt-2" x-text="tool.version"></p>
+                        </div>
+                        <button x-show="!tool.installed" @click="installDevelopmentTool(tool)" :disabled="tool._installing" class="btn-primary text-xs" x-text="tool._installing ? t('software.installing') : t('software.install')"></button>
+                        <span x-show="tool.installed" class="badge-success text-xs">{{t .Lang "software.installed"}}</span>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <p class="text-xs text-gray-500 mt-4">{{t .Lang "software.wp_cli_not_cron"}}</p>
+    </div>
+    </section>
+
+    <div x-show="showHelp" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="showHelp = false">
+        <div class="modal-content p-6 w-full mx-4 max-h-[85vh] overflow-y-auto" style="max-width:900px">
+            <h3 class="text-lg font-bold text-white mb-4">{{t .Lang "software.advice_title"}}</h3>
+            <p class="text-xs text-gray-500 mb-4">{{t .Lang "software.advice_intro"}}</p>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead class="border-b border-gray-600 text-gray-300">
+                        <tr>
+                            <th class="py-2 text-left">{{t .Lang "software.advice_scene"}}</th>
+                            <th class="py-2 text-left">PHP memory_limit</th>
+                            <th class="py-2 text-left">upload / post</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-gray-400">
+                        <tr class="border-b border-gray-700/50"><td class="py-2">{{t .Lang "software.advice_simple"}}</td><td class="py-2 text-green-400">128M</td><td class="py-2">32M / 32M</td></tr>
+                        <tr class="border-b border-gray-700/50"><td class="py-2">{{t .Lang "software.advice_standard"}}</td><td class="py-2 text-blue-400">256M</td><td class="py-2">64M / 64M</td></tr>
+                        <tr class="border-b border-gray-700/50"><td class="py-2">{{t .Lang "software.advice_heavy"}}</td><td class="py-2 text-yellow-400">512M</td><td class="py-2">128M / 128M</td></tr>
+                        <tr class="border-b border-gray-700/50"><td class="py-2">{{t .Lang "software.advice_large"}}</td><td class="py-2 text-yellow-400">512M</td><td class="py-2">256M / 256M</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-4 p-3 rounded text-xs" style="background-color: #0f172a;">
+                <p class="text-gray-300 font-medium mb-2">{{t .Lang "software.advice_principles"}}</p>
+                <ul class="text-gray-400 space-y-1 list-disc list-inside">
+                    <li>{{t .Lang "software.advice_upload_rule"}}</li>
+                    <li>{{t .Lang "software.advice_execution_rule"}}</li>
+                    <li>{{t .Lang "software.advice_input_rule"}}</li>
+                    <li>{{t .Lang "software.advice_dynamic_rule"}}</li>
+                </ul>
+            </div>
+
+            <div class="mt-5 text-right">
+                <button @click="showHelp = false" class="btn-primary text-sm">{{t .Lang "software.got_it"}}</button>
+            </div>
+        </div>
     </div>
 
     <div x-show="logModal.open" class="modal-overlay" @click.self="logModal.open = false">
@@ -279,6 +261,8 @@ function processGuard() {
         async action(service, act) {
             const s = this.services.find(s => s.service === service);
             if (!s) return;
+            if (act === 'stop' && !await confirmModal(t('software.confirm_stop_service', { service: s.name }))) return;
+            if (act === 'restart' && !await confirmModal(t('software.confirm_restart_service', { service: s.name }))) return;
             s._acting = true;
             try {
                 const r = await api('/software/guard/action', { method: 'POST', body: { service, action: act } });
@@ -297,9 +281,13 @@ function softwareManager() {
         software: [],
         phpRuntimes: [],
         developmentTools: [],
+        activeSection: 'runtime',
         showHelp: false,
         clearingOpcache: false,
         logModal: { open: false, title: '', content: '' },
+        configurableSoftware() {
+            return this.software.filter(sw => ['PHP', 'OpenLiteSpeed', 'MariaDB', 'Redis'].includes(sw.name));
+        },
         async fetchList() {
             try {
                 const r = await api('/software');

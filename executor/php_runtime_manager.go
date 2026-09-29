@@ -29,6 +29,7 @@ type LSPHPRuntime struct {
 	Installed   bool   `json:"installed"`
 	ActiveSites int    `json:"active_sites"`
 	Recommended bool   `json:"recommended"`
+	Primary     bool   `json:"primary"`
 }
 
 var lsphpInstallMu sync.Mutex
@@ -57,6 +58,7 @@ func lsphpRuntimeForVersion(version string) (LSPHPRuntime, error) {
 		Version: version, Package: "lsphp" + suffix,
 		LSAPIBinary: filepath.Join(root, "lsphp"), CLIBinary: filepath.Join(root, "php"),
 		Recommended: version == DefaultLSPHPVersion,
+		Primary:     version == PrimaryLSPHPVersion(),
 	}
 	if version == PrimaryLSPHPVersion() && config.AppConfig != nil {
 		if path := strings.TrimSpace(config.AppConfig.Paths.LSPHPBinary); path != "" {

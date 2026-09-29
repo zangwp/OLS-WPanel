@@ -193,6 +193,49 @@ aside {
     border-radius: 12px;
 }
 
+.software-tabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--panel-surface-strong) 88%, var(--panel-bg));
+}
+
+.software-tabs button {
+    min-width: 6.5rem;
+    padding: 0.55rem 0.9rem;
+    border-radius: 8px;
+    color: var(--panel-muted);
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.software-tabs button:hover {
+    color: var(--panel-text);
+    background: var(--panel-accent-soft);
+}
+
+.software-tabs button.active {
+    color: #ffffff;
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+}
+
+.software-config-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+}
+
+@media (min-width: 1280px) {
+    .software-config-grid-wide {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 table tbody tr {
     transition: background-color 120ms ease;
 }
