@@ -97,12 +97,10 @@ jobs:
           bash -n install.sh install-cn.sh
           sudo bash install.sh --check-platform
 
-          for version in 10.11 11.4 11.8; do
-            docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
-              bash /src/install.sh --check-mariadb-packages --mariadb-version "$version"
-          done
+          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
+            bash /src/install.sh --check-mariadb-packages
           docker run --rm -v "$PWD:/src:ro" debian:13 \
-            bash /src/install.sh --check-mariadb-packages --mariadb-version 11.8
+            bash /src/install.sh --check-mariadb-packages
 
           # These vendored browser assets are part of the reviewed Git commit.
           # Release builds must never replace them with live CDN downloads.
@@ -394,12 +392,10 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = aarch64
           sudo bash install.sh --check-platform
-          for version in 10.11 11.4 11.8; do
-            docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
-              bash /src/install.sh --check-mariadb-packages --mariadb-version "$version"
-          done
+          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
+            bash /src/install.sh --check-mariadb-packages
           docker run --rm -v "$PWD:/src:ro" debian:13 \
-            bash /src/install.sh --check-mariadb-packages --mariadb-version 11.8
+            bash /src/install.sh --check-mariadb-packages
           go mod download
           go mod verify
           packages_file="$RUNNER_TEMP/release-arm64-packages"

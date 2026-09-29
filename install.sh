@@ -27,8 +27,7 @@ PREFER_CN=false
 CHECK_PLATFORM_ONLY=false
 CHECK_OLS_PACKAGES_ONLY=false
 CHECK_MARIADB_PACKAGES_ONLY=false
-MARIADB_SERIES="${OLS_WPANEL_MARIADB_VERSION:-}"
-MARIADB_SERIES_EXPLICIT=false
+MARIADB_SERIES="11.8"
 PLATFORM_ID=""
 PLATFORM_VERSION=""
 PLATFORM_CODENAME=""
@@ -89,8 +88,6 @@ MCowBQYDK2VwAyEA5rZthMZ8gkeCHSqxa22OlYSpYtTIRY0fBrUtnLvWW9Y=
 if [[ "${OLS_WPANEL_PREFER_CN_MIRROR:-0}" == "1" ]] || [[ "${OLS_WPANEL_PREFER_CN_MIRROR:-}" == "true" ]]; then
     PREFER_CN=true
 fi
-[[ -z "$MARIADB_SERIES" ]] || MARIADB_SERIES_EXPLICIT=true
-
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
@@ -273,6 +270,32 @@ systemctl_start_required() {
     fi
 }
 
+systemctl_wait_active_required() {
+    local svc="$1"
+    local attempt=""
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if systemctl is-active --quiet "$svc"; then
+            return 0
+        fi
+        sleep 1
+    done
+    journalctl -u "$svc" -n 30 --no-pager 2>/dev/null || true
+    log_error "${svc} 未能保持运行状态，请根据上方日志排查"
+}
+
+require_ols_listeners() {
+    local attempt=""
+    local addresses=""
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        addresses=$(ss -lntH 2>/dev/null | awk '{print $4}')
+        if grep -Eq ':80$' <<< "$addresses" && grep -Eq ':443$' <<< "$addresses"; then
+            return 0
+        fi
+        sleep 1
+    done
+    log_error "OpenLiteSpeed 未同时监听 80/443 端口"
+}
+
 # ============================================================
 # 系统内核优化（BBR+FQ、TCP 缓冲、连接队列、文件描述符）
 # ============================================================
@@ -362,12 +385,6 @@ while [[ $# -gt 0 ]]; do
         --check-mariadb-packages)
             CHECK_MARIADB_PACKAGES_ONLY=true
             shift
-            ;;
-        --mariadb-version|--mariadbver)
-            [[ $# -ge 2 ]] || log_error "MariaDB 版本参数缺少版本值（10.11、11.4 或 11.8）"
-            MARIADB_SERIES="$2"
-            MARIADB_SERIES_EXPLICIT=true
-            shift 2
             ;;
         *)
             log_warn "未知参数已忽略: $1"
@@ -1492,31 +1509,13 @@ REDISSOURCEEOF
 		log_error "Redis APT 候选版本 ${candidate} 低于所需稳定版本 8.10.2"
 }
 
-resolve_mariadb_series() {
-	if [[ -z "$MARIADB_SERIES" ]]; then
-		MARIADB_SERIES="11.8"
-	fi
-	case "$MARIADB_SERIES" in
-		10.11|11.4|11.8) ;;
-		*) log_error "MariaDB 仅支持 10.11、11.4 或 11.8，收到: ${MARIADB_SERIES:-empty}" ;;
-	esac
-	if [[ "$PLATFORM_ID" == "debian" ]] && [[ "$MARIADB_SERIES" != "11.8" ]]; then
-		log_error "MariaDB 官方仓库在 Debian 13 (Trixie) 仅提供 11.8；10.11/11.4 仅支持 Ubuntu 24.04"
-	fi
-}
-
-configure_selected_mariadb_repository() {
-	resolve_mariadb_series
+configure_mariadb_repository() {
 	local key_download="$INSTALL_WORKDIR/mariadb-keyring-2019.gpg"
 	local keyring="/usr/share/keyrings/ols-wpanel-mariadb-archive-keyring.gpg"
 	local source_file="/etc/apt/sources.list.d/ols-wpanel-mariadb.sources"
 	local fingerprints=""
 	local candidate=""
-	if [[ "$MARIADB_SERIES_EXPLICIT" == true ]]; then
-		log_info "配置用户选择的 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
-	else
-		log_info "配置全新安装默认 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
-	fi
+	log_info "配置全新安装默认 MariaDB ${MARIADB_SERIES} 官方 APT 仓库..."
 	assert_managed_source_target "$source_file"
 	download_file "https://supplychain.mariadb.com/mariadb-keyring-2019.gpg" "$key_download" 60 1048576 || \
 		log_error "下载 MariaDB APT 公钥失败"
@@ -1790,6 +1789,7 @@ cleanup_ols_runtime_integrations() {
         /etc/systemd/system/olswpanel-whitelist.service \
         /etc/systemd/system/timers.target.wants/olswpanel-whitelist.timer \
         /etc/systemd/system/lsws.service.d/ols-wpanel.conf \
+        /etc/systemd/system/lshttpd.service.d/ols-wpanel.conf \
         /etc/systemd/system/mariadb.service.d/ols-wpanel.conf \
         /etc/systemd/system/redis-server.service.d/ols-wpanel.conf \
         /etc/fail2ban/jail.d/olswpanel.conf \
@@ -1862,7 +1862,7 @@ do_uninstall() {
     echo -e "  ${GREEN}✓${NC} 面板文件已删除"
 
     echo -e "  → 重新加载 OpenLiteSpeed..."
-    systemctl restart lsws 2>/dev/null || true
+    systemctl restart lshttpd 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} OpenLiteSpeed 站点继续运行"
 
     echo ""
@@ -1902,7 +1902,7 @@ do_purge() {
 
     echo -e "  → 停止所有服务..."
     systemctl stop ols-wpanel 2>/dev/null || true
-    systemctl stop lsws 2>/dev/null || true
+    systemctl stop lshttpd 2>/dev/null || true
     systemctl stop mariadb 2>/dev/null || true
     systemctl stop redis-server 2>/dev/null || true
     systemctl stop fail2ban 2>/dev/null || true
@@ -1961,20 +1961,17 @@ if [[ $EUID -ne 0 ]]; then
     log_error "请使用 root 权限运行此脚本"
 fi
 assert_supported_platform
-resolve_mariadb_series
 if $CHECK_PLATFORM_ONLY; then
     log_info "平台检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} (${PLATFORM_CODENAME}) ${PLATFORM_ARCH}"
     trap - EXIT
     exit 0
 fi
 if $CHECK_MARIADB_PACKAGES_ONLY; then
-    [[ "$MARIADB_SERIES_EXPLICIT" == true ]] || \
-        log_error "--check-mariadb-packages 必须同时指定 --mariadb-version"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl systemd
     init_install_workdir
-    configure_selected_mariadb_repository
+    configure_mariadb_repository
     log_info "MariaDB ${MARIADB_SERIES} 软件包检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH}"
     trap - EXIT
     exit 0
@@ -2374,7 +2371,7 @@ apt-get install -y curl wget unzip ca-certificates gnupg lsb-release
 # OpenLiteSpeed 与 LSPHP 均只从 LiteSpeed 官方仓库安装；仓库公钥通过
 # HTTPS 下载并使用本发布内固定的 SHA-256 校验。
 configure_litespeed_repository
-configure_selected_mariadb_repository
+configure_mariadb_repository
 configure_redis_repository
 
 # ============================================================
@@ -2421,15 +2418,16 @@ fi
 log_info "配置 systemd 进程守护..."
 
 if ! $REPAIR_MODE; then
-for svc in lsws mariadb redis-server; do
+for svc in lshttpd mariadb redis-server; do
     DROPDIR="/etc/systemd/system/${svc}.service.d"
     mkdir -p "$DROPDIR"
     cat > "$DROPDIR/ols-wpanel.conf" << SYSTEMDEOF
 [Unit]
-StartLimitIntervalSec=0
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
-Restart=always
+Restart=on-failure
 RestartSec=5s
 SYSTEMDEOF
 done
@@ -2437,10 +2435,10 @@ done
 systemctl daemon-reload
 log_info "systemd 进程守护配置完成"
 
-systemctl_enable_best_effort lsws
+systemctl_enable_best_effort lshttpd
 systemctl_enable_best_effort mariadb
 systemctl_enable_best_effort redis-server
-systemctl_start_required lsws
+systemctl_start_required lshttpd
 systemctl_start_required redis-server
 else
     log_info "repair模式保留OpenLiteSpeed、MariaDB和Redis的systemd配置与状态"
@@ -2455,8 +2453,11 @@ if ! $REPAIR_MODE; then
 OLS_CONF_DIR="/usr/local/lsws/conf/ols-wpanel"
 OLS_MAIN_CONF="/usr/local/lsws/conf/httpd_config.conf"
 OLS_MANAGED_CONF="$OLS_CONF_DIR/sites.conf"
+OLS_DEFAULT_ROOT="$OLS_CONF_DIR/default-vhost-root"
+OLS_DEFAULT_CONF="$OLS_CONF_DIR/default-vhost.conf"
 install -d -o root -g root -m 0750 "$OLS_CONF_DIR"
 install -d -o root -g root -m 0750 "$OLS_CONF_DIR/sites-available" "$OLS_CONF_DIR/sites-enabled" "$OLS_CONF_DIR/lsphp-sites"
+install -d -o root -g root -m 0755 "$OLS_DEFAULT_ROOT"
 
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout "$OLS_CONF_DIR/default.key" \
@@ -2466,11 +2467,40 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
 chmod 0600 "$OLS_CONF_DIR/default.key"
 chmod 0644 "$OLS_CONF_DIR/default.crt"
 
+cat > "$OLS_DEFAULT_CONF" << 'OLSDEFAULTVHOSTEOF'
+docRoot                 /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
+vhDomain                ols-wpanel.invalid
+adminEmails             root@localhost
+enableGzip              0
+enableBr                0
+
+index {
+  useServer              0
+  indexFiles             index.html
+}
+
+context / {
+  location               /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
+  allowBrowse            0
+  addDefaultCharset      off
+}
+OLSDEFAULTVHOSTEOF
+chmod 0640 "$OLS_DEFAULT_CONF"
+
 cat > "$OLS_MANAGED_CONF" << 'OLSMANAGEDEOF'
 # OLS WPanel managed OpenLiteSpeed registry. DO NOT EDIT.
+virtualHost olsw_default {
+  vhRoot                 /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
+  allowSymbolLink        0
+  enableScript           0
+  restrained             1
+  setUIDMode             0
+  configFile             /usr/local/lsws/conf/ols-wpanel/default-vhost.conf
+}
 listener OLSWPanelHTTP {
   address                 *:80
   secure                  0
+  map                     olsw_default *
 }
 listener OLSWPanelHTTPS {
   address                 *:443
@@ -2479,6 +2509,7 @@ listener OLSWPanelHTTPS {
   certFile                /usr/local/lsws/conf/ols-wpanel/default.crt
   certChain               0
   sslProtocol             30
+  map                     olsw_default *
 }
 OLSMANAGEDEOF
 chmod 0640 "$OLS_MANAGED_CONF"
@@ -2614,11 +2645,14 @@ module cache {
 include /usr/local/lsws/conf/ols-wpanel/sites.conf
 OLSHTTPEOF
 chown root:root "$OLS_MAIN_CONF" "$OLS_MANAGED_CONF"
-chmod 0640 "$OLS_MAIN_CONF" "$OLS_MANAGED_CONF"
+chown root:root "$OLS_DEFAULT_CONF"
+chmod 0640 "$OLS_MAIN_CONF" "$OLS_MANAGED_CONF" "$OLS_DEFAULT_CONF"
 mkdir -p /tmp/lshttpd/swap
 chown -R nobody:nogroup /tmp/lshttpd
 /usr/local/lsws/bin/openlitespeed -t || log_error "OpenLiteSpeed 基础配置检查失败"
-systemctl restart lsws || log_error "OpenLiteSpeed 重启失败"
+systemctl restart lshttpd || log_error "OpenLiteSpeed 重启失败"
+systemctl_wait_active_required lshttpd
+require_ols_listeners
 log_info "OpenLiteSpeed 基础配置完成（WebAdmin 已禁用，站点由面板管理）"
 else
     log_info "repair模式不改写或重载 OpenLiteSpeed 配置"

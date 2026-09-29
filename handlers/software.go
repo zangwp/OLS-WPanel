@@ -37,7 +37,7 @@ type guardResponse struct {
 }
 
 var versionCmds = map[string]string{
-	"lsws":         "/usr/local/lsws/bin/openlitespeed -v 2>&1 | head -1",
+	"lshttpd":      "/usr/local/lsws/bin/openlitespeed -v 2>&1 | head -1",
 	"mariadb":      "mariadb --version 2>/dev/null | head -1",
 	"redis-server": "redis-server --version 2>/dev/null | awk '{print $3}' | cut -d= -f2",
 	"nftables":     "nft --version 2>/dev/null | awk '{print $2}' | cut -dv -f2",
@@ -53,8 +53,6 @@ type softwareItem struct {
 	VersionPolicy    string           `json:"version_policy"`
 	CandidateVersion string           `json:"candidate_version,omitempty"`
 	UpdateAvailable  bool             `json:"update_available"`
-	SupportedSeries  []string         `json:"supported_series,omitempty"`
-	UpstreamVersion  string           `json:"upstream_version,omitempty"`
 	ConfigPath       string           `json:"-"`
 }
 
@@ -83,8 +81,8 @@ func (h *SoftwareHandler) List(c *gin.Context) {
 		getOpenLiteSpeedInfo(lang),
 		getMariaDBInfo(lang),
 		getRedisInfo(lang),
-		getSystemPackageInfo(lang, "nftables", "nft --version 2>/dev/null | awk '{print $2}' | cut -dv -f2", "1.1.7"),
-		getSystemPackageInfo(lang, "Fail2ban", "fail2ban-client --version 2>/dev/null | awk '{print $2}'", "1.1.1"),
+		getSystemPackageInfo(lang, "nftables", "nft --version 2>/dev/null | awk '{print $2}' | cut -dv -f2"),
+		getSystemPackageInfo(lang, "Fail2ban", "fail2ban-client --version 2>/dev/null | awk '{print $2}'"),
 	}
 	items[0].Configs = append(items[0].Configs, softwareConfig{
 		Key:   "max_input_time",
@@ -257,7 +255,7 @@ func (h *SoftwareHandler) GetGuardStatus(c *gin.Context) {
 	for i, s := range svcs {
 		version := strings.TrimSpace(runCmd(versionCmds[s.ServiceName]))
 		switch s.ServiceName {
-		case "lsws":
+		case "lshttpd":
 			version = parseOpenLiteSpeedVersion(version)
 		case "mariadb":
 			version = parseMariaDBVersion(version)
@@ -365,9 +363,9 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 	switch req.Name {
 	case "PHP":
 		configPath = softwarePHPRuntimeConfigPath()
-		serviceName = "lsws"
+		serviceName = "lshttpd"
 		checkCmd = executor.OpenLiteSpeedBinaryPath() + " -t"
-		reloadCmd = "systemctl restart lsws"
+		reloadCmd = "systemctl restart lshttpd"
 	case "MariaDB":
 		configPath = "/etc/mysql/mariadb.conf.d/99-olswpanel.cnf"
 		serviceName = "mariadb"
@@ -667,24 +665,15 @@ func getOpenLiteSpeedInfo(lang string) softwareItem {
 func getMariaDBInfo(lang string) softwareItem {
 	ver := parseMariaDBVersion(runCmd("mariadb --version 2>/dev/null | head -1"))
 	return softwareItem{
-		Name:            "MariaDB",
-		Version:         strings.TrimSpace(ver),
-		Status:          i18n.T(lang, "software.installed"),
-		VersionPolicy:   i18n.T(lang, "software.mariadb_runtime_version_policy"),
-		SupportedSeries: supportedMariaDBSeries(),
-		ConfigPath:      "/etc/mysql/mariadb.conf.d/99-olswpanel.cnf",
+		Name:          "MariaDB",
+		Version:       strings.TrimSpace(ver),
+		Status:        i18n.T(lang, "software.installed"),
+		VersionPolicy: i18n.T(lang, "software.mariadb_runtime_version_policy"),
+		ConfigPath:    "/etc/mysql/mariadb.conf.d/99-olswpanel.cnf",
 		Configs: []softwareConfig{
 			{Key: "innodb_buffer_pool_size", Label: i18n.T(lang, "software.innodb_buffer_pool_size_label"), Hint: i18n.T(lang, "software.innodb_buffer_pool_size_hint")},
 		},
 	}
-}
-
-func supportedMariaDBSeries() []string {
-	data, err := os.ReadFile("/etc/os-release")
-	if err == nil && regexp.MustCompile(`(?m)^ID=["']?debian["']?\s*$`).Match(data) {
-		return []string{"11.8"}
-	}
-	return []string{"10.11", "11.4", "11.8"}
 }
 
 func getRedisInfo(lang string) softwareItem {
@@ -694,25 +683,23 @@ func getRedisInfo(lang string) softwareItem {
 		status = i18n.T(lang, "software.stopped")
 	}
 	return softwareItem{
-		Name:            "Redis",
-		Version:         strings.TrimSpace(ver),
-		Status:          status,
-		VersionPolicy:   i18n.T(lang, "software.redis_runtime_version_policy"),
-		UpstreamVersion: "8.10.2",
-		ConfigPath:      "/etc/redis/redis.conf",
+		Name:          "Redis",
+		Version:       strings.TrimSpace(ver),
+		Status:        status,
+		VersionPolicy: i18n.T(lang, "software.redis_runtime_version_policy"),
+		ConfigPath:    "/etc/redis/redis.conf",
 		Configs: []softwareConfig{
 			{Key: "maxmemory", Label: i18n.T(lang, "software.maxmemory_label"), Hint: i18n.T(lang, "software.maxmemory_hint")},
 		},
 	}
 }
 
-func getSystemPackageInfo(lang, name, versionCommand, upstreamVersion string) softwareItem {
+func getSystemPackageInfo(lang, name, versionCommand string) softwareItem {
 	return softwareItem{
-		Name:            name,
-		Version:         strings.TrimSpace(runCmd(versionCommand)),
-		Status:          i18n.T(lang, "software.installed"),
-		VersionPolicy:   i18n.T(lang, "software.system_package_version_policy"),
-		UpstreamVersion: upstreamVersion,
+		Name:          name,
+		Version:       strings.TrimSpace(runCmd(versionCommand)),
+		Status:        i18n.T(lang, "software.installed"),
+		VersionPolicy: i18n.T(lang, "software.system_package_version_policy"),
 	}
 }
 

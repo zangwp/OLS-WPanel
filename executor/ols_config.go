@@ -22,6 +22,7 @@ const (
 	olsMetadataVHostPrefix   = "# OLS-WPanel-VHost: "
 	olsMetadataDomainsPrefix = "# OLS-WPanel-Domains: "
 	olsMetadataRootPrefix    = "# OLS-WPanel-VHRoot: "
+	olsDefaultVHostName      = "olsw_default"
 )
 
 var (
@@ -100,7 +101,7 @@ func LSPHPBinaryPath() string { return currentOLSRuntimePaths().lsphpCLI }
 func OpenLiteSpeedBinaryPath() string { return currentOLSRuntimePaths().binary }
 
 // ReloadOpenLiteSpeed validates the complete configuration before restarting
-// lsws. Replacing the managed LSPHP workers also clears their shared OPcache.
+// lshttpd. Replacing the managed LSPHP workers also clears their shared OPcache.
 func ReloadOpenLiteSpeed() error {
 	_, err := testAndRestartOpenLiteSpeed()
 	return err
@@ -462,9 +463,18 @@ func renderOLSManagedRegistry(enabledDir string) (string, error) {
 	}
 
 	paths := currentOLSRuntimePaths()
+	defaultRoot, defaultConfig := olsDefaultVHostPaths(paths)
 	var out strings.Builder
 	out.WriteString("# OLS WPanel managed OpenLiteSpeed registry. DO NOT EDIT.\n")
 	out.WriteString("# Generated atomically from the enabled-site directory.\n\n")
+	fmt.Fprintf(&out, "virtualHost %s {\n", olsDefaultVHostName)
+	fmt.Fprintf(&out, "  vhRoot                 %s/\n", filepath.ToSlash(defaultRoot))
+	out.WriteString("  allowSymbolLink        0\n")
+	out.WriteString("  enableScript           0\n")
+	out.WriteString("  restrained             1\n")
+	out.WriteString("  setUIDMode             0\n")
+	fmt.Fprintf(&out, "  configFile             %s\n", filepath.ToSlash(defaultConfig))
+	out.WriteString("}\n\n")
 	for _, meta := range metas {
 		fmt.Fprintf(&out, "virtualHost %s {\n", meta.name)
 		fmt.Fprintf(&out, "  vhRoot                 %s/\n", strings.TrimSuffix(meta.vhRoot, "/"))
@@ -479,6 +489,7 @@ func renderOLSManagedRegistry(enabledDir string) (string, error) {
 	for _, meta := range metas {
 		fmt.Fprintf(&out, "  map                    %s %s\n", meta.name, strings.Join(meta.domains, ","))
 	}
+	fmt.Fprintf(&out, "  map                    %s *\n", olsDefaultVHostName)
 	out.WriteString("}\n\n")
 	out.WriteString("listener OLSWPanelHTTPS {\n  address                 *:443\n  secure                  1\n")
 	fmt.Fprintf(&out, "  keyFile                 %s\n", filepath.ToSlash(paths.listenerKey))
@@ -487,8 +498,54 @@ func renderOLSManagedRegistry(enabledDir string) (string, error) {
 	for _, meta := range metas {
 		fmt.Fprintf(&out, "  map                    %s %s\n", meta.name, strings.Join(meta.domains, ","))
 	}
+	fmt.Fprintf(&out, "  map                    %s *\n", olsDefaultVHostName)
 	out.WriteString("}\n")
 	return out.String(), nil
+}
+
+func olsDefaultVHostPaths(paths olsRuntimePaths) (string, string) {
+	base := filepath.Dir(paths.managed)
+	return filepath.Join(base, "default-vhost-root"), filepath.Join(base, "default-vhost.conf")
+}
+
+func ensureOLSDefaultVHost(paths olsRuntimePaths) error {
+	root, configPath := olsDefaultVHostPaths(paths)
+	if info, err := os.Lstat(root); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("OpenLiteSpeed 默认虚拟主机根目录不安全: %s", root)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if info, err := os.Lstat(configPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("OpenLiteSpeed 默认虚拟主机配置不得为符号链接: %s", configPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return fmt.Errorf("创建 OpenLiteSpeed 默认虚拟主机根目录失败: %w", err)
+	}
+	content := fmt.Sprintf(`docRoot                 %s/
+vhDomain                ols-wpanel.invalid
+adminEmails             root@localhost
+enableGzip              0
+enableBr                0
+
+index {
+  useServer              0
+  indexFiles             index.html
+}
+
+context / {
+  location               %s/
+  allowBrowse            0
+  addDefaultCharset      off
+}
+`, filepath.ToSlash(root), filepath.ToSlash(root))
+	if err := writeOLSFileAtomic(configPath, []byte(content), 0640); err != nil {
+		return fmt.Errorf("写入 OpenLiteSpeed 默认虚拟主机配置失败: %w", err)
+	}
+	return nil
 }
 
 func writeOLSFileAtomic(path string, data []byte, mode os.FileMode) error {
@@ -537,7 +594,7 @@ func testAndRestartOpenLiteSpeed() ([]byte, error) {
 	if err != nil {
 		return testOut, fmt.Errorf("OpenLiteSpeed 配置检查失败: %s", strings.TrimSpace(string(testOut)))
 	}
-	restartOut, err := runOLSCommand("systemctl", "restart", "lsws")
+	restartOut, err := runOLSCommand("systemctl", "restart", "lshttpd")
 	if err != nil {
 		return restartOut, fmt.Errorf("OpenLiteSpeed 优雅重载失败: %s", strings.TrimSpace(string(restartOut)))
 	}
@@ -545,11 +602,14 @@ func testAndRestartOpenLiteSpeed() ([]byte, error) {
 }
 
 func reloadOLSManagedRegistry(enabledDir string) ([]byte, error) {
+	paths := currentOLSRuntimePaths()
+	if err := ensureOLSDefaultVHost(paths); err != nil {
+		return nil, err
+	}
 	content, err := renderOLSManagedRegistry(enabledDir)
 	if err != nil {
 		return nil, err
 	}
-	paths := currentOLSRuntimePaths()
 	old, oldErr := os.ReadFile(paths.managed)
 	existed := oldErr == nil
 	if oldErr != nil && !os.IsNotExist(oldErr) {

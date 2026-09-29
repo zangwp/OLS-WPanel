@@ -45,12 +45,17 @@ func TestRunSystemPackageUpdatePlanCompletesAllChecks(t *testing.T) {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 	want := []string{
+		"systemctl is-active --quiet lshttpd",
+		"systemctl is-active --quiet mariadb",
+		"systemctl is-active --quiet redis-server",
+		"systemctl is-active --quiet ols-wpanel",
+		"/usr/local/lsws/bin/openlitespeed -t",
 		"apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 update",
 		"apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 -s upgrade",
 		"env DEBIAN_FRONTEND=noninteractive apt-get -y -o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold upgrade",
 		"apt-get check",
 		"dpkg --audit",
-		"systemctl is-active --quiet lsws",
+		"systemctl is-active --quiet lshttpd",
 		"systemctl is-active --quiet mariadb",
 		"systemctl is-active --quiet redis-server",
 		"systemctl is-active --quiet ols-wpanel",
@@ -96,7 +101,7 @@ func TestRunSystemPackageUpdatePlanStopsBeforeUpgradeWhenPreflightFails(t *testi
 	if status.Status != "failed" || status.Stage != "preflight" || status.MessageKey != "settings.system_update_status_failed" {
 		t.Fatalf("unexpected status: %+v", status)
 	}
-	if len(calls) != 2 {
+	if len(calls) != 7 {
 		t.Fatalf("upgrade should not run after failed preflight: %#v", calls)
 	}
 }
@@ -119,8 +124,12 @@ func TestRunSystemPackageUpdatePlanReportsPostUpdateHealthFailure(t *testing.T) 
 	})
 	systemPackageUpdateSleep = func(time.Duration) {}
 	systemPackageUpdateLockPath = filepath.Join(tempDir, "update.lock")
+	mariaChecks := 0
 	systemPackageUpdateCommand = func(_ context.Context, name string, args ...string) error {
 		if name == "systemctl" && len(args) == 3 && args[2] == "mariadb" {
+			mariaChecks++
+		}
+		if mariaChecks > 1 && name == "systemctl" && len(args) == 3 && args[2] == "mariadb" {
 			return errors.New("inactive")
 		}
 		return nil

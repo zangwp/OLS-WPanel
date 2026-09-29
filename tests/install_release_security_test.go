@@ -474,10 +474,7 @@ func TestInstallerPinsSupportedRuntimeRepositories(t *testing.T) {
 		`lsphp84 lsphp84-common lsphp84-mysql`,
 		`lsphp85 lsphp85-common lsphp85-mysql`,
 		`lsphp85-intl lsphp85-redis lsphp85-imagick`,
-		`10.11|11.4|11.8) ;;`,
-		`--mariadb-version|--mariadbver)`,
 		`--check-mariadb-packages)`,
-		`[[ "$PLATFORM_ID" == "debian" ]] && [[ "$MARIADB_SERIES" != "11.8" ]]`,
 		`MARIADB_APT_KEY_FINGERPRINT="177F4010FE56CA3336300305F1656F24C74CD1D8"`,
 		`https://supplychain.mariadb.com/mariadb-keyring-2019.gpg`,
 		`https://mirror.mariadb.org/repo/${MARIADB_SERIES}/${PLATFORM_ID}`,
@@ -552,6 +549,16 @@ func TestInstallerUsesPrivateWorkdirsAndBoundedDownloads(t *testing.T) {
 	} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("install.sh still uses predictable temporary path %q", forbidden)
+		}
+	}
+	for _, forbidden := range []string{
+		`--mariadb-version`,
+		`--mariadbver`,
+		`MARIADB_SERIES_EXPLICIT`,
+		`10.11|11.4|11.8`,
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("install.sh still exposes selectable MariaDB series %q", forbidden)
 		}
 	}
 }

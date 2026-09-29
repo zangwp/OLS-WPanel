@@ -17,7 +17,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.2.2`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前稳定版：`v1.2.3`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
 
 精简镜像如果连 `curl` 都没有，请先执行：
 
@@ -34,17 +34,9 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 |---|---|
 | OpenLiteSpeed | 官方稳定软件源，每站点独立虚拟主机 |
 | LSPHP | 默认 8.5；可按需增加 8.4 / 8.3，并逐站点切换 |
-| MariaDB | 默认 11.8；Ubuntu 24.04 全新安装可选 10.11 / 11.4；Debian 13 仅 11.8 |
+| MariaDB | 全新安装默认 11.8；现有数据库仅跟随当前系列的补丁与安全更新 |
 | Redis | 官方签名 APT 源，每个 WordPress 站点使用独立缓存前缀 |
 | 安全组件 | Fail2ban + nftables，跟随系统软件源更新 |
-
-指定 MariaDB 兼容系列（仅 Ubuntu 24.04 全新安装）：
-
-```bash
-curl -fsSL https://ols.zangyubin.top/install | bash -s -- --mariadb-version 11.4
-```
-
-现有数据库仅自动安装当前系列的补丁与安全更新，不会静默跨系列升级或降级。
 
 ## 核心能力
 

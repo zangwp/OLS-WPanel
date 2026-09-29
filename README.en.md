@@ -16,17 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.2.2`.
-
-### MariaDB series on a fresh server
-
-Fresh installs default to the latest stable series verified by this release, MariaDB `11.8`. Ubuntu 24.04 may explicitly select an older compatibility series:
-
-```bash
-curl -fsSL https://ols.zangyubin.top/install | bash -s -- --mariadb-version 11.8
-```
-
-Ubuntu 24.04 supports `10.11`, `11.4`, and `11.8`. MariaDB's official repository only provides `11.8` for Debian 13/Trixie, so the installer rejects unsupported combinations before package installation. This option never performs an in-place downgrade of an existing database. The `--mariadbver` alias is also accepted.
+The current stable release is `v1.2.3`.
 
 ### Minimal images / download failures
 
@@ -40,7 +30,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 
 - OpenLiteSpeed with generated HTTP/HTTPS listeners and one isolated virtual host per site
 - LSPHP 8.5 by default, with optional 8.4 and 8.3 compatibility runtimes assignable per site
-- MariaDB 11.8 by default; Ubuntu 24.04 may explicitly select 10.11 or 11.4, while Debian 13 supports 11.8; Redis 8.10.2 or newer comes from Redis' official signed APT repository
+- MariaDB 11.8 on fresh installs; existing databases receive same-series patch and security updates only; Redis follows its official signed APT repository
 - The official LiteSpeed Cache WordPress plugin, automatically activated for new WordPress sites
 - Redis object-cache defaults with an independent key prefix per site
 - Fail2ban and nftables for host-level enforcement
@@ -60,7 +50,7 @@ Generic PHP sites use OpenLiteSpeed and LSPHP but do not receive WordPress plugi
 
 ## Site provisioning
 
-Creating a WordPress site automatically prepares the system user, document root, logs, database, OpenLiteSpeed virtual host and listener mappings, LSPHP application, WordPress files, LiteSpeed Cache, Redis configuration, and optional TLS certificate. Configuration is validated before `lsws` is restarted; failed updates restore the previous files and listener registry.
+Creating a WordPress site automatically prepares the system user, document root, logs, database, OpenLiteSpeed virtual host and listener mappings, LSPHP application, WordPress files, LiteSpeed Cache, Redis configuration, and optional TLS certificate. Configuration is validated before `lshttpd` is restarted; failed updates restore the previous files and listener registry.
 
 ## Management commands
 
@@ -85,7 +75,7 @@ o unban           clear managed IP bans
 
 ## Runtime updates and OpenLiteSpeed administration
 
-System Update installs stable patch and security updates from configured APT repositories. OpenLiteSpeed and LSPHP follow the official LiteSpeed repository; MariaDB follows the series selected during installation; Redis follows Redis' official signed repository (the v1.1.0 baseline is 8.10.2); nftables and Fail2ban follow the target system repository. The Software page also shows upstream stable references for Redis 8.10.2, nftables 1.1.7, and Fail2ban 1.1.1. LSPHP 8.3, 8.4, and 8.5 can coexist and are assigned per site. An upstream source release is not treated as safely installable until a configured repository supplies a compatible package. Database cross-series changes remain controlled migrations, not routine unattended updates.
+System Update installs the latest verified stable and security candidates from configured signed APT repositories. OpenLiteSpeed and LSPHP follow the official LiteSpeed repository, MariaDB stays on its installed series, Redis follows Redis' official repository, and nftables and Fail2ban follow the target operating-system repository. LSPHP 8.3, 8.4, and 8.5 can coexist and are assigned per site. Database cross-series changes remain controlled migrations rather than routine unattended updates.
 
 OLS WPanel owns the generated server and per-site OpenLiteSpeed configuration, so WebAdmin on port 7080 is disabled by default to avoid conflicting edits and an extra public administration endpoint. The installer enables Gzip, Brotli, and HTTP/3/QUIC, and WordPress sites receive LiteSpeed Cache and Redis configuration automatically. The Software page reports their effective status.
 

@@ -1,12 +1,33 @@
 package executor
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestProcessGuardLoadsLegacyLSWSPausedState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guard-paused.json")
+	data, err := json.Marshal(map[string]bool{"lsws": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	pg := &ProcessGuard{
+		services:   []*GuardService{{Name: "OpenLiteSpeed", ServiceName: "lshttpd"}},
+		pausedFile: path,
+	}
+	pg.loadPaused()
+	if !pg.services[0].Paused {
+		t.Fatal("legacy lsws paused state was not migrated to lshttpd")
+	}
+}
 
 func TestSetServiceStateRejectsUnknownService(t *testing.T) {
 	err := SetServiceState("not-managed", "restart")
@@ -30,7 +51,7 @@ func TestSetServiceStateRejectsCommandSuccessWithoutActiveState(t *testing.T) {
 		guardStateWaitTimeout, guardStatePollInterval = oldTimeout, oldPoll
 	})
 
-	err := SetServiceState("lsws", "start")
+	err := SetServiceState("lshttpd", "start")
 	if err == nil || !strings.Contains(err.Error(), "目标状态") {
 		t.Fatalf("error=%v, want final-state failure", err)
 	}
@@ -98,7 +119,7 @@ func TestClassifyServiceFailure(t *testing.T) {
 }
 
 func TestCoreGuardServices(t *testing.T) {
-	for _, service := range []string{"lsws", "mariadb", "redis-server"} {
+	for _, service := range []string{"lshttpd", "mariadb", "redis-server"} {
 		if !isCoreGuardService(service) {
 			t.Fatalf("%s should be a core service", service)
 		}

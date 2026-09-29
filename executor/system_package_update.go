@@ -155,6 +155,10 @@ func RunSystemPackageUpdatePlan(planPath string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	writeStatus("running", "services_preflight", "settings.system_update_status_checking_services", "")
+	if err := checkSystemPackageUpdateHealth(ctx); err != nil {
+		return fail("services_preflight", "settings.system_update_status_health_failed", err)
+	}
 	aptOptions := []string{"-o", "Acquire::Retries=3", "-o", "DPkg::Lock::Timeout=300"}
 	for _, step := range []struct {
 		stage, messageKey, name string
@@ -172,16 +176,23 @@ func RunSystemPackageUpdatePlan(planPath string) error {
 		}
 	}
 	writeStatus("running", "services", "settings.system_update_status_checking_services", "")
-	for _, service := range []string{"lsws", "mariadb", "redis-server", "ols-wpanel"} {
-		if err := waitForSystemPackageUpdateService(ctx, service); err != nil {
-			return fail("services", "settings.system_update_status_health_failed", err)
-		}
-	}
-	if err := systemPackageUpdateCommand(ctx, "/usr/local/lsws/bin/openlitespeed", "-t"); err != nil {
+	if err := checkSystemPackageUpdateHealth(ctx); err != nil {
 		return fail("services", "settings.system_update_status_health_failed", err)
 	}
 	status := SystemPackageUpdateStatus{ID: plan.ID, Status: "success", Stage: "complete", MessageKey: "settings.system_update_status_success", StartedAt: started, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 	return writePanelDBRestoreJSON(plan.StatusPath, status)
+}
+
+func checkSystemPackageUpdateHealth(ctx context.Context) error {
+	for _, service := range []string{"lshttpd", "mariadb", "redis-server", "ols-wpanel"} {
+		if err := waitForSystemPackageUpdateService(ctx, service); err != nil {
+			return err
+		}
+	}
+	if err := systemPackageUpdateCommand(ctx, "/usr/local/lsws/bin/openlitespeed", "-t"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func waitForSystemPackageUpdateService(ctx context.Context, service string) error {

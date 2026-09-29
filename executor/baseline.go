@@ -18,7 +18,7 @@ func EnsureWordPressBaseline() {
 func ensurePHPBaseline() {
 	changed, err := EnsurePHPRuntimeConfigFile()
 	if err == nil && changed {
-		exec.Command("systemctl", "restart", "lsws").Run()
+		exec.Command("systemctl", "restart", "lshttpd").Run()
 	}
 }
 

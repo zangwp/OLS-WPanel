@@ -796,6 +796,7 @@ func RegenerateAllSitesOLSConfigs() error {
 	defer rows.Close()
 
 	var failures []string
+	regenerated := 0
 	for rows.Next() {
 		var siteID int
 		if err := rows.Scan(&siteID); err != nil {
@@ -805,13 +806,23 @@ func RegenerateAllSitesOLSConfigs() error {
 		if err := RegenerateSiteOLSConfig(siteID); err != nil {
 			log.Printf("[OpenLiteSpeed重建] 站点 %d 更新失败: %v", siteID, err)
 			failures = append(failures, err.Error())
+			continue
 		}
+		regenerated++
 	}
 	if err := rows.Err(); err != nil {
 		failures = append(failures, err.Error())
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("部分站点 OpenLiteSpeed 配置更新失败: %s", strings.Join(failures, "; "))
+	}
+	if regenerated == 0 {
+		if config.AppConfig == nil {
+			return errors.New("面板配置尚未初始化")
+		}
+		if _, err := reloadOLSManagedRegistry(config.AppConfig.Paths.OLSVHostsEnabled); err != nil {
+			return fmt.Errorf("初始化 OpenLiteSpeed 默认虚拟主机失败: %w", err)
+		}
 	}
 	log.Printf("[OpenLiteSpeed重建] 全部网站配置已更新")
 	return nil

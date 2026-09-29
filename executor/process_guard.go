@@ -53,7 +53,7 @@ var guard *ProcessGuard
 func init() {
 	guard = &ProcessGuard{
 		services: []*GuardService{
-			{Name: "OpenLiteSpeed", ServiceName: "lsws"},
+			{Name: "OpenLiteSpeed", ServiceName: "lshttpd"},
 			{Name: "MariaDB", ServiceName: "mariadb"},
 			{Name: "Redis", ServiceName: "redis-server"},
 			{Name: "nftables", ServiceName: "nftables"},
@@ -259,7 +259,11 @@ func (pg *ProcessGuard) loadPaused() {
 		return
 	}
 	for _, s := range pg.services {
-		if v, ok := paused[s.ServiceName]; ok {
+		v, ok := paused[s.ServiceName]
+		if !ok && s.ServiceName == "lshttpd" {
+			v, ok = paused["lsws"]
+		}
+		if ok {
 			s.Paused = v
 		}
 	}
@@ -421,7 +425,7 @@ func logIncident(s *GuardService, event, message string, notify bool) {
 
 func isCoreGuardService(service string) bool {
 	switch service {
-	case "lsws", "mariadb", "redis-server":
+	case "lshttpd", "mariadb", "redis-server":
 		return true
 	default:
 		return false

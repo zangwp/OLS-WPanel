@@ -83,6 +83,56 @@ func TestRenderOLSVHostGenericPHPDoesNotEnableLSCache(t *testing.T) {
 	}
 }
 
+func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
+	root := t.TempDir()
+	enabled := filepath.Join(root, "sites-enabled")
+	managed := filepath.Join(root, "sites.conf")
+	if err := os.MkdirAll(enabled, 0750); err != nil {
+		t.Fatal(err)
+	}
+	old := config.AppConfig
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{
+		OLSManagedConfig: managed,
+		OLSListenerCert:  filepath.Join(root, "default.crt"),
+		OLSListenerKey:   filepath.Join(root, "default.key"),
+	}}
+	t.Cleanup(func() { config.AppConfig = old })
+
+	content, err := renderOLSManagedRegistry(enabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"virtualHost olsw_default {",
+		"enableScript           0",
+		"configFile             " + filepath.ToSlash(filepath.Join(root, "default-vhost.conf")),
+		"map                    olsw_default *",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("empty registry missing %q:\n%s", want, content)
+		}
+	}
+	if got := strings.Count(content, "map                    olsw_default *"); got != 2 {
+		t.Fatalf("default listener mappings = %d, want 2", got)
+	}
+
+	paths := currentOLSRuntimePaths()
+	if err := ensureOLSDefaultVHost(paths); err != nil {
+		t.Fatal(err)
+	}
+	defaultRoot, defaultConfig := olsDefaultVHostPaths(paths)
+	if info, err := os.Stat(defaultRoot); err != nil || !info.IsDir() {
+		t.Fatalf("default root was not created: info=%v err=%v", info, err)
+	}
+	data, err := os.ReadFile(defaultConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "vhDomain                ols-wpanel.invalid") || !strings.Contains(string(data), "allowBrowse            0") {
+		t.Fatalf("unsafe or incomplete default vhost:\n%s", data)
+	}
+}
+
 func TestRenderOLSManagedRegistryRejectsDuplicateDomain(t *testing.T) {
 	root := t.TempDir()
 	available := filepath.Join(root, "sites-available")

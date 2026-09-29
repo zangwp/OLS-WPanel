@@ -757,6 +757,10 @@ var upgrades = []Upgrade{
 			`ALTER TABLE websites ADD COLUMN php_version TEXT NOT NULL DEFAULT '8.3'`,
 		},
 	},
+	{
+		Version:     "1.0.68",
+		Description: "为受管服务启用有界的失败重启策略",
+	},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

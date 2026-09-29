@@ -88,16 +88,14 @@ jobs:
           set -euo pipefail
           docker run --rm -v "$PWD:/src:ro" debian:13 bash /src/install.sh --check-ols-packages
 
-      - name: Verify selectable MariaDB repositories
+      - name: Verify default MariaDB repository
         shell: bash
         run: |
           set -euo pipefail
-          for version in 10.11 11.4 11.8; do
-            docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
-              bash /src/install.sh --check-mariadb-packages --mariadb-version "$version"
-          done
+          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
+            bash /src/install.sh --check-mariadb-packages
           docker run --rm -v "$PWD:/src:ro" debian:13 \
-            bash /src/install.sh --check-mariadb-packages --mariadb-version 11.8
+            bash /src/install.sh --check-mariadb-packages
 
       - name: Download and verify Go modules
         shell: bash

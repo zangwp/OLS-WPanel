@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	managedServiceDropInLegacyContent = "[Service]\nRestart=always\nRestartSec=5s\nStartLimitIntervalSec=0\n"
-	managedServiceDropInFixedContent  = "[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestart=always\nRestartSec=5s\n"
+	managedServiceDropInLegacyContent  = "[Service]\nRestart=always\nRestartSec=5s\nStartLimitIntervalSec=0\n"
+	managedServiceDropInFixedContent   = "[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestart=always\nRestartSec=5s\n"
+	managedServiceDropInBoundedContent = "[Unit]\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nRestart=on-failure\nRestartSec=5s\n"
 )
 
 var (
@@ -29,6 +30,7 @@ var (
 
 func init() {
 	database.RegisterUpgrade("1.0.40", ensureManagedServiceDropInStartLimitSections)
+	database.RegisterUpgrade("1.0.68", ensureManagedServiceDropInBoundedRestarts)
 }
 
 // ensureManagedServiceDropInStartLimitSections repairs only the exact drop-ins
@@ -75,6 +77,57 @@ func repairManagedServiceDropIns(root string) (bool, error) {
 			return changed, fmt.Errorf("检查 %s: %w", path, err)
 		}
 		if err := os.WriteFile(path, []byte(managedServiceDropInFixedContent), info.Mode().Perm()); err != nil {
+			return changed, fmt.Errorf("写入 %s: %w", path, err)
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+// ensureManagedServiceDropInBoundedRestarts replaces only drop-ins emitted by
+// older installers. A broken OpenLiteSpeed configuration must not create an
+// unlimited restart loop, while administrator-authored policies remain intact.
+func ensureManagedServiceDropInBoundedRestarts() error {
+	changed, err := repairManagedServiceDropInsBounded(managedServiceDropInRoot)
+	if err != nil {
+		log.Printf("[升级] 限制受管服务重启频率失败，已跳过且不会阻止面板启动: %v", err)
+		return nil
+	}
+	if !changed {
+		return nil
+	}
+	if err := managedSystemctlCommand("daemon-reload"); err != nil {
+		log.Printf("[升级] systemd daemon-reload 失败，请手动执行 systemctl daemon-reload: %v", err)
+		return nil
+	}
+	log.Printf("[升级] 已为受管服务启用有界的失败重启策略")
+	return nil
+}
+
+func repairManagedServiceDropInsBounded(root string) (bool, error) {
+	changed := false
+	for _, svc := range []string{"lsws", "lshttpd", "mariadb", "redis-server"} {
+		path := filepath.Join(root, svc+".service.d", "ols-wpanel.conf")
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return changed, fmt.Errorf("读取 %s: %w", path, err)
+		}
+		content := string(data)
+		if content == managedServiceDropInBoundedContent {
+			continue
+		}
+		if content != managedServiceDropInLegacyContent && content != managedServiceDropInFixedContent {
+			log.Printf("[升级] 跳过自定义 systemd drop-in: %s", path)
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return changed, fmt.Errorf("检查 %s: %w", path, err)
+		}
+		if err := os.WriteFile(path, []byte(managedServiceDropInBoundedContent), info.Mode().Perm()); err != nil {
 			return changed, fmt.Errorf("写入 %s: %w", path, err)
 		}
 		changed = true

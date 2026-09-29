@@ -19,7 +19,7 @@ const optipngPackage = "optipng"
 
 // EnsurePHPExifExtension 保证 LSPHP common 扩展包已安装，供配套插件的新上传图片处理
 // （EXIF 方向修正）使用。新装机通过 install.sh 已经装了这个包；这个函数是给已经
-// 装机的老服务器做补装，异步执行、不阻塞面板启动，装完重启 lsws 让扩展
+// 装机的老服务器做补装，异步执行、不阻塞面板启动，装完重启 lshttpd 让扩展
 // 生效。插件侧不查询这个函数的状态——它直接在 PHP 运行时用
 // is_callable('exif_read_data') 判断，装好之后下次页面加载自然可用。
 func EnsurePHPExifExtension() {

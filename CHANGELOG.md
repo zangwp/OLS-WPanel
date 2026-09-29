@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.3 — 2026-09-29
+
+- Keeps OpenLiteSpeed runnable before the first website exists by installing a static, no-script fallback virtual host and mapping it to the managed HTTP/HTTPS listeners.
+- Repairs existing zero-site installations during panel startup and standardizes service control on the canonical `lshttpd` unit.
+- Adds pre-update OpenLiteSpeed configuration and service health checks so package updates stop before mutation when the runtime is already unhealthy.
+- Replaces unbounded restart loops for managed infrastructure services with a rate-limited `on-failure` policy while preserving user-customized systemd drop-ins.
+- Simplifies Software Management: fresh installs use MariaDB 11.8, existing databases receive same-series updates only, and Redis/nftables/Fail2ban follow authenticated APT candidates without hard-coded upstream-version clutter.
+- Adds regression coverage for the fallback virtual host, service migration, package-update preflight, installer ordering, and amd64/arm64 release builds.
+
 ## v1.2.2 — 2026-09-29
 
 - Fixes fresh Ubuntu/Debian installations aborting after MariaDB repository setup when `apt-cache policy` received SIGPIPE from an early-exiting `awk` under `pipefail`.

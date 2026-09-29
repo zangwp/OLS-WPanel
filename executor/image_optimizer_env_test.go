@@ -77,7 +77,7 @@ func TestEnsurePHPExifExtensionInstallsAndReloadsWhenMissing(t *testing.T) {
 	if !strings.Contains(joined, "apt-get") {
 		t.Fatalf("expected apt-get install to run when extension is missing, calls: %v", calls)
 	}
-	if !strings.Contains(joined, "openlitespeed -t") || !strings.Contains(joined, "systemctl restart lsws") {
+	if !strings.Contains(joined, "openlitespeed -t") || !strings.Contains(joined, "systemctl restart lshttpd") {
 		t.Fatalf("expected OpenLiteSpeed validation and restart after a successful install, calls: %v", calls)
 	}
 }

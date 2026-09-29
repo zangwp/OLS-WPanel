@@ -16,7 +16,7 @@ func TestInstallRequiredWebServicesOrder(t *testing.T) {
 
 	guardConfigured := requiredIndex(t, script, `log_info "systemd 进程守护配置完成"`)
 	daemonReload := requiredLastIndexBefore(t, script, "systemctl daemon-reload", guardConfigured)
-	olsStart := requiredIndex(t, script, "systemctl_start_required lsws")
+	olsStart := requiredIndex(t, script, "systemctl_start_required lshttpd")
 	redisStart := requiredIndex(t, script, "systemctl_start_required redis-server")
 	mariaDBStart := requiredIndex(t, script, "systemctl_start_required mariadb")
 	panelStart := requiredIndex(t, script, "systemctl_start_required ols-wpanel")
@@ -35,7 +35,7 @@ func TestInstallRequiredWebServicesUseSharedStartHelper(t *testing.T) {
 		t.Fatalf("systemctl_start_required helper definitions = %d, want 1", got)
 	}
 	for _, call := range []string{
-		"systemctl_start_required lsws",
+		"systemctl_start_required lshttpd",
 		"systemctl_start_required redis-server",
 	} {
 		if got := countExactLine(script, call); got != 1 {
@@ -62,10 +62,11 @@ func TestManagedServiceDropInUsesSystemdSections(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 	required := `cat > "$DROPDIR/ols-wpanel.conf" << SYSTEMDEOF
 [Unit]
-StartLimitIntervalSec=0
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
-Restart=always
+Restart=on-failure
 RestartSec=5s
 SYSTEMDEOF`
 	if got := strings.Count(script, required); got != 1 {
@@ -73,6 +74,21 @@ SYSTEMDEOF`
 	}
 	if strings.Contains(script, "[Service]\nRestart=always\nRestartSec=5s\nStartLimitIntervalSec=0") {
 		t.Fatal("StartLimitIntervalSec must not be emitted in the [Service] section")
+	}
+}
+
+func TestInstallerProvidesSafeDefaultOpenLiteSpeedVHost(t *testing.T) {
+	script := readInstallScript(t, installScriptPath)
+	for _, required := range []string{
+		"virtualHost olsw_default {",
+		"enableScript           0",
+		"map                     olsw_default *",
+		"systemctl_wait_active_required lshttpd",
+		"require_ols_listeners",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("install.sh missing empty-site safety control %q", required)
+		}
 	}
 }
 

@@ -191,25 +191,16 @@
 
                 <p x-show="sw.version_policy" class="text-xs text-gray-500 mb-3" x-text="sw.version_policy"></p>
 
-                <div x-show="sw.upstream_version" class="runtime-detail mb-3 rounded border border-gray-700 p-3 text-xs">
-                    <span class="text-gray-500">{{t .Lang "software.upstream_stable"}}</span>
-                    <span class="runtime-version ml-2" x-text="sw.upstream_version"></span>
-                    <span class="text-gray-500 ml-2">{{t .Lang "software.upstream_reference_only"}}</span>
-                </div>
-
-                <div x-show="sw.supported_series && sw.supported_series.length" class="flex flex-wrap items-center gap-2 mb-3 text-xs">
-                    <span class="text-gray-500">{{t .Lang "software.fresh_install_series"}}</span>
-                    <template x-for="series in (sw.supported_series || [])" :key="series">
-                        <span class="runtime-version" x-text="series"></span>
-                    </template>
-                </div>
-
                 <div x-show="sw.update_available" class="software-update-notice mb-3 rounded border p-3">
                     <div class="flex items-center justify-between gap-3">
                         <p class="text-xs text-blue-300" x-text="t('software.update_available_candidate', { version: sw.candidate_version })"></p>
                         <a href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap">{{t .Lang "software.go_to_system_update"}}</a>
                     </div>
                 </div>
+
+                <p x-show="sw.candidate_version && !sw.update_available" class="text-xs text-green-400 mb-3">
+                    {{t .Lang "software.repository_current"}}
+                </p>
 
                 <div x-show="sw.details && sw.details.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
                     <template x-for="detail in (sw.details || [])" :key="detail.label">

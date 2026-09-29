@@ -49,6 +49,31 @@ func TestRepairManagedServiceDropInsReportsNoChangeWhenAlreadyFixed(t *testing.T
 	}
 }
 
+func TestRepairManagedServiceDropInsBoundedReplacesOnlyPanelPolicies(t *testing.T) {
+	root := t.TempDir()
+	writeDropIn(t, root, "lsws", managedServiceDropInLegacyContent)
+	writeDropIn(t, root, "lshttpd", managedServiceDropInFixedContent)
+	writeDropIn(t, root, "redis-server", managedServiceDropInBoundedContent)
+	custom := "[Service]\nRestart=on-failure\nRestartSec=30s\n"
+	writeDropIn(t, root, "mariadb", custom)
+
+	changed, err := repairManagedServiceDropInsBounded(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	for _, svc := range []string{"lsws", "lshttpd", "redis-server"} {
+		if got := readDropIn(t, root, svc); got != managedServiceDropInBoundedContent {
+			t.Fatalf("%s drop-in = %q, want bounded policy", svc, got)
+		}
+	}
+	if got := readDropIn(t, root, "mariadb"); got != custom {
+		t.Fatalf("custom mariadb policy was overwritten: %q", got)
+	}
+}
+
 func writeDropIn(t *testing.T, root, svc, content string) {
 	t.Helper()
 	dir := filepath.Join(root, svc+".service.d")
