@@ -17,7 +17,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.4.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前稳定版：`v1.4.1`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
 
 精简镜像如果连 `curl` 都没有，请先执行：
 

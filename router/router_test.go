@@ -204,6 +204,29 @@ func TestFeatureSettingsAreSeparatedFromPanelSettings(t *testing.T) {
 	}
 }
 
+func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
+	settings, err := os.ReadFile("../templates/settings.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range [][]byte{
+		[]byte(`grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-6`),
+		[]byte(`style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;"`),
+		[]byte(`x-for="pkg in filteredPackages"`),
+		[]byte(`filter === 'security'`),
+		[]byte(`filter === 'regular'`),
+		[]byte(`@click="listOpen = !listOpen"`),
+		[]byte(`@click="check(true)"`),
+	} {
+		if !bytes.Contains(settings, expected) {
+			t.Fatalf("compact system update panel is missing %q", expected)
+		}
+	}
+	if bytes.Contains(settings, []byte(`space-y-2 max-h-80 overflow-y-auto`)) {
+		t.Fatal("system update list still depends on an uncompiled max-h-80 utility")
+	}
+}
+
 func TestContentTemplatesRender(t *testing.T) {
 	contents := []string{
 		"dashboard_content", "websites_content", "wordpress_overview_content", "websites_new_content",
