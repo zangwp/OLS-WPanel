@@ -178,6 +178,28 @@ func TestEnsureOLSDefaultVHostRejectsPrivilegedOwner(t *testing.T) {
 	}
 }
 
+func TestEnsureOLSDefaultVHostReportsOwnerRepairFailure(t *testing.T) {
+	root := t.TempDir()
+	paths := olsRuntimePaths{managed: filepath.Join(root, "sites.conf")}
+	oldLookup := lookupOLSDefaultVHostUser
+	oldChown := chownOLSDefaultVHostRoot
+	lookupOLSDefaultVHostUser = func(string) (*user.User, error) {
+		return &user.User{Username: "www-data", Uid: "33", Gid: "33"}, nil
+	}
+	chownOLSDefaultVHostRoot = func(string, int, int) error {
+		return errors.New("permission denied")
+	}
+	t.Cleanup(func() {
+		lookupOLSDefaultVHostUser = oldLookup
+		chownOLSDefaultVHostRoot = oldChown
+	})
+
+	err := ensureOLSDefaultVHost(paths)
+	if err == nil || !strings.Contains(err.Error(), "目录所有者") {
+		t.Fatalf("owner repair error = %v", err)
+	}
+}
+
 func TestRenderOLSManagedRegistryRejectsDuplicateDomain(t *testing.T) {
 	root := t.TempDir()
 	available := filepath.Join(root, "sites-available")
