@@ -211,6 +211,22 @@ var migrations = append([]string{
 	)`,
 
 	// ============================================================
+	// firewall_port_rules
+	// 面板只记录自己创建的放行规则；不会接管或删除管理员的既有规则。
+	// ============================================================
+	`CREATE TABLE IF NOT EXISTS firewall_port_rules (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		protocol    TEXT    NOT NULL,
+		port        INTEGER NOT NULL,
+		source      TEXT    NOT NULL DEFAULT '',
+		description TEXT    NOT NULL DEFAULT '',
+		expires_at  DATETIME,
+		created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(protocol, port, source)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_firewall_port_rules_expires ON firewall_port_rules(expires_at)`,
+
+	// ============================================================
 	// file_security_events
 	// ============================================================
 	`CREATE TABLE IF NOT EXISTS file_security_events (

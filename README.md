@@ -17,7 +17,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.3.1`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前稳定版：`v1.4.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
 
 精简镜像如果连 `curl` 都没有，请先执行：
 
@@ -46,7 +46,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 | WordPress | 核心/主题/插件更新检查，LiteSpeed Cache，Redis 对象缓存，定时任务与临时维护 |
 | SSL | Let's Encrypt 申请与自动续签，支持手动证书，失败时保留 HTTP 站点便于排查 |
 | 备份 | 站点与数据库备份/恢复，面板 SQLite 自动备份，支持 SFTP / S3 异地保存 |
-| 安全 | 登录防爆破、恶意扫描检测、CDN 真实 IP、白名单、Fail2ban 与 nftables 封禁 |
+| 安全 | 登录防爆破、恶意扫描检测、CDN 真实 IP、白名单、Fail2ban、nftables 封禁与受管端口放行 |
 | 运维 | CPU/内存/磁盘监控，文件与数据库管理，计划任务，邮件告警，日志分析与 AI 诊断 |
 | 更新 | 面板 Release 验签更新与回滚；系统软件通过已配置的签名 APT 源更新 |
 

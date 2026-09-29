@@ -53,7 +53,15 @@
 
         <div class="xl:col-span-8">
             <div class="card min-h-[560px]">
-                <div x-show="!job && !running" class="py-24 text-center text-gray-500 text-sm">{{t .Lang "log_analysis.placeholder"}}</div>
+                <div x-show="!job && !running" class="py-12">
+                    <div class="max-w-xl mx-auto text-center"><p class="text-sm text-gray-400">{{t .Lang "log_analysis.placeholder"}}</p><p class="text-xs text-gray-600 mt-2">{{t .Lang "log_analysis.empty_help"}}</p></div>
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-8">
+                        <div class="rounded border border-gray-800 p-3"><p class="text-sm text-white">5xx / PHP</p><p class="text-xs text-gray-600 mt-1">{{t .Lang "log_analysis.empty_errors"}}</p></div>
+                        <div class="rounded border border-gray-800 p-3"><p class="text-sm text-white">404 / 444</p><p class="text-xs text-gray-600 mt-1">{{t .Lang "log_analysis.empty_security"}}</p></div>
+                        <div class="rounded border border-gray-800 p-3"><p class="text-sm text-white">Bots</p><p class="text-xs text-gray-600 mt-1">{{t .Lang "log_analysis.empty_bots"}}</p></div>
+                        <div class="rounded border border-gray-800 p-3"><p class="text-sm text-white">Top IP / URL</p><p class="text-xs text-gray-600 mt-1">{{t .Lang "log_analysis.empty_traffic"}}</p></div>
+                    </div>
+                </div>
                 <div x-show="running" class="py-24 text-center">
                     <div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
                     <p class="text-sm text-gray-400 mt-4">{{t .Lang "log_analysis.running_help"}}</p>

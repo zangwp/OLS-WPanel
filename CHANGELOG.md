@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0 — 2026-09-29
+
+- Adds a Ports & Firewall workspace with listener inventory, SSH/panel port discovery, host-policy visibility, and persistent or time-limited nftables allow rules.
+- Restricts OpenLiteSpeed WebAdmin port 7080 to an explicit management IP/CIDR and only creates or removes rules owned by OLS WPanel; active UFW and firewalld installations remain read-only to avoid conflicting managers.
+- Validates nftables changes before applying them, reconciles managed rules after restart, records changes in the operation log, and retains expired rules when kernel removal fails so access is never silently left unmanaged.
+- Adds alert-channel and rule summaries, searchable alert history, more useful empty states for AI Diagnostics and Log Analysis, and a compact troubleshooting/help area with privacy reminders.
+- Keeps the system-update package list in an internal scrolling region so large update sets no longer stretch the entire Settings page.
+
 ## v1.3.1 — 2026-09-29
 
 - Reorganizes Software Management into focused Runtime, Performance, and Developer Tools sections to reduce page length and visual noise.
