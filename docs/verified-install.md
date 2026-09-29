@@ -2,13 +2,13 @@
 
 ## Quick installation
 
-On a clean Debian 13 or Ubuntu 24.04 LTS server (amd64 or arm64), run as `root`:
+On a clean Debian 13, Ubuntu 24.04 LTS, or Ubuntu 26.04 LTS server (amd64 or arm64), run as `root`:
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The Cloudflare entry is pinned to `v1.2.5`. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
+The Cloudflare entry is pinned to `v1.3.0`. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
 
 ## Verify before executing any remote script
 
@@ -21,7 +21,7 @@ workdir="$(mktemp -d /tmp/ols-wpanel-install.XXXXXXXXXX)"
 trap 'rm -rf -- "$workdir"' EXIT
 cd "$workdir"
 
-version='v1.2.5'
+version='v1.3.0'
 base="https://github.com/zangwp/OLS-WPanel/releases/download/${version}"
 wget --no-config --https-only --no-hsts \
   "$base/install.sh" \
@@ -40,7 +40,7 @@ sha256sum --check --strict install.sh.sha256
 bash install.sh
 ```
 
-The key above is the OLS WPanel release-verification key used by `v1.2.5`. Compare it with the key shown in the repository and Release notes before use.
+The key above is the OLS WPanel release-verification key used by `v1.3.0`. Compare it with the key shown in the repository and Release notes before use.
 
 ## Minimal images
 
@@ -54,6 +54,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 
 - Debian 13 (Trixie), amd64 or arm64
 - Ubuntu 24.04 LTS (Noble), amd64 or arm64
+- Ubuntu 26.04 LTS (Resolute), amd64 or arm64
 - `root` access and a clean server are required
 - ARM64 currently requires a 4 KiB or 8 KiB kernel page size because the official OpenLiteSpeed ARM64 build is not compatible with 16 KiB page-size kernels
 

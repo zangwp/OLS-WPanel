@@ -50,15 +50,15 @@ assert_bootstrap_platform() {
     for required_cmd in dpkg head sed tr uname; do
         command -v "$required_cmd" >/dev/null 2>&1 || log_error "缺少平台检测命令: $required_cmd"
     done
-    [[ -r /etc/os-release ]] || log_error "无法读取 /etc/os-release；仅支持 Debian 13 或 Ubuntu 24.04 LTS（amd64/arm64）"
+    [[ -r /etc/os-release ]] || log_error "无法读取 /etc/os-release；仅支持 Debian 13 或 Ubuntu 24.04/26.04 LTS（amd64/arm64）"
     os_id=$(sed -n 's/^ID=//p' /etc/os-release | head -n 1 | tr -d '"')
     version_id=$(sed -n 's/^VERSION_ID=//p' /etc/os-release | head -n 1 | tr -d '"')
     codename=$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release | head -n 1 | tr -d '"')
     machine=$(uname -m 2>/dev/null || true)
     dpkg_arch=$(dpkg --print-architecture 2>/dev/null || true)
     case "${os_id}:${version_id}:${codename}" in
-        debian:13:trixie|ubuntu:24.04:noble) ;;
-        *) log_error "仅支持 Debian 13 (trixie) 或 Ubuntu 24.04 LTS (noble)，当前系统: ${os_id:-unknown} ${version_id:-unknown} ${codename:-unknown}" ;;
+        debian:13:trixie|ubuntu:24.04:noble|ubuntu:26.04:resolute) ;;
+        *) log_error "仅支持 Debian 13 (trixie) 或 Ubuntu 24.04/26.04 LTS (noble/resolute)，当前系统: ${os_id:-unknown} ${version_id:-unknown} ${codename:-unknown}" ;;
     esac
     case "$machine" in
         x86_64|amd64) machine="amd64" ;;
@@ -76,7 +76,7 @@ assert_bootstrap_platform() {
 ensure_bootstrap_dependencies() {
     local -a packages=()
 
-    command -v apt-get >/dev/null 2>&1 || log_error "缺少 apt-get；仅支持 Debian 13 或 Ubuntu 24.04 LTS"
+    command -v apt-get >/dev/null 2>&1 || log_error "缺少 apt-get；仅支持 Debian 13 或 Ubuntu 24.04/26.04 LTS"
     if ! dpkg-query -W -f='${Status}' ca-certificates 2>/dev/null | grep -Fqx 'install ok installed'; then
         packages+=(ca-certificates)
     fi

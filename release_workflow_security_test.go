@@ -179,7 +179,11 @@ func TestReleaseWorkflowSupplyChainBoundaries(t *testing.T) {
 		`BOOTSTRAP_RELEASE_VERSION=\"$version\"`,
 		`BOOTSTRAP_DEFAULT_PREFER_CN=0`,
 		`sudo bash dist/bootstrap.sh --check-platform`,
+		`docker run --rm -i ubuntu:26.04 bash -s -- --check-platform < dist/bootstrap.sh`,
 		`docker run --rm -i debian:13 bash -s -- --check-platform < dist/bootstrap.sh`,
+		`docker run --rm -v "$PWD:/src:ro" ubuntu:26.04`,
+		`bash /src/install.sh --check-ols-packages`,
+		`bash /src/install.sh --check-mariadb-packages`,
 		`printf '%s\n' "$version" > "$license_root/RELEASE_VERSION"`,
 		`install -m 0644 "$go_root/LICENSE" "$license_root/go-toolchain/LICENSE"`,
 		"third_party/adminer-6.0.1/LICENSE-APACHE-2.0.txt",
@@ -237,6 +241,9 @@ func TestCIWorkflowUsesExactPinnedGoToolchain(t *testing.T) {
 		"sudo bash install.sh --check-platform",
 		`docker run --rm -v "$PWD:/src:ro" debian:13 bash /src/install.sh --check-platform`,
 		`docker run --rm -i debian:13 bash -s -- --check-platform < "$RUNNER_TEMP/bootstrap.sh"`,
+		`docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/install.sh --check-platform`,
+		`docker run --rm -i ubuntu:26.04 bash -s -- --check-platform < "$RUNNER_TEMP/bootstrap.sh"`,
+		`docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/install.sh --check-ols-packages`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("CI workflow is missing platform verification %q", required)

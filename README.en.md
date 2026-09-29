@@ -4,7 +4,7 @@
 
 OLS WPanel is a WordPress-focused server panel built around OpenLiteSpeed, isolated per-site LSPHP 8.3/8.4/8.5 applications, LiteSpeed Cache, Redis, and MariaDB.
 
-It supports clean Debian 13 and Ubuntu 24.04 LTS servers on amd64 and arm64. The project is licensed under `GPL-3.0-only` and maintained at [zangwp/OLS-WPanel](https://github.com/zangwp/OLS-WPanel).
+It supports clean Debian 13, Ubuntu 24.04 LTS, and Ubuntu 26.04 LTS servers on amd64 and arm64. The project is licensed under `GPL-3.0-only` and maintained at [zangwp/OLS-WPanel](https://github.com/zangwp/OLS-WPanel).
 
 ## Quick installation
 
@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.2.5`.
+The current stable release is `v1.3.0`.
 
 ### Minimal images / download failures
 
@@ -42,7 +42,7 @@ Generic PHP sites use OpenLiteSpeed and LSPHP but do not receive WordPress plugi
 
 | Item | Supported |
 |---|---|
-| Operating systems | Debian 13 (Trixie), Ubuntu 24.04 LTS (Noble) |
+| Operating systems | Debian 13 (Trixie), Ubuntu 24.04 LTS (Noble), Ubuntu 26.04 LTS (Resolute) |
 | Architectures | amd64/x86_64, arm64/aarch64 |
 | CPU | 1 core or more |
 | Memory | 1 GiB or more |

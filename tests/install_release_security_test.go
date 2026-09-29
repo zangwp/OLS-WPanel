@@ -403,7 +403,7 @@ func TestInstallerPlatformAndArtifactPreflightPrecedeSystemWrites(t *testing.T) 
 		t.Fatalf("early safety order invalid: platform=%d workdir=%d artifact=%d first_system_write=%d", platform, workdir, artifact, lock)
 	}
 	for _, required := range []string{
-		`debian:13:trixie|ubuntu:24.04:noble) ;;`,
+		`debian:13:trixie|ubuntu:24.04:noble|ubuntu:26.04:resolute) ;;`,
 		`x86_64|amd64) machine="amd64" ;;`,
 		`aarch64|arm64) machine="arm64" ;;`,
 		`amd64|arm64) ;;`,

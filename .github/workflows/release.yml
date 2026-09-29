@@ -99,6 +99,10 @@ jobs:
 
           docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
             bash /src/install.sh --check-mariadb-packages
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 \
+            bash /src/install.sh --check-mariadb-packages
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 \
+            bash /src/install.sh --check-ols-packages
           docker run --rm -v "$PWD:/src:ro" debian:13 \
             bash /src/install.sh --check-mariadb-packages
 
@@ -222,6 +226,7 @@ jobs:
           grep -Fxq 'BOOTSTRAP_DEFAULT_PREFER_CN=1' dist/install-cn.sh
           grep -Fxq 'BOOTSTRAP_DEFAULT_PREFER_CN=0' dist/bootstrap.sh
           sudo bash dist/bootstrap.sh --check-platform
+          docker run --rm -i ubuntu:26.04 bash -s -- --check-platform < dist/bootstrap.sh
           docker run --rm -i debian:13 bash -s -- --check-platform < dist/bootstrap.sh
 
           # Collect the reviewed browser notices plus the exact license files
@@ -394,6 +399,10 @@ jobs:
           sudo bash install.sh --check-platform
           docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
             bash /src/install.sh --check-mariadb-packages
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 \
+            bash /src/install.sh --check-mariadb-packages
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 \
+            bash /src/install.sh --check-ols-packages
           docker run --rm -v "$PWD:/src:ro" debian:13 \
             bash /src/install.sh --check-mariadb-packages
           go mod download
