@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestCloudflareInstallEntryVerifiesPinnedRelease(t *testing.T) {
 	}
 	worker := string(workerBytes)
 	for _, required := range []string{
-		`const RELEASE_VERSION = "v1.2.0"`,
+		`const RELEASE_VERSION = "v`,
 		`https://github.com/zangwp/OLS-WPanel/releases/download/${RELEASE_VERSION}`,
 		`const BOOTSTRAP_NAME = "bootstrap.sh"`,
 		`MCowBQYDK2VwAyEA5rZthMZ8gkeCHSqxa22OlYSpYtTIRY0fBrUtnLvWW9Y=`,
@@ -28,6 +29,27 @@ func TestCloudflareInstallEntryVerifiesPinnedRelease(t *testing.T) {
 	} {
 		if !strings.Contains(worker, required) {
 			t.Errorf("Cloudflare install entry missing security control %q", required)
+		}
+	}
+	releaseMatches := regexp.MustCompile(`const RELEASE_VERSION = "(v[0-9]+\.[0-9]+\.[0-9]+)";`).FindAllStringSubmatch(worker, -1)
+	if len(releaseMatches) != 1 || len(releaseMatches[0]) != 2 {
+		t.Fatal("Cloudflare install entry must pin exactly one canonical semantic release")
+	}
+	releaseVersion := releaseMatches[0][1]
+	if !regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(releaseVersion) {
+		t.Fatalf("Cloudflare install entry has a non-canonical release version: %s", releaseVersion)
+	}
+	for path, expected := range map[string]string{
+		"README.md":                "当前稳定版：`" + releaseVersion + "`",
+		"README.en.md":             "The current stable release is `" + releaseVersion + "`",
+		"docs/verified-install.md": "version='" + releaseVersion + "'",
+	} {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !strings.Contains(string(contents), expected) {
+			t.Errorf("%s is not pinned to the Cloudflare release %s", path, releaseVersion)
 		}
 	}
 	for _, forbidden := range []string{
