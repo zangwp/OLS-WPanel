@@ -44,6 +44,9 @@ func TestPrimaryLSPHPVersionPreservesConfiguredExistingRuntime(t *testing.T) {
 	if runtime.LSAPIBinary != config.AppConfig.Paths.LSPHPBinary || runtime.CLIBinary != config.AppConfig.Paths.LSPHPCLI {
 		t.Fatalf("configured primary runtime paths were not preserved: %+v", runtime)
 	}
+	if !runtime.Primary {
+		t.Fatal("configured LSPHP 8.3 must be marked as the panel primary runtime")
+	}
 }
 
 func TestPrimaryLSPHPVersionDefaultsToLatestVerifiedRuntime(t *testing.T) {
@@ -60,6 +63,9 @@ func TestPrimaryLSPHPVersionDefaultsToLatestVerifiedRuntime(t *testing.T) {
 	}
 	if !runtime.Recommended {
 		t.Fatal("LSPHP 8.5 must be marked as the recommended fresh-install runtime")
+	}
+	if !runtime.Primary {
+		t.Fatal("default LSPHP 8.5 must be marked as the panel primary runtime")
 	}
 }
 

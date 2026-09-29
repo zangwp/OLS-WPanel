@@ -41,6 +41,8 @@ var i18nKeys = []string{
 	"software.action_success",
 	"software.config_updated",
 	"software.confirm_clear_log",
+	"software.confirm_restart_service",
+	"software.confirm_stop_service",
 	"software.current_value",
 	"software.development_tool_install_confirm",
 	"software.development_tool_installed",
