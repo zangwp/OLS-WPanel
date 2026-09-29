@@ -17,6 +17,42 @@ import (
 
 type FirewallHandler struct{}
 
+func (h *FirewallHandler) PortStatus(c *gin.Context) {
+	status, err := executor.GetFirewallPortStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取端口与防火墙状态失败"))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *FirewallHandler) AddPortRule(c *gin.Context) {
+	var req executor.FirewallPortRuleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("端口规则格式不正确"))
+		return
+	}
+	rule, err := executor.AddFirewallPortRule(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(rule))
+}
+
+func (h *FirewallHandler) DeletePortRule(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("无效的规则 ID"))
+		return
+	}
+	if err := executor.DeleteFirewallPortRule(id); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"deleted": true}))
+}
+
 const (
 	firewallBanHistoryLimit         = 300
 	firewallBanHistoryExpandedLimit = 1000

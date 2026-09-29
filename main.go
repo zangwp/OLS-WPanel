@@ -327,6 +327,7 @@ func main() {
 		log.Println("sshpass 未安装，远程备份密码认证功能不可用；请通过安装脚本或包管理器手动安装")
 	}
 	executor.StartProcessGuard()
+	executor.StartFirewallPortRuleManager()
 	executor.StartAlertMonitor(Version)
 	executor.DefaultWPAnomalyMonitor(cfg)
 	executor.StartOOMMonitor()

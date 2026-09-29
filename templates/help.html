@@ -4,7 +4,7 @@
     <h2 class="text-xl font-bold text-white mb-2">{{t .Lang "nav.help"}}</h2>
     <p class="text-sm text-gray-400 mb-6">{{t .Lang "help.intro"}}</p>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="card">
         <div class="flex items-start">
             <svg class="w-6 h-6 mr-3 text-white flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -29,6 +29,31 @@
             </div>
         </div>
     </div>
+    <div class="card">
+        <h3 class="text-base font-semibold text-white">{{t .Lang "help.docs_title"}}</h3>
+        <p class="text-sm text-gray-400 mt-2 mb-4">{{t .Lang "help.docs_desc"}}</p>
+        <div class="flex flex-wrap gap-2">
+            <a href="https://github.com/zangwp/OLS-WPanel#readme" target="_blank" rel="noopener" class="btn-secondary text-sm">README</a>
+            <a href="https://github.com/zangwp/OLS-WPanel/releases" target="_blank" rel="noopener" class="btn-secondary text-sm">{{t .Lang "help.changelog"}}</a>
+        </div>
+    </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        <div class="card">
+            <h3 class="text-base font-semibold text-white">{{t .Lang "help.environment_title"}}</h3>
+            <p class="text-sm text-gray-400 mt-2">{{t .Lang "help.environment_desc"}}</p>
+            <div class="mt-4 rounded border border-gray-700 p-3 text-sm"><span class="text-gray-500">{{t .Lang "help.panel_version"}}</span><span class="float-right font-mono text-white">{{.PanelVersion}}</span></div>
+            <p class="text-xs text-gray-600 mt-3">{{t .Lang "help.privacy_notice"}}</p>
+        </div>
+        <div class="card">
+            <h3 class="text-base font-semibold text-white">{{t .Lang "help.quick_help"}}</h3>
+            <div class="mt-3 divide-y divide-gray-800">
+                <details class="py-3"><summary class="cursor-pointer text-sm text-gray-200">{{t .Lang "help.question_panel"}}</summary><p class="text-xs text-gray-500 mt-2">{{t .Lang "help.answer_panel"}}</p></details>
+                <details class="py-3"><summary class="cursor-pointer text-sm text-gray-200">{{t .Lang "help.question_site"}}</summary><p class="text-xs text-gray-500 mt-2">{{t .Lang "help.answer_site"}}</p></details>
+                <details class="py-3"><summary class="cursor-pointer text-sm text-gray-200">{{t .Lang "help.question_update"}}</summary><p class="text-xs text-gray-500 mt-2">{{t .Lang "help.answer_update"}}</p></details>
+            </div>
+        </div>
     </div>
 </div>
 {{end}}

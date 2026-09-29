@@ -36,7 +36,7 @@ func init() {
 	database.RegisterUpgrade("1.0.38", ensureSwapUpgrade)
 }
 
-// ensureSwapUpgrade is best-effort: v1.3.1 must not fail to start merely
+// ensureSwapUpgrade is best-effort: the panel must not fail to start merely
 // because this optional safety buffer could not be created.
 func ensureSwapUpgrade() error {
 	created, reason, err := ensureAutomaticSwap(

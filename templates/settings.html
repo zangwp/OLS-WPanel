@@ -176,7 +176,7 @@
                         <span class="text-sm text-white font-mono" x-show="checked && count > 0" x-text="t('settings.available_count', { count })"></span>
                     <span class="text-xs text-gray-500" x-show="checked && count === 0">{{t .Lang "settings.up_to_date"}}</span>
                 </div>
-                <div x-show="count > 0" class="mb-3 space-y-2">
+                <div x-show="count > 0" class="mb-3 space-y-2 max-h-80 overflow-y-auto pr-1 overscroll-contain">
                     <template x-for="pkg in packages" :key="pkg.name">
                         <div class="flex items-center justify-between p-2 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
                             <div class="flex items-center space-x-2">
@@ -191,7 +191,7 @@
                     </template>
                     <p class="text-xs text-gray-500 mt-2">{{t .Lang "settings.system_update_help"}}</p>
                 </div>
-                <div class="flex items-center space-x-3">
+                <div class="sticky bottom-0 flex items-center space-x-3 py-2" style="background-color: #1e293b;">
                     <button @click="check()" :disabled="checking || updating" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.refresh')"></button>
                     <button @click="doUpdate()" x-show="count > 0" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.one_click_update')"></button>
                 </div>

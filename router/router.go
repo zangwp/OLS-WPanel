@@ -119,6 +119,7 @@ var i18nKeys = []string{
 	"common.request_failed",
 	"common.request_timeout",
 	"common.saving",
+	"common.loading",
 	"common.service_busy",
 	"common.service_exception",
 	"cron.day_separator",
@@ -686,6 +687,18 @@ var i18nKeys = []string{
 	"firewall.confirm_clear_history",
 	"firewall.confirm_permanent_ban",
 	"firewall.confirm_unban",
+	"firewall.confirm_open_port",
+	"firewall.confirm_close_port",
+	"firewall.any_source",
+	"firewall.port_opened",
+	"firewall.port_closed",
+	"firewall.refresh",
+	"firewall.applied",
+	"firewall.open_port",
+	"firewall.pending_reconcile",
+	"firewall.unknown_process",
+	"alert.configured",
+	"alert.not_configured",
 	"firewall.copy_failed_manual",
 	"firewall.copy_line_count",
 	"firewall.copy_line_ip",
@@ -1575,6 +1588,9 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.POST("/api/firewall/bans", firewallHandler.ManualBan)
 	protected.DELETE("/api/firewall/bans/:id", firewallHandler.Unban)
 	protected.POST("/api/firewall/bans/:id/permanent", firewallHandler.PermanentBan)
+	protected.GET("/api/firewall/ports", firewallHandler.PortStatus)
+	protected.POST("/api/firewall/ports", firewallHandler.AddPortRule)
+	protected.DELETE("/api/firewall/ports/:id", firewallHandler.DeletePortRule)
 
 	securityHandler := &handlers.SecurityHandler{}
 	protected.GET("/api/security/settings", securityHandler.GetSettings)

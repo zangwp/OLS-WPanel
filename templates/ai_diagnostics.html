@@ -132,8 +132,19 @@
                     <span x-show="report?.risk_level" class="text-xs px-2 py-1 rounded" :class="riskClass(report?.risk_level)" x-text="riskText(report?.risk_level)"></span>
                 </div>
 
-                <div x-show="!report && !rawText && !error && !diagnosing" class="py-24 text-center text-gray-500">
-                    <p class="text-sm">{{t .Lang "ai_diagnostics.results_placeholder"}}</p>
+                <div x-show="!report && !rawText && !error && !diagnosing" class="py-12">
+                    <div class="max-w-2xl mx-auto text-center">
+                        <p class="text-sm text-gray-400">{{t .Lang "ai_diagnostics.results_placeholder"}}</p>
+                        <p class="text-xs text-gray-600 mt-2">{{t .Lang "ai_diagnostics.empty_help"}}</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-8">
+                        <template x-for="item in symptoms" :key="'quick-' + item.value">
+                            <button type="button" @click="symptom = item.value" class="rounded border p-3 text-left transition-colors" :class="symptom === item.value ? 'border-blue-500 bg-blue-500/10' : 'border-gray-800 hover:border-blue-900'">
+                                <span class="text-sm text-gray-200" x-text="item.label"></span>
+                                <span class="block text-xs text-gray-600 mt-1">{{t .Lang "ai_diagnostics.read_only_hint"}}</span>
+                            </button>
+                        </template>
+                    </div>
                 </div>
 
                 <div x-show="diagnosing" class="py-24 text-center">
