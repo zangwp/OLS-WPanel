@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.2.0`.
+The current stable release is `v1.2.1`.
 
 ### MariaDB series on a fresh server
 
@@ -89,4 +89,4 @@ System Update installs stable patch and security updates from configured APT rep
 
 OLS WPanel owns the generated server and per-site OpenLiteSpeed configuration, so WebAdmin on port 7080 is disabled by default to avoid conflicting edits and an extra public administration endpoint. The installer enables Gzip, Brotli, and HTTP/3/QUIC, and WordPress sites receive LiteSpeed Cache and Redis configuration automatically. The Software page reports their effective status.
 
-See [README.md](README.md) for the complete Chinese guide, [NOTICE.md](NOTICE.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+See the [verified installation guide](docs/verified-install.md), [operations and recovery guide](docs/operations-and-recovery.md), [repository layout](docs/repository-layout.md), [NOTICE.md](NOTICE.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

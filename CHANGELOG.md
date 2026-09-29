@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.1 — 2026-09-29
+
+- Improves light-mode contrast, constrains ultra-wide layouts, groups sidebar navigation, and keeps language/theme controls visible in a dedicated footer.
+- Replaces dense Security, Firewall, and Software help dialogs with concise bilingual guidance and removes remaining user-visible hard-coded Chinese strings.
+- Fixes the announcement feed URL so it targets the tracked `docs/announcement.md` document.
+- Reduces the Chinese README to installation, support, feature, and documentation entry points; moves operational recovery details into `docs/operations-and-recovery.md`.
+- Removes an unreferenced community QR image and renames stale internal identifiers while retaining only the installer compatibility path required to clean older service drop-ins.
+
 ## v1.2.0 — 2026-09-28
 
 - Makes fresh installations use the latest release-verified defaults: LSPHP 8.5 and MariaDB 11.8.

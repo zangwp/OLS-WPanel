@@ -11,16 +11,16 @@ const OLS_WPANEL_INVENTORY_UPDATE_LIMIT = 3000;
 const OLS_WPANEL_INVENTORY_NAME_LIMIT = 512;
 const OLS_WPANEL_INVENTORY_VERSION_LIMIT = 128;
 
-$yubWPanelInventoryState = array(
+$olsWPanelInventoryState = array(
     'emitted' => false,
     'bootstrap_output_bytes' => 0,
     'protocol' => null,
 );
-$yubWPanelInventoryEmergencyReserve = str_repeat('R', 256 * 1024);
+$olsWPanelInventoryEmergencyReserve = str_repeat('R', 256 * 1024);
 
 function ols_wpanel_inventory_diagnostics(): array
 {
-    global $yubWPanelInventoryState;
+    global $olsWPanelInventoryState;
 
     $allowUrlInclude = filter_var(ini_get('allow_url_include'), FILTER_VALIDATE_BOOLEAN) ? '1' : '0';
 
@@ -32,18 +32,18 @@ function ols_wpanel_inventory_diagnostics(): array
         'disable_functions' => (string) ini_get('disable_functions'),
         'allow_url_include' => $allowUrlInclude,
         'memory_limit' => (string) ini_get('memory_limit'),
-        'bootstrap_output_bytes' => (int) $yubWPanelInventoryState['bootstrap_output_bytes'],
+        'bootstrap_output_bytes' => (int) $olsWPanelInventoryState['bootstrap_output_bytes'],
     );
 }
 
 function ols_wpanel_inventory_emit(array $envelope): void
 {
-    global $yubWPanelInventoryState;
+    global $olsWPanelInventoryState;
 
-    if ($yubWPanelInventoryState['emitted']) {
+    if ($olsWPanelInventoryState['emitted']) {
         return;
     }
-    $yubWPanelInventoryState['emitted'] = true;
+    $olsWPanelInventoryState['emitted'] = true;
     $envelope['protocol'] = OLS_WPANEL_INVENTORY_PROTOCOL;
     $envelope['runner_version'] = OLS_WPANEL_INVENTORY_RUNNER_VERSION;
     $envelope['inventory_schema_version'] = OLS_WPANEL_INVENTORY_SCHEMA_VERSION;
@@ -54,7 +54,7 @@ function ols_wpanel_inventory_emit(array $envelope): void
     }
     $token = (string) getenv('OLS_WPANEL_RUNNER_TOKEN');
     $frame = 'OLS_WPANEL_INVENTORY_BEGIN ' . $token . "\n" . $encoded . "\n" . 'OLS_WPANEL_INVENTORY_END ' . $token . "\n";
-    $protocol = $yubWPanelInventoryState['protocol'];
+    $protocol = $olsWPanelInventoryState['protocol'];
     if (is_resource($protocol)) {
         @fwrite($protocol, $frame);
         @fflush($protocol);
@@ -273,20 +273,20 @@ function ols_wpanel_inventory_anomaly_sample(array $query): array
 }
 
 $token = (string) getenv('OLS_WPANEL_RUNNER_TOKEN');
-$yubWPanelInventoryState['protocol'] = @fopen('php://fd/3', 'wb');
-if (PHP_SAPI !== 'cli' || !preg_match('/^[0-9a-f]{32}$/', $token) || !is_resource($yubWPanelInventoryState['protocol'])) {
+$olsWPanelInventoryState['protocol'] = @fopen('php://fd/3', 'wb');
+if (PHP_SAPI !== 'cli' || !preg_match('/^[0-9a-f]{32}$/', $token) || !is_resource($olsWPanelInventoryState['protocol'])) {
     ols_wpanel_inventory_fail('invalid_sapi');
     exit(2);
 }
 
-ob_start(static function (string $buffer) use (&$yubWPanelInventoryState): string {
-    $yubWPanelInventoryState['bootstrap_output_bytes'] += strlen($buffer);
+ob_start(static function (string $buffer) use (&$olsWPanelInventoryState): string {
+    $olsWPanelInventoryState['bootstrap_output_bytes'] += strlen($buffer);
     return '';
 }, 1);
 
-register_shutdown_function(static function () use (&$yubWPanelInventoryState, &$yubWPanelInventoryEmergencyReserve): void {
-    $yubWPanelInventoryEmergencyReserve = null;
-    if ($yubWPanelInventoryState['emitted']) {
+register_shutdown_function(static function () use (&$olsWPanelInventoryState, &$olsWPanelInventoryEmergencyReserve): void {
+    $olsWPanelInventoryEmergencyReserve = null;
+    if ($olsWPanelInventoryState['emitted']) {
         return;
     }
     $last = error_get_last();

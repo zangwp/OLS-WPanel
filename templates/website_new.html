@@ -37,7 +37,7 @@
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.database_password"}}</label>
                 <div class="flex space-x-2">
-                    <input type="text" x-model="dbPassword" class="input-field flex-1" :placeholder="siteType === 'php' ? '请输入数据库密码' : '留空自动生成随机密码'" :required="siteType === 'php'">
+                    <input type="text" x-model="dbPassword" class="input-field flex-1" :placeholder="siteType === 'php' ? t('website.db_password_php_placeholder') : t('website.db_password_wp_placeholder')" :required="siteType === 'php'">
                     <button type="button" @click="generatePassword()" class="btn-secondary" x-show="siteType !== 'php'">{{t .Lang "website.generate_random_password"}}</button>
                 </div>
                 <p class="text-xs text-gray-500 mt-1" x-show="siteType === 'php'">{{t .Lang "website.php_password_help"}}</p>
@@ -116,15 +116,11 @@ function createWebsite() {
             const warnings = (resp.data && resp.data.warnings) || [];
             const hardWarnings = (resp.data && resp.data.hard_warnings) || [];
             if (hardWarnings.length > 0) {
-                this.error = 'SSL 申请前检测未通过：\n\n' + hardWarnings.join('\n\n') + '\n\n请修复后重试，或取消勾选 SSL 后先创建 HTTP 网站。';
+                this.error = t('website.ssl_precheck_failed', { warnings: hardWarnings.join('\n\n') });
                 return false;
             }
             if (warnings.length === 0) return true;
-            return await confirmModal(
-                'SSL 申请前检测到以下风险：\n\n' +
-                warnings.join('\n\n') +
-                '\n\n如果你使用 CDN，请确认 CDN 已正确回源到当前服务器，并放行 /.well-known/acme-challenge/。\n\n是否继续创建网站并尝试申请 SSL？'
-            );
+            return await confirmModal(t('website.ssl_precheck_warning', { warnings: warnings.join('\n\n') }));
         },
         async submit() {
             this.loading = true;
@@ -152,7 +148,9 @@ function createWebsite() {
                     const sslWarning = resp.data && resp.data.ssl_warning;
                     this.sslWarning = sslWarning || '';
                     this.createdSiteID = resp.data && resp.data.id;
-                    this.success = sslWarning ? ('网站 ' + this.domain + ' 创建成功，但 SSL 未启用：' + sslWarning) : ('网站 ' + this.domain + ' 创建成功！');
+                    this.success = sslWarning
+                        ? t('website.created_ssl_warning', { domain: this.domain, warning: sslWarning })
+                        : t('website.created', { domain: this.domain });
                     this.domain = '';
                     this.aliases = '';
                     this.dbPassword = '';

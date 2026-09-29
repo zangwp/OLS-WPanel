@@ -17,9 +17,9 @@ const (
 	PasswordResetModeAdmin = "admin"
 )
 
-// yubWPanelPasswordResetMarker 标记该 mu-plugin 文件由面板全权托管，
+// olsWPanelPasswordResetMarker 标记该 mu-plugin 文件由面板全权托管，
 // 面板会在 allow 模式下删除它、在其它模式下覆盖它，用户不应手动修改。
-const yubWPanelPasswordResetMarker = "OLS-WPANEL-MANAGED:password-reset"
+const olsWPanelPasswordResetMarker = "OLS-WPANEL-MANAGED:password-reset"
 
 const wpPasswordResetPluginFile = "ols-wpanel-password-reset.php"
 
@@ -150,5 +150,5 @@ add_filter('allow_password_reset', function ($allow, $user_id) {
 // 由 OLS WPanel 托管：密码找回保护（mode: %s）。请勿手动修改，面板会覆盖本文件。
 
 %s
-`, yubWPanelPasswordResetMarker, mode, body)
+`, olsWPanelPasswordResetMarker, mode, body)
 }

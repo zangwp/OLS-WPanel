@@ -168,3 +168,17 @@ func TestInitialOLSDistributionBoundariesRemainExplicit(t *testing.T) {
 		}
 	}
 }
+
+func TestAnnouncementURLTargetsTrackedDocument(t *testing.T) {
+	configuration, err := os.ReadFile("config/distribution.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = "https://raw.githubusercontent.com/zangwp/OLS-WPanel/main/docs/announcement.md"
+	if !strings.Contains(string(configuration), expected) {
+		t.Fatalf("announcement URL does not target the tracked document: %s", expected)
+	}
+	if _, err := os.Stat("docs/announcement.md"); err != nil {
+		t.Fatalf("tracked announcement document is unavailable: %v", err)
+	}
+}

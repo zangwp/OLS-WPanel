@@ -762,7 +762,7 @@ function dbBackup() {
         restoring: false,
         async init() {
             await this.fetchBackups();
-            const restoreID = localStorage.getItem('yubWPanelDBRestoreID');
+            const restoreID = localStorage.getItem('olsWPanelDBRestoreID') || localStorage.getItem('yubWPanelDBRestoreID');
             if (restoreID) await this.waitForRestore(restoreID);
         },
         async fetchBackups() {
@@ -787,7 +787,8 @@ function dbBackup() {
             try {
                 const r = await api('/settings/db-backup/restore', { method: 'POST', body: { filename } });
                 showToast(r.data?.message || t('settings.restoring'), 'success');
-                localStorage.setItem('yubWPanelDBRestoreID', r.data.restore_id);
+                localStorage.setItem('olsWPanelDBRestoreID', r.data.restore_id);
+                localStorage.removeItem('yubWPanelDBRestoreID');
                 await this.waitForRestore(r.data.restore_id);
             } catch(e) {
                 this.restoring = false;
@@ -801,6 +802,7 @@ function dbBackup() {
                     const r = await api('/settings/db-backup/restore-status', { silent: true });
                     const status = r.data || {};
                     if (status.id === restoreID && status.status !== 'running' && status.status !== 'idle') {
+                        localStorage.removeItem('olsWPanelDBRestoreID');
                         localStorage.removeItem('yubWPanelDBRestoreID');
                         showToast(status.message || t('settings.restoring'), status.status === 'success' ? 'success' : 'error');
                         setTimeout(() => location.reload(), 1500);

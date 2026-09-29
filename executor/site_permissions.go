@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	yubWPanelFileLockBegin = "// BEGIN OLS WPanel File Lock"
-	yubWPanelFileLockEnd   = "// END OLS WPanel File Lock"
+	olsWPanelFileLockBegin = "// BEGIN OLS WPanel File Lock"
+	olsWPanelFileLockEnd   = "// END OLS WPanel File Lock"
 
 	FileLockModeLegacy   = "legacy"
 	FileLockModeStandard = "standard"
@@ -955,19 +955,19 @@ func applyWPFileModsLockBlock(content string, enabled bool) (string, error) {
 		return "", fmt.Errorf("wp-config.php DISALLOW_FILE_MODS must have one literal true definition")
 	case wpFileModsLiteralTrue:
 		content = fsMethodPattern.ReplaceAllString(content, "")
-		block := yubWPanelFileLockBegin + "\n" +
+		block := olsWPanelFileLockBegin + "\n" +
 			"define('FS_METHOD', 'direct');\n" +
-			yubWPanelFileLockEnd + "\n"
+			olsWPanelFileLockEnd + "\n"
 		next := insertBeforeMarker(content, block)
 		if next == content {
 			return "", fmt.Errorf("wp-config.php marker not found")
 		}
 		return next, nil
 	}
-	block := yubWPanelFileLockBegin + "\n" +
+	block := olsWPanelFileLockBegin + "\n" +
 		"define('DISALLOW_FILE_MODS', true);\n" +
 		"define('FS_METHOD', 'direct');\n" +
-		yubWPanelFileLockEnd + "\n"
+		olsWPanelFileLockEnd + "\n"
 	next := insertBeforeMarker(content, block)
 	if next == content {
 		return "", fmt.Errorf("wp-config.php marker not found")
@@ -977,15 +977,15 @@ func applyWPFileModsLockBlock(content string, enabled bool) (string, error) {
 
 func removeOLSWPanelFileLockBlock(content string) string {
 	for {
-		start := strings.Index(content, yubWPanelFileLockBegin)
+		start := strings.Index(content, olsWPanelFileLockBegin)
 		if start < 0 {
 			return content
 		}
-		end := strings.Index(content[start:], yubWPanelFileLockEnd)
+		end := strings.Index(content[start:], olsWPanelFileLockEnd)
 		if end < 0 {
 			return content
 		}
-		end += start + len(yubWPanelFileLockEnd)
+		end += start + len(olsWPanelFileLockEnd)
 		if end < len(content) && content[end] == '\r' {
 			end++
 		}

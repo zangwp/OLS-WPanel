@@ -14,19 +14,39 @@
 
 html[data-theme="light"] {
     color-scheme: light;
-    --panel-bg: #f3f6fb;
+    --panel-bg: #eef2f7;
     --panel-surface: rgba(255, 255, 255, 0.94);
     --panel-surface-strong: #ffffff;
     --panel-sidebar: rgba(255, 255, 255, 0.97);
-    --panel-border: rgba(15, 23, 42, 0.12);
+    --panel-border: #cbd5e1;
     --panel-text: #172033;
-    --panel-muted: #3f4d63;
-    --panel-subtle: #526176;
+    --panel-muted: #334155;
+    --panel-subtle: #475569;
     --panel-accent: #2563eb;
     --panel-accent-soft: rgba(37, 99, 235, 0.09);
     --panel-surface-soft: #f8fafc;
     --panel-row-hover: #eef4ff;
     --panel-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+}
+
+.panel-page-shell {
+    width: 100%;
+    max-width: 112rem;
+    margin: 0 auto;
+}
+
+.sidebar-section-label {
+    padding: 0.9rem 0.75rem 0.3rem;
+    color: var(--panel-muted);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    line-height: 1rem;
+    text-transform: uppercase;
+}
+
+.sidebar-footer {
+    background: color-mix(in srgb, var(--panel-sidebar) 94%, var(--panel-surface-strong));
 }
 
 html,
@@ -201,6 +221,7 @@ html[data-theme="light"] .bg-gray-800\/70,
 html[data-theme="light"] .bg-gray-700,
 html[data-theme="light"] .bg-gray-700\/40,
 html[data-theme="light"] .bg-gray-700\/50,
+html[data-theme="light"] [style*="background-color: #1e293b"],
 html[data-theme="light"] [style*="background-color: #0f172a"] {
     background-color: var(--panel-surface-strong) !important;
 }
@@ -222,8 +243,9 @@ html[data-theme="light"] .text-gray-500 {
     color: var(--panel-muted) !important;
 }
 
-html[data-theme="light"] .text-gray-600 {
-    color: #334155 !important;
+html[data-theme="light"] .text-gray-600,
+html[data-theme="light"] .text-gray-700 {
+    color: var(--panel-subtle) !important;
 }
 
 /* Component classes in main.css contain compiled dark-theme colors, so they
@@ -332,25 +354,32 @@ html[data-theme="light"] .bg-purple-950\/40 {
 html[data-theme="light"] .text-blue-100,
 html[data-theme="light"] .text-blue-200,
 html[data-theme="light"] .text-blue-300,
-html[data-theme="light"] .text-blue-400 { color: #1d4ed8 !important; }
+html[data-theme="light"] .text-blue-400,
+html[data-theme="light"] .text-blue-600,
+html[data-theme="light"] .text-blue-200\/80 { color: #1d4ed8 !important; }
 html[data-theme="light"] .text-green-200,
 html[data-theme="light"] .text-green-300,
 html[data-theme="light"] .text-green-400 { color: #15803d !important; }
 html[data-theme="light"] .text-red-100,
 html[data-theme="light"] .text-red-200,
+html[data-theme="light"] .text-red-200\/80,
 html[data-theme="light"] .text-red-300,
 html[data-theme="light"] .text-red-400 { color: #b91c1c !important; }
 html[data-theme="light"] .text-yellow-100,
 html[data-theme="light"] .text-yellow-200,
 html[data-theme="light"] .text-yellow-300,
 html[data-theme="light"] .text-yellow-400,
-html[data-theme="light"] .text-yellow-500 { color: #a16207 !important; }
+html[data-theme="light"] .text-yellow-500,
+html[data-theme="light"] .text-yellow-200\/80,
+html[data-theme="light"] .text-yellow-500\/80 { color: #854d0e !important; }
 html[data-theme="light"] .text-orange-200,
 html[data-theme="light"] .text-orange-300 { color: #c2410c !important; }
 html[data-theme="light"] .text-purple-100,
 html[data-theme="light"] .text-purple-200,
 html[data-theme="light"] .text-purple-300,
 html[data-theme="light"] .text-purple-400 { color: #7e22ce !important; }
+html[data-theme="light"] .text-pink-300,
+html[data-theme="light"] .text-pink-400 { color: #be185d !important; }
 
 html[data-theme="light"] .btn-primary,
 html[data-theme="light"] .btn-danger,

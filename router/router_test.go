@@ -1544,7 +1544,12 @@ func TestBaseProvidesPersistentLightDarkThemeToggle(t *testing.T) {
 		[]byte(`/css/theme.css`),
 		[]byte(`localStorage.getItem('ols-wpanel-theme')`),
 		[]byte(`localStorage.setItem('ols-wpanel-theme'`),
+		[]byte(`ols-wpanel-theme-change`),
 		[]byte(`@click="toggleTheme()"`),
+		[]byte(`class="panel-page-shell"`),
+		[]byte(`class="sidebar-footer`),
+		[]byte(`nav.group_sites`),
+		[]byte(`nav.group_operations`),
 	} {
 		if !bytes.Contains(source, required) {
 			t.Fatalf("base theme support is missing %q", required)
@@ -1565,8 +1570,10 @@ func TestLightThemeOverridesCompiledComponentColors(t *testing.T) {
 		[]byte(`html[data-theme="light"] .table-header`),
 		[]byte(`html[data-theme="light"] .label`),
 		[]byte(`html[data-theme="light"] .input-field::placeholder`),
-		[]byte(`--panel-muted: #3f4d63`),
-		[]byte(`--panel-subtle: #526176`),
+		[]byte(`--panel-muted: #334155`),
+		[]byte(`--panel-subtle: #475569`),
+		[]byte(`.panel-page-shell`),
+		[]byte(`.sidebar-section-label`),
 		[]byte(`html[data-theme="light"] .runtime-version`),
 		[]byte(`color: #166534 !important`),
 	} {

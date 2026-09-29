@@ -68,10 +68,10 @@ func TestApplyWPFileModsLockBlockAddsAndRemovesManagedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply lock: %v", err)
 	}
-	if !strings.Contains(locked, yubWPanelFileLockBegin) || !strings.Contains(locked, "define('DISALLOW_FILE_MODS', true);") || !strings.Contains(locked, "define('FS_METHOD', 'direct');") {
+	if !strings.Contains(locked, olsWPanelFileLockBegin) || !strings.Contains(locked, "define('DISALLOW_FILE_MODS', true);") || !strings.Contains(locked, "define('FS_METHOD', 'direct');") {
 		t.Fatalf("managed lock block missing:\n%s", locked)
 	}
-	if strings.Index(locked, yubWPanelFileLockBegin) > strings.Index(locked, "/* That's all, stop editing!") {
+	if strings.Index(locked, olsWPanelFileLockBegin) > strings.Index(locked, "/* That's all, stop editing!") {
 		t.Fatal("managed lock block should be inserted before wp-config marker")
 	}
 
@@ -79,7 +79,7 @@ func TestApplyWPFileModsLockBlockAddsAndRemovesManagedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remove lock: %v", err)
 	}
-	if strings.Contains(unlocked, yubWPanelFileLockBegin) || strings.Contains(unlocked, "DISALLOW_FILE_MODS") {
+	if strings.Contains(unlocked, olsWPanelFileLockBegin) || strings.Contains(unlocked, "DISALLOW_FILE_MODS") {
 		t.Fatalf("managed lock block was not removed:\n%s", unlocked)
 	}
 }
@@ -108,7 +108,7 @@ func TestApplyWPFileModsLockBlockClearsManagedFSMethodOnUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply lock: %v", err)
 	}
-	if !strings.Contains(locked, yubWPanelFileLockBegin) {
+	if !strings.Contains(locked, olsWPanelFileLockBegin) {
 		t.Fatalf("managed block should be present while locked: %s", locked)
 	}
 
@@ -116,7 +116,7 @@ func TestApplyWPFileModsLockBlockClearsManagedFSMethodOnUnlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remove lock: %v", err)
 	}
-	if strings.Contains(unlocked, yubWPanelFileLockBegin) {
+	if strings.Contains(unlocked, olsWPanelFileLockBegin) {
 		t.Fatalf("managed block should be removed after unlock: %s", unlocked)
 	}
 	if strings.Contains(unlocked, "define('FS_METHOD', 'direct');") {
@@ -198,9 +198,9 @@ func TestWPConfigHasUserFileModsLockIgnoresManagedBlock(t *testing.T) {
 	webRoot := t.TempDir()
 	configPath := filepath.Join(webRoot, "wp-config.php")
 	managedOnly := "<?php\n" +
-		yubWPanelFileLockBegin + "\n" +
+		olsWPanelFileLockBegin + "\n" +
 		"define('DISALLOW_FILE_MODS', true);\n" +
-		yubWPanelFileLockEnd + "\n" +
+		olsWPanelFileLockEnd + "\n" +
 		"/* That's all, stop editing! Happy publishing. */\n"
 	if err := os.WriteFile(configPath, []byte(managedOnly), 0600); err != nil {
 		t.Fatal(err)
@@ -441,7 +441,7 @@ func TestApplyWPFileModsLockBlockFallbackForNonstandardWPConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply lock: %v", err)
 	}
-	if !strings.Contains(locked, yubWPanelFileLockBegin) {
+	if !strings.Contains(locked, olsWPanelFileLockBegin) {
 		t.Fatal("managed lock block should be injected for nonstandard wp-config")
 	}
 	if !strings.Contains(locked, "define('DISALLOW_FILE_MODS', true);") {
@@ -455,18 +455,18 @@ func TestApplyWPFileModsLockBlockFallbackForNonstandardWPConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remove lock: %v", err)
 	}
-	if strings.Contains(unlocked, yubWPanelFileLockBegin) || strings.Contains(unlocked, "DISALLOW_FILE_MODS") {
+	if strings.Contains(unlocked, olsWPanelFileLockBegin) || strings.Contains(unlocked, "DISALLOW_FILE_MODS") {
 		t.Fatalf("managed lock block should be removed: %s", unlocked)
 	}
 
 	configWithClose := "<?php\n" +
 		"define('DB_NAME', 'wordpress');\n" +
 		"?>\n"
-	got := insertBeforeMarker(configWithClose, yubWPanelFileLockBegin+"\n"+"define('DISALLOW_FILE_MODS', true);\n"+yubWPanelFileLockEnd+"\n")
-	if !strings.Contains(got, yubWPanelFileLockBegin) {
+	got := insertBeforeMarker(configWithClose, olsWPanelFileLockBegin+"\n"+"define('DISALLOW_FILE_MODS', true);\n"+olsWPanelFileLockEnd+"\n")
+	if !strings.Contains(got, olsWPanelFileLockBegin) {
 		t.Fatal("should inject before closing PHP tag when marker is missing")
 	}
-	if idxTag := strings.Index(got, yubWPanelFileLockBegin); idxTag >= strings.Index(got, "?>") {
+	if idxTag := strings.Index(got, olsWPanelFileLockBegin); idxTag >= strings.Index(got, "?>") {
 		t.Fatal("managed block should be before ?> when inserted by fallback")
 	}
 }

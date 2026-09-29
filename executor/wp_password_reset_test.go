@@ -28,7 +28,7 @@ func TestApplyWPPasswordResetModeAll(t *testing.T) {
 		t.Fatalf("read mu-plugin: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, yubWPanelPasswordResetMarker) {
+	if !strings.Contains(content, olsWPanelPasswordResetMarker) {
 		t.Fatalf("marker missing")
 	}
 	if !strings.Contains(content, "allow_password_reset") || !strings.Contains(content, "__return_false") {

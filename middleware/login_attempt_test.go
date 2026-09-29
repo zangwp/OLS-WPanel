@@ -18,7 +18,7 @@ func insertTestBan(t *testing.T, tracker *LoginAttemptTracker, ip, jail string) 
 	}
 }
 
-func TestIsBannedIgnoresYubWPanelLoginSource(t *testing.T) {
+func TestIsBannedIgnoresOLSWPanelLoginSource(t *testing.T) {
 	db := newScanDefenseTestDB(t)
 	tracker := &LoginAttemptTracker{DB: db}
 	insertTestBan(t, tracker, "203.0.113.10", "olswpanel-login")

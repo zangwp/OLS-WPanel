@@ -11,7 +11,6 @@ would change Go package and test boundaries.
 |---|---|
 | `.github/workflows/` | CI、双架构验证、签名与发布 |
 | `assets/branding/` | 品牌主图与设计说明 |
-| `assets/community/` | 社区渠道图片，不进入运行时二进制 |
 | `assets/frontend/` | Tailwind 源码和构建配置；生成结果在 `static/` |
 | `collector/`、`database/`、`handlers/`、`middleware/`、`models/`、`router/` | Go 应用分层 |
 | `config/`、`executor/`、`security/` | 配置、系统操作与安全边界 |
