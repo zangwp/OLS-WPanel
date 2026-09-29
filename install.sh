@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eE
 set -o pipefail
 
 # ============================================================
@@ -62,6 +62,8 @@ REPAIR_INACTIVE_HEALTH_VERIFIED=false
 FRESH_SERVICE_CLEANUP_REQUIRED=false
 VALIDATED_TLS_PORT=""
 ATOMIC_STAGE_PATH=""
+INSTALL_FAILURE_STATUS=""
+INSTALL_FAILURE_LINE=""
 # The signed bootstrap validates this marker before it delegates execution.
 # shellcheck disable=SC2034
 RELEASE_PUBLIC_KEY_HEX="e6b66d84c67c8247821d2ab16b6d8e9584a962d4c8458d1f06b52d9cbbd65bd6"
@@ -225,6 +227,7 @@ cleanup_failed_fresh_panel_service() {
 
 installer_exit() {
     local exit_code=$?
+    trap - ERR
     set +e
     if [[ $exit_code -ne 0 ]]; then
         repair_rollback
@@ -239,6 +242,10 @@ installer_exit() {
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${RED}  安装未完成 / Installation incomplete${NC}"
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        if [[ -n "$INSTALL_FAILURE_STATUS" ]] && [[ -n "$INSTALL_FAILURE_LINE" ]]; then
+            echo -e "  ${RED}失败状态:${NC} exit ${INSTALL_FAILURE_STATUS}，安装脚本第 ${INSTALL_FAILURE_LINE} 行。"
+            echo -e "  ${RED}Failure:${NC} exit ${INSTALL_FAILURE_STATUS} at installer line ${INSTALL_FAILURE_LINE}."
+        fi
         echo -e "  请先保存本次终端完整输出，不要在未定位原因前直接重装系统。"
         echo -e "  优先检查：网络/DNS 与系统时间、APT 错误、发行包哈希/签名、受支持平台检测，以及现有服务冲突。"
         echo -e "  可结合 ${BOLD}journalctl -u ols-wpanel -n 100 --no-pager${NC} 和 APT 输出排查，再携带已脱敏日志提交 GitHub Issue。"
@@ -370,6 +377,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 异常退出时回滚 repair，并只清理由 mktemp 创建的本次工作目录。
+trap 'INSTALL_FAILURE_STATUS=$?; INSTALL_FAILURE_LINE=$LINENO' ERR
 trap installer_exit EXIT
 
 file_size_within_limit() {
@@ -1256,11 +1264,21 @@ repair_rollback() {
     fi
 }
 
+apt_candidate_version() {
+    local pkg="$1"
+
+    # Do not exit awk after the first match. With `set -o pipefail`, an early
+    # consumer exit can give apt-cache SIGPIPE and abort the installer even
+    # though a valid Candidate line was already produced.
+    LC_ALL=C apt-cache policy "$pkg" 2>/dev/null | \
+        awk '$1 == "Candidate:" && !found { print $2; found = 1 }'
+}
+
 apt_package_available() {
     local pkg="$1"
     local candidate=""
 
-    candidate=$(LC_ALL=C apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/ {print $2; exit}' || true)
+    candidate=$(apt_candidate_version "$pkg" || true)
     if [[ -n "$candidate" ]] && [[ "$candidate" != "(none)" ]]; then
         return 0
     fi
@@ -1465,7 +1483,9 @@ REDISSOURCEEOF
 	apt-get update
 	apt_package_available redis-server || \
 		log_error "Redis 官方仓库缺少 redis-server（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
-	candidate=$(LC_ALL=C apt-cache policy redis-server 2>/dev/null | awk '/Candidate:/ {print $2; exit}' || true)
+	if ! candidate=$(apt_candidate_version redis-server); then
+		log_error "无法读取 Redis APT 候选版本"
+	fi
 	[[ -n "$candidate" ]] && [[ "$candidate" != "(none)" ]] || \
 		log_error "无法解析 Redis APT 候选版本"
 	dpkg --compare-versions "$candidate" ge "$MIN_REDIS_PACKAGE_VERSION" || \
@@ -1514,7 +1534,9 @@ Signed-By: ${keyring}
 MARIADBSOURCEEOF
 	APT_SOURCES_MUTATED=true
 	apt-get update
-	candidate=$(LC_ALL=C apt-cache policy mariadb-server 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+	if ! candidate=$(apt_candidate_version mariadb-server); then
+		log_error "无法读取 MariaDB APT 候选版本"
+	fi
 	[[ "$candidate" == *"${MARIADB_SERIES}."* ]] || \
 		log_error "MariaDB 官方仓库未提供 ${MARIADB_SERIES} 候选包（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
 	log_info "MariaDB ${MARIADB_SERIES} 官方候选包可用: $candidate"

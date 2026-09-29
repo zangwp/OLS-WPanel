@@ -499,6 +499,29 @@ func TestInstallerPinsSupportedRuntimeRepositories(t *testing.T) {
 	}
 }
 
+func TestInstallerCandidateLookupIsPipefailSafeAndFailuresAreActionable(t *testing.T) {
+	script := readInstallScript(t, installScriptPath)
+	for _, required := range []string{
+		`set -eE`,
+		`trap 'INSTALL_FAILURE_STATUS=$?; INSTALL_FAILURE_LINE=$LINENO' ERR`,
+		`失败状态:${NC} exit ${INSTALL_FAILURE_STATUS}，安装脚本第 ${INSTALL_FAILURE_LINE} 行`,
+		`apt_candidate_version()`,
+		`awk '$1 == "Candidate:" && !found { print $2; found = 1 }'`,
+		`candidate=$(apt_candidate_version "$pkg" || true)`,
+		`candidate=$(apt_candidate_version redis-server)`,
+		`candidate=$(apt_candidate_version mariadb-server)`,
+		`无法读取 Redis APT 候选版本`,
+		`无法读取 MariaDB APT 候选版本`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("install.sh missing pipefail-safe candidate/error diagnostic control %q", required)
+		}
+	}
+	if strings.Contains(script, `awk '/Candidate:/ {print $2; exit}'`) {
+		t.Fatal("installer candidate lookup must drain apt-cache output instead of causing SIGPIPE under pipefail")
+	}
+}
+
 func TestInstallerUsesPrivateWorkdirsAndBoundedDownloads(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 	cnScript := readInstallScript(t, installCNScriptPath)

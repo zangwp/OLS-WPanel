@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.2 — 2026-09-29
+
+- Fixes fresh Ubuntu/Debian installations aborting after MariaDB repository setup when `apt-cache policy` received SIGPIPE from an early-exiting `awk` under `pipefail`.
+- Adds explicit unexpected-failure exit status and installer line diagnostics while keeping sensitive command arguments out of terminal output.
+
 ## v1.2.1 — 2026-09-29
 
 - Improves light-mode contrast, constrains ultra-wide layouts, groups sidebar navigation, and keeps language/theme controls visible in a dedicated footer.
