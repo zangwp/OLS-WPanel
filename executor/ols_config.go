@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -31,6 +32,8 @@ var (
 	runOLSCommand      = func(name string, args ...string) ([]byte, error) {
 		return exec.Command(name, args...).CombinedOutput()
 	}
+	lookupOLSDefaultVHostUser = user.Lookup
+	chownOLSDefaultVHostRoot  = os.Chown
 )
 
 type olsRuntimePaths struct {
@@ -524,6 +527,24 @@ func ensureOLSDefaultVHost(paths olsRuntimePaths) error {
 	}
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("创建 OpenLiteSpeed 默认虚拟主机根目录失败: %w", err)
+	}
+	account, err := lookupOLSDefaultVHostUser("www-data")
+	if err != nil {
+		return fmt.Errorf("查找 OpenLiteSpeed 默认虚拟主机用户 www-data 失败: %w", err)
+	}
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil || uid < 11 {
+		return fmt.Errorf("www-data UID 不符合 OpenLiteSpeed 最低安全要求: %q", account.Uid)
+	}
+	gid, err := strconv.Atoi(account.Gid)
+	if err != nil || gid < 10 {
+		return fmt.Errorf("www-data GID 不符合 OpenLiteSpeed 最低安全要求: %q", account.Gid)
+	}
+	if err := chownOLSDefaultVHostRoot(root, uid, gid); err != nil {
+		return fmt.Errorf("设置 OpenLiteSpeed 默认虚拟主机目录所有者失败: %w", err)
+	}
+	if err := os.Chmod(root, 0755); err != nil {
+		return fmt.Errorf("设置 OpenLiteSpeed 默认虚拟主机目录权限失败: %w", err)
 	}
 	content := fmt.Sprintf(`docRoot                 %s/
 vhDomain                ols-wpanel.invalid

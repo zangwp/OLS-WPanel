@@ -3,6 +3,7 @@ package executor
 import (
 	"errors"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -97,6 +98,24 @@ func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
 		OLSListenerKey:   filepath.Join(root, "default.key"),
 	}}
 	t.Cleanup(func() { config.AppConfig = old })
+	oldLookup := lookupOLSDefaultVHostUser
+	oldChown := chownOLSDefaultVHostRoot
+	var chownPath string
+	var chownUID, chownGID int
+	lookupOLSDefaultVHostUser = func(name string) (*user.User, error) {
+		if name != "www-data" {
+			t.Fatalf("lookup user = %q", name)
+		}
+		return &user.User{Username: name, Uid: "33", Gid: "33"}, nil
+	}
+	chownOLSDefaultVHostRoot = func(path string, uid, gid int) error {
+		chownPath, chownUID, chownGID = path, uid, gid
+		return nil
+	}
+	t.Cleanup(func() {
+		lookupOLSDefaultVHostUser = oldLookup
+		chownOLSDefaultVHostRoot = oldChown
+	})
 
 	content, err := renderOLSManagedRegistry(enabled)
 	if err != nil {
@@ -124,12 +143,38 @@ func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
 	if info, err := os.Stat(defaultRoot); err != nil || !info.IsDir() {
 		t.Fatalf("default root was not created: info=%v err=%v", info, err)
 	}
+	if chownPath != defaultRoot || chownUID != 33 || chownGID != 33 {
+		t.Fatalf("default root owner repair = (%q,%d,%d), want (%q,33,33)", chownPath, chownUID, chownGID, defaultRoot)
+	}
 	data, err := os.ReadFile(defaultConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "vhDomain                ols-wpanel.invalid") || !strings.Contains(string(data), "allowBrowse            0") {
 		t.Fatalf("unsafe or incomplete default vhost:\n%s", data)
+	}
+}
+
+func TestEnsureOLSDefaultVHostRejectsPrivilegedOwner(t *testing.T) {
+	root := t.TempDir()
+	paths := olsRuntimePaths{managed: filepath.Join(root, "sites.conf")}
+	oldLookup := lookupOLSDefaultVHostUser
+	oldChown := chownOLSDefaultVHostRoot
+	lookupOLSDefaultVHostUser = func(string) (*user.User, error) {
+		return &user.User{Username: "www-data", Uid: "0", Gid: "33"}, nil
+	}
+	chownOLSDefaultVHostRoot = func(string, int, int) error {
+		t.Fatal("chown must not run for an unsafe identity")
+		return nil
+	}
+	t.Cleanup(func() {
+		lookupOLSDefaultVHostUser = oldLookup
+		chownOLSDefaultVHostRoot = oldChown
+	})
+
+	err := ensureOLSDefaultVHost(paths)
+	if err == nil || !strings.Contains(err.Error(), "UID") {
+		t.Fatalf("unsafe UID error = %v", err)
 	}
 }
 

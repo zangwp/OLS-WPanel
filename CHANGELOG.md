@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.5 — 2026-09-29
+
+- Fixes fresh installs stopping at OpenLiteSpeed configuration validation because the no-site fallback root was owned by a privileged UID.
+- Assigns the fallback virtual host to the standard unprivileged `www-data` identity and verifies that its UID/GID satisfy OpenLiteSpeed's minimums before validation.
+- Repairs the fallback-root identity during upgrades and whenever the managed OpenLiteSpeed registry is regenerated.
+- Adds installer, runtime, migration, and Linux build regression coverage for the ownership guard.
+
 ## v1.2.4 — 2026-09-29
 
 - Fixes OpenLiteSpeed startup timeouts on Ubuntu 24.04 by aligning the panel-owned systemd drop-in with the PID file actually maintained by `lswsctrl`.

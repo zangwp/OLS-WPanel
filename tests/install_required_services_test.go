@@ -97,6 +97,9 @@ func TestInstallerProvidesSafeDefaultOpenLiteSpeedVHost(t *testing.T) {
 		"virtualHost olsw_default {",
 		"enableScript           0",
 		"map                     olsw_default *",
+		"id -u www-data",
+		"id -g www-data",
+		"install -d -o www-data -g www-data -m 0755 \"$OLS_DEFAULT_ROOT\"",
 		"systemctl_wait_active_required lshttpd",
 		"require_ols_listeners",
 	} {

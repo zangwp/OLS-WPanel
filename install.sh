@@ -2476,7 +2476,13 @@ OLS_DEFAULT_ROOT="$OLS_CONF_DIR/default-vhost-root"
 OLS_DEFAULT_CONF="$OLS_CONF_DIR/default-vhost.conf"
 install -d -o root -g root -m 0750 "$OLS_CONF_DIR"
 install -d -o root -g root -m 0750 "$OLS_CONF_DIR/sites-available" "$OLS_CONF_DIR/sites-enabled" "$OLS_CONF_DIR/lsphp-sites"
-install -d -o root -g root -m 0755 "$OLS_DEFAULT_ROOT"
+if ! OLS_DEFAULT_UID="$(id -u www-data 2>/dev/null)" || ! OLS_DEFAULT_GID="$(id -g www-data 2>/dev/null)"; then
+    log_error "OpenLiteSpeed 备用虚拟主机需要低权限 www-data 用户"
+fi
+if (( OLS_DEFAULT_UID < 11 || OLS_DEFAULT_GID < 10 )); then
+    log_error "www-data 的 UID/GID 不符合 OpenLiteSpeed 最低安全要求"
+fi
+install -d -o www-data -g www-data -m 0755 "$OLS_DEFAULT_ROOT"
 
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout "$OLS_CONF_DIR/default.key" \
