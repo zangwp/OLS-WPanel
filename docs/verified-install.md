@@ -8,7 +8,7 @@ On a clean Debian 13, Ubuntu 24.04 LTS, or Ubuntu 26.04 LTS server (amd64 or arm
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The Cloudflare entry is pinned to `v1.11.0`. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
+The Cloudflare entry is pinned to `v1.12.0`. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
 
 ## Verify before executing any remote script
 
@@ -21,7 +21,7 @@ workdir="$(mktemp -d /tmp/ols-wpanel-install.XXXXXXXXXX)"
 trap 'rm -rf -- "$workdir"' EXIT
 cd "$workdir"
 
-version='v1.11.0'
+version='v1.12.0'
 base="https://github.com/zangwp/OLS-WPanel/releases/download/${version}"
 wget --no-config --https-only --no-hsts \
   "$base/install.sh" \
@@ -40,7 +40,7 @@ sha256sum --check --strict install.sh.sha256
 bash install.sh
 ```
 
-The key above is the OLS WPanel release-verification key used by `v1.11.0`. Compare it with the key shown in the repository and Release notes before use.
+The key above is the OLS WPanel release-verification key used by `v1.12.0`. Compare it with the key shown in the repository and Release notes before use.
 
 ## Minimal images
 
