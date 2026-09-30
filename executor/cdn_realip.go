@@ -141,8 +141,6 @@ func ResolveCDNRealIPRuntime(site *models.Website) (*CDNRealIPRuntime, error) {
 		return &CDNRealIPRuntime{}, nil
 	}
 	header := ""
-	compatible := false
-	enabledGroups := 0
 	seen := map[string]bool{}
 	var ranges []string
 
@@ -150,7 +148,6 @@ func ResolveCDNRealIPRuntime(site *models.Website) (*CDNRealIPRuntime, error) {
 		if !group.Enabled {
 			continue
 		}
-		enabledGroups++
 		groupHeader, err := NormalizeCDNRealIPHeader(group.HeaderName)
 		if err != nil {
 			return nil, err
@@ -188,9 +185,6 @@ func ResolveCDNRealIPRuntime(site *models.Website) (*CDNRealIPRuntime, error) {
 			}
 		}
 	}
-	_ = compatible
-	_ = enabledGroups
-
 	if header == "" {
 		return &CDNRealIPRuntime{}, nil
 	}

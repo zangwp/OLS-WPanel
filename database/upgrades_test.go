@@ -400,7 +400,7 @@ func TestUpgradeAddsWPUpdateSchemaFrom1031(t *testing.T) {
 			t.Fatalf("table %s exists=%d err=%v", table, exists, err)
 		}
 	}
-	if got := LatestVersion(); got != "1.0.71" {
+	if got := LatestVersion(); got != "1.0.72" {
 		t.Fatalf("LatestVersion=%q", got)
 	}
 	for _, column := range []string{"database_backup_mode", "database_backup_source_id", "auto_rollback", "batch_id"} {
@@ -1917,5 +1917,46 @@ func TestUpgradeAddsBotRateLimitSettingsToExistingSchema(t *testing.T) {
 		if got != setting.want {
 			t.Fatalf("%s = %q, want %q", setting.key, got, setting.want)
 		}
+	}
+}
+
+func TestSecurityWhitelistScopeUpgrade(t *testing.T) {
+	openTempDB(t)
+	if err := RunMigrations(); err != nil {
+		t.Fatalf("RunMigrations() error = %v", err)
+	}
+	if _, err := DB.Exec(`DELETE FROM security_settings WHERE skey = 'ssh_whitelist_ips'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DB.Exec(`INSERT INTO cdn_realip_groups (name, provider, header_name, ip_ranges, builtin, enabled, description)
+		VALUES ('Legacy compatible', 'compatible', 'X-Forwarded-For', '', 0, 1, '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DB.Exec(`CREATE TABLE schema_version (
+		version TEXT NOT NULL,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DB.Exec(`INSERT INTO schema_version (version) VALUES ('1.0.71')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunUpgrades(); err != nil {
+		t.Fatalf("RunUpgrades() error = %v", err)
+	}
+
+	var sshWhitelist string
+	if err := DB.QueryRow(`SELECT svalue FROM security_settings WHERE skey = 'ssh_whitelist_ips'`).Scan(&sshWhitelist); err != nil {
+		t.Fatal(err)
+	}
+	if sshWhitelist != "" {
+		t.Fatalf("new SSH whitelist = %q, want empty", sshWhitelist)
+	}
+	var enabled int
+	if err := DB.QueryRow(`SELECT enabled FROM cdn_realip_groups WHERE name = 'Legacy compatible'`).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 0 {
+		t.Fatalf("legacy compatible group enabled = %d, want 0", enabled)
 	}
 }

@@ -776,6 +776,15 @@ var upgrades = []Upgrade{
 			`ALTER TABLE websites ADD COLUMN alias_redirect_mode TEXT NOT NULL DEFAULT 'serve'`,
 		},
 	},
+	{
+		Version:     "1.0.72",
+		Description: "拆分网站与 SSH 白名单，并停用缺少可信回源网段的旧 CDN 配置",
+		SQL: []string{
+			`INSERT OR IGNORE INTO security_settings (skey, svalue, description) VALUES ('ssh_whitelist_ips', '', 'SSH防护独立白名单IP/段')`,
+			`UPDATE security_settings SET description = '网站访问防护自定义白名单IP/段' WHERE skey = 'whitelist_ips'`,
+			`UPDATE cdn_realip_groups SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE provider <> 'cloudflare' AND TRIM(ip_ranges) = ''`,
+		},
+	},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

@@ -319,7 +319,8 @@ var migrations = append([]string{
 	// ============================================================
 	`INSERT OR IGNORE INTO security_settings (skey, svalue, description) VALUES
 		('panel_title',              'OLS WPanel', '面板标题（显示在侧边栏和浏览器标签）'),
-		('whitelist_ips',            '',         '合并的官方与自定义白名单IP/段'),
+		('whitelist_ips',            '',         '网站访问防护自定义白名单IP/段'),
+		('ssh_whitelist_ips',        '',         'SSH防护独立白名单IP/段'),
 		('fail2ban_maxretry',        '5',        'Fail2ban触发阈值'),
 		('fail2ban_findtime',        '60',       'Fail2ban统计时间窗口(秒)'),
 		('fail2ban_bantime',         '600',      'Fail2ban初犯封禁时间(秒)'),
