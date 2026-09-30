@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.12.0 — 2026-10-01
+
+- Adds an explicit one-click `www` canonical-domain workflow when creating a site and when editing an existing site, defaulting to a path- and query-preserving 301 redirect to the primary domain.
+- Keeps additional-domain handling visible even before aliases are entered, distinguishes examples from saved values, previews redirect behavior, and automatically selects certificate reissue when a panel-managed certificate must cover the new alias.
+- Reorganizes Website Details into overview, runtime, cache, protection, and log sections with compact status badges, balanced cards, collapsible technical information, and on-demand log loading.
+- Clarifies that the official WordPress LiteSpeed Cache plugin owns WordPress cache policy, while OLS WPanel provides installation, status, recommended setup, purge actions, advanced OpenLiteSpeed synchronization, and the separate Redis object-cache layer.
+- Expands bilingual UI and regression coverage for canonical-domain controls, page navigation, cache ownership guidance, and the compact log workspace.
+
 ## v1.11.0 — 2026-10-01
 
 - Reworks Ports & Firewall around explicit access scope, permanent or temporary rules, common service presets, compact empty states, creation and expiry times, and nftables packet-hit counters.
