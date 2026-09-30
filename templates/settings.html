@@ -231,10 +231,18 @@
                     <button @click="doUpdate()" x-show="count > 0" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.one_click_update')"></button>
                 </div>
                 <p x-show="count > 0" class="text-xs text-yellow-500 mt-2">{{t .Lang "settings.system_update_warning"}}</p>
+                <p x-show="lastMessage && !msg" x-cloak class="mt-3 text-xs text-gray-500">
+                    <span>{{t .Lang "settings.last_system_update"}}</span>
+                    <span class="text-gray-300" x-text="lastMessage"></span>
+                    <span x-show="lastUpdatedAt"> · <span x-text="formatStatusTime(lastUpdatedAt)"></span></span>
+                </p>
                 <div x-show="msg" class="mt-3 rounded border border-gray-700 p-3" :class="updating ? 'system-update-running' : (failed ? 'system-update-failed' : 'system-update-success')">
                     <div class="flex items-center justify-between gap-3">
                         <p class="text-sm" :class="updating ? 'text-blue-400' : (failed ? 'text-red-400' : 'text-green-400')" x-text="msg"></p>
-                        <span x-show="stage" class="text-xs text-gray-500 font-mono" x-text="stage"></span>
+                        <div class="flex shrink-0 items-center gap-2">
+                            <span x-show="stage" class="text-xs text-gray-500 font-mono" x-text="stage"></span>
+                            <button x-show="!updating" type="button" @click="dismissStatus()" class="text-xs text-gray-400 hover:text-white" title="{{t .Lang "settings.dismiss_status"}}">×</button>
+                        </div>
                     </div>
                     <pre x-show="failed && detail" class="mt-2 rounded p-2 text-xs whitespace-pre-wrap break-words overflow-auto" style="max-height: 10rem;" x-text="detail"></pre>
                 </div>
@@ -1024,6 +1032,9 @@ function systemUpdate() {
         distribution: '',
         packageCatalogURL: '',
         pollTimer: null,
+        successTimer: null,
+        lastMessage: '',
+        lastUpdatedAt: '',
         isSecurity(pkg) {
             return String(pkg && pkg.repo || '').toLowerCase().includes('security');
         },
@@ -1039,7 +1050,7 @@ function systemUpdate() {
             return this.packages;
         },
         init() {
-            this.resume();
+            this.resume(true);
             this.scheduleCheck();
         },
         scheduleCheck() {
@@ -1062,40 +1073,82 @@ function systemUpdate() {
         packageDetailsURL(name) {
             return this.packageCatalogURL + encodeURIComponent(name);
         },
-        async resume() {
+        async resume(initial = false) {
             this.pollTimer = null;
             try {
                 const r = await api('/system/updates/status');
                 if (!r.success || !r.data) return;
-                this.applyStatus(r.data);
+                this.applyStatus(r.data, initial);
             } catch(e) {
                 console.error('system update status error:', e);
                 if (this.updating && !this.pollTimer) {
-                    this.pollTimer = setTimeout(() => this.resume(), 3000);
+                    this.pollTimer = setTimeout(() => this.resume(false), 3000);
                 }
             }
         },
-        applyStatus(status) {
+        applyStatus(status, initial = false) {
+            const wasUpdating = this.updating;
+            if (status.status !== 'success') {
+                clearTimeout(this.successTimer);
+                this.successTimer = null;
+            }
             this.updating = status.status === 'running';
             this.failed = status.status === 'failed';
             this.detail = status.detail || '';
             this.stage = status.stage || '';
-            if (status.status !== 'idle') {
+            if (status.status === 'idle') {
+                this.dismissStatus();
+                this.lastMessage = '';
+                this.lastUpdatedAt = '';
+                return;
+            }
+            if (status.status === 'success' || status.status === 'failed') {
+                this.lastMessage = status.message || '';
+                this.lastUpdatedAt = status.updated_at || '';
+            }
+            this.ok = status.status === 'success';
+            if (status.status === 'success' && initial && !wasUpdating) {
+                this.msg = '';
+                this.detail = '';
+                this.stage = '';
+            } else {
                 this.msg = status.message || '';
-                this.ok = status.status === 'success';
             }
             if (this.updating) {
+                clearTimeout(this.successTimer);
                 clearTimeout(this.pollTimer);
                 this.pollTimer = setTimeout(() => {
                     this.pollTimer = null;
-                    this.resume();
+                    this.resume(false);
                 }, 1500);
             } else if (status.status === 'success') {
                 this.check(true);
+                if (this.msg) this.scheduleSuccessDismiss();
             }
+        },
+        scheduleSuccessDismiss() {
+            clearTimeout(this.successTimer);
+            this.successTimer = setTimeout(() => this.dismissStatus(), 10000);
+        },
+        dismissStatus() {
+            clearTimeout(this.successTimer);
+            this.successTimer = null;
+            this.msg = '';
+            this.detail = '';
+            this.stage = '';
+            this.ok = false;
+            this.failed = false;
+        },
+        formatStatusTime(value) {
+            if (!value) return '';
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return value;
+            return parsed.toLocaleString();
         },
         async doUpdate() {
             if (!await confirmModal(t('settings.confirm_system_update'))) return;
+            clearTimeout(this.successTimer);
+            this.successTimer = null;
             this.updating = true;
             this.ok = false;
             this.failed = false;
@@ -1104,9 +1157,9 @@ function systemUpdate() {
             this.msg = t('settings.system_update_status_queued');
             try {
                 const r = await api('/system/updates/do', { method: 'POST' });
-                if (r.success) this.applyStatus(r.data);
+                if (r.success) this.applyStatus(r.data, false);
             } catch(e) {
-                await this.resume();
+                await this.resume(false);
                 if (!this.failed) {
                     this.ok = false;
                     this.failed = true;
