@@ -165,16 +165,44 @@
          之前"高级设置"折叠面板就漏加过，导致通用 PHP 站点也看到了停止更新检查等选项。 -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
         <div class="card" :class="site.site_type === 'wordpress' ? '' : 'md:col-span-2'">
-            <h3 class="text-lg font-semibold text-white mb-4" x-text="site.site_type === 'wordpress' ? t('website.wp_optimization') : t('website.litespeed_cache_title')"></h3>
-            <div class="flex items-center space-x-3 mb-3">
+            <h3 class="text-lg font-semibold text-white mb-1" x-text="site.site_type === 'wordpress' ? t('website.performance_cache') : t('website.litespeed_cache_title')"></h3>
+            <p x-show="site.site_type === 'wordpress'" class="text-sm text-gray-400 mb-4">{{t .Lang "website.performance_cache_help"}}</p>
+
+            <div x-show="site.site_type === 'wordpress'" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div class="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
+                    <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.litespeed_plugin"}}</p>
+                    <p class="text-sm font-medium" :class="cacheRuntime.plugin_status === 'active' ? 'text-green-400' : (cacheRuntime.plugin_status === 'unknown' ? 'text-gray-400' : 'text-yellow-300')" x-text="liteSpeedPluginStatusText()"></p>
+                    <p x-show="cacheRuntime.plugin_version" class="text-xs text-gray-500 mt-1" x-text="'v' + cacheRuntime.plugin_version"></p>
+                </div>
+                <div class="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
+                    <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.page_cache"}}</p>
+                    <p class="text-sm font-medium" :class="lscacheEnabled ? 'text-green-400' : 'text-yellow-300'" x-text="lscacheEnabled ? t('website.enabled') : t('website.disabled')"></p>
+                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.page_cache_help"}}</p>
+                </div>
+                <div class="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
+                    <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.redis_object_cache"}}</p>
+                    <p class="text-sm font-medium" :class="cacheRuntime.redis_object_cache_configured ? 'text-green-400' : 'text-yellow-300'" x-text="cacheRuntime.redis_object_cache_configured ? t('website.configured') : t('website.not_configured')"></p>
+                    <p x-show="cacheRuntime.redis_object_cache_configured" class="text-xs text-gray-500 mt-1" x-text="(cacheRuntime.redis_host || '127.0.0.1') + ':' + (cacheRuntime.redis_port || 6379) + ' · DB ' + (cacheRuntime.redis_database || 0)"></p>
+                </div>
+            </div>
+
+            <div x-show="site.site_type === 'wordpress'" class="flex flex-wrap items-center gap-2 mb-4">
+                <button @click="applyRecommendedLiteSpeedCache()" :disabled="cacheApplying || site.file_lock_enabled" class="btn-primary text-sm" x-text="cacheApplying ? t('website.applying_recommended_cache') : t('website.apply_recommended_cache')"></button>
+                <button @click="fetchLiteSpeedCacheStatus()" :disabled="cacheStatusLoading || cacheApplying" class="btn-secondary text-sm" x-text="cacheStatusLoading ? t('website.cache_status_checking') : t('website.refresh_cache_status')"></button>
+                <a x-show="cacheRuntime.plugin_status === 'active' || cacheRuntime.plugin_status === 'inactive'" :href="liteSpeedCacheAdminURL()" target="_blank" rel="noopener noreferrer" class="btn-secondary text-sm inline-block">{{t .Lang "website.open_litespeed_settings"}}</a>
+                <span x-show="site.file_lock_enabled" class="text-xs text-yellow-300">{{t .Lang "website.cache_unlock_to_configure"}}</span>
+            </div>
+
+            <div class="rounded-lg border border-gray-700 bg-gray-900/30 p-3 mb-4">
+                <p class="text-sm font-medium text-white mb-2">{{t .Lang "website.server_page_cache"}}</p>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
                     <input type="checkbox" x-model="lscacheEnabled">
-                    <span>{{t .Lang "website.enable_litespeed_cache"}}</span>
+                    <span>{{t .Lang "website.enable_server_page_cache"}}</span>
                 </label>
-            </div>
-            <div x-show="lscacheEnabled" class="mb-3 ml-6">
-                <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "website.cache_ttl_seconds"}}</label>
-                <input type="number" x-model="lscacheTTL" class="input-field w-32 text-sm py-1" min="10" max="86400">
+                <div x-show="lscacheEnabled" class="mt-3 ml-6">
+                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "website.cache_ttl_seconds"}}</label>
+                    <input type="number" x-model="lscacheTTL" class="input-field w-32 text-sm py-1" min="10" max="86400">
+                </div>
             </div>
             <details class="mb-4 rounded border border-gray-700 bg-gray-900/30 px-3 py-2" x-show="site.site_type === 'wordpress'">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "website.wp_optimization_advanced"}}</summary>
@@ -232,7 +260,8 @@
             </div>
             <div class="flex items-center space-x-3 mb-3">
                 <button @click="saveWPOptimizations()" :disabled="optimizationSaving || site.file_lock_enabled" class="btn-primary text-sm" x-text="optimizationSaving ? t('common.saving') : t('website.save_settings')"></button>
-                <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_cache"}}</button>
+                <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_page_cache"}}</button>
+                <button x-show="site.site_type === 'wordpress' && cacheRuntime.redis_object_cache_configured" @click="clearRedisObjectCache()" :disabled="redisCacheClearing" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;" x-text="redisCacheClearing ? t('website.clearing_redis_cache') : t('website.clear_redis_cache')"></button>
             </div>
             <div x-show="site.site_type === 'wordpress'" id="companion-plugin-controls" class="flex flex-wrap items-center gap-3 mb-3">
                 <button x-show="pluginStatus === 'not_installed'" @click="installPlugin()" :disabled="pluginInstalling || site.file_lock_enabled" class="btn-primary text-sm py-1.5" x-text="pluginInstalling ? t('website.installing') : t('website.install_companion_plugin')"></button>
@@ -750,6 +779,10 @@ function websiteDetail() {
         pluginStatus: 'unknown',
         pluginStatusLoading: false,
         pluginInstalling: false,
+        cacheRuntime: { plugin_status: 'unknown', plugin_version: '', page_cache_enabled: false, redis_object_cache_configured: false, redis_host: '', redis_port: 0, redis_database: 0 },
+        cacheStatusLoading: false,
+        cacheApplying: false,
+        redisCacheClearing: false,
         monitoringEnabled: false,
         monitoringInterval: 5,
         monitoringSaving: false,
@@ -820,7 +853,7 @@ function websiteDetail() {
             } catch(e) { showToast(t('website.load_failed_with_error', { error: e.message }), 'error'); }
             this.loading = false;
             Promise.allSettled([
-                this.fetchPluginStatus(),
+                (async () => { await this.fetchPluginStatus(); await this.fetchLiteSpeedCacheStatus(); })(),
                 this.fetchCDNGroups(),
                 this.fetchAIDevelopment(),
                 this.fetchPHPRuntimes()
@@ -1275,6 +1308,50 @@ function websiteDetail() {
             if (!await confirmModal(t('website.rebuild_plugin_config_confirm'))) return;
             await this.installPlugin();
         },
+        async fetchLiteSpeedCacheStatus() {
+            if (!this.site || this.site.site_type !== 'wordpress' || this.cacheStatusLoading) return;
+            this.cacheStatusLoading = true;
+            try {
+                const r = await api('/websites/' + this.site.id + '/litespeed-cache/status', { timeout: 30000 });
+                if (r.success && r.data) {
+                    this.cacheRuntime = { ...this.cacheRuntime, ...r.data };
+                    this.lscacheEnabled = !!r.data.page_cache_enabled;
+                }
+            } catch (_) {
+                this.cacheRuntime = { ...this.cacheRuntime, plugin_status: 'unknown' };
+            } finally {
+                this.cacheStatusLoading = false;
+            }
+        },
+        liteSpeedPluginStatusText() {
+            const key = {
+                active: 'website.litespeed_plugin_active',
+                inactive: 'website.litespeed_plugin_inactive',
+                not_installed: 'website.litespeed_plugin_missing',
+                unknown: 'website.cache_status_unknown'
+            }[this.cacheRuntime.plugin_status] || 'website.cache_status_unknown';
+            return t(key);
+        },
+        liteSpeedCacheAdminURL() {
+            if (!this.site) return '#';
+            const scheme = this.site.ssl_enabled ? 'https://' : 'http://';
+            return scheme + this.site.domain + '/wp-admin/admin.php?page=litespeed-cache#object';
+        },
+        async applyRecommendedLiteSpeedCache() {
+            if (!await confirmModal(t('website.apply_recommended_cache_confirm'))) return;
+            this.cacheApplying = true;
+            try {
+                const r = await api('/websites/' + this.site.id + '/litespeed-cache/recommended', { method: 'POST', timeout: 120000 });
+                this.lscacheEnabled = true;
+                this.lscacheTTL = r.data?.ttl || this.lscacheTTL || 300;
+                showToast(r.data?.message || t('website.litespeed_recommended_applied'), 'success');
+                await this.fetchLiteSpeedCacheStatus();
+            } catch (e) {
+                showToast(e.message || t('website.litespeed_recommended_failed'), 'error');
+            } finally {
+                this.cacheApplying = false;
+            }
+        },
         fileLockStatusText() {
             if (this.site.file_lock_apply_status === 'applying') return t('website.processing');
             if (this.fileLockApplyIncomplete()) return t('website.file_lock_apply_failed');
@@ -1441,6 +1518,18 @@ function websiteDetail() {
                 await api('/websites/' + this.site.id + '/cache', { method: 'DELETE' });
                 showToast(t('website.cache_cleared'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
+        },
+        async clearRedisObjectCache() {
+            if (!await confirmModal(t('website.confirm_clear_redis_cache'))) return;
+            this.redisCacheClearing = true;
+            try {
+                const r = await api('/websites/' + this.site.id + '/redis-object-cache', { method: 'DELETE' });
+                showToast(r.data?.message || t('website.redis_cache_cleared'), 'success');
+            } catch(e) {
+                showToast(e.message || t('website.redis_cache_clear_failed'), 'error');
+            } finally {
+                this.redisCacheClearing = false;
+            }
         },
     }
 }

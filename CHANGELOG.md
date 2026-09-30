@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.5.0 — 2026-09-30
+
+- Reworks the website performance card around the real cache architecture: the official LiteSpeed Cache plugin manages WordPress integration, OpenLiteSpeed provides page cache, and Redis provides a separate object-cache layer.
+- Adds one-click recommended cache configuration for existing WordPress sites, including verified plugin installation, activation, page cache, and isolated per-site Redis settings without requiring another Redis cache plugin.
+- Shows the effective plugin, page-cache, and Redis configuration states and links directly to the LiteSpeed Cache settings in WordPress admin.
+- Separates page-cache and Redis object-cache clearing so operators can invalidate the intended layer without flushing unrelated data.
+- Preserves existing plugin installations, rejects non-regular plugin entry files, and rolls back WordPress configuration when the server-side cache update fails.
+
 ## v1.4.1 — 2026-09-29
 
 - Fixes the Settings system-update list so large package sets stay inside a bounded scrolling region in the released UI instead of stretching the page.

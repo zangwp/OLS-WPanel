@@ -52,6 +52,49 @@ func TestGeneratedWPConfigForcesLiteSpeedCacheAndRedisIsolation(t *testing.T) {
 	}
 }
 
+func TestConfigureLiteSpeedObjectCacheReversibleUsesOfficialPluginConstants(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wp-config.php")
+	before := "<?php\ndefine('WP_CACHE', false);\ndefine('LITESPEED_CONF__OBJECT', false);\n/* That's all, stop editing! Happy publishing. */\n"
+	if err := os.WriteFile(path, []byte(before), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := ConfigureLiteSpeedObjectCacheReversible(dir, "Example.COM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, expected := range []string{
+		"define('WP_CACHE', true);",
+		"define('LITESPEED_CONF__OBJECT', true);",
+		"define('LITESPEED_CONF__OBJECT__KIND', true);",
+		"define('LITESPEED_CONF__OBJECT__HOST', '127.0.0.1');",
+		"define('LITESPEED_CONF__OBJECT__PORT', 6379);",
+		"define('LSOC_PREFIX', 'example.com:');",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("configured wp-config.php missing %q:\n%s", expected, content)
+		}
+	}
+	if strings.Count(content, "LITESPEED_CONF__OBJECT'") != 1 {
+		t.Fatalf("object cache constant duplicated:\n%s", content)
+	}
+	if err := rollback(); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restored) != before {
+		t.Fatalf("rollback did not restore exact config:\n%s", restored)
+	}
+}
+
 func TestEnsureWPConfigCachePrefixesKeepExistingValues(t *testing.T) {
 	content := "<?php\ndefine('LSOC_PREFIX', 'lsoc.example:');\ndefine('WP_REDIS_PREFIX', 'redis.example:');\ndefine('WP_CACHE_KEY_SALT', 'old.example:');\n/* That's all, stop editing! Happy publishing. */\n"
 

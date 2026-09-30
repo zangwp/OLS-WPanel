@@ -47,6 +47,10 @@ var (
 	updateSiteLiteSpeedCache        = executor.UpdateSiteLiteSpeedCache
 	publishSiteOLSWithCacheRollback = executor.PublishSiteOLSWithCacheRollback
 	clearSiteCache                  = executor.ClearSiteCache
+	observeLiteSpeedCacheStatus     = executor.ObserveLiteSpeedCacheStatus
+	ensureLiteSpeedCachePlugin      = executor.EnsureLiteSpeedCachePlugin
+	configureLiteSpeedObjectCache   = executor.ConfigureLiteSpeedObjectCacheReversible
+	clearWPRedisObjectCache         = executor.ClearWPRedisObjectCache
 )
 
 func wpOptimizationSiteLock(id int) *sync.Mutex {
@@ -2339,6 +2343,109 @@ func (h *WebsiteHandler) UpdateCache(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "缓存设置已更新"}))
+}
+
+func (h *WebsiteHandler) LiteSpeedCacheStatus(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.invalid_site_id")))
+		return
+	}
+	if !executor.TryAcquireSiteOpLock(id, "litespeed_cache_status") {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "maintenance.operation_unavailable")))
+		return
+	}
+	defer executor.ReleaseSiteOpLock(id)
+	site := getWebsiteByID(id)
+	if site == nil || site.SiteType != "wordpress" {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(i18n.TE(c.Request, "website.not_found")))
+		return
+	}
+	status := observeLiteSpeedCacheStatus(c.Request.Context(), config.AppConfig, site)
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *WebsiteHandler) ApplyRecommendedLiteSpeedCache(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.invalid_site_id")))
+		return
+	}
+	if !executor.TryAcquireSiteOpLock(id, "litespeed_cache_recommended") {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "maintenance.operation_unavailable")))
+		return
+	}
+	defer executor.ReleaseSiteOpLock(id)
+	lock := wpOptimizationSiteLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	site := getWebsiteByID(id)
+	if site == nil || site.SiteType != "wordpress" {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(i18n.TE(c.Request, "website.not_found")))
+		return
+	}
+	if site.FileLockEnabled {
+		c.JSON(http.StatusLocked, models.ErrorResponse(fileLockBlockedMessage))
+		return
+	}
+	installed, err := ensureLiteSpeedCachePlugin(site.WebRoot, site.SystemUser)
+	if err != nil {
+		recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "failed", err.Error())
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.litespeed_recommended_failed")))
+		return
+	}
+	rollbackConfig, err := configureLiteSpeedObjectCache(site.WebRoot, site.Domain)
+	if err != nil {
+		recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "failed", err.Error())
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.litespeed_recommended_failed")))
+		return
+	}
+	ttl := site.LSCacheTTL
+	if ttl < 10 || ttl > 86400 {
+		ttl = 300
+	}
+	if err := updateSiteLiteSpeedCache(id, 1, ttl); err != nil {
+		if rollbackErr := rollbackConfig(); rollbackErr != nil {
+			log.Printf("回滚 LiteSpeed Cache WordPress 配置失败 site=%d: %v", id, rollbackErr)
+		}
+		recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "failed", err.Error())
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.litespeed_recommended_failed")))
+		return
+	}
+	recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "success", fmt.Sprintf("本次安装官方插件=%t 页面缓存=开启 Redis对象缓存=已配置 TTL=%d", installed, ttl))
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"message":                       i18n.TE(c.Request, "website.litespeed_recommended_applied"),
+		"plugin_installed":              installed,
+		"page_cache_enabled":            true,
+		"redis_object_cache_configured": true,
+		"ttl":                           ttl,
+	}))
+}
+
+func (h *WebsiteHandler) ClearRedisObjectCache(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.invalid_site_id")))
+		return
+	}
+	if !executor.TryAcquireSiteOpLock(id, "redis_object_cache_clear") {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "maintenance.operation_unavailable")))
+		return
+	}
+	defer executor.ReleaseSiteOpLock(id)
+	site := getWebsiteByID(id)
+	if site == nil || site.SiteType != "wordpress" {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(i18n.TE(c.Request, "website.not_found")))
+		return
+	}
+	if err := clearWPRedisObjectCache(site.Domain, site.WebRoot); err != nil {
+		recordHandlerOperationLog("redis_object_cache_clear", site.Domain, "failed", err.Error())
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.redis_cache_clear_failed")))
+		return
+	}
+	recordHandlerOperationLog("redis_object_cache_clear", site.Domain, "success", "Redis 对象缓存已清除")
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.TE(c.Request, "website.redis_cache_cleared")}))
 }
 
 func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {

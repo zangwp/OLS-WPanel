@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.4.1`.
+The current stable release is `v1.5.0`.
 
 ### Minimal images / download failures
 
@@ -32,7 +32,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 - LSPHP 8.5 by default, with optional 8.4 and 8.3 compatibility runtimes assignable per site
 - MariaDB 11.8 on fresh installs; existing databases receive same-series patch and security updates only; Redis follows its official signed APT repository
 - The official LiteSpeed Cache WordPress plugin, automatically activated for new WordPress sites
-- Redis object-cache defaults with an independent key prefix per site
+- Redis object-cache integration through LiteSpeed Cache with an independent key prefix per site; no second Redis cache plugin is required
 - Fail2ban and nftables for host-level enforcement, listener inventory, and panel-owned allow rules
 - The OLS WPanel Go service on its own HTTPS management port
 
