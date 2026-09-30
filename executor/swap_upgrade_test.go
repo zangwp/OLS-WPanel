@@ -58,7 +58,7 @@ func TestEnsureAutomaticSwapCreatesEligibleServerSwap(t *testing.T) {
 		t.Fatalf("fstab = %q, err %v", fstabData, err)
 	}
 	sysctlData, err := os.ReadFile(sysctlPath)
-	if err != nil || !strings.Contains(string(sysctlData), "vm.swappiness = 10") {
+	if err != nil || !strings.Contains(string(sysctlData), "vm.swappiness = 60") {
 		t.Fatalf("sysctl = %q, err %v", sysctlData, err)
 	}
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.8.0 — 2026-09-30
+
+- Adds two bounded DNS presets to VPS Management: Cloudflare for international routing and Alibaba Public DNS for mainland China, each with paired IPv4 and IPv6 resolvers.
+- Detects the active resolver and IPv6 default route, tests presets before applying them, verifies resolution afterward, and automatically restores the previous panel-managed configuration if validation fails.
+- Keeps DNS read-only when another network manager or an administrator-owned drop-in is detected, and provides an explicit return to system- or cloud-managed DNS.
+- Makes `vm.swappiness` recommendations workload-aware: a healthy single WordPress site may use 10, multiple sites or memory pressure keep the kernel default of 60, and zram uses 100.
+- Changes fresh-install and upgrade-created Swap defaults to swappiness 60; the panel only applies a different recommendation after an administrator confirms it.
+- Detects active-but-disabled nftables persistence and offers a guarded boot-enable action that validates `/etc/nftables.conf` without reloading current firewall rules.
+- Improves VPS Management layout, localized status explanations, action feedback, and regression coverage for the new DNS, Swap, and firewall behavior.
+
 ## v1.7.1 — 2026-09-30
 
 - Fixes panel login failures caused by a missing or stale CSRF cookie after browser page restoration, cache reuse, or a panel upgrade.

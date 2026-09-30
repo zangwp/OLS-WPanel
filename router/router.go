@@ -1525,6 +1525,11 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.PUT("/api/vps/swap", vpsHandler.ApplyCustomSwap)
 	protected.PUT("/api/vps/swap/swappiness", vpsHandler.SetSwappiness)
 	protected.DELETE("/api/vps/swap", vpsHandler.RemoveManagedSwap)
+	protected.GET("/api/vps/dns", vpsHandler.DNSStatus)
+	protected.POST("/api/vps/dns/test", vpsHandler.TestDNSPreset)
+	protected.PUT("/api/vps/dns", vpsHandler.ApplyDNSPreset)
+	protected.DELETE("/api/vps/dns", vpsHandler.RestoreAutomaticDNS)
+	protected.POST("/api/vps/nftables/enable-boot", vpsHandler.EnableNftablesBoot)
 
 	websiteHandler := &handlers.WebsiteHandler{DB: db}
 	wpInventoryHandler := &handlers.WPInventoryHandler{DB: db}

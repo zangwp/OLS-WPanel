@@ -88,6 +88,32 @@ func TestValidateSwapSettings(t *testing.T) {
 	}
 }
 
+func TestRecommendedSwappinessUsesWorkloadAndSwapType(t *testing.T) {
+	gb := int64(1024 * 1024 * 1024)
+	tests := []struct {
+		name   string
+		status SwapStatus
+		sites  int
+		want   int
+		reason string
+	}{
+		{name: "unknown workload keeps default", status: SwapStatus{MemoryTotalBytes: 4 * gb, MemoryAvailableBytes: 3 * gb}, want: 60, reason: "system_default"},
+		{name: "single wordpress with headroom", status: SwapStatus{MemoryTotalBytes: 4 * gb, MemoryAvailableBytes: 2 * gb, TotalBytes: gb}, sites: 1, want: 10, reason: "single_wordpress"},
+		{name: "multiple wordpress keeps default", status: SwapStatus{MemoryTotalBytes: 4 * gb, MemoryAvailableBytes: 2 * gb, TotalBytes: gb}, sites: 3, want: 60, reason: "multiple_wordpress"},
+		{name: "memory pressure keeps default", status: SwapStatus{MemoryTotalBytes: 4 * gb, MemoryAvailableBytes: gb / 2, TotalBytes: gb}, sites: 1, want: 60, reason: "memory_pressure"},
+		{name: "swap pressure keeps default", status: SwapStatus{MemoryTotalBytes: 4 * gb, MemoryAvailableBytes: 2 * gb, TotalBytes: gb, UsedBytes: gb / 2}, sites: 1, want: 60, reason: "swap_pressure"},
+		{name: "zram uses compressed swap", status: SwapStatus{MemoryTotalBytes: 4 * gb, MemoryAvailableBytes: 2 * gb, Entries: []SwapEntry{{Type: "zram"}}}, sites: 2, want: 100, reason: "zram"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, reason := RecommendedSwappiness(test.status, test.sites)
+			if got != test.want || reason != test.reason {
+				t.Fatalf("RecommendedSwappiness() = %d, %q; want %d, %q", got, reason, test.want, test.reason)
+			}
+		})
+	}
+}
+
 func containsAll(value string, needles ...string) bool {
 	for _, needle := range needles {
 		if !strings.Contains(value, needle) {

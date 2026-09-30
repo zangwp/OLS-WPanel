@@ -2385,13 +2385,13 @@ if ! $REPAIR_MODE; then
             } >> /etc/fstab; then
                 if ! cat > /etc/sysctl.d/99-ols-wpanel-swap.conf << 'SWAPSYSCTLEOF'
 # OLS WPanel managed swap
-vm.swappiness = 10
+vm.swappiness = 60
 SWAPSYSCTLEOF
                 then
                     log_warn "Swap 已启用，但写入 vm.swappiness 配置失败"
                 else
                     sysctl -p /etc/sysctl.d/99-ols-wpanel-swap.conf >/dev/null 2>&1 || \
-                        log_warn "Swap 已启用，但应用 vm.swappiness=10 失败"
+                        log_warn "Swap 已启用，但应用 vm.swappiness=60 失败"
                 fi
                 log_info "${SWAP_SIZE_MB}MB Swap 创建完成"
             else

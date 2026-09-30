@@ -143,12 +143,12 @@ func ensureAutomaticSwap(meminfoPath, swapsPath, swapPath, fstabPath, sysctlPath
 	}
 
 	cleanup = false
-	if err := os.WriteFile(sysctlPath, []byte("# OLS WPanel managed swap\nvm.swappiness = 10\n"), 0644); err != nil {
+	if err := os.WriteFile(sysctlPath, []byte("# OLS WPanel managed swap\nvm.swappiness = 60\n"), 0644); err != nil {
 		log.Printf("[升级] Swap 已启用，但写入 swappiness 配置失败: %v", err)
 		return true, "", nil
 	}
 	if err := swapCommand("sysctl", "-p", sysctlPath); err != nil {
-		log.Printf("[升级] Swap 已启用，但应用 swappiness=10 失败: %v", err)
+		log.Printf("[升级] Swap 已启用，但应用 swappiness=60 失败: %v", err)
 	}
 	return true, "", nil
 }

@@ -18,5 +18,6 @@ func collectVPSOverview() VPSOverview {
 		Tuning:   VPSTuning{Nameservers: []string{}},
 		Services: []VPSService{},
 		Swap:     executor.SwapStatus{Supported: false, Entries: []executor.SwapEntry{}},
+		DNS:      executor.DNSStatus{Supported: false, Current: []string{}, Presets: executor.DNSPresets()},
 	}
 }

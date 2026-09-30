@@ -60,6 +60,7 @@ func collectVPSOverview() VPSOverview {
 		},
 		Services: services,
 		Swap:     swapStatus,
+		DNS:      executor.GetDNSStatus(),
 	}
 }
 

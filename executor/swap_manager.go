@@ -10,15 +10,17 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/zangwp/OLS-WPanel/database"
 )
 
 const (
-	managedSwapMarker     = "# OLS WPanel managed swap"
-	defaultSwappiness     = 10
-	minimumSwapSizeMB     = 512
-	maximumSwapSizeMB     = 8192
-	swapSizeIncrementMB   = 256
-	swapRemovalSafetyHead = int64(256 * 1024 * 1024)
+	managedSwapMarker       = "# OLS WPanel managed swap"
+	systemDefaultSwappiness = 60
+	minimumSwapSizeMB       = 512
+	maximumSwapSizeMB       = 8192
+	swapSizeIncrementMB     = 256
+	swapRemovalSafetyHead   = int64(256 * 1024 * 1024)
 )
 
 type SwapEntry struct {
@@ -39,6 +41,9 @@ type SwapStatus struct {
 	MemoryAvailableBytes    int64       `json:"memory_available_bytes"`
 	RecommendedBytes        int64       `json:"recommended_bytes"`
 	Swappiness              int         `json:"swappiness"`
+	RecommendedSwappiness   int         `json:"recommended_swappiness"`
+	RecommendationReason    string      `json:"recommendation_reason"`
+	ActiveWordPressSites    int         `json:"active_wordpress_sites"`
 	ManagedFile             bool        `json:"managed_file"`
 	ManagedActive           bool        `json:"managed_active"`
 	ManagedSizeBytes        int64       `json:"managed_size_bytes"`
@@ -120,7 +125,48 @@ func getSwapStatus(paths swapManagerPaths) (SwapStatus, error) {
 	if value, readErr := os.ReadFile("/proc/sys/vm/swappiness"); readErr == nil {
 		status.Swappiness, _ = strconv.Atoi(strings.TrimSpace(string(value)))
 	}
+	status.ActiveWordPressSites = activeWordPressSiteCount()
+	status.RecommendedSwappiness, status.RecommendationReason = RecommendedSwappiness(status, status.ActiveWordPressSites)
 	return status, nil
+}
+
+// RecommendedSwappiness keeps the kernel default for unknown or multi-site
+// workloads, lowers disk-swap eagerness only for a lightly loaded single-site
+// host, and lets zram absorb inactive pages more aggressively.
+func RecommendedSwappiness(status SwapStatus, activeWordPressSites int) (int, string) {
+	for _, entry := range status.Entries {
+		if entry.Type == "zram" {
+			return 100, "zram"
+		}
+	}
+	if activeWordPressSites >= 2 {
+		return systemDefaultSwappiness, "multiple_wordpress"
+	}
+	if status.MemoryTotalBytes > 0 {
+		availablePercent := status.MemoryAvailableBytes * 100 / status.MemoryTotalBytes
+		if availablePercent < 20 {
+			return systemDefaultSwappiness, "memory_pressure"
+		}
+	}
+	if status.TotalBytes > 0 && status.UsedBytes*100/status.TotalBytes >= 25 {
+		return systemDefaultSwappiness, "swap_pressure"
+	}
+	if activeWordPressSites == 1 {
+		return 10, "single_wordpress"
+	}
+	return systemDefaultSwappiness, "system_default"
+}
+
+func activeWordPressSiteCount() int {
+	db := database.GetDB()
+	if db == nil {
+		return 0
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM websites WHERE site_type='wordpress' AND status='active'`).Scan(&count); err != nil {
+		return 0
+	}
+	return count
 }
 
 func readSwapEntries(path, managedPath string, managed bool) ([]SwapEntry, error) {
@@ -189,7 +235,7 @@ func ApplyRecommendedSwap() (SwapStatus, error) {
 		return status, err
 	}
 	if status.RecommendationSatisfied {
-		err = setManagedSwappiness(defaultSwappiness, swapPaths.sysctl)
+		err = setManagedSwappiness(status.RecommendedSwappiness, swapPaths.sysctl)
 		if err != nil {
 			recordSwapOperation("swap_apply_recommended", status, err)
 			return status, err
@@ -206,7 +252,7 @@ func ApplyRecommendedSwap() (SwapStatus, error) {
 	if target < minimumSwapSizeMB*1024*1024 {
 		target = minimumSwapSizeMB * 1024 * 1024
 	}
-	updated, err := applyManagedSwapLocked(target/(1024*1024), defaultSwappiness, swapPaths)
+	updated, err := applyManagedSwapLocked(target/(1024*1024), int64(status.RecommendedSwappiness), swapPaths)
 	recordSwapOperation("swap_apply_recommended", updated, err)
 	return updated, err
 }

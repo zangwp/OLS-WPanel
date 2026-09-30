@@ -45,6 +45,7 @@ type VPSOverview struct {
 	Tuning   VPSTuning           `json:"tuning"`
 	Services []VPSService        `json:"services"`
 	Swap     executor.SwapStatus `json:"swap"`
+	DNS      executor.DNSStatus  `json:"dns"`
 }
 
 func (h *VPSHandler) Overview(c *gin.Context) {
@@ -62,6 +63,10 @@ type swappinessRequest struct {
 
 type removeSwapRequest struct {
 	Confirm string `json:"confirm"`
+}
+
+type dnsPresetRequest struct {
+	Preset string `json:"preset"`
 }
 
 func (h *VPSHandler) SwapStatus(c *gin.Context) {
@@ -122,4 +127,53 @@ func (h *VPSHandler) RemoveManagedSwap(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) DNSStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, models.SuccessResponse(executor.GetDNSStatus()))
+}
+
+func (h *VPSHandler) TestDNSPreset(c *gin.Context) {
+	var req dnsPresetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
+		return
+	}
+	status, err := executor.ProbeDNSPreset(c.Request.Context(), req.Preset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) ApplyDNSPreset(c *gin.Context) {
+	var req dnsPresetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
+		return
+	}
+	status, err := executor.ApplyDNSPreset(c.Request.Context(), req.Preset)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) RestoreAutomaticDNS(c *gin.Context) {
+	status, err := executor.RestoreAutomaticDNS(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) EnableNftablesBoot(c *gin.Context) {
+	if err := executor.EnableNftablesBoot(); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"enabled": true}))
 }
