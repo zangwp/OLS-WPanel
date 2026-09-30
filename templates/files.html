@@ -19,6 +19,7 @@
             <div>
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "files.directory_list_title"}}</h3>
                 <p class="text-xs text-gray-500 mt-1">{{t .Lang "files.directory_list_subtitle"}}</p>
+                <p class="text-xs text-gray-500 mt-1">{{t .Lang "files.protection_status_help"}}</p>
             </div>
             <input type="search" x-model.trim="siteSearch" class="input-field w-full sm:w-80 text-sm" placeholder="{{t .Lang "files.search_directories_placeholder"}}">
         </div>
@@ -35,7 +36,7 @@
                         <th class="py-2 text-left">{{t .Lang "files.root_path"}}</th>
                         <th class="py-2 text-left">{{t .Lang "files.directory_size"}}</th>
                         <th class="py-2 text-left">{{t .Lang "files.protection_status"}}</th>
-                        <th class="py-2 text-left w-28">{{t .Lang "files.actions"}}</th>
+                        <th class="py-2 text-left w-48">{{t .Lang "files.actions"}}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -57,10 +58,16 @@
                                 <div x-show="directorySizeState(site.id, '/').calculated_at" class="text-xs text-gray-600 mt-1"><span>{{t .Lang "files.calculated_at"}}</span><span x-text="formatCalculatedTime(directorySizeState(site.id, '/').calculated_at)"></span></div>
                             </td>
                             <td class="py-3 pr-4">
-                                <span x-show="site.file_lock_enabled" class="badge-warning text-xs">{{t .Lang "files.protected"}}</span>
-                                <span x-show="!site.file_lock_enabled" class="badge-success text-xs">{{t .Lang "files.not_protected"}}</span>
+                                <span x-show="site.site_type === 'wordpress' && site.file_lock_enabled" class="badge-success text-xs">{{t .Lang "files.protected"}}</span>
+                                <span x-show="site.site_type === 'wordpress' && !site.file_lock_enabled" class="badge-warning text-xs">{{t .Lang "files.not_protected"}}</span>
+                                <span x-show="site.site_type !== 'wordpress'" class="badge-info text-xs">{{t .Lang "files.protection_not_applicable"}}</span>
                             </td>
-                            <td class="py-3"><button @click.stop="openRoot(site.id)" class="btn-primary text-xs py-1 px-3">{{t .Lang "files.open_directory"}}</button></td>
+                            <td class="py-3">
+                                <div class="flex flex-wrap gap-2">
+                                    <button @click.stop="openRoot(site.id)" class="btn-primary text-xs py-1 px-3">{{t .Lang "files.open_directory"}}</button>
+                                    <a x-show="site.site_type === 'wordpress'" @click.stop :href="fileProtectionURL(site)" class="btn-secondary text-xs py-1 px-3">{{t .Lang "files.manage_protection"}}</a>
+                                </div>
+                            </td>
                         </tr>
                     </template>
                     <tr x-show="filteredSites.length === 0 && siteSearch">
@@ -144,8 +151,12 @@
     </div>
 
     <div class="card mb-4">
-        <div x-show="selectedSiteLocked()" class="mb-4 p-3 bg-yellow-900/30 border border-yellow-700 text-yellow-100 rounded text-sm">
-            {{t .Lang "files.file_lock_notice"}}
+        <div x-show="selectedSiteInfo()?.site_type === 'wordpress'" class="mb-4 p-3 rounded border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm" :class="selectedSiteLocked() ? 'bg-green-950/30 border-green-800 text-green-100' : 'bg-yellow-950/30 border-yellow-800 text-yellow-100'">
+            <div>
+                <p class="font-medium" x-text="selectedSiteLocked() ? t('files.file_lock_active_title') : t('files.file_lock_inactive_title')"></p>
+                <p class="text-xs mt-1 opacity-80" x-text="selectedSiteLocked() ? t('files.file_lock_notice') : t('files.file_lock_inactive_help')"></p>
+            </div>
+            <a :href="fileProtectionURL(selectedSiteInfo())" class="btn-secondary text-xs self-start sm:self-auto whitespace-nowrap">{{t .Lang "files.manage_protection"}}</a>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 mb-4">
@@ -353,6 +364,10 @@ function fileManager() {
         selectedSiteLocked() {
             const site = this.selectedSiteInfo();
             return !!(site && site.file_lock_enabled);
+        },
+        fileProtectionURL(site) {
+            if (!site?.id) return '#';
+            return (document.body.dataset.panelPrefix || '') + '/websites/' + site.id + '#security-maintenance';
         },
         directorySizeKey(siteID, path) {
             return String(siteID) + ':' + path;

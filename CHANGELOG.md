@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.13.0 — 2026-10-01
+
+- Turns Website Details navigation into real Overview, Cache, Security, and Logs workspaces so only the selected section is rendered and long logs no longer stretch unrelated settings.
+- Adds stable hash deep links, including direct navigation to Security & Maintenance from other panel pages, while preserving legacy Website Details anchors.
+- Replaces the misleading alias policy shown on sites without aliases with an explicit “not configured” state and adds a one-click shortcut for adding `www` with a path-preserving 301 redirect.
+- Corrects file-protection status semantics: protected WordPress sites are green, unprotected sites are warnings, and generic PHP sites are marked not applicable.
+- Adds File Manager protection guidance and “Manage Protection” actions both in the directory list and inside a selected WordPress root, opening the exact protection workspace without silently changing permissions.
+- Refines protection action hierarchy, keeps scope preview mandatory before enabling, and expands bilingual regression coverage for the new navigation and safety states.
+
 ## v1.12.0 — 2026-10-01
 
 - Adds an explicit one-click `www` canonical-domain workflow when creating a site and when editing an existing site, defaulting to a path- and query-preserving 301 redirect to the primary domain.

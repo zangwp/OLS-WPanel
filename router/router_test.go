@@ -1622,8 +1622,13 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 	if !bytes.Contains(source, []byte(`'/databases/' + site.id`)) {
 		t.Fatal("website detail is missing the direct database management link")
 	}
-	if !bytes.Contains(source, []byte(`site.site_type === 'wordpress' ? '' : 'md:col-span-2'`)) {
-		t.Fatal("non-WordPress optimization card does not span the full desktop row")
+	for _, required := range [][]byte{
+		[]byte(`x-show="detailTab === 'cache'"`),
+		[]byte(`x-show="detailTab === 'security' && site.site_type === 'wordpress'"`),
+	} {
+		if !bytes.Contains(source, required) {
+			t.Fatalf("website detail tab layout is missing %q", required)
+		}
 	}
 	for _, required := range [][]byte{
 		[]byte(`website.performance_cache`),
@@ -1664,14 +1669,18 @@ func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
 	}
 	for _, required := range [][]byte{
 		[]byte(`@click="addEditedWWWRedirect()"`),
+		[]byte(`@click="openWWWRedirectModal()"`),
 		[]byte(`this.editAliasRedirectMode = '301'`),
 		[]byte(`this.reissueSSL = true`),
 		[]byte(`id="site-overview"`),
 		[]byte(`id="site-performance"`),
 		[]byte(`id="site-protection"`),
 		[]byte(`id="site-logs"`),
-		[]byte(`@click="openLogs()"`),
-		[]byte(`@toggle="if ($event.target.open) loadLogs()"`),
+		[]byte(`@click="setDetailTab('overview')"`),
+		[]byte(`@click="setDetailTab('cache')"`),
+		[]byte(`@click="setDetailTab('security')"`),
+		[]byte(`@click="setDetailTab('logs')"`),
+		[]byte(`'security-maintenance': 'security'`),
 		[]byte(`await Promise.all([this.fetchLogs(), this.fetchLogFiles()])`),
 		[]byte(`website.wordpress_cache_owner_notice`),
 		[]byte(`website.server_cache_advanced`),
@@ -1926,6 +1935,10 @@ func TestFileManagerStartsWithDirectoryList(t *testing.T) {
 		[]byte(`{ timeout: 65000, suppressToast: true }`),
 		[]byte(`deepLinkFailed: false`),
 		[]byte(`this.deepLinkFailed = true`),
+		[]byte(`class="badge-success text-xs">{{t .Lang "files.protected"}}`),
+		[]byte(`class="badge-warning text-xs">{{t .Lang "files.not_protected"}}`),
+		[]byte(`{{t .Lang "files.manage_protection"}}`),
+		[]byte(`'/websites/' + site.id + '#security-maintenance'`),
 	} {
 		if !bytes.Contains(source, expected) {
 			t.Fatalf("file manager is missing directory-list behavior %s", expected)
