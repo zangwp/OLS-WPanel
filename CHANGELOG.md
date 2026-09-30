@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.7.0 — 2026-09-30
+
+- Adds adaptive Swap recommendations to VPS Management: systems with up to 1GB RAM receive a 2GB recommendation, while larger VPSes default to a conservative 1GB emergency buffer.
+- Detects active zram, swap partitions, and swap files separately; existing system-managed sources count toward the recommendation and are never modified or deleted by the panel.
+- Adds safe controls for applying the recommendation, selecting a 512MB–8GB panel-managed `/swapfile`, and changing `vm.swappiness` without accepting arbitrary shell input.
+- Checks free memory before shrinking or removal, preserves at least 8GB of disk headroom, caps projected disk usage at 85%, serializes changes, and requires the exact `REMOVE SWAP` confirmation phrase for deletion.
+- Updates fresh installs and the existing best-effort migration to choose the recommended Swap size instead of always creating 2GB or skipping hosts with more than 8GB RAM.
+- Prevents destructive uninstall from deleting a user-owned `/swapfile`; cleanup now requires the exact OLS WPanel marker and fstab entry.
+
 ## v1.6.0 — 2026-09-30
 
 - Adds a focused VPS Management page with host identity, operating system, kernel, CPU, resource, DNS, NTP, BBR/qdisc, reboot-required, and core systemd service visibility.

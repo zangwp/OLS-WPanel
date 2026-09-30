@@ -49,6 +49,7 @@ func TestEnsureAutomaticSwapCreatesEligibleServerSwap(t *testing.T) {
 	}
 	if got := strings.Join(commands, "\n"); !strings.Contains(got, "mkswap "+swapfile) ||
 		!strings.Contains(got, "swapon "+swapfile) ||
+		!strings.Contains(got, "count=1024") ||
 		!strings.Contains(got, "sysctl -p "+sysctlPath) {
 		t.Fatalf("commands = %q", got)
 	}
@@ -77,18 +78,27 @@ func TestEnsureAutomaticSwapSkipsExistingSwap(t *testing.T) {
 	}
 }
 
-func TestEnsureAutomaticSwapSkipsLargeMemoryServer(t *testing.T) {
-	root := t.TempDir()
-	meminfo := filepath.Join(root, "meminfo")
-	swaps := filepath.Join(root, "swaps")
-	mustWriteSwapTestFile(t, meminfo, "MemTotal:       16777216 kB\n")
-	mustWriteSwapTestFile(t, swaps, "Filename Type Size Used Priority\n")
-
-	created, reason, err := ensureAutomaticSwap(
-		meminfo, swaps, filepath.Join(root, "swapfile"), filepath.Join(root, "fstab"), filepath.Join(root, "swap.conf"),
-	)
-	if err != nil || created || reason != "物理内存超过 8GB" {
-		t.Fatalf("ensureAutomaticSwap() = created %v, reason %q, err %v", created, reason, err)
+func TestRecommendedSwapBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		memoryGB float64
+		wantGB   int64
+	}{
+		{"512MB", 0.5, 2},
+		{"1GB", 1, 2},
+		{"2GB", 2, 1},
+		{"4GB", 4, 1},
+		{"8GB", 8, 1},
+		{"16GB", 16, 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory := int64(test.memoryGB * 1024 * 1024 * 1024)
+			want := test.wantGB * 1024 * 1024 * 1024
+			if got := RecommendedSwapBytes(memory); got != want {
+				t.Fatalf("RecommendedSwapBytes(%d) = %d, want %d", memory, got, want)
+			}
+		})
 	}
 }
 

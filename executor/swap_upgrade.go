@@ -14,12 +14,10 @@ import (
 )
 
 const (
-	swapFilePath       = "/swapfile"
-	swapFstabPath      = "/etc/fstab"
-	swapSysctlPath     = "/etc/sysctl.d/99-ols-wpanel-swap.conf"
-	swapSizeBytes      = int64(2 * 1024 * 1024 * 1024)
-	swapMaxMemoryBytes = int64(8 * 1024 * 1024 * 1024)
-	swapMinFreeBytes   = int64(8 * 1024 * 1024 * 1024)
+	swapFilePath     = "/swapfile"
+	swapFstabPath    = "/etc/fstab"
+	swapSysctlPath   = "/etc/sysctl.d/99-ols-wpanel-swap.conf"
+	swapMinFreeBytes = int64(8 * 1024 * 1024 * 1024)
 )
 
 var swapCommand = func(name string, args ...string) error {
@@ -51,7 +49,7 @@ func ensureSwapUpgrade() error {
 		return nil
 	}
 	if created {
-		log.Printf("[升级] 已自动创建 2GB Swap")
+		log.Printf("[升级] 已按物理内存自动创建推荐的 Swap")
 	} else {
 		log.Printf("[升级] 跳过自动创建 Swap: %s", reason)
 	}
@@ -63,9 +61,8 @@ func ensureAutomaticSwap(meminfoPath, swapsPath, swapPath, fstabPath, sysctlPath
 	if err != nil {
 		return false, "", err
 	}
-	if totalMemory > swapMaxMemoryBytes {
-		return false, "物理内存超过 8GB", nil
-	}
+	swapSizeBytes := RecommendedSwapBytes(totalMemory)
+	swapSizeMB := swapSizeBytes / (1024 * 1024)
 
 	hasSwap, err := swapsConfigured(swapsPath)
 	if err != nil {
@@ -94,8 +91,8 @@ func ensureAutomaticSwap(meminfoPath, swapsPath, swapPath, fstabPath, sysctlPath
 		return false, "创建后根分区使用率将超过 85%", nil
 	}
 
-	log.Printf("[升级] 正在创建 2GB Swap，可能需要几十秒")
-	if err := swapCommand("dd", "if=/dev/zero", "of="+swapPath, "bs=1M", "count=2048", "status=none"); err != nil {
+	log.Printf("[升级] 正在创建 %dMB Swap，可能需要几十秒", swapSizeMB)
+	if err := swapCommand("dd", "if=/dev/zero", "of="+swapPath, "bs=1M", "count="+strconv.FormatInt(swapSizeMB, 10), "status=none"); err != nil {
 		_ = os.Remove(swapPath)
 		return false, "", err
 	}

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zangwp/OLS-WPanel/executor"
 )
 
 func collectVPSOverview() VPSOverview {
@@ -36,6 +38,7 @@ func collectVPSOverview() VPSOverview {
 		})
 	}
 
+	swapStatus, _ := executor.GetSwapStatus()
 	return VPSOverview{
 		Identity: VPSIdentity{
 			Hostname:       fallback(hostname, "unknown"),
@@ -56,6 +59,7 @@ func collectVPSOverview() VPSOverview {
 			RebootRequired:    regularFileExists("/var/run/reboot-required"),
 		},
 		Services: services,
+		Swap:     swapStatus,
 	}
 }
 

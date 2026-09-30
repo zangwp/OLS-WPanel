@@ -3,14 +3,14 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/zangwp/OLS-WPanel/executor"
 	"github.com/zangwp/OLS-WPanel/models"
 
 	"github.com/gin-gonic/gin"
 )
 
-// VPSHandler exposes read-only host facts used by the VPS management page.
-// Mutating operations intentionally remain in the existing, audited settings,
-// firewall and software workflows instead of accepting arbitrary shell input.
+// VPSHandler exposes bounded VPS facts and Swap operations. It never accepts
+// arbitrary shell input; every mutation is validated and audited by executor.
 type VPSHandler struct{}
 
 type VPSIdentity struct {
@@ -44,8 +44,82 @@ type VPSOverview struct {
 	Stats    *models.SystemStats `json:"stats"`
 	Tuning   VPSTuning           `json:"tuning"`
 	Services []VPSService        `json:"services"`
+	Swap     executor.SwapStatus `json:"swap"`
 }
 
 func (h *VPSHandler) Overview(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(collectVPSOverview()))
+}
+
+type swapSettingsRequest struct {
+	SizeMB     int64 `json:"size_mb"`
+	Swappiness int64 `json:"swappiness"`
+}
+
+type swappinessRequest struct {
+	Swappiness int64 `json:"swappiness"`
+}
+
+type removeSwapRequest struct {
+	Confirm string `json:"confirm"`
+}
+
+func (h *VPSHandler) SwapStatus(c *gin.Context) {
+	status, err := executor.GetSwapStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) ApplyRecommendedSwap(c *gin.Context) {
+	status, err := executor.ApplyRecommendedSwap()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) ApplyCustomSwap(c *gin.Context) {
+	var req swapSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
+		return
+	}
+	status, err := executor.ApplyManagedSwap(req.SizeMB, req.Swappiness)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) SetSwappiness(c *gin.Context) {
+	var req swappinessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
+		return
+	}
+	status, err := executor.SetSwapSwappiness(req.Swappiness)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
+
+func (h *VPSHandler) RemoveManagedSwap(c *gin.Context) {
+	var req removeSwapRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
+		return
+	}
+	status, err := executor.RemoveManagedSwap(req.Confirm)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }

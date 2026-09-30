@@ -1970,11 +1970,12 @@ do_purge() {
     rm -f /usr/share/keyrings/litespeed-archive-keyring.gpg
     echo -e "  ${GREEN}✓${NC} 网站数据已删除"
 
-    if grep -q "/swapfile" /etc/fstab 2>/dev/null; then
+    if awk '$0 == "# OLS WPanel managed swap" {getline; if ($0 == "/swapfile none swap sw 0 0") found=1} END {exit !found}' /etc/fstab 2>/dev/null; then
         echo -e "  → 清理 Swap 文件..."
         swapoff /swapfile 2>/dev/null || true
         rm -f /swapfile
-        sed -i '/\/swapfile/d' /etc/fstab
+        sed -i '/^# OLS WPanel managed swap$/ {N; /\/swapfile none swap sw 0 0/d;}' /etc/fstab
+        rm -f /etc/sysctl.d/99-ols-wpanel-swap.conf
         echo -e "  ${GREEN}✓${NC} Swap 已删除"
     fi
 
@@ -2348,9 +2349,14 @@ TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_MEM_MB=$((TOTAL_MEM_KB / 1024))
 log_info "物理内存: ${TOTAL_MEM_MB}MB"
 
-if ! $REPAIR_MODE && [[ $TOTAL_MEM_MB -le 8192 ]]; then
+if ! $REPAIR_MODE; then
     SWAP_FILE="/swapfile"
-    SWAP_SIZE_BYTES=$((2 * 1024 * 1024 * 1024))
+    if [[ $TOTAL_MEM_MB -le 1024 ]]; then
+        SWAP_SIZE_MB=2048
+    else
+        SWAP_SIZE_MB=1024
+    fi
+    SWAP_SIZE_BYTES=$((SWAP_SIZE_MB * 1024 * 1024))
     ROOT_STATS=$(df -P -B1 / | awk 'NR == 2 {print $2, $3, $4}')
     read -r ROOT_TOTAL ROOT_USED ROOT_AVAILABLE <<< "$ROOT_STATS"
 
@@ -2367,8 +2373,8 @@ if ! $REPAIR_MODE && [[ $TOTAL_MEM_MB -le 8192 ]]; then
     elif [[ $(((ROOT_USED + SWAP_SIZE_BYTES) * 100 / ROOT_TOTAL)) -gt 85 ]]; then
         log_warn "创建 Swap 后根分区使用率将超过 85%，跳过自动创建"
     else
-        log_info "创建 2GB Swap 安全缓冲..."
-        if dd if=/dev/zero of="$SWAP_FILE" bs=1M count=2048 status=progress &&
+        log_info "按物理内存创建 ${SWAP_SIZE_MB}MB Swap 安全缓冲..."
+        if dd if=/dev/zero of="$SWAP_FILE" bs=1M count="$SWAP_SIZE_MB" status=progress &&
            chmod 600 "$SWAP_FILE" &&
            mkswap "$SWAP_FILE" &&
            swapon "$SWAP_FILE"; then
@@ -2387,7 +2393,7 @@ SWAPSYSCTLEOF
                     sysctl -p /etc/sysctl.d/99-ols-wpanel-swap.conf >/dev/null 2>&1 || \
                         log_warn "Swap 已启用，但应用 vm.swappiness=10 失败"
                 fi
-                log_info "2GB Swap 创建完成"
+                log_info "${SWAP_SIZE_MB}MB Swap 创建完成"
             else
                 swapoff "$SWAP_FILE" 2>/dev/null || true
                 rm -f "$SWAP_FILE"

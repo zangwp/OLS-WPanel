@@ -1658,6 +1658,10 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 	}
 	for _, required := range [][]byte{
 		[]byte(`api('/vps/overview')`),
+		[]byte(`'/vps/swap/recommended'`),
+		[]byte(`'/vps/swap/swappiness'`),
+		[]byte(`confirm: this.swapConfirm`),
+		[]byte(`swapConfirm !== 'REMOVE SWAP'`),
 		[]byte(`command: 'o update'`),
 		[]byte(`command: 'o uninstall'`),
 		[]byte(`/firewall?tab=ports`),

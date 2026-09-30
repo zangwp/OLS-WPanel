@@ -1500,6 +1500,11 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/api/auth/csrf-token", authHandler.CSRFToken)
 	vpsHandler := &handlers.VPSHandler{}
 	protected.GET("/api/vps/overview", vpsHandler.Overview)
+	protected.GET("/api/vps/swap", vpsHandler.SwapStatus)
+	protected.POST("/api/vps/swap/recommended", vpsHandler.ApplyRecommendedSwap)
+	protected.PUT("/api/vps/swap", vpsHandler.ApplyCustomSwap)
+	protected.PUT("/api/vps/swap/swappiness", vpsHandler.SetSwappiness)
+	protected.DELETE("/api/vps/swap", vpsHandler.RemoveManagedSwap)
 
 	websiteHandler := &handlers.WebsiteHandler{DB: db}
 	wpInventoryHandler := &handlers.WPInventoryHandler{DB: db}

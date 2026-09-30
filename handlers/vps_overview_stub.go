@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/zangwp/OLS-WPanel/executor"
 	"github.com/zangwp/OLS-WPanel/models"
 )
 
@@ -16,5 +17,6 @@ func collectVPSOverview() VPSOverview {
 		Stats:    &models.SystemStats{},
 		Tuning:   VPSTuning{Nameservers: []string{}},
 		Services: []VPSService{},
+		Swap:     executor.SwapStatus{Supported: false, Entries: []executor.SwapEntry{}},
 	}
 }

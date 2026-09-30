@@ -115,6 +115,66 @@
     </div>
 
     <section class="card mb-5">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 mb-4">
+            <div>
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.swap_title"}}</h3>
+                <p class="text-sm text-gray-500 mt-1">{{t .Lang "vps.swap_help"}}</p>
+            </div>
+            <span class="text-xs px-3 py-1 rounded-full border" :class="overview.swap?.recommendation_satisfied ? 'border-green-700 text-green-400' : 'border-yellow-700 text-yellow-300'" x-text="overview.swap?.recommendation_satisfied ? '{{t .Lang "vps.swap_satisfied"}}' : '{{t .Lang "vps.swap_action_needed"}}'"></span>
+        </div>
+
+        <div x-show="swapMessage" x-cloak class="mb-4 rounded-lg border p-3 text-sm" :class="swapMessageError ? 'border-red-700 bg-red-900/20 text-red-300' : 'border-green-700 bg-green-900/20 text-green-300'" x-text="swapMessage"></div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-5 text-sm">
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_current"}}</p><p class="text-white font-mono mt-1" x-text="bytes(overview.swap?.used_bytes) + ' / ' + bytes(overview.swap?.total_bytes)"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_recommended"}}</p><p class="text-white font-mono mt-1" x-text="bytes(overview.swap?.recommended_bytes)"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">swappiness</p><p class="text-white font-mono mt-1" x-text="overview.swap?.swappiness >= 0 ? overview.swap.swappiness : '--'"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_managed"}}</p><p class="text-white font-mono mt-1" x-text="overview.swap?.managed_file ? bytes(overview.swap?.managed_size_bytes) : '{{t .Lang "vps.swap_none"}}'"></p></div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-gray-700 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <div><p class="font-medium text-white">{{t .Lang "vps.swap_sources"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.swap_sources_help"}}</p></div>
+                    <button type="button" class="btn-primary text-sm" @click="applyRecommendedSwap()" :disabled="swapBusy || !overview.swap?.can_manage" x-text="swapBusy ? '{{t .Lang "vps.swap_working"}}' : '{{t .Lang "vps.swap_apply_recommended"}}'"></button>
+                </div>
+                <div x-show="!(overview.swap?.entries || []).length" class="text-sm text-gray-500 py-3">{{t .Lang "vps.swap_no_sources"}}</div>
+                <div class="space-y-2">
+                    <template x-for="entry in overview.swap?.entries || []" :key="entry.filename">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded border border-gray-700/70 px-3 py-2 text-sm">
+                            <div><span class="text-white font-mono" x-text="entry.filename"></span><span x-show="entry.managed" class="ml-2 text-xs text-blue-400">{{t .Lang "vps.swap_panel_managed"}}</span></div>
+                            <div class="text-gray-400"><span x-text="swapType(entry.type)"></span><span class="mx-2">·</span><span x-text="bytes(entry.used_bytes) + ' / ' + bytes(entry.size_bytes)"></span></div>
+                        </div>
+                    </template>
+                </div>
+                <p x-show="overview.swap?.manage_reason" x-cloak class="text-xs text-yellow-300 mt-3" x-text="overview.swap?.manage_reason"></p>
+            </div>
+
+            <div class="rounded-lg border border-gray-700 p-4">
+                <p class="font-medium text-white">{{t .Lang "vps.swap_custom_title"}}</p>
+                <p class="text-xs text-gray-500 mt-1 mb-4">{{t .Lang "vps.swap_custom_help"}}</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label class="text-sm text-gray-300"><span class="block mb-1">{{t .Lang "vps.swap_file_size"}}</span><select class="form-select w-full" x-model.number="swapSizeMB"><option value="512">512 MB</option><option value="1024">1 GB</option><option value="2048">2 GB</option><option value="4096">4 GB</option><option value="8192">8 GB</option></select></label>
+                    <label class="text-sm text-gray-300"><span class="block mb-1">swappiness</span><input class="form-input w-full" type="number" min="1" max="100" x-model.number="swappiness"></label>
+                </div>
+                <div class="flex flex-wrap gap-2 mt-4">
+                    <button type="button" class="btn-primary text-sm" @click="saveCustomSwap()" :disabled="swapBusy || !overview.swap?.can_manage">{{t .Lang "vps.swap_save_custom"}}</button>
+                    <button type="button" class="btn-secondary text-sm" @click="saveSwappiness()" :disabled="swapBusy">{{t .Lang "vps.swap_save_swappiness"}}</button>
+                </div>
+                <div x-show="overview.swap?.managed_file" x-cloak class="mt-5 pt-4 border-t border-red-900/60">
+                    <p class="text-sm font-medium text-red-300">{{t .Lang "vps.swap_remove_title"}}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.swap_remove_help"}}</p>
+                    <div class="flex flex-col md:flex-row gap-2 mt-3">
+                        <input class="form-input flex-1 font-mono" x-model="swapConfirm" placeholder="REMOVE SWAP" autocomplete="off">
+                        <button type="button" class="btn-danger text-sm" @click="removeManagedSwap()" :disabled="swapBusy || swapConfirm !== 'REMOVE SWAP'">{{t .Lang "vps.swap_remove"}}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p class="text-xs text-gray-500 mt-4">{{t .Lang "vps.swap_safety_note"}}</p>
+    </section>
+
+    <section class="card mb-5">
         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
             <div>
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.lifecycle_title"}}</h3>
@@ -153,10 +213,16 @@
 <script>
 function vpsPage() {
     return {
-        overview: { identity: {}, stats: {}, tuning: {}, services: [] },
+        overview: { identity: {}, stats: {}, tuning: {}, services: [], swap: { entries: [], can_manage: false } },
         loading: false,
         error: '',
         copied: '',
+        swapBusy: false,
+        swapMessage: '',
+        swapMessageError: false,
+        swapSizeMB: 1024,
+        swappiness: 10,
+        swapConfirm: '',
         commands: [
             { title: '{{t .Lang "vps.command_update"}}', help: '{{t .Lang "vps.command_update_help"}}', command: 'o update' },
             { title: '{{t .Lang "vps.command_status"}}', help: '{{t .Lang "vps.command_status_help"}}', command: 'o status' },
@@ -169,6 +235,8 @@ function vpsPage() {
                 const response = await api('/vps/overview');
                 if (!response.success) throw new Error(response.message || '{{t .Lang "vps.load_failed"}}');
                 this.overview = response.data || this.overview;
+                this.swapSizeMB = Math.max(512, Math.round(Number(this.overview.swap?.managed_size_bytes || this.overview.swap?.recommended_bytes || 1073741824) / 1048576));
+                this.swappiness = Number(this.overview.swap?.swappiness >= 0 ? this.overview.swap.swappiness : 10);
             } catch (error) {
                 this.error = error.message || '{{t .Lang "vps.load_failed"}}';
             } finally {
@@ -179,6 +247,30 @@ function vpsPage() {
         number(value) { return Number(value || 0).toFixed(1); },
         stateLabel(value) { return value === 'active' ? '{{t .Lang "vps.state_active"}}' : (value === 'activating' ? '{{t .Lang "vps.state_activating"}}' : '{{t .Lang "vps.state_inactive"}}'); },
         enabledLabel(value) { return value === 'enabled' ? '{{t .Lang "vps.state_enabled"}}' : (value === 'disabled' ? '{{t .Lang "vps.state_disabled"}}' : value || '{{t .Lang "vps.state_unknown"}}'); },
+        swapType(value) { return value === 'zram' ? 'zram' : (value === 'partition' ? '{{t .Lang "vps.swap_partition"}}' : '{{t .Lang "vps.swap_file"}}'); },
+        async swapRequest(path, options, successMessage) {
+            this.swapBusy = true;
+            this.swapMessage = '';
+            this.swapMessageError = false;
+            try {
+                const response = await api(path, { timeout: 120000, ...options });
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.swap_failed"}}');
+                this.overview.swap = response.data || this.overview.swap;
+                this.overview.stats.swap_total_bytes = this.overview.swap.total_bytes;
+                this.overview.stats.swap_used_bytes = this.overview.swap.used_bytes;
+                this.swapMessage = successMessage;
+                this.swapConfirm = '';
+            } catch (error) {
+                this.swapMessageError = true;
+                this.swapMessage = error.message || '{{t .Lang "vps.swap_failed"}}';
+            } finally {
+                this.swapBusy = false;
+            }
+        },
+        applyRecommendedSwap() { return this.swapRequest('/vps/swap/recommended', { method: 'POST' }, '{{t .Lang "vps.swap_recommended_applied"}}'); },
+        saveCustomSwap() { return this.swapRequest('/vps/swap', { method: 'PUT', body: { size_mb: Number(this.swapSizeMB), swappiness: Number(this.swappiness) } }, '{{t .Lang "vps.swap_custom_saved"}}'); },
+        saveSwappiness() { return this.swapRequest('/vps/swap/swappiness', { method: 'PUT', body: { swappiness: Number(this.swappiness) } }, '{{t .Lang "vps.swap_swappiness_saved"}}'); },
+        removeManagedSwap() { return this.swapRequest('/vps/swap', { method: 'DELETE', body: { confirm: this.swapConfirm } }, '{{t .Lang "vps.swap_removed"}}'); },
         async copy(command) {
             try {
                 await navigator.clipboard.writeText(command);
