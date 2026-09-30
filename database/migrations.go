@@ -21,6 +21,7 @@ var migrations = append([]string{
 		name                  TEXT    NOT NULL,
 		domain                TEXT    NOT NULL UNIQUE,
 		aliases               TEXT    DEFAULT '',
+		alias_redirect_mode   TEXT    NOT NULL DEFAULT 'serve',
 		status                TEXT    NOT NULL DEFAULT 'active',
 		system_user           TEXT    NOT NULL,
 		web_root              TEXT    NOT NULL,

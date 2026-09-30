@@ -64,6 +64,7 @@ type TaskResult struct {
 type CreateSitePayload struct {
 	Domain             string
 	Aliases            []string
+	AliasRedirectMode  string
 	SSLEnabled         bool
 	DBPassword         string
 	ExpiresAt          string
@@ -104,13 +105,14 @@ type ChangeDBPasswordPayload struct {
 }
 
 type UpdateDomainsPayload struct {
-	Site         *models.Website `json:"-"`
-	NewDomain    string          `json:"new_domain"`
-	Aliases      []string        `json:"aliases"`
-	OldWPSiteURL string          `json:"old_wp_site_url,omitempty"`
-	OldWPHomeURL string          `json:"old_wp_home_url,omitempty"`
-	NewWPSiteURL string          `json:"new_wp_site_url,omitempty"`
-	NewWPHomeURL string          `json:"new_wp_home_url,omitempty"`
+	Site              *models.Website `json:"-"`
+	NewDomain         string          `json:"new_domain"`
+	Aliases           []string        `json:"aliases"`
+	AliasRedirectMode string          `json:"alias_redirect_mode"`
+	OldWPSiteURL      string          `json:"old_wp_site_url,omitempty"`
+	OldWPHomeURL      string          `json:"old_wp_home_url,omitempty"`
+	NewWPSiteURL      string          `json:"new_wp_site_url,omitempty"`
+	NewWPHomeURL      string          `json:"new_wp_home_url,omitempty"`
 }
 
 type SetAccessLogModePayload struct {

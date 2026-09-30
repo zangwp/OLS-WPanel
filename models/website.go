@@ -18,6 +18,7 @@ type Website struct {
 	Name                        string           `json:"name"`
 	Domain                      string           `json:"domain"`
 	Aliases                     string           `json:"aliases"`
+	AliasRedirectMode           string           `json:"alias_redirect_mode"`
 	Status                      WebsiteStatus    `json:"status"`
 	SystemUser                  string           `json:"system_user"`
 	WebRoot                     string           `json:"web_root"`
@@ -68,6 +69,7 @@ type Website struct {
 type CreateWebsiteRequest struct {
 	Domain             string   `json:"domain" binding:"required"`
 	Aliases            []string `json:"aliases"`
+	AliasRedirectMode  string   `json:"alias_redirect_mode"`
 	SSLEnabled         bool     `json:"ssl_enabled"`
 	DBPassword         string   `json:"db_password"`
 	ExpiresAt          string   `json:"expires_at"`

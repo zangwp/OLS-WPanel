@@ -20,6 +20,8 @@
             <dl class="space-y-3">
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.domain"}}</dt><dd><a :href="(site.ssl_enabled ? 'https' : 'http') + '://' + site.domain" target="_blank" class="text-blue-400 hover:text-blue-300 hover:underline" x-text="site.domain"></a></dd></div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.aliases"}}</dt><dd class="text-white" x-text="site.aliases || t('common.none')"></dd></div>
+                <div><dt class="text-sm text-gray-400">{{t .Lang "website.alias_handling"}}</dt><dd class="text-white" x-text="aliasModeLabel(site.alias_redirect_mode)"></dd></div>
+                <div><dt class="text-sm text-gray-400">{{t .Lang "website.https_policy"}}</dt><dd class="text-white" x-text="site.ssl_enabled ? t('website.https_forced') : t('website.https_requires_ssl')"></dd></div>
                 <div class="pt-2">
                     <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.edit_domain"}}</button>
                     <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded ml-2 inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.files"}}</a>
@@ -600,7 +602,7 @@
 
     <!-- 编辑域名 -->
     <div x-show="domainModalOpen" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" @click.self="domainModalOpen = false">
-        <div class="rounded-lg shadow-xl w-full max-w-md p-6" style="background-color: #1e293b; border: 1px solid #334155;">
+        <div class="rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" style="background-color: #1e293b; border: 1px solid #334155;">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "website.edit_domain"}}</h3>
                 <button @click="domainModalOpen = false" class="text-gray-400 hover:text-white text-xl">&times;</button>
@@ -613,6 +615,24 @@
                 <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.aliases_one_per_line"}}</label>
                 <textarea x-model="editAliasesStr" rows="4" class="w-full rounded p-2 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;" placeholder="www.aaa.com&#10;blog.aaa.com"></textarea>
             </div>
+            <div class="mb-3">
+                <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.alias_handling"}}</label>
+                <select x-model="editAliasRedirectMode" class="input-field">
+                    <option value="301">{{t .Lang "website.alias_redirect_301"}}</option>
+                    <option value="302">{{t .Lang "website.alias_redirect_302"}}</option>
+                    <option value="serve">{{t .Lang "website.alias_serve_same_site"}}</option>
+                </select>
+                <p class="text-xs text-gray-400 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
+            </div>
+            <div x-show="firstEditedAlias()" class="mb-3 p-3 rounded text-xs font-mono break-all" style="background-color: #0f172a; border: 1px solid #334155;">
+                <div class="text-gray-400 mb-1">{{t .Lang "website.redirect_preview"}}</div>
+                <div><span class="text-gray-300" x-text="redirectPreviewSource()"></span> <span class="text-gray-500">→</span> <span class="text-green-300" x-text="redirectPreviewTarget()"></span></div>
+            </div>
+            <div class="mb-3 flex flex-wrap items-center gap-2">
+                <button type="button" @click="checkDomainDNS()" :disabled="domainDNSChecking" class="btn-secondary text-sm" x-text="domainDNSChecking ? t('website.dns_checking') : t('website.check_dns')"></button>
+                <span x-show="domainDNSResult" class="text-xs" :class="domainDNSResult && domainDNSResult.ok ? 'text-green-300' : 'text-yellow-300'" x-text="domainDNSStatusText()"></span>
+            </div>
+            <div x-show="domainDNSResult && ((domainDNSResult.hard_warnings || []).length || (domainDNSResult.warnings || []).length)" class="mb-3 p-3 rounded text-xs text-yellow-200 whitespace-pre-line" style="background-color: #422006; border: 1px solid #78350f;" x-text="domainDNSWarnings()"></div>
             <div x-show="editDomain !== site.domain" class="mb-3 p-3 rounded text-sm" style="background-color: #422006; border: 1px solid #78350f; color: #fbbf24;">
                 <span x-text="t('website.domain_change_resources_warning', { user: site.system_user })"></span>
             </div>
@@ -630,7 +650,13 @@
                 </div>
                 <p x-show="!wpURLsLoading && wpURLsError" class="text-xs text-yellow-300 mt-2" x-text="wpURLsError"></p>
             </div>
-            <p x-show="site.ssl_enabled" class="text-yellow-400 text-xs mb-3">{{t .Lang "website.domain_change_ssl_warning"}}</p>
+            <div x-show="site.ssl_enabled" class="mb-3 p-3 rounded" style="background-color: #0f172a; border: 1px solid #334155;">
+                <label class="flex items-start gap-2 text-sm text-gray-200">
+                    <input type="checkbox" x-model="reissueSSL" :disabled="site.ssl_cert_source !== 'auto'" class="mt-1">
+                    <span>{{t .Lang "website.reissue_ssl_domains"}}</span>
+                </label>
+                <p class="text-xs text-gray-400 mt-2" x-text="site.ssl_cert_source === 'auto' ? t('website.reissue_ssl_domains_help') : t('website.manual_ssl_domains_help')"></p>
+            </div>
             <div class="flex justify-end space-x-3">
                 <button @click="domainModalOpen = false" class="btn-secondary">{{t .Lang "common.cancel"}}</button>
                 <button @click="updateDomains()" :disabled="domainSubmitting" class="btn-primary" x-text="domainSubmitting ? t('website.processing') : t('common.save')"></button>
@@ -802,6 +828,10 @@ function websiteDetail() {
         domainModalOpen: false,
         editDomain: '',
         editAliasesStr: '',
+        editAliasRedirectMode: '301',
+        reissueSSL: false,
+        domainDNSChecking: false,
+        domainDNSResult: null,
         domainSubmitting: false,
         syncWPSiteURLs: false,
         wpURLsLoading: false,
@@ -1146,21 +1176,25 @@ function websiteDetail() {
                 if (!newDomain) { showToast(t('website.domain_required'), 'error'); this.domainSubmitting = false; return; }
                 const aliases = this.editAliasesStr.split('\n').map(a => a.trim()).filter(a => a);
                 const domainChanged = newDomain.toLowerCase() !== this.site.domain.toLowerCase();
-                const body = { new_domain: newDomain, aliases, sync_wp_site_urls: this.syncWPSiteURLs && domainChanged };
+                if (this.reissueSSL && !await this.confirmDomainSSLPreflight()) return;
+                const body = { new_domain: newDomain, aliases, alias_redirect_mode: this.editAliasRedirectMode, reissue_ssl: this.reissueSSL, sync_wp_site_urls: this.syncWPSiteURLs && domainChanged };
                 const r = await api('/websites/' + this.site.id + '/domains', { method: 'PUT', body });
                 if (r.success) {
-                    showToast(r.data?.message || t('website.updated'), 'success');
+                    showToast(r.data?.ssl_warning || r.data?.message || t('website.updated'), r.data?.ssl_warning ? 'warning' : 'success');
                     this.domainModalOpen = false;
                     await this.fetchDetail();
                 } else {
                     showToast(r.data?.message || t('common.operation_failed'), 'error');
                 }
             } catch(e) { showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
-            this.domainSubmitting = false;
+            finally { this.domainSubmitting = false; }
         },
         async openDomainModal() {
             this.editDomain = this.site.domain;
             this.editAliasesStr = this.site.aliases || '';
+            this.editAliasRedirectMode = this.site.alias_redirect_mode || 'serve';
+            this.reissueSSL = !!this.site.ssl_enabled && this.site.ssl_cert_source === 'auto';
+            this.domainDNSResult = null;
             this.syncWPSiteURLs = false;
             this.wpSiteURL = '';
             this.wpHomeURL = '';
@@ -1178,6 +1212,54 @@ function websiteDetail() {
             } finally {
                 this.wpURLsLoading = false;
             }
+        },
+        aliasModeLabel(mode) {
+            if (mode === '301') return t('website.alias_redirect_301');
+            if (mode === '302') return t('website.alias_redirect_302');
+            return t('website.alias_serve_same_site');
+        },
+        firstEditedAlias() {
+            return this.editAliasesStr.split('\n').map(a => a.trim()).find(Boolean) || '';
+        },
+        redirectPreviewSource() {
+            const alias = this.firstEditedAlias();
+            return alias ? 'http://' + alias + '/article?id=1' : '';
+        },
+        redirectPreviewTarget() {
+            if (this.editAliasRedirectMode === 'serve') return t('website.alias_preview_same_site');
+            const scheme = this.site && this.site.ssl_enabled ? 'https' : 'http';
+            return scheme + '://' + this.editDomain.trim() + '/article?id=1';
+        },
+        async checkDomainDNS() {
+            this.domainDNSChecking = true;
+            this.domainDNSResult = null;
+            try {
+                const aliases = this.editAliasesStr.split('\n').map(a => a.trim()).filter(Boolean);
+                const r = await api('/websites/ssl-preflight', { method: 'POST', body: { domain: this.editDomain.trim(), aliases } });
+                this.domainDNSResult = r.data || null;
+                return this.domainDNSResult;
+            } catch (e) {
+                showToast(e.message, 'error');
+                return null;
+            } finally { this.domainDNSChecking = false; }
+        },
+        domainDNSStatusText() {
+            if (!this.domainDNSResult) return '';
+            return this.domainDNSResult.ok ? t('website.dns_check_passed') : t('website.dns_check_attention');
+        },
+        domainDNSWarnings() {
+            if (!this.domainDNSResult) return '';
+            return [...(this.domainDNSResult.hard_warnings || []), ...(this.domainDNSResult.warnings || [])].join('\n');
+        },
+        async confirmDomainSSLPreflight() {
+            const result = await this.checkDomainDNS();
+            if (!result) return false;
+            if ((result.hard_warnings || []).length) {
+                showToast(t('website.dns_fix_before_ssl'), 'error');
+                return false;
+            }
+            if ((result.warnings || []).length) return await confirmModal(t('website.ssl_precheck_warning', { warnings: result.warnings.join('\n\n') }));
+            return true;
         },
         previewWPURL(value) {
             try {

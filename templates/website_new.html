@@ -34,6 +34,16 @@
                 <label class="label">{{t .Lang "website.aliases_one_per_line"}}</label>
                 <textarea x-model="aliases" class="input-field" rows="3" placeholder="www.example.com"></textarea>
             </div>
+            <div class="mb-4" x-show="aliases.trim()">
+                <label class="label">{{t .Lang "website.alias_handling"}}</label>
+                <select x-model="aliasRedirectMode" class="input-field">
+                    <option value="301">{{t .Lang "website.alias_redirect_301"}}</option>
+                    <option value="302">{{t .Lang "website.alias_redirect_302"}}</option>
+                    <option value="serve">{{t .Lang "website.alias_serve_same_site"}}</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
+                <p class="text-xs font-mono text-green-300 mt-2" x-text="aliasPreview()"></p>
+            </div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.database_password"}}</label>
                 <div class="flex space-x-2">
@@ -83,6 +93,7 @@ function createWebsite() {
     return {
         domain: '',
         aliases: '',
+        aliasRedirectMode: '301',
         dbPassword: '',
         sslEnabled: false,
         expiresAt: '',
@@ -110,6 +121,12 @@ function createWebsite() {
             for (let i = 0; i < 24; i++) pw += chars[Math.floor(Math.random() * chars.length)];
             this.dbPassword = pw;
         },
+        aliasPreview() {
+            const alias = this.aliases.split('\n').map(s => s.trim()).find(Boolean);
+            if (!alias) return '';
+            if (this.aliasRedirectMode === 'serve') return t('website.alias_preview_same_site');
+            return 'http://' + alias + '/article?id=1 → ' + (this.sslEnabled ? 'https://' : 'http://') + this.domain.trim() + '/article?id=1';
+        },
         async confirmSSLPreflight(body) {
             if (!body.ssl_enabled) return true;
             const resp = await api('/websites/ssl-preflight', { method: 'POST', body });
@@ -133,6 +150,7 @@ function createWebsite() {
                 const body = {
                     domain: this.domain.trim(),
                     aliases: aliasesList,
+                    alias_redirect_mode: this.aliasRedirectMode,
                     db_password: this.dbPassword,
                     ssl_enabled: this.sslEnabled,
                     expires_at: this.expiresAt || null,

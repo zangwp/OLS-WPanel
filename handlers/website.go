@@ -29,7 +29,7 @@ import (
 )
 
 // canonical column list shared by all website queries.
-const websiteCols = `id, name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
+const websiteCols = `id, name, domain, aliases, alias_redirect_mode, status, system_user, web_root, document_root_subdir, log_dir,
 	db_name, db_user, lsphp_socket_path, php_version, ols_vhost_config_path, site_type, ssl_enabled,
 	ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, ssl_export_enabled, template_version, access_log_mode,
 	litespeed_cache_enabled, litespeed_cache_ttl, litespeed_cache_key,
@@ -111,7 +111,7 @@ func scanWebsite(scanner func(dest ...interface{}) error) (*models.Website, erro
 	var cdnRealIPEnabled int
 
 	err := scanner(
-		&w.ID, &w.Name, &w.Domain, &aliases, &status, &w.SystemUser,
+		&w.ID, &w.Name, &w.Domain, &aliases, &w.AliasRedirectMode, &status, &w.SystemUser,
 		&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.LSPHPSocketPath, &w.PHPVersion,
 		&w.OLSVHostConfigPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath,
 		&w.SSLExpiresAt, &w.SSLLastError, &w.SSLCertSource, &sslExportEnabled, &w.TemplateVersion, &w.AccessLogMode,
@@ -480,6 +480,15 @@ func (h *WebsiteHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("域名不能为空"))
 		return
 	}
+	aliasRedirectMode := strings.TrimSpace(req.AliasRedirectMode)
+	if aliasRedirectMode == "" {
+		aliasRedirectMode = executor.AliasRedirectPermanent
+	}
+	aliasRedirectMode, err := executor.NormalizeAliasRedirectMode(aliasRedirectMode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
 	if conflict, target := isAliasConflicting(req.Domain, 0); conflict {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("域名 "+req.Domain+" 已被站点 "+target+" 使用"))
 		return
@@ -523,6 +532,7 @@ func (h *WebsiteHandler) Create(c *gin.Context) {
 	payload := &executor.CreateSitePayload{
 		Domain:             req.Domain,
 		Aliases:            req.Aliases,
+		AliasRedirectMode:  aliasRedirectMode,
 		SSLEnabled:         req.SSLEnabled,
 		DBPassword:         req.DBPassword,
 		ExpiresAt:          req.ExpiresAt,
@@ -1128,9 +1138,11 @@ func (h *WebsiteHandler) UpdateDomains(c *gin.Context) {
 	}
 
 	var req struct {
-		NewDomain      string   `json:"new_domain"`
-		Aliases        []string `json:"aliases"`
-		SyncWPSiteURLs bool     `json:"sync_wp_site_urls"`
+		NewDomain         string   `json:"new_domain"`
+		Aliases           []string `json:"aliases"`
+		AliasRedirectMode string   `json:"alias_redirect_mode"`
+		ReissueSSL        bool     `json:"reissue_ssl"`
+		SyncWPSiteURLs    bool     `json:"sync_wp_site_urls"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("参数错误"))
@@ -1140,6 +1152,15 @@ func (h *WebsiteHandler) UpdateDomains(c *gin.Context) {
 	targetDomain := strings.ToLower(strings.TrimSpace(req.NewDomain))
 	if targetDomain == "" {
 		targetDomain = site.Domain
+	}
+	aliasRedirectMode := strings.TrimSpace(req.AliasRedirectMode)
+	if aliasRedirectMode == "" {
+		aliasRedirectMode = site.AliasRedirectMode
+	}
+	aliasRedirectMode, err = executor.NormalizeAliasRedirectMode(aliasRedirectMode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
 	}
 
 	if targetDomain != site.Domain {
@@ -1163,8 +1184,21 @@ func (h *WebsiteHandler) UpdateDomains(c *gin.Context) {
 			return
 		}
 	}
+	if req.ReissueSSL && site.SSLEnabled && site.SSLCertSource == "auto" {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		preflight, preflightErr := runSSLPreflight(ctx, targetDomain, req.Aliases)
+		cancel()
+		if preflightErr != nil {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(preflightErr.Error()))
+			return
+		}
+		if len(preflight.HardWarnings) > 0 {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse(strings.Join(preflight.HardWarnings, "\n")))
+			return
+		}
+	}
 
-	payload := &executor.UpdateDomainsPayload{Site: site, NewDomain: targetDomain, Aliases: req.Aliases}
+	payload := &executor.UpdateDomainsPayload{Site: site, NewDomain: targetDomain, Aliases: req.Aliases, AliasRedirectMode: aliasRedirectMode}
 	if req.SyncWPSiteURLs {
 		if site.SiteType != "wordpress" {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.sync_wp_urls_wordpress_only")))
@@ -1210,7 +1244,34 @@ func (h *WebsiteHandler) UpdateDomains(c *gin.Context) {
 	}
 	result := <-task.ResultCh
 	if result.Success {
-		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": result.Message}))
+		response := gin.H{"message": result.Message}
+		if site.SSLEnabled && !req.ReissueSSL {
+			if site.SSLCertSource == "auto" {
+				response["ssl_warning"] = i18n.TE(c.Request, "website.domain_saved_ssl_not_reissued")
+			} else {
+				response["ssl_warning"] = i18n.TE(c.Request, "website.domain_saved_manual_ssl")
+			}
+		} else if req.ReissueSSL && site.SSLEnabled {
+			updatedSite := getWebsiteByID(id)
+			if updatedSite == nil {
+				response["ssl_warning"] = i18n.TE(c.Request, "website.domain_saved_ssl_state_failed")
+			} else if updatedSite.SSLCertSource != "auto" {
+				response["ssl_warning"] = i18n.TE(c.Request, "website.domain_saved_manual_ssl")
+			} else {
+				sslTask, queued := enqueueTask(c, executor.TaskEnableSSL, &executor.EnableSSLPayload{Site: updatedSite, Mode: "auto"})
+				if !queued {
+					return
+				}
+				sslResult := <-sslTask.ResultCh
+				if sslResult.Success {
+					response["ssl_reissued"] = true
+					response["message"] = i18n.TE(c.Request, "website.domain_saved_ssl_reissued", i18n.P{"message": result.Message})
+				} else {
+					response["ssl_warning"] = i18n.TE(c.Request, "website.domain_saved_ssl_reissue_failed", i18n.P{"error": sslResult.Message})
+				}
+			}
+		}
+		c.JSON(http.StatusOK, models.SuccessResponse(response))
 	} else {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(result.Message))
 	}

@@ -14,35 +14,36 @@ import (
 )
 
 type OLSVHostData struct {
-	Domain           string
-	Aliases          []string
-	ServerNames      string
-	WebRoot          string
-	LogDir           string
-	SystemUser       string
-	UseSSL           bool
-	SSLCertPath      string
-	SSLKeyPath       string
-	PHPProxy         string
-	LSPHPBinary      string
-	TemplateVer      string
-	AccessLogMode    string
-	LSCacheEnabled   bool
-	LSCacheTTL       int
-	LSCacheKey       string
-	SiteType         string
-	RateLimitEnabled bool
-	RateLimitBurst   int
-	BotLimitEnabled  bool
-	BotLimitBurst    int
-	XMLRPCEnabled    bool
-	CDNRealIPEnabled bool
-	CDNRealIPHeader  string
-	CDNRealIPRanges  []string
-	CDNRealIPCompat  bool
-	SQLiBlockEnabled bool
-	SQLiAutoBanLog   bool
-	PHPMaxChildren   int
+	Domain            string
+	Aliases           []string
+	AliasRedirectMode string
+	ServerNames       string
+	WebRoot           string
+	LogDir            string
+	SystemUser        string
+	UseSSL            bool
+	SSLCertPath       string
+	SSLKeyPath        string
+	PHPProxy          string
+	LSPHPBinary       string
+	TemplateVer       string
+	AccessLogMode     string
+	LSCacheEnabled    bool
+	LSCacheTTL        int
+	LSCacheKey        string
+	SiteType          string
+	RateLimitEnabled  bool
+	RateLimitBurst    int
+	BotLimitEnabled   bool
+	BotLimitBurst     int
+	XMLRPCEnabled     bool
+	CDNRealIPEnabled  bool
+	CDNRealIPHeader   string
+	CDNRealIPRanges   []string
+	CDNRealIPCompat   bool
+	SQLiBlockEnabled  bool
+	SQLiAutoBanLog    bool
+	PHPMaxChildren    int
 }
 
 type TemplateEngine struct {

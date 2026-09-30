@@ -2,6 +2,9 @@
 
 ## v1.7.0 — 2026-09-30
 
+- Adds explicit additional-domain policies: new sites default to a canonical 301 redirect, while 302 and same-site serving remain available and existing sites retain their prior behavior.
+- Generates host-specific OpenLiteSpeed redirects without reflecting an untrusted Host header, preserves request paths and query strings, and folds HTTP-to-HTTPS canonicalization into a single hop.
+- Adds redirect preview and DNS checks to domain management, automatically reissues panel-managed certificates for the primary domain and all aliases, and clearly identifies manual-certificate follow-up work.
 - Adds adaptive Swap recommendations to VPS Management: systems with up to 1GB RAM receive a 2GB recommendation, while larger VPSes default to a conservative 1GB emergency buffer.
 - Detects active zram, swap partitions, and swap files separately; existing system-managed sources count toward the recommendation and are never modified or deleted by the panel.
 - Adds safe controls for applying the recommendation, selecting a 512MB–8GB panel-managed `/swapfile`, and changing `vm.swappiness` without accepting arbitrary shell input.

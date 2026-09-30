@@ -84,6 +84,45 @@ func TestRenderOLSVHostGenericPHPDoesNotEnableLSCache(t *testing.T) {
 	}
 }
 
+func TestRenderOLSVHostCanonicalAliasRedirectPreservesPathAndQuery(t *testing.T) {
+	data := testOLSVHostData(t.TempDir())
+	data.AliasRedirectMode = AliasRedirectPermanent
+	data.UseSSL = true
+	data.SSLCertPath = filepath.Join(t.TempDir(), "fullchain.pem")
+	data.SSLKeyPath = filepath.Join(t.TempDir(), "privkey.pem")
+	content := mustRenderOLSVHost(t, data)
+	for _, want := range []string{
+		`RewriteCond %{HTTP_HOST} ^(?:www\.example\.com)(?::[0-9]+)?$ [NC]`,
+		`RewriteRule ^/?(.*)$ https://example.com/$1 [R=301,L]`,
+		`RewriteCond %{HTTP_HOST} ^example\.com(?::[0-9]+)?$ [NC]`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("canonical redirect missing %q\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "https://%{HTTP_HOST}") {
+		t.Fatal("generated redirect must not reflect an untrusted Host header")
+	}
+}
+
+func TestRenderOLSVHostTemporaryAliasRedirectWithoutSSL(t *testing.T) {
+	data := testOLSVHostData(t.TempDir())
+	data.AliasRedirectMode = AliasRedirectTemporary
+	content := mustRenderOLSVHost(t, data)
+	if !strings.Contains(content, `RewriteRule ^/?(.*)$ http://example.com/$1 [R=302,L]`) {
+		t.Fatalf("temporary redirect missing:\n%s", content)
+	}
+}
+
+func TestNormalizeAliasRedirectModeRejectsUnknownValue(t *testing.T) {
+	if _, err := NormalizeAliasRedirectMode("javascript"); err == nil {
+		t.Fatal("unknown alias redirect mode accepted")
+	}
+	if got, err := NormalizeAliasRedirectMode(""); err != nil || got != AliasRedirectServe {
+		t.Fatalf("empty mode = %q, %v", got, err)
+	}
+}
+
 func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
 	root := t.TempDir()
 	enabled := filepath.Join(root, "sites-enabled")

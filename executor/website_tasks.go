@@ -53,9 +53,9 @@ func requireDomainTargetAvailable(path, label string) error {
 	return nil
 }
 
-const createWebsiteInsertSQL = `INSERT INTO websites (name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
+const createWebsiteInsertSQL = `INSERT INTO websites (name, domain, aliases, alias_redirect_mode, status, system_user, web_root, document_root_subdir, log_dir,
 	 db_name, db_user, lsphp_socket_path, php_version, ols_vhost_config_path, site_type, ssl_enabled, ssl_cert_path, ssl_key_path, ssl_expires_at, ssl_last_error, ssl_cert_source, template_version, access_log_mode, disable_application_passwords, log_retention_days, lsphp_max_children, expires_at)
-	 VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1.0', 'error_only', 1, ?, ?, ?)`
+	 VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1.0', 'error_only', 1, ?, ?, ?)`
 
 func moveSiteLogDir(oldLogDir, newLogDir string) error {
 	if oldLogDir == newLogDir {
@@ -202,10 +202,24 @@ func executeCreateSite(task *Task) TaskResult {
 	if !IsValidDomain(domain) {
 		return TaskResult{Success: false, Message: "域名格式不合法: " + domain}
 	}
-	for _, alias := range payload.Aliases {
-		if !IsValidDomain(strings.TrimSpace(alias)) {
+	aliasRedirectMode, err := NormalizeAliasRedirectMode(payload.AliasRedirectMode)
+	if err != nil {
+		return TaskResult{Success: false, Message: err.Error()}
+	}
+	seenAliases := map[string]bool{}
+	for index, alias := range payload.Aliases {
+		alias = strings.ToLower(strings.TrimSpace(alias))
+		if !IsValidDomain(alias) {
 			return TaskResult{Success: false, Message: "附加域名格式不合法: " + alias}
 		}
+		if alias == domain {
+			return TaskResult{Success: false, Message: "附加域名不能与主域名相同"}
+		}
+		if seenAliases[alias] {
+			return TaskResult{Success: false, Message: "附加域名不能重复: " + alias}
+		}
+		seenAliases[alias] = true
+		payload.Aliases[index] = alias
 	}
 
 	systemUser := "wp_" + siteName
@@ -318,19 +332,20 @@ func executeCreateSite(task *Task) TaskResult {
 	maxChildren := RecommendLSPHPMaxChildren(CollectSystemFacts())
 
 	olsVHostData := &OLSVHostData{
-		Domain:         domain,
-		Aliases:        payload.Aliases,
-		ServerNames:    allServerNames,
-		WebRoot:        documentRoot,
-		LogDir:         logDir,
-		SystemUser:     systemUser,
-		UseSSL:         false,
-		PHPProxy:       "unix:" + phpSockPath,
-		LSPHPBinary:    phpRuntime.LSAPIBinary,
-		SiteType:       payload.SiteType,
-		TemplateVer:    "v1.0",
-		AccessLogMode:  "error_only",
-		PHPMaxChildren: maxChildren,
+		Domain:            domain,
+		Aliases:           payload.Aliases,
+		AliasRedirectMode: aliasRedirectMode,
+		ServerNames:       allServerNames,
+		WebRoot:           documentRoot,
+		LogDir:            logDir,
+		SystemUser:        systemUser,
+		UseSSL:            false,
+		PHPProxy:          "unix:" + phpSockPath,
+		LSPHPBinary:       phpRuntime.LSAPIBinary,
+		SiteType:          payload.SiteType,
+		TemplateVer:       "v1.0",
+		AccessLogMode:     "error_only",
+		PHPMaxChildren:    maxChildren,
 	}
 
 	olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
@@ -374,21 +389,22 @@ func executeCreateSite(task *Task) TaskResult {
 			os.RemoveAll(certDir)
 		} else {
 			sslData := &OLSVHostData{
-				Domain:         domain,
-				Aliases:        payload.Aliases,
-				ServerNames:    allServerNames,
-				WebRoot:        documentRoot,
-				LogDir:         logDir,
-				SystemUser:     systemUser,
-				UseSSL:         true,
-				SSLCertPath:    certPath,
-				SSLKeyPath:     keyPath,
-				PHPProxy:       "unix:" + phpSockPath,
-				LSPHPBinary:    phpRuntime.LSAPIBinary,
-				SiteType:       payload.SiteType,
-				TemplateVer:    "v1.0",
-				AccessLogMode:  "error_only",
-				PHPMaxChildren: maxChildren,
+				Domain:            domain,
+				Aliases:           payload.Aliases,
+				AliasRedirectMode: aliasRedirectMode,
+				ServerNames:       allServerNames,
+				WebRoot:           documentRoot,
+				LogDir:            logDir,
+				SystemUser:        systemUser,
+				UseSSL:            true,
+				SSLCertPath:       certPath,
+				SSLKeyPath:        keyPath,
+				PHPProxy:          "unix:" + phpSockPath,
+				LSPHPBinary:       phpRuntime.LSAPIBinary,
+				SiteType:          payload.SiteType,
+				TemplateVer:       "v1.0",
+				AccessLogMode:     "error_only",
+				PHPMaxChildren:    maxChildren,
 			}
 
 			httpsConfig, sslErr := engine.RenderOLSVHostConfig(sslData)
@@ -440,7 +456,7 @@ func executeCreateSite(task *Task) TaskResult {
 	db := database.GetDB()
 	insertResult, err := db.Exec(
 		createWebsiteInsertSQL,
-		siteName, domain, strings.Join(payload.Aliases, "\n"), systemUser,
+		siteName, domain, strings.Join(payload.Aliases, "\n"), aliasRedirectMode, systemUser,
 		webRoot, documentRootSubdir, logDir, dbName, dbUser, phpSockPath, phpRuntime.Version, olsVHostConfigPath, payload.SiteType, sslEnabled,
 		certPath, keyPath, sslExpiry, sslWarning, sslCertSource, defaultSiteLogRetentionDays, maxChildren, nilIfEmpty(payload.ExpiresAt),
 	)
@@ -920,10 +936,10 @@ var reloadPrimaryDomainOLS = func() error {
 }
 
 func updateWebsitePrimaryDomain(siteID int, fromDomain string, site *models.Website) error {
-	result, err := database.GetDB().Exec(`UPDATE websites SET domain = ?, aliases = ?, web_root = ?, log_dir = ?,
+	result, err := database.GetDB().Exec(`UPDATE websites SET domain = ?, aliases = ?, alias_redirect_mode = ?, web_root = ?, log_dir = ?,
 		ols_vhost_config_path = ?, lsphp_socket_path = ?, ssl_cert_path = ?, ssl_key_path = ?,
 		updated_at = CURRENT_TIMESTAMP WHERE id = ? AND domain = ?`,
-		site.Domain, site.Aliases, site.WebRoot, site.LogDir,
+		site.Domain, site.Aliases, site.AliasRedirectMode, site.WebRoot, site.LogDir,
 		site.OLSVHostConfigPath, site.LSPHPSocketPath, site.SSLCertPath, site.SSLKeyPath, siteID, fromDomain)
 	if err != nil {
 		return err
@@ -979,12 +995,29 @@ func executeUpdateDomains(task *Task) TaskResult {
 	oldDomain := site.Domain
 	newDomain := strings.TrimSpace(payload.NewDomain)
 	newAliases := payload.Aliases
+	aliasRedirectMode, err := NormalizeAliasRedirectMode(payload.AliasRedirectMode)
+	if err != nil {
+		return taskFailure("附加域名处理方式无效", err)
+	}
+	payload.AliasRedirectMode = aliasRedirectMode
+	currentAliasRedirectMode, err := NormalizeAliasRedirectMode(site.AliasRedirectMode)
+	if err != nil {
+		return taskFailure("当前附加域名处理方式无效", err)
+	}
+	site.AliasRedirectMode = currentAliasRedirectMode
 
 	// Validate alias domains
-	for _, alias := range newAliases {
-		if !IsValidDomain(strings.TrimSpace(alias)) {
+	seenAliases := map[string]bool{}
+	for index, alias := range newAliases {
+		alias = strings.ToLower(strings.TrimSpace(alias))
+		if !IsValidDomain(alias) {
 			return TaskResult{Success: false, Message: "别名域名格式不合法: " + alias}
 		}
+		if seenAliases[alias] {
+			return TaskResult{Success: false, Message: "附加域名不能重复: " + alias}
+		}
+		seenAliases[alias] = true
+		newAliases[index] = alias
 	}
 
 	if newDomain != "" && newDomain != oldDomain {
@@ -995,6 +1028,9 @@ func executeUpdateDomains(task *Task) TaskResult {
 		domainChanged = true
 	} else {
 		newDomain = oldDomain
+	}
+	if seenAliases[newDomain] {
+		return TaskResult{Success: false, Message: "别名不能与主域名相同"}
 	}
 
 	var rollbacks []rollbackStep
@@ -1072,6 +1108,7 @@ func executeUpdateDomains(task *Task) TaskResult {
 		proposed.LogDir = newLogDir
 		proposed.Domain = newDomain
 		proposed.Aliases = strings.Join(newAliases, "\n")
+		proposed.AliasRedirectMode = aliasRedirectMode
 		if proposed.SSLCertPath != "" {
 			proposed.SSLCertPath = filepath.Join(newCertDir, "fullchain.pem")
 			proposed.SSLKeyPath = filepath.Join(newCertDir, "privkey.pem")
@@ -1197,9 +1234,6 @@ func executeUpdateDomains(task *Task) TaskResult {
 			log.Printf("site logrotate config skipped after domain update: %v", err)
 		}
 
-		if site.SSLEnabled {
-			msg += "。请重新申请 SSL 证书以匹配新域名"
-		}
 		if payload.NewWPSiteURL != "" || payload.NewWPHomeURL != "" {
 			GoSafe(func() { ClearWPSiteRuntimeCaches(site.ID, newDomain, newWebRoot) })
 			msg += "。WordPress 站点 URL 已同步"
@@ -1209,8 +1243,10 @@ func executeUpdateDomains(task *Task) TaskResult {
 	}
 
 	oldAliases := site.Aliases
+	oldAliasRedirectMode := site.AliasRedirectMode
 	aliasStr := strings.Join(newAliases, "\n")
 	site.Aliases = aliasStr
+	site.AliasRedirectMode = aliasRedirectMode
 
 	engine := NewTemplateEngine(cfg.Panel.BackupDir)
 	olsVHostData, err := olsVHostDataFromSiteChecked(site)
@@ -1224,44 +1260,42 @@ func executeUpdateDomains(task *Task) TaskResult {
 		return taskFailure("渲染 OpenLiteSpeed 配置失败", err)
 	}
 
-	if err := changeWebsiteAliases(site.ID, oldAliases, aliasStr); err != nil {
+	if err := changeWebsiteAliasSettings(site.ID, oldAliases, oldAliasRedirectMode, aliasStr, aliasRedirectMode); err != nil {
 		site.Aliases = oldAliases
+		site.AliasRedirectMode = oldAliasRedirectMode
 		return taskFailure("保存网站别名失败", err)
 	}
 	if err := applyAliasOLSVHost(engine, olsVHostConfig, site.OLSVHostConfigPath,
 		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, newDomain)); err != nil {
 		log.Printf("应用 OpenLiteSpeed 配置失败: %v", err)
 		site.Aliases = oldAliases
-		if restoreErr := changeWebsiteAliases(site.ID, aliasStr, oldAliases); restoreErr != nil {
+		site.AliasRedirectMode = oldAliasRedirectMode
+		if restoreErr := changeWebsiteAliasSettings(site.ID, aliasStr, aliasRedirectMode, oldAliases, oldAliasRedirectMode); restoreErr != nil {
 			return TaskResult{Success: false, Message: "应用 OpenLiteSpeed 配置失败，网站别名状态恢复失败，请人工检查"}
 		}
 		return taskFailure("应用 OpenLiteSpeed 配置失败", err)
 	}
 
-	msg := "别名已更新"
-	if site.SSLEnabled {
-		msg += "。若新增了别名，请重新申请 SSL 证书以覆盖新域名"
-	}
-
-	return TaskResult{Success: true, Message: msg}
+	return TaskResult{Success: true, Message: "别名与跳转策略已更新"}
 }
 
 var applyAliasOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
 	return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 }
 
-var changeWebsiteAliases = updateWebsiteAliases
+var changeWebsiteAliasSettings = updateWebsiteAliasSettings
 
-func updateWebsiteAliases(siteID int, from, to string) error {
+func updateWebsiteAliasSettings(siteID int, fromAliases, fromMode, toAliases, toMode string) error {
 	result, err := database.GetDB().Exec(
-		"UPDATE websites SET aliases = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND aliases = ?", to, siteID, from,
+		"UPDATE websites SET aliases = ?, alias_redirect_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND aliases = ? AND alias_redirect_mode = ?",
+		toAliases, toMode, siteID, fromAliases, fromMode,
 	)
 	if err != nil {
 		return err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil || rows != 1 {
-		return errors.New("网站别名已变化")
+		return errors.New("网站附加域名设置已变化")
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ func setupWebsiteAliasTest(t *testing.T) *models.Website {
 	openTestDB(t)
 	root := t.TempDir()
 	oldCfg := config.AppConfig
-	oldChange, oldApply := changeWebsiteAliases, applyAliasOLSVHost
+	oldChange, oldApply := changeWebsiteAliasSettings, applyAliasOLSVHost
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: filepath.Join(root, "backups")},
 		Paths: config.PathsConfig{
@@ -28,10 +28,10 @@ func setupWebsiteAliasTest(t *testing.T) *models.Website {
 	}
 	t.Cleanup(func() {
 		config.AppConfig = oldCfg
-		changeWebsiteAliases, applyAliasOLSVHost = oldChange, oldApply
+		changeWebsiteAliasSettings, applyAliasOLSVHost = oldChange, oldApply
 	})
 	site := &models.Website{
-		ID: 91, Domain: "example.com", Aliases: "www.example.com", Status: models.StatusActive,
+		ID: 91, Domain: "example.com", Aliases: "www.example.com", AliasRedirectMode: AliasRedirectServe, Status: models.StatusActive,
 		SiteType: "wordpress", SystemUser: "wp_alias", WebRoot: filepath.Join(root, "www"), LogDir: filepath.Join(root, "logs"),
 		OLSVHostConfigPath: filepath.Join(root, "available", "example.com.conf"), LSPHPSocketPath: filepath.Join(root, "php", "example.com.conf"),
 	}
@@ -52,7 +52,7 @@ func runAliasUpdate(site *models.Website) TaskResult {
 
 func TestAliasUpdateDatabaseFailureDoesNotApplyOpenLiteSpeed(t *testing.T) {
 	site := setupWebsiteAliasTest(t)
-	changeWebsiteAliases = func(int, string, string) error { return errors.New("database failed") }
+	changeWebsiteAliasSettings = func(int, string, string, string, string) error { return errors.New("database failed") }
 	openlitespeedCalled := false
 	applyAliasOLSVHost = func(*TemplateEngine, string, string, string) error { openlitespeedCalled = true; return nil }
 	result := runAliasUpdate(site)
@@ -64,7 +64,7 @@ func TestAliasUpdateDatabaseFailureDoesNotApplyOpenLiteSpeed(t *testing.T) {
 func TestAliasUpdateOpenLiteSpeedFailureRestoresDatabase(t *testing.T) {
 	site := setupWebsiteAliasTest(t)
 	var transitions [][2]string
-	changeWebsiteAliases = func(_ int, from, to string) error {
+	changeWebsiteAliasSettings = func(_ int, from, _ string, to, _ string) error {
 		transitions = append(transitions, [2]string{from, to})
 		return nil
 	}
@@ -78,7 +78,7 @@ func TestAliasUpdateOpenLiteSpeedFailureRestoresDatabase(t *testing.T) {
 func TestAliasUpdateReportsRecoveryFailure(t *testing.T) {
 	site := setupWebsiteAliasTest(t)
 	call := 0
-	changeWebsiteAliases = func(int, string, string) error {
+	changeWebsiteAliasSettings = func(int, string, string, string, string) error {
 		call++
 		if call == 2 {
 			return errors.New("restore failed")
@@ -106,9 +106,9 @@ func TestAliasUpdateSuccessPersistsAndApplies(t *testing.T) {
 	}
 }
 
-func TestUpdateWebsiteAliasesRejectsStaleValue(t *testing.T) {
+func TestUpdateWebsiteAliasSettingsRejectsStaleValue(t *testing.T) {
 	setupWebsiteAliasTest(t)
-	if err := updateWebsiteAliases(91, "stale.example.com", "new.example.com"); err == nil {
+	if err := updateWebsiteAliasSettings(91, "stale.example.com", AliasRedirectServe, "new.example.com", AliasRedirectPermanent); err == nil {
 		t.Fatal("stale aliases unexpectedly overwritten")
 	}
 }

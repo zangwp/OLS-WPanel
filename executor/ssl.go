@@ -590,7 +590,7 @@ func executeRenewSSL(task *Task) TaskResult {
 	db := database.GetDB()
 
 	rows, err := db.Query(
-		`SELECT id, name, domain, aliases, status, system_user, web_root, document_root_subdir, log_dir,
+		`SELECT id, name, domain, aliases, alias_redirect_mode, status, system_user, web_root, document_root_subdir, log_dir,
 		        db_name, db_user, lsphp_socket_path, COALESCE(NULLIF(php_version,''),'8.3'), ols_vhost_config_path, site_type, ssl_enabled,
 		        ssl_cert_path, ssl_key_path, ssl_cert_source, template_version, ssl_expires_at
 		 FROM websites WHERE ssl_enabled = 1 AND ssl_cert_path != ''`,
@@ -613,7 +613,7 @@ func executeRenewSSL(task *Task) TaskResult {
 		var sslEnabled int
 		var sslExpiresAt *time.Time
 		if scanErr := rows.Scan(
-			&w.ID, &w.Name, &w.Domain, &aliases, &status, &w.SystemUser,
+			&w.ID, &w.Name, &w.Domain, &aliases, &w.AliasRedirectMode, &status, &w.SystemUser,
 			&w.WebRoot, &w.DocumentRootSubdir, &w.LogDir, &w.DBName, &w.DBUser, &w.LSPHPSocketPath, &w.PHPVersion,
 			&w.OLSVHostConfigPath, &w.SiteType, &sslEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.SSLCertSource,
 			&w.TemplateVersion, &sslExpiresAt,

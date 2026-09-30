@@ -659,18 +659,18 @@ func deleteRedisKeysByPrefix(prefix string) error {
 
 func RegenerateSiteOLSConfig(siteID int) error {
 	db := database.GetDB()
-	var domain, aliases, siteType, systemUser, webRoot, documentRootSubdir, logDir, accessLogMode, cacheKey, templateVer string
+	var domain, aliases, aliasRedirectMode, siteType, systemUser, webRoot, documentRootSubdir, logDir, accessLogMode, cacheKey, templateVer string
 	var phpPoolPath, phpVersion, olsVHostConfigPath string
 	var sslEnabled, lsCacheEnabled, xmlrpcEnabled, cdnRealIPEnabled int
 	var lsCacheTTL int
 	var sslCertPath, sslKeyPath, status string
 
 	err := db.QueryRow(
-		`SELECT domain, aliases, site_type, system_user, web_root, document_root_subdir, log_dir, ssl_enabled,
+		`SELECT domain, aliases, alias_redirect_mode, site_type, system_user, web_root, document_root_subdir, log_dir, ssl_enabled,
 		        access_log_mode, litespeed_cache_enabled, litespeed_cache_ttl, litespeed_cache_key,
 		        ssl_cert_path, ssl_key_path, template_version, xmlrpc_enabled, lsphp_socket_path, php_version, ols_vhost_config_path, cdn_realip_enabled, status
 		 FROM websites WHERE id = ?`, siteID,
-	).Scan(&domain, &aliases, &siteType, &systemUser, &webRoot, &documentRootSubdir, &logDir, &sslEnabled, &accessLogMode, &lsCacheEnabled, &lsCacheTTL, &cacheKey, &sslCertPath, &sslKeyPath, &templateVer, &xmlrpcEnabled, &phpPoolPath, &phpVersion, &olsVHostConfigPath, &cdnRealIPEnabled, &status)
+	).Scan(&domain, &aliases, &aliasRedirectMode, &siteType, &systemUser, &webRoot, &documentRootSubdir, &logDir, &sslEnabled, &accessLogMode, &lsCacheEnabled, &lsCacheTTL, &cacheKey, &sslCertPath, &sslKeyPath, &templateVer, &xmlrpcEnabled, &phpPoolPath, &phpVersion, &olsVHostConfigPath, &cdnRealIPEnabled, &status)
 	if err != nil || domain == "" {
 		if err != nil {
 			return fmt.Errorf("查询站点失败(site %d): %w", siteID, err)
@@ -699,22 +699,23 @@ func RegenerateSiteOLSConfig(siteID int) error {
 	}
 
 	data := &OLSVHostData{
-		Domain:         domain,
-		Aliases:        aliasList,
-		ServerNames:    buildServerNames(domain, aliasList),
-		WebRoot:        EffectiveDocumentRoot(webRoot, siteType, documentRootSubdir),
-		LogDir:         logDir,
-		SystemUser:     systemUser,
-		SiteType:       siteType,
-		PHPProxy:       "unix:" + phpSocketPath(cfg, phpPoolPath, domain),
-		LSPHPBinary:    phpRuntime.LSAPIBinary,
-		TemplateVer:    templateVer,
-		AccessLogMode:  accessLogMode,
-		UseSSL:         sslEnabled == 1,
-		LSCacheEnabled: lsCacheEnabled == 1,
-		LSCacheTTL:     lsCacheTTL,
-		LSCacheKey:     cacheKey,
-		XMLRPCEnabled:  xmlrpcEnabled == 1,
+		Domain:            domain,
+		Aliases:           aliasList,
+		AliasRedirectMode: aliasRedirectMode,
+		ServerNames:       buildServerNames(domain, aliasList),
+		WebRoot:           EffectiveDocumentRoot(webRoot, siteType, documentRootSubdir),
+		LogDir:            logDir,
+		SystemUser:        systemUser,
+		SiteType:          siteType,
+		PHPProxy:          "unix:" + phpSocketPath(cfg, phpPoolPath, domain),
+		LSPHPBinary:       phpRuntime.LSAPIBinary,
+		TemplateVer:       templateVer,
+		AccessLogMode:     accessLogMode,
+		UseSSL:            sslEnabled == 1,
+		LSCacheEnabled:    lsCacheEnabled == 1,
+		LSCacheTTL:        lsCacheTTL,
+		LSCacheKey:        cacheKey,
+		XMLRPCEnabled:     xmlrpcEnabled == 1,
 	}
 	if cdnRealIPEnabled == 1 {
 		groups, _ := GetWebsiteCDNRealIPGroups(siteID)

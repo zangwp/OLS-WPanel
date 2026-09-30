@@ -42,9 +42,9 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 | 板块 | 主要能力 |
 |---|---|
-| 网站 | 创建 WordPress 或通用 PHP 站点，独立系统用户、LSPHP 进程、数据库与日志 |
+| 网站 | 创建 WordPress 或通用 PHP 站点，独立系统用户、LSPHP 进程、数据库与日志；附加域名可自动 301/302 到主域名或显示同一网站 |
 | WordPress | 核心/主题/插件更新检查，LiteSpeed 页面缓存与 Redis 对象缓存一键配置，定时任务与临时维护 |
-| SSL | Let's Encrypt 申请与自动续签，支持手动证书，失败时保留 HTTP 站点便于排查 |
+| SSL | Let's Encrypt 申请与自动续签，域名 DNS 预检及主域名/附加域名证书覆盖，支持手动证书 |
 | 备份 | 站点与数据库备份/恢复，面板 SQLite 自动备份，支持 SFTP / S3 异地保存 |
 | 安全 | 登录防爆破、恶意扫描检测、CDN 真实 IP、白名单、Fail2ban、nftables 封禁与受管端口放行 |
 | 运维 | VPS 系统概况、CPU/内存/磁盘监控、核心服务健康、BBR/DNS/NTP 状态、文件与数据库管理、计划任务、邮件告警、日志分析与 AI 诊断 |

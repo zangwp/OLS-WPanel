@@ -769,6 +769,13 @@ var upgrades = []Upgrade{
 		Version:     "1.0.70",
 		Description: "修正 OpenLiteSpeed 备用虚拟主机目录身份",
 	},
+	{
+		Version:     "1.0.71",
+		Description: "新增附加域名规范跳转策略，存量网站保持同站显示",
+		SQL: []string{
+			`ALTER TABLE websites ADD COLUMN alias_redirect_mode TEXT NOT NULL DEFAULT 'serve'`,
+		},
+	},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

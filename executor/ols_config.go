@@ -24,6 +24,9 @@ const (
 	olsMetadataDomainsPrefix = "# OLS-WPanel-Domains: "
 	olsMetadataRootPrefix    = "# OLS-WPanel-VHRoot: "
 	olsDefaultVHostName      = "olsw_default"
+	AliasRedirectServe       = "serve"
+	AliasRedirectPermanent   = "301"
+	AliasRedirectTemporary   = "302"
 )
 
 var (
@@ -141,6 +144,28 @@ func normalizeOLSDomains(primary string, aliases []string) ([]string, error) {
 	return domains, nil
 }
 
+// NormalizeAliasRedirectMode limits generated rewrite directives to the three
+// panel-owned policies. Empty values are treated as the legacy "serve" mode so
+// old databases and hand-built test fixtures keep their previous behaviour.
+func NormalizeAliasRedirectMode(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return AliasRedirectServe, nil
+	}
+	switch value {
+	case AliasRedirectServe, AliasRedirectPermanent, AliasRedirectTemporary:
+		return value, nil
+	default:
+		return "", fmt.Errorf("附加域名处理方式无效: %s", value)
+	}
+}
+
+func writeHTTPSRedirectRule(out *strings.Builder, domain string) {
+	fmt.Fprintf(out, "RewriteCond %%{HTTP_HOST} ^%s(?::[0-9]+)?$ [NC]\n", regexp.QuoteMeta(domain))
+	out.WriteString("RewriteCond %{HTTPS} off\n")
+	fmt.Fprintf(out, "RewriteRule ^/?(.*)$ https://%s/$1 [R=301,L]\n", domain)
+}
+
 func olsSocketAddress(proxy string) (string, error) {
 	value := strings.TrimSpace(proxy)
 	value = strings.TrimPrefix(value, "unix:")
@@ -161,6 +186,10 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 		return "", errors.New("站点配置为空")
 	}
 	domains, err := normalizeOLSDomains(data.Domain, data.Aliases)
+	if err != nil {
+		return "", err
+	}
+	aliasRedirectMode, err := NormalizeAliasRedirectMode(data.AliasRedirectMode)
 	if err != nil {
 		return "", err
 	}
@@ -289,10 +318,27 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	out.WriteString("rewrite {\n")
 	out.WriteString("  enable                 1\n")
 	out.WriteString("  autoLoadHtaccess       1\n")
-	if data.UseSSL {
+	if len(domains) > 1 && aliasRedirectMode != AliasRedirectServe {
 		out.WriteString("  rules                  <<<END_rules\n")
-		out.WriteString("RewriteCond %{HTTPS} off\n")
-		out.WriteString("RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]\n")
+		aliases := make([]string, 0, len(domains)-1)
+		for _, alias := range domains[1:] {
+			aliases = append(aliases, regexp.QuoteMeta(alias))
+		}
+		fmt.Fprintf(&out, "RewriteCond %%{HTTP_HOST} ^(?:%s)(?::[0-9]+)?$ [NC]\n", strings.Join(aliases, "|"))
+		scheme := "http"
+		if data.UseSSL {
+			scheme = "https"
+		}
+		fmt.Fprintf(&out, "RewriteRule ^/?(.*)$ %s://%s/$1 [R=%s,L]\n", scheme, domains[0], aliasRedirectMode)
+		if data.UseSSL {
+			writeHTTPSRedirectRule(&out, domains[0])
+		}
+		out.WriteString("END_rules\n")
+	} else if data.UseSSL {
+		out.WriteString("  rules                  <<<END_rules\n")
+		for _, domain := range domains {
+			writeHTTPSRedirectRule(&out, domain)
+		}
 		out.WriteString("END_rules\n")
 	}
 	out.WriteString("}\n")

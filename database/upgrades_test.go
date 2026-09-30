@@ -400,7 +400,7 @@ func TestUpgradeAddsWPUpdateSchemaFrom1031(t *testing.T) {
 			t.Fatalf("table %s exists=%d err=%v", table, exists, err)
 		}
 	}
-	if got := LatestVersion(); got != "1.0.70" {
+	if got := LatestVersion(); got != "1.0.71" {
 		t.Fatalf("LatestVersion=%q", got)
 	}
 	for _, column := range []string{"database_backup_mode", "database_backup_source_id", "auto_rollback", "batch_id"} {
@@ -1747,6 +1747,36 @@ func TestUpgradeRunnerAdvancesExistingVersion(t *testing.T) {
 	}
 	if version != LatestVersion() {
 		t.Fatalf("version = %q, want %q", version, LatestVersion())
+	}
+}
+
+func TestUpgrade1071PreservesExistingAliasServingBehaviour(t *testing.T) {
+	openTempDB(t)
+	if err := RunMigrations(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunUpgrades(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DB.Exec(`INSERT INTO websites (name,domain,aliases,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path)
+		VALUES ('legacy','legacy.example.com','www.legacy.example.com','wp_legacy','/srv/legacy','/var/log/legacy','db_legacy','user_legacy','/run/legacy.sock','/etc/legacy.conf')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DB.Exec(`ALTER TABLE websites DROP COLUMN alias_redirect_mode`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DB.Exec(`DELETE FROM schema_version; INSERT INTO schema_version(version) VALUES ('1.0.70')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunUpgrades(); err != nil {
+		t.Fatal(err)
+	}
+	var mode string
+	if err := DB.QueryRow(`SELECT alias_redirect_mode FROM websites WHERE domain='legacy.example.com'`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "serve" {
+		t.Fatalf("legacy alias mode = %q, want serve", mode)
 	}
 }
 

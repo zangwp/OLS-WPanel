@@ -50,7 +50,7 @@ Generic PHP sites use OpenLiteSpeed and LSPHP but do not receive WordPress plugi
 
 ## Site provisioning
 
-Creating a WordPress site automatically prepares the system user, document root, logs, database, OpenLiteSpeed virtual host and listener mappings, LSPHP application, WordPress files, LiteSpeed Cache, Redis configuration, and optional TLS certificate. Configuration is validated before `lshttpd` is restarted; failed updates restore the previous files and listener registry.
+Creating a WordPress site automatically prepares the system user, document root, logs, database, OpenLiteSpeed virtual host and listener mappings, LSPHP application, WordPress files, LiteSpeed Cache, Redis configuration, and optional TLS certificate. Additional domains default to a canonical 301 redirect to the primary domain, with 302 or same-site serving available when needed. Domain management previews the redirect, checks DNS, and can reissue panel-managed certificates for every configured name. Configuration is validated before `lshttpd` is restarted; failed updates restore the previous files and listener registry.
 
 ## Management commands
 
