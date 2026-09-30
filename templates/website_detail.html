@@ -24,21 +24,27 @@
 <template x-if="site">
     <div>
 
-    <nav class="card py-3 px-4 mb-6 flex flex-wrap items-center gap-2" aria-label="{{t .Lang "website.detail_title"}}">
-        <a href="#site-overview" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_overview"}}</a>
-        <a href="#site-performance" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_cache"}}</a>
-        <a x-show="site.site_type === 'wordpress'" href="#site-protection" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_protection"}}</a>
-        <a href="#site-logs" @click="openLogs()" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_logs"}}</a>
+    <nav class="card py-2 px-3 mb-6 flex flex-wrap items-center gap-1" aria-label="{{t .Lang "website.detail_title"}}">
+        <button type="button" @click="setDetailTab('overview')" :class="detailTab === 'overview' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_overview"}}</button>
+        <button type="button" @click="setDetailTab('cache')" :class="detailTab === 'cache' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_cache"}}</button>
+        <button type="button" x-show="site.site_type === 'wordpress'" @click="setDetailTab('security')" :class="detailTab === 'security' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_protection"}}</button>
+        <button type="button" @click="setDetailTab('logs')" :class="detailTab === 'logs' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_logs"}}</button>
     </nav>
 
     <!-- Row 1: 基本信息 | 网站运行与配置 -->
-    <div id="site-overview" class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start scroll-mt-4">
+    <div id="site-overview" x-show="detailTab === 'overview'" x-cloak class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start scroll-mt-4">
         <div class="card" :class="aiAccess.status !== 'disabled' ? 'border border-purple-500 shadow-lg shadow-purple-950/30' : ''">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "website.basic_info"}}</h3>
             <dl class="space-y-3">
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.domain"}}</dt><dd><a :href="(site.ssl_enabled ? 'https' : 'http') + '://' + site.domain" target="_blank" class="text-blue-400 hover:text-blue-300 hover:underline" x-text="site.domain"></a></dd></div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.aliases"}}</dt><dd class="text-white whitespace-pre-line break-all" x-text="site.aliases || t('common.none')"></dd></div>
-                <div><dt class="text-sm text-gray-400">{{t .Lang "website.alias_handling"}}</dt><dd class="text-white" x-text="aliasModeLabel(site.alias_redirect_mode)"></dd></div>
+                <div>
+                    <dt class="text-sm text-gray-400">{{t .Lang "website.alias_handling"}}</dt>
+                    <dd class="flex flex-wrap items-center gap-2 mt-1">
+                        <span class="text-xs px-2 py-1 rounded border" :class="hasAliases() ? (site.alias_redirect_mode === '301' ? 'bg-green-950/50 text-green-300 border-green-800' : 'bg-yellow-950/40 text-yellow-200 border-yellow-800') : 'bg-gray-900/60 text-gray-400 border-gray-700'" x-text="aliasHandlingSummary()"></span>
+                        <button x-show="!hasAliases()" type="button" @click="openWWWRedirectModal()" class="text-xs text-blue-400 hover:text-blue-300">{{t .Lang "website.quick_add_www_redirect"}}</button>
+                    </dd>
+                </div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.https_policy"}}</dt><dd class="text-white" x-text="site.ssl_enabled ? t('website.https_forced') : t('website.https_requires_ssl')"></dd></div>
                 <div class="pt-2 flex flex-wrap gap-2">
                     <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.edit_domain"}}</button>
@@ -183,14 +189,14 @@
         </div>
     </div>
 
-    <!-- Row 2: WordPress优化 | WordPress文件保护 -->
-    <!-- 这张卡片对 wordpress 和 php 两种 site_type 都会渲染（见上面的 :class 三元判断），
+    <!-- Cache and security workspaces share this single-column container. -->
+    <!-- 缓存卡片对 wordpress 和 php 两种 site_type 都会渲染，
          里面混了通用控件（LiteSpeed 缓存）和多个 WordPress 专属控件。新增/修改任何一个
          "仅 WordPress 站点显示"的元素时，必须把本卡片内所有同类元素都加上
          x-show="site.site_type === 'wordpress'"，不能只改自己新加的那一个——
          之前"高级设置"折叠面板就漏加过，导致通用 PHP 站点也看到了停止更新检查等选项。 -->
-    <div id="site-performance" class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 items-start scroll-mt-4">
-        <div class="card" :class="site.site_type === 'wordpress' ? '' : 'md:col-span-2'">
+    <div id="site-performance" x-show="detailTab === 'cache' || detailTab === 'security'" x-cloak class="grid grid-cols-1 gap-6 items-start scroll-mt-4">
+        <div x-show="detailTab === 'cache'" class="card">
             <h3 class="text-lg font-semibold text-white mb-1" x-text="site.site_type === 'wordpress' ? t('website.performance_cache') : t('website.litespeed_cache_title')"></h3>
             <p x-show="site.site_type === 'wordpress'" class="text-sm text-gray-400 mb-4">{{t .Lang "website.performance_cache_help"}}</p>
 
@@ -331,12 +337,12 @@
             {{template "wp_anomaly_panel" .}}
         </div>
 
-        <div id="site-protection" x-show="site.site_type === 'wordpress'" class="card scroll-mt-4">
+        <div id="site-protection" x-show="detailTab === 'security' && site.site_type === 'wordpress'" class="card scroll-mt-4">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div>
                     <div class="flex items-center gap-2 mb-1">
                         <h3 class="text-lg font-semibold text-white">{{t .Lang "website.file_lock"}}</h3>
-                        <span class="text-xs px-2 py-0.5 rounded" :class="fileLockApplyIncomplete() ? 'bg-red-900/50 text-red-200 border border-red-700' : (site.file_lock_enabled ? 'bg-yellow-900/50 text-yellow-200 border border-yellow-700' : 'bg-green-900/40 text-green-200 border border-green-800')" x-text="fileLockStatusText()"></span>
+                        <span class="text-xs px-2 py-0.5 rounded" :class="fileLockApplyIncomplete() ? 'bg-red-900/50 text-red-200 border border-red-700' : (site.file_lock_enabled ? 'bg-green-950/50 text-green-200 border border-green-800' : 'bg-yellow-950/40 text-yellow-200 border border-yellow-800')" x-text="fileLockStatusText()"></span>
                     </div>
                     <p class="text-sm text-gray-400">{{t .Lang "website.file_lock_help"}}</p>
                     <details class="mt-2 text-xs">
@@ -361,8 +367,8 @@
                 </label>
                 <div class="flex flex-wrap gap-2">
                     <button @click="loadFileLockPreview()" :disabled="fileLockSaving || fileLockPreviewLoading" class="text-sm py-1.5 px-3 rounded bg-gray-700 text-gray-200" x-text="fileLockPreviewLoading ? t('website.file_lock_checking') : t('website.file_lock_check_impact')"></button>
-                    <button x-show="!site.file_lock_enabled || site.file_lock_mode === 'legacy' || site.file_lock_mode !== fileLockMode || fileLockApplyIncomplete()" @click="applyFileLock(true)" :disabled="fileLockSaving" class="text-sm py-1.5 px-3 rounded bg-red-900 text-red-200" x-text="fileLockSaving ? t('website.processing') : (site.file_lock_enabled ? t('website.file_lock_apply_mode') : t('website.enable_lock'))"></button>
-                    <button x-show="site.file_lock_enabled" @click="applyFileLock(false)" :disabled="fileLockSaving" class="text-sm py-1.5 px-3 rounded bg-blue-950 text-blue-300" x-text="t('website.unlock')"></button>
+                    <button x-show="!site.file_lock_enabled || site.file_lock_mode === 'legacy' || site.file_lock_mode !== fileLockMode || fileLockApplyIncomplete()" @click="applyFileLock(true)" :disabled="fileLockSaving" class="btn-primary text-sm" x-text="fileLockSaving ? t('website.processing') : (site.file_lock_enabled ? t('website.file_lock_apply_mode') : t('website.enable_lock'))"></button>
+                    <button x-show="site.file_lock_enabled" @click="applyFileLock(false)" :disabled="fileLockSaving" class="btn-secondary text-sm" x-text="t('website.unlock')"></button>
                 </div>
             </div>
             <p class="text-xs text-gray-500 mt-2" x-text="fileLockMode === 'strict' ? t('website.file_lock_strict_help') : t('website.file_lock_standard_help')"></p>
@@ -450,14 +456,12 @@
         </div>
     </div>
 
-    <!-- Row 3: 网站日志 -->
-    <div class="mt-6">
-        <details id="site-logs" x-ref="siteLogs" @toggle="if ($event.target.open) loadLogs()" class="card scroll-mt-4">
-            <summary class="cursor-pointer list-none flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+    <!-- Website logs workspace -->
+    <div id="site-logs" x-show="detailTab === 'logs'" x-cloak class="card scroll-mt-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5">
                 <span class="text-lg font-semibold text-white">{{t .Lang "website.site_logs"}}</span>
-                <span class="text-xs font-normal text-gray-500">{{t .Lang "website.logs_collapsed_help"}}</span>
-            </summary>
-            <div class="mt-5">
+                <span class="text-xs font-normal text-gray-500">{{t .Lang "website.logs_tab_help"}}</span>
+            </div>
             <div class="flex flex-wrap items-center gap-2 mb-3">
                 <button @click="selectLogType('access')" :class="logType === 'access' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.access_log"}}</button>
                 <button @click="selectLogType('error')" :class="logType === 'error' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.error_log"}}</button>
@@ -524,8 +528,6 @@
                     </table>
                 </div>
             </div>
-            </div>
-        </details>
     </div>
 
     <!-- 日志全屏弹窗 -->
@@ -761,6 +763,7 @@
 <script>
 function websiteDetail() {
     return {
+        detailTab: 'overview',
         site: null,
 		maintenance: { state: 'unknown', window_id: '' },
 		maintenanceEnabled: false,
@@ -895,7 +898,41 @@ function websiteDetail() {
         aiCredentialDownloaded: false,
         aiAccess: { loading: true, enabled: false, status: 'disabled', busy: false, stage: '', installWPCLI: true, installNodeJS: false, confirmDomain: '', tools: [] },
         init() {
+            this.applyDetailHash(false);
+            window.addEventListener('hashchange', () => this.applyDetailHash());
             this.fetchDetail();
+        },
+        detailTabHash(tab) {
+            return {
+                overview: 'overview',
+                cache: 'cache-performance',
+                security: 'security-maintenance',
+                logs: 'logs'
+            }[tab] || 'overview';
+        },
+        applyDetailHash(loadContent = true) {
+            const hash = (window.location.hash || '').replace(/^#/, '');
+            const tab = {
+                overview: 'overview',
+                'site-overview': 'overview',
+                'cache-performance': 'cache',
+                'site-performance': 'cache',
+                'security-maintenance': 'security',
+                'site-protection': 'security',
+                logs: 'logs',
+                'site-logs': 'logs'
+            }[hash] || 'overview';
+            this.detailTab = tab;
+            if (loadContent && tab === 'logs') this.loadLogs();
+        },
+        setDetailTab(tab, updateURL = true) {
+            if (tab === 'security' && this.site?.site_type !== 'wordpress') tab = 'overview';
+            this.detailTab = tab;
+            if (updateURL) {
+                const hash = this.detailTabHash(tab);
+                window.history.replaceState({}, '', window.location.pathname + window.location.search + '#' + hash);
+            }
+            if (tab === 'logs') this.loadLogs();
         },
         async fetchDetail() {
             const id = window.location.pathname.split('/').pop();
@@ -931,6 +968,8 @@ function websiteDetail() {
                     this.sslExportEnabled = r.data.ssl_export_enabled || false;
                     this.fileLockMode = r.data.file_lock_mode === 'strict' ? 'strict' : 'standard';
                     this.fileLockPreview = null;
+                    if (this.detailTab === 'security' && r.data.site_type !== 'wordpress') this.setDetailTab('overview');
+                    if (this.detailTab === 'logs') this.loadLogs();
                 }
             } catch(e) { showToast(t('website.load_failed_with_error', { error: e.message }), 'error'); }
             this.loading = false;
@@ -1271,6 +1310,17 @@ function websiteDetail() {
             if (mode === '302') return t('website.alias_redirect_302');
             return t('website.alias_serve_same_site');
         },
+        hasAliases() {
+            return !!String(this.site?.aliases || '').trim();
+        },
+        aliasHandlingSummary() {
+            if (!this.hasAliases()) return t('website.alias_not_configured');
+            return this.aliasModeLabel(this.site.alias_redirect_mode);
+        },
+        openWWWRedirectModal() {
+            this.openDomainModal();
+            this.$nextTick(() => this.addEditedWWWRedirect());
+        },
         firstEditedAlias() {
             return this.editAliasesStr.split('\n').map(a => a.trim()).find(Boolean) || '';
         },
@@ -1386,8 +1436,7 @@ function websiteDetail() {
             }
         },
         openLogs() {
-            if (this.$refs.siteLogs) this.$refs.siteLogs.open = true;
-            this.loadLogs();
+            this.setDetailTab('logs');
         },
         selectLogType(type) {
             this.logType = type;
