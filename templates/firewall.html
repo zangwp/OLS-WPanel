@@ -97,12 +97,26 @@
     <div x-show="activeTab === 'ports'" x-cloak class="space-y-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.firewall_backend"}}</p><p class="text-lg text-white mt-1" x-text="portStatus.backend || '--'"></p></div>
-            <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.input_policy"}}</p><p class="text-lg mt-1" :class="portStatus.input_policy === 'drop' ? 'text-green-400' : 'text-yellow-400'" x-text="portStatus.input_policy || '--'"></p></div>
-            <div class="card py-4"><p class="text-xs text-gray-500">SSH</p><p class="text-lg text-white mt-1" x-text="(portStatus.ssh_port || 22) + '/TCP'"></p></div>
-            <div class="card py-4"><p class="text-xs text-gray-500">OLS WPanel</p><p class="text-lg text-white mt-1" x-text="(portStatus.panel_port || 8443) + '/TCP'"></p></div>
+            <div class="card py-4">
+                <p class="text-xs text-gray-500">{{t .Lang "firewall.input_policy"}}</p>
+                <p class="text-lg mt-1" :class="portStatus.input_policy === 'drop' ? 'text-green-400' : 'text-yellow-400'" x-text="portStatus.input_policy || '--'"></p>
+                <p class="text-xs text-gray-500 mt-1" x-text="t('firewall.core_ports_summary', { ssh: portStatus.ssh_port || 22, panel: portStatus.panel_port || 8443 })"></p>
+            </div>
+            <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.managed_rule_count"}}</p><p class="text-lg text-white mt-1" x-text="portStatus.managed_rule_count || 0"></p><p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.managed_rule_count_help"}}</p></div>
+            <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.firewall_anomalies"}}</p><p class="text-lg mt-1" :class="(portStatus.anomaly_count || 0) > 0 ? 'text-yellow-400' : 'text-green-400'" x-text="portStatus.anomaly_count || 0"></p><p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.firewall_anomalies_help"}}</p></div>
         </div>
 
         <div x-show="portStatus.warning" class="rounded border border-yellow-500/40 bg-yellow-500/10 p-4 text-sm text-yellow-200" x-text="portStatus.warning"></div>
+        <div x-show="portStatus.input_policy === 'accept'" class="rounded border border-yellow-500/40 bg-yellow-500/10 p-4">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                    <p class="font-semibold text-yellow-200">{{t .Lang "firewall.accept_policy_warning_title"}}</p>
+                    <p class="text-sm text-yellow-100/80 mt-1">{{t .Lang "firewall.accept_policy_warning"}}</p>
+                    <p class="text-xs text-gray-400 mt-2">{{t .Lang "firewall.protection_rollback_help"}}</p>
+                </div>
+                <button x-show="portStatus.can_enable_protection" @click="enableProtection()" :disabled="protectionSubmitting" class="btn-danger text-sm whitespace-nowrap" x-text="protectionSubmitting ? t('common.saving') : t('firewall.enable_protected_mode')"></button>
+            </div>
+        </div>
 
         <div class="card">
             <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-5">
@@ -112,7 +126,19 @@
                 </div>
                 <button @click="fetchPortStatus()" :disabled="portsLoading" class="btn-secondary text-xs" x-text="portsLoading ? t('common.loading') : t('firewall.refresh')"></button>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+            <div class="mb-4">
+                <p class="label">{{t .Lang "firewall.service_presets"}}</p>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="preset in portPresets" :key="preset.key">
+                        <button type="button" @click="applyPortPreset(preset)" class="btn-secondary text-xs py-1.5 px-3" x-text="preset.label"></button>
+                    </template>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div>
+                    <label class="label">{{t .Lang "firewall.service_preset"}}</label>
+                    <input type="text" class="input-field text-sm" :value="selectedPresetLabel()" readonly>
+                </div>
                 <div>
                     <label class="label">{{t .Lang "firewall.protocol"}}</label>
                     <select x-model="portForm.protocol" class="input-field text-sm"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
@@ -121,20 +147,40 @@
                     <label class="label">{{t .Lang "firewall.port"}}</label>
                     <input type="number" min="1" max="65535" x-model.number="portForm.port" class="input-field text-sm" placeholder="8443">
                 </div>
+                <div>
+                    <label class="label">{{t .Lang "firewall.description"}}</label>
+                    <input type="text" maxlength="80" x-model.trim="portForm.description" class="input-field text-sm" placeholder="{{t .Lang "firewall.description_placeholder"}}">
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end mt-4">
                 <div class="md:col-span-2">
+                    <label class="label">{{t .Lang "firewall.access_scope"}}</label>
+                    <select x-model="portForm.source_mode" @change="onSourceModeChange()" class="input-field text-sm">
+                        <option value="current">{{t .Lang "firewall.scope_current_ip"}}</option>
+                        <option value="specific">{{t .Lang "firewall.scope_specific"}}</option>
+                        <option value="any">{{t .Lang "firewall.scope_any"}}</option>
+                    </select>
+                </div>
+                <div class="md:col-span-2" x-show="portForm.source_mode !== 'any'">
                     <label class="label">{{t .Lang "firewall.source_scope"}}</label>
-                    <input type="text" x-model.trim="portForm.source" class="input-field text-sm" placeholder="203.0.113.5/32">
-                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.source_scope_help"}}</p>
+                    <input type="text" x-model.trim="portForm.source" :readonly="portForm.source_mode === 'current'" class="input-field text-sm" placeholder="203.0.113.5/32">
+                    <p class="text-xs text-gray-500 mt-1" x-text="portForm.source_mode === 'current' ? t('firewall.current_ip_help') : t('firewall.source_scope_help')"></p>
                 </div>
                 <div>
+                    <label class="label">{{t .Lang "firewall.validity"}}</label>
+                    <select x-model="portForm.duration_mode" class="input-field text-sm">
+                        <option value="permanent">{{t .Lang "firewall.permanent_open"}}</option>
+                        <option value="temporary">{{t .Lang "firewall.temporary_open"}}</option>
+                    </select>
+                </div>
+                <div x-show="portForm.duration_mode === 'temporary'">
                     <label class="label">{{t .Lang "firewall.duration_minutes"}}</label>
-                    <input type="number" min="0" max="10080" x-model.number="portForm.duration_minutes" class="input-field text-sm" placeholder="0">
+                    <input type="number" min="1" max="10080" x-model.number="portForm.duration_minutes" class="input-field text-sm" placeholder="60">
                 </div>
                 <button @click="addPortRule()" :disabled="portSubmitting || !portStatus.writable" class="btn-primary text-sm" x-text="portSubmitting ? t('common.saving') : t('firewall.open_port')"></button>
             </div>
-            <div class="mt-3">
-                <label class="label">{{t .Lang "firewall.description"}}</label>
-                <input type="text" maxlength="80" x-model.trim="portForm.description" class="input-field text-sm" placeholder="{{t .Lang "firewall.description_placeholder"}}">
+            <div x-show="portForm.source_mode === 'any'" class="mt-4 rounded border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-200">
+                {{t .Lang "firewall.any_source_warning"}}
             </div>
             <div class="mt-4 rounded border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-200">
                 {{t .Lang "firewall.port_safety_notice"}}
@@ -144,8 +190,8 @@
         <div class="card">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "firewall.managed_port_rules"}}</h3>
             <div class="overflow-x-auto">
-                <table class="w-full min-w-[760px]">
-                    <thead class="border-b border-gray-700"><tr><th class="table-header">{{t .Lang "firewall.protocol"}}</th><th class="table-header">{{t .Lang "firewall.port"}}</th><th class="table-header">{{t .Lang "firewall.source_scope"}}</th><th class="table-header">{{t .Lang "firewall.description"}}</th><th class="table-header">{{t .Lang "firewall.status"}}</th><th class="table-header">{{t .Lang "firewall.actions"}}</th></tr></thead>
+                <table class="w-full min-w-[1180px]">
+                    <thead class="border-b border-gray-700"><tr><th class="table-header">{{t .Lang "firewall.protocol"}}</th><th class="table-header">{{t .Lang "firewall.port"}}</th><th class="table-header">{{t .Lang "firewall.source_scope"}}</th><th class="table-header">{{t .Lang "firewall.description"}}</th><th class="table-header">{{t .Lang "firewall.created_at"}}</th><th class="table-header">{{t .Lang "firewall.expires_at"}}</th><th class="table-header">{{t .Lang "firewall.hit_count"}}</th><th class="table-header">{{t .Lang "firewall.status"}}</th><th class="table-header">{{t .Lang "firewall.actions"}}</th></tr></thead>
                     <tbody>
                         <template x-for="rule in (portStatus.rules || [])" :key="rule.id">
                             <tr class="border-b border-gray-700/50">
@@ -153,23 +199,32 @@
                                 <td class="table-cell font-mono" x-text="rule.port"></td>
                                 <td class="table-cell font-mono text-xs" x-text="rule.source || t('firewall.any_source')"></td>
                                 <td class="table-cell text-sm" x-text="rule.description || '--'"></td>
+                                <td class="table-cell text-xs whitespace-nowrap" x-text="formatFirewallTime(rule.created_at)"></td>
+                                <td class="table-cell text-xs whitespace-nowrap" x-text="rule.expires_at ? formatFirewallTime(rule.expires_at) : t('firewall.permanent')"></td>
+                                <td class="table-cell font-mono text-xs" x-text="rule.hit_packets == null ? '--' : rule.hit_packets"></td>
                                 <td class="table-cell"><span :class="rule.applied ? 'badge-success' : 'badge-warning'" x-text="rule.applied ? t('firewall.applied') : t('firewall.pending_reconcile')"></span></td>
                                 <td class="table-cell"><button @click="deletePortRule(rule)" class="btn-danger text-xs py-1 px-2">{{t .Lang "firewall.close_port"}}</button></td>
                             </tr>
                         </template>
-                        <tr x-show="portsLoaded && (portStatus.rules || []).length === 0"><td colspan="6" class="table-cell text-center text-gray-500 py-6">{{t .Lang "firewall.no_managed_port_rules"}}</td></tr>
+                        <tr x-show="portsLoaded && (portStatus.rules || []).length === 0"><td colspan="9" class="table-cell text-center text-gray-500 py-4">{{t .Lang "firewall.no_managed_port_rules"}}</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
         <details class="card">
-            <summary class="cursor-pointer text-sm font-semibold text-white">{{t .Lang "firewall.listening_ports"}}</summary>
+            <summary class="cursor-pointer text-sm font-semibold text-white" x-text="t('firewall.listening_ports_summary', { total: portStatus.listener_count || 0, network: portStatus.network_listener_count || 0, local: portStatus.local_listener_count || 0 })"></summary>
             <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 max-h-64 overflow-y-auto">
-                <template x-for="listener in (portStatus.listeners || [])" :key="listener.protocol + ':' + listener.port">
-                    <div class="rounded border border-gray-700 p-3"><span class="font-mono text-white" x-text="listener.port + '/' + listener.protocol.toUpperCase()"></span><span class="block text-xs text-gray-500 mt-1" x-text="listener.process || t('firewall.unknown_process')"></span></div>
+                <template x-for="listener in (portStatus.listeners || [])" :key="listener.protocol + ':' + listener.port + ':' + listener.address">
+                    <div class="rounded border p-3" :class="isSensitiveNetworkListener(listener) ? 'border-red-700 bg-red-950/10' : 'border-gray-700'">
+                        <div class="flex items-center justify-between gap-2"><span class="font-mono text-white" x-text="listener.port + '/' + listener.protocol.toUpperCase()"></span><span class="text-xs" :class="listener.bind_scope === 'local' ? 'text-green-400' : 'text-yellow-400'" x-text="listener.bind_scope === 'local' ? t('firewall.local_only') : t('firewall.network_listening')"></span></div>
+                        <span class="block text-xs text-gray-400 mt-1 font-mono" x-text="listener.address || '--'"></span>
+                        <span class="block text-xs text-gray-500 mt-1" x-text="listener.process || t('firewall.unknown_process')"></span>
+                        <span class="block text-xs mt-1" :class="listener.host_exposure === 'allowed_by_default' ? 'text-yellow-400' : 'text-gray-500'" x-text="listenerExposureLabel(listener)"></span>
+                    </div>
                 </template>
             </div>
+            <p x-show="(portStatus.dangerous_listener_count || 0) > 0" class="text-xs text-red-300 mt-3">{{t .Lang "firewall.database_listener_warning"}}</p>
             <p class="text-xs text-gray-500 mt-3">{{t .Lang "firewall.cloud_security_group_notice"}}</p>
         </details>
     </div>
@@ -526,11 +581,20 @@ function firewallManager() {
         page: 1,
         totalPages: 1,
         total: 0,
-        portStatus: { backend: '', writable: false, warning: '', input_policy: '', ssh_port: 22, panel_port: 8443, listeners: [], rules: [] },
-        portForm: { protocol: 'tcp', port: null, source: '', description: '', duration_minutes: 0 },
+        portStatus: { backend: '', writable: false, warning: '', input_policy: '', ssh_port: 22, panel_port: 8443, current_management_ip: '', managed_rule_count: 0, anomaly_count: 0, listener_count: 0, network_listener_count: 0, local_listener_count: 0, dangerous_listener_count: 0, listeners: [], rules: [] },
+        portForm: { protocol: 'tcp', port: null, source: '', source_mode: 'current', description: '', duration_mode: 'permanent', duration_minutes: 60, confirm_public: false },
+        selectedPortPreset: '',
+        portPresets: [
+            { key: 'ssh', label: 'SSH', protocol: 'tcp', portKey: 'ssh_port', fallback: 22, sourceMode: 'current', description: 'SSH' },
+            { key: 'http', label: 'HTTP', protocol: 'tcp', fallback: 80, sourceMode: 'any', description: 'HTTP' },
+            { key: 'https', label: 'HTTPS', protocol: 'tcp', fallback: 443, sourceMode: 'any', description: 'HTTPS' },
+            { key: 'http3', label: 'HTTP/3', protocol: 'udp', fallback: 443, sourceMode: 'any', description: 'HTTP/3 QUIC' },
+            { key: 'panel', label: 'OLS WPanel', protocol: 'tcp', portKey: 'panel_port', fallback: 8443, sourceMode: 'current', description: 'OLS WPanel' },
+        ],
         portsLoaded: false,
         portsLoading: false,
         portSubmitting: false,
+        protectionSubmitting: false,
         init() {
             const requestedTab = new URLSearchParams(window.location.search).get('tab');
             if (['current', 'wp', 'files', 'history', 'ports'].includes(requestedTab)) {
@@ -560,6 +624,7 @@ function firewallManager() {
                 const r = await api('/firewall/ports', { silent: true });
                 if (r.success) {
                     this.portStatus = r.data || this.portStatus;
+                    if (this.portForm.source_mode === 'current') this.portForm.source = this.portStatus.current_management_ip || '';
                     this.portsLoaded = true;
                 }
             } catch(e) { showToast(e.message || t('common.operation_failed'), 'error'); }
@@ -567,16 +632,76 @@ function firewallManager() {
         },
         async addPortRule() {
             if (!this.portForm.port) return;
-            const scope = this.portForm.source || t('firewall.any_source');
+            if (this.portForm.source_mode !== 'any' && !String(this.portForm.source || '').trim()) {
+                showToast(t('firewall.source_required'), 'error');
+                return;
+            }
+            if (this.portForm.duration_mode === 'temporary' && Number(this.portForm.duration_minutes || 0) < 1) {
+                showToast(t('firewall.duration_required'), 'error');
+                return;
+            }
+            if (this.portForm.source_mode === 'any' && !(await confirmModal(t('firewall.confirm_any_source')))) return;
+            const scope = this.portForm.source_mode === 'any' ? t('firewall.any_source') : this.portForm.source;
             if (!(await confirmModal(t('firewall.confirm_open_port', { protocol: this.portForm.protocol.toUpperCase(), port: this.portForm.port, source: scope })))) return;
             this.portSubmitting = true;
             try {
-                await api('/firewall/ports', { method: 'POST', body: this.portForm });
-                this.portForm = { protocol: 'tcp', port: null, source: '', description: '', duration_minutes: 0 };
+                const body = { ...this.portForm, confirm_public: this.portForm.source_mode === 'any' };
+                if (body.duration_mode === 'permanent') body.duration_minutes = 0;
+                await api('/firewall/ports', { method: 'POST', body });
+                this.resetPortForm();
                 await this.fetchPortStatus();
                 showToast(t('firewall.port_opened'), 'success');
             } catch(e) { showToast(e.message || t('common.operation_failed'), 'error'); }
             finally { this.portSubmitting = false; }
+        },
+        resetPortForm() {
+            this.selectedPortPreset = '';
+            this.portForm = { protocol: 'tcp', port: null, source: this.portStatus.current_management_ip || '', source_mode: 'current', description: '', duration_mode: 'permanent', duration_minutes: 60, confirm_public: false };
+        },
+        applyPortPreset(preset) {
+            this.selectedPortPreset = preset.key;
+            this.portForm.protocol = preset.protocol;
+            this.portForm.port = preset.portKey ? (this.portStatus[preset.portKey] || preset.fallback) : preset.fallback;
+            this.portForm.description = preset.description;
+            this.portForm.source_mode = preset.sourceMode;
+            this.onSourceModeChange();
+        },
+        selectedPresetLabel() {
+            const preset = this.portPresets.find(item => item.key === this.selectedPortPreset);
+            return preset ? preset.label : t('firewall.custom_service');
+        },
+        onSourceModeChange() {
+            if (this.portForm.source_mode === 'current') this.portForm.source = this.portStatus.current_management_ip || '';
+            if (this.portForm.source_mode === 'any') this.portForm.source = '';
+            if (this.portForm.source_mode === 'specific' && this.portForm.source === this.portStatus.current_management_ip) this.portForm.source = '';
+        },
+        async enableProtection() {
+            if (!(await confirmModal(t('firewall.confirm_enable_protection')))) return;
+            this.protectionSubmitting = true;
+            try {
+                const enabled = await api('/firewall/ports/protection', { method: 'POST', body: { confirm: true }, timeout: 30000 });
+                const token = enabled.data?.confirmation_token || '';
+                if (!token) throw new Error(t('firewall.protection_confirmation_failed'));
+                await this.fetchPortStatus();
+                await api('/firewall/ports/protection/confirm', { method: 'POST', body: { token }, timeout: 30000 });
+                await this.fetchPortStatus();
+                showToast(t('firewall.protection_enabled'), 'success');
+            } catch(e) {
+                showToast(e.message || t('firewall.protection_rollback_pending'), 'error');
+            } finally { this.protectionSubmitting = false; }
+        },
+        formatFirewallTime(value) {
+            if (!value) return '--';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? '--' : date.toLocaleString(currentLocale());
+        },
+        isSensitiveNetworkListener(listener) {
+            return listener?.bind_scope !== 'local' && [3306, 6379].includes(Number(listener?.port || 0));
+        },
+        listenerExposureLabel(listener) {
+            if (listener?.host_exposure === 'local_only') return t('firewall.exposure_local_only');
+            if (listener?.host_exposure === 'allowed_by_default') return t('firewall.exposure_allowed_by_default');
+            return t('firewall.exposure_rule_dependent');
         },
         async deletePortRule(rule) {
             if (!(await confirmModal(t('firewall.confirm_close_port', { protocol: String(rule.protocol || '').toUpperCase(), port: rule.port })))) return;

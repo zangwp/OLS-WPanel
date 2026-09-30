@@ -5,8 +5,8 @@
         <div class="flex items-center space-x-3">
             <h2 class="text-xl font-bold text-white">{{t .Lang "nav.dashboard"}}</h2>
             <span class="version-pill text-xs px-2 py-0.5">{{.PanelVersion}}</span>
-            <a x-show="hasUpdate" href="/{{.RandomSuffix}}/settings" class="text-xs bg-yellow-600 text-yellow-100 px-2 py-0.5 rounded hover:bg-yellow-500" x-text="t('dashboard.update_available', { version: latestVersion })"></a>
-            <a x-show="sysCount > 0" href="/{{.RandomSuffix}}/settings" class="text-xs bg-red-700 text-red-100 px-2 py-0.5 rounded hover:bg-red-600" x-text="t('dashboard.system_updates', { count: sysCount })"></a>
+            <a x-show="hasUpdate" href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs bg-yellow-600 text-yellow-100 px-2 py-0.5 rounded hover:bg-yellow-500" x-text="t('dashboard.update_available', { version: latestVersion })"></a>
+            <a x-show="sysCount > 0" href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs bg-red-700 text-red-100 px-2 py-0.5 rounded hover:bg-red-600" x-text="t('dashboard.system_updates', { count: sysCount })"></a>
             <span x-show="checking" class="text-xs text-gray-600">{{t .Lang "dashboard.checking_updates"}}</span>
         </div>
         <a href="/{{.RandomSuffix}}/vps" class="btn-secondary text-xs py-1.5 px-3">{{t .Lang "dashboard.vps_management"}}</a>
