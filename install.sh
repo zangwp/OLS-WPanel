@@ -158,6 +158,101 @@ assert_panel_command_paths_available() {
     done
 }
 
+detect_installer_ssh_port() {
+    local ssh_port=""
+    local sshd_path=""
+
+    sshd_path=$(command -v sshd 2>/dev/null || true)
+    if [[ -n "$sshd_path" ]]; then
+        ssh_port=$($sshd_path -T 2>/dev/null | awk '$1 == "port" && !found { value=$2; found=1 } END { if (found) print value }' || true)
+    fi
+    if { [[ ! "$ssh_port" =~ ^[0-9]+$ ]] || (( ssh_port < 1 || ssh_port > 65535 )); } && command -v ss >/dev/null 2>&1; then
+        ssh_port=$(ss -H -ltnp 2>/dev/null | awk '/users:\(\("sshd"/ && !found { endpoint=$4; sub(/^.*:/, "", endpoint); value=endpoint; found=1 } END { if (found) print value }' || true)
+    fi
+    if [[ ! "$ssh_port" =~ ^[0-9]+$ ]] || (( ssh_port < 1 || ssh_port > 65535 )); then
+        ssh_port=22
+    fi
+    printf '%s\n' "$ssh_port"
+}
+
+configure_fresh_firewall() {
+    local ssh_port=""
+    local nft_stage=""
+    local nft_snapshot=""
+    local create_table_line=""
+
+    if $REPAIR_MODE; then
+        log_info "repair模式保留现有防火墙规则和默认策略"
+        return 0
+    fi
+
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -F "Status: active" >/dev/null; then
+        ufw allow 8443/tcp comment 'OLS WPanel' >/dev/null 2>&1 || \
+            log_error "UFW 正在运行，但无法放行面板 8443/TCP"
+        log_info "检测到现有 UFW：已放行 8443/TCP，未覆盖其余规则或默认策略"
+        return 0
+    fi
+
+    command -v nft >/dev/null 2>&1 || \
+        log_error "缺少 nft 命令，无法配置本机防火墙"
+
+    if nft list ruleset 2>/dev/null | grep -F "hook input" >/dev/null; then
+        if nft add rule inet filter input tcp dport 8443 counter accept comment "ols-wpanel-panel" 2>/dev/null || \
+           nft add rule ip filter input tcp dport 8443 counter accept comment "ols-wpanel-panel" 2>/dev/null; then
+            log_info "检测到现有 nftables 入站策略：仅放行 8443/TCP，未覆盖默认策略"
+        else
+            log_warn "检测到自定义 nftables 入站链，无法安全定位写入位置；请手动放行 8443/TCP"
+        fi
+        return 0
+    fi
+
+    # A table/chain with these names but no input hook is user-managed state. Do
+    # not repurpose it as a base chain because doing so can unexpectedly change
+    # packet flow. A genuinely clean host normally has neither object loaded.
+    if nft list chain inet filter input >/dev/null 2>&1; then
+        log_warn "检测到无 input hook 的 inet filter input 自定义链；为避免覆盖，未启用默认 drop，请手动放行 8443/TCP"
+        return 0
+    fi
+    if ! nft list table inet filter >/dev/null 2>&1; then
+        create_table_line="add table inet filter"
+    fi
+
+    ssh_port=$(detect_installer_ssh_port)
+    nft_stage="$INSTALL_WORKDIR/nftables-fresh.conf"
+    nft_snapshot="$INSTALL_WORKDIR/nftables.conf"
+    cat > "$nft_stage" << NFTFRESHEOF
+${create_table_line}
+add chain inet filter input { type filter hook input priority filter; policy drop; }
+add rule inet filter input ct state invalid counter drop comment "ols-wpanel-core:invalid"
+add rule inet filter input ct state established,related counter accept comment "ols-wpanel-core:established"
+add rule inet filter input iifname "lo" counter accept comment "ols-wpanel-core:loopback"
+add rule inet filter input meta l4proto ipv6-icmp counter accept comment "ols-wpanel-core:icmpv6"
+add rule inet filter input ip protocol icmp counter accept comment "ols-wpanel-core:icmpv4"
+add rule inet filter input tcp dport ${ssh_port} ct state new counter accept comment "ols-wpanel-core:ssh"
+add rule inet filter input tcp dport 80 ct state new counter accept comment "ols-wpanel-core:http"
+add rule inet filter input tcp dport 443 ct state new counter accept comment "ols-wpanel-core:https"
+add rule inet filter input udp dport 443 ct state new counter accept comment "ols-wpanel-core:http3"
+add rule inet filter input tcp dport 8443 ct state new counter accept comment "ols-wpanel-core:panel"
+NFTFRESHEOF
+    chmod 0600 "$nft_stage"
+    nft --check --file "$nft_stage" || \
+        log_error "默认 nftables 安全基线检查失败，未修改防火墙"
+    nft --file "$nft_stage" || \
+        log_error "默认 nftables 安全基线应用失败"
+    printf 'flush ruleset\n' > "$nft_snapshot" || \
+        log_error "无法创建 nftables 持久化快照"
+    nft list ruleset >> "$nft_snapshot" || \
+        log_error "无法导出已验证的 nftables 规则"
+    chmod 0600 "$nft_snapshot"
+    nft --check --file "$nft_snapshot" || \
+        log_error "持久化前 nftables 规则检查失败"
+    install -o root -g root -m 0600 "$nft_snapshot" /etc/nftables.conf || \
+        log_error "无法安全保存 nftables 规则"
+    systemctl enable --now nftables >/dev/null 2>&1 || \
+        log_error "无法启用并启动 nftables 服务"
+    log_info "已启用 nftables 安全基线：入站默认 drop；放行 SSH ${ssh_port}/TCP、80/TCP、443/TCP+UDP、8443/TCP"
+}
+
 init_install_workdir() {
     local required_cmd=""
     local previous_umask=""
@@ -2738,26 +2833,10 @@ else
 fi
 
 # ============================================================
-# 防火墙放行 8443 面板端口
+# 本机防火墙安全基线
 # ============================================================
-log_info "放行面板端口 8443..."
-
-if ! $REPAIR_MODE; then
-# nftables
-if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q "hook input"; then
-    nft add rule inet filter input tcp dport 8443 accept 2>/dev/null || \
-    nft add rule ip filter input tcp dport 8443 accept 2>/dev/null || true
-    log_info "nftables 已放行 8443"
-fi
-
-# ufw
-if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-    ufw allow 8443/tcp 2>/dev/null || true
-    log_info "ufw 已放行 8443"
-fi
-else
-    log_info "repair模式保留现有防火墙规则"
-fi
+log_info "配置本机防火墙安全基线..."
+configure_fresh_firewall
 
 # ============================================================
 # MariaDB 安全加固
