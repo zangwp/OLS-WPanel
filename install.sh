@@ -2165,14 +2165,14 @@ OLSCHECKMAINEOF
     exit 0
 fi
 init_install_workdir
-exec 9>/run/lock/ols-wpanel-install.lock
-flock -n 9 || log_error "另一个 OLS WPanel 安装或 repair 进程正在运行"
 if [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
     log_info "权限与 ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台预检通过；普通卸载不下载发布包"
 else
     prepare_panel_candidate
     log_info "权限、${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台与发布包安全预检通过"
 fi
+exec 9>/run/lock/ols-wpanel-install.lock
+flock -n 9 || log_error "另一个 OLS WPanel 安装或 repair 进程正在运行"
 
 # ============================================================
 # 重复安装/残留安装检测
