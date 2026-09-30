@@ -17,7 +17,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.5.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前稳定版：`v1.6.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
 
 精简镜像如果连 `curl` 都没有，请先执行：
 
@@ -47,7 +47,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 | SSL | Let's Encrypt 申请与自动续签，支持手动证书，失败时保留 HTTP 站点便于排查 |
 | 备份 | 站点与数据库备份/恢复，面板 SQLite 自动备份，支持 SFTP / S3 异地保存 |
 | 安全 | 登录防爆破、恶意扫描检测、CDN 真实 IP、白名单、Fail2ban、nftables 封禁与受管端口放行 |
-| 运维 | CPU/内存/磁盘监控，文件与数据库管理，计划任务，邮件告警，日志分析与 AI 诊断 |
+| 运维 | VPS 系统概况、CPU/内存/磁盘监控、核心服务健康、BBR/DNS/NTP 状态、文件与数据库管理、计划任务、邮件告警、日志分析与 AI 诊断 |
 | 更新 | 面板 Release 验签更新与回滚；系统软件通过已配置的签名 APT 源更新 |
 
 OLS WPanel 不提供邮件服务器、FTP、Docker 编排或通用 Java/Python 应用托管，以减少攻击面和无关依赖。
@@ -75,7 +75,11 @@ o password        重置管理员密码
 o info            查看版本、端口和入口
 o status          查看运行状态
 o unban           清空面板管理的 IP 封禁
+o update          通过签名发布链更新/修复面板
+o uninstall       普通卸载面板（保留网站、数据库与共享软件）
 ```
+
+`o uninstall` 会在终端要求输入精确的 `UNINSTALL` 后才执行。系统重装、磁盘分区和彻底清空等高风险动作不会放在网页中一键执行。
 
 ## 安全与文档
 

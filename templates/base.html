@@ -160,6 +160,12 @@
 						{{t .Lang "nav.log_analysis"}}
 					</a>
                     <p class="sidebar-section-label">{{t .Lang "nav.group_system"}}</p>
+                    <a href="/{{$.RandomSuffix}}/vps" class="sidebar-link {{if eq .Active "vps"}}active{{end}}">
+                        <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5m4.75-11.396c.251-.042.506-.075.766-.098m-.766.098a24.301 24.301 0 00-4.103.69m4.869-.788c.26-.023.523-.035.784-.035.26 0 .522.012.782.035m-1.566 0a24.32 24.32 0 014.104.69m-4.104-.69v5.812a2.25 2.25 0 00.659 1.591L19.5 18.75m-14.5-4.25h14.5m-14.5 0l-1.286 2.25A2.25 2.25 0 005.667 20h12.666a2.25 2.25 0 001.953-3.25L19 14.5"/>
+                        </svg>
+                        {{t .Lang "nav.vps"}}
+                    </a>
                     <a href="/{{$.RandomSuffix}}/settings" class="sidebar-link {{if eq .Active "settings"}}active{{end}}">
                         <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -224,6 +230,7 @@
                 {{if eq .ContentTemplate "firewall_content"}}{{template "firewall_content" .}}{{end}}
                 {{if eq .ContentTemplate "files_content"}}{{template "files_content" .}}{{end}}
                 {{if eq .ContentTemplate "security_content"}}{{template "security_content" .}}{{end}}
+                {{if eq .ContentTemplate "vps_content"}}{{template "vps_content" .}}{{end}}
                 {{if eq .ContentTemplate "settings_content"}}{{template "settings_content" .}}{{end}}
                 {{if eq .ContentTemplate "alert_content"}}{{template "alert_content" .}}{{end}}
                 {{if eq .ContentTemplate "software_content"}}{{template "software_content" .}}{{end}}

@@ -9,6 +9,7 @@
             <a x-show="sysCount > 0" href="/{{.RandomSuffix}}/settings" class="text-xs bg-red-700 text-red-100 px-2 py-0.5 rounded hover:bg-red-600" x-text="t('dashboard.system_updates', { count: sysCount })"></a>
             <span x-show="checking" class="text-xs text-gray-600">{{t .Lang "dashboard.checking_updates"}}</span>
         </div>
+        <a href="/{{.RandomSuffix}}/vps" class="btn-secondary text-xs py-1.5 px-3">{{t .Lang "dashboard.vps_management"}}</a>
     </div>
     <div x-data="announcement()" x-init="fetch()" class="mb-4" x-show="visible">
         <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 text-blue-200 text-sm leading-relaxed prose-a:text-blue-300 prose-a:underline prose-a:hover:text-blue-100 flex items-start">

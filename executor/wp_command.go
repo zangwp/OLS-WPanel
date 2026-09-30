@@ -11,13 +11,64 @@ import (
 const panelCommandScript = `#!/bin/bash
 # OLS WPanel CLI — o
 
+set -o pipefail
+
 BIN=/usr/local/bin/ols-wpanel
 CFG=/www/ols-wpanel/config.json
 SVC=ols-wpanel
+ENTRY_URL=https://ols.zangyubin.top/install
+ENTRY_MAX_BYTES=$((4 * 1024 * 1024))
 
 red()  { echo -e "\033[31m$*\033[0m"; }
 green(){ echo -e "\033[32m$*\033[0m"; }
 dim()  { echo -e "\033[2m$*\033[0m"; }
+
+run_lifecycle() {
+    local action="$1"
+    local entry_file=""
+    local entry_size=""
+    local status=1
+
+    if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        red "此操作需要 root 权限"
+        return 1
+    fi
+    entry_file=$(mktemp /tmp/ols-wpanel-entry.XXXXXXXXXX) || {
+        red "无法创建临时文件"
+        return 1
+    }
+    chmod 0600 "$entry_file"
+    if command -v curl >/dev/null 2>&1; then
+        curl -q -fsSL --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 120 --max-filesize "$ENTRY_MAX_BYTES" \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            "$ENTRY_URL" -o "$entry_file"
+        status=$?
+    elif command -v wget >/dev/null 2>&1; then
+        wget --no-config -q --https-only --connect-timeout=15 --read-timeout=30 \
+            --tries=3 -O "$entry_file" "$ENTRY_URL"
+        status=$?
+    else
+        red "缺少 curl 或 wget，无法下载签名入口"
+        rm -f -- "$entry_file"
+        return 1
+    fi
+    if [ "$status" -ne 0 ]; then
+        red "下载 OLS WPanel 签名入口失败"
+        rm -f -- "$entry_file"
+        return "$status"
+    fi
+    entry_size=$(stat -c '%s' -- "$entry_file" 2>/dev/null || echo 0)
+    if ! [[ "$entry_size" =~ ^[0-9]+$ ]] || [ "$entry_size" -le 0 ] || [ "$entry_size" -gt "$ENTRY_MAX_BYTES" ]; then
+        red "入口脚本大小异常，已拒绝执行"
+        rm -f -- "$entry_file"
+        return 1
+    fi
+    bash "$entry_file" "$action"
+    status=$?
+    rm -f -- "$entry_file"
+    return "$status"
+}
 
 diag() {
     local issues=0
@@ -137,6 +188,14 @@ case "${1:-}" in
     unban)
         $BIN --unban-all
         ;;
+    update|upgrade|repair)
+        echo "正在通过签名发布链更新/修复 OLS WPanel..."
+        run_lifecycle --repair
+        ;;
+    uninstall)
+        echo "普通卸载会保留网站、数据库、站点证书和共享软件。"
+        run_lifecycle --uninstall
+        ;;
     status|check)
         echo "OLS WPanel 诊断检查"
         echo "=================="
@@ -171,6 +230,8 @@ case "${1:-}" in
         echo "  o log [N]     查看最近 N 条日志（默认30）"
         echo "  o password    一键重置管理员账号密码"
         echo "  o unban       一键清空所有IP封禁"
+        echo "  o update      通过签名发布链更新/修复面板"
+        echo "  o uninstall   普通卸载面板（保留网站与数据库）"
         ;;
 esac
 `

@@ -34,6 +34,11 @@ func TestEnsurePanelCommandsAt_WritesLowerAndUpperAliases(t *testing.T) {
 	if strings.Contains(panelCommandScript, "olsw status") {
 		t.Fatal("panel command script still advertises the removed command")
 	}
+	for _, expected := range []string{"o update", "o uninstall", "run_lifecycle --repair", "run_lifecycle --uninstall", "ENTRY_URL=https://ols.zangyubin.top/install"} {
+		if !strings.Contains(panelCommandScript, expected) {
+			t.Fatalf("panel command script is missing lifecycle command %q", expected)
+		}
+	}
 }
 
 func TestPanelCommandScriptHasValidBashSyntax(t *testing.T) {

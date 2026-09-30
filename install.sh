@@ -27,6 +27,7 @@ PREFER_CN=false
 CHECK_PLATFORM_ONLY=false
 CHECK_OLS_PACKAGES_ONLY=false
 CHECK_MARIADB_PACKAGES_ONLY=false
+REQUESTED_ACTION=""
 MARIADB_SERIES="11.8"
 PLATFORM_ID=""
 PLATFORM_VERSION=""
@@ -384,6 +385,20 @@ while [[ $# -gt 0 ]]; do
             ;;
         --check-mariadb-packages)
             CHECK_MARIADB_PACKAGES_ONLY=true
+            shift
+            ;;
+        --repair|--update)
+            if [[ -n "$REQUESTED_ACTION" ]] && [[ "$REQUESTED_ACTION" != "repair" ]]; then
+                log_error "不能同时请求更新/修复和卸载"
+            fi
+            REQUESTED_ACTION="repair"
+            shift
+            ;;
+        --uninstall)
+            if [[ -n "$REQUESTED_ACTION" ]] && [[ "$REQUESTED_ACTION" != "uninstall" ]]; then
+                log_error "不能同时请求更新/修复和卸载"
+            fi
+            REQUESTED_ACTION="uninstall"
             shift
             ;;
         *)
@@ -1834,6 +1849,19 @@ remove_managed_panel_command() {
     fi
 }
 
+confirm_ordinary_uninstall() {
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  即将普通卸载 OLS WPanel${NC}"
+    echo -e "  将删除面板配置、面板数据库、面板 TLS 身份和面板本地备份。"
+    echo -e "${GREEN}  网站文件、网站日志、站点证书、OLS 站点配置、MariaDB 数据库和共享软件会保留。${NC}"
+    echo -e "  请输入精确的 ${BOLD}UNINSTALL${NC} 继续，其他输入都会取消。"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    local uninstall_confirmation=""
+    read -r -p "  > " uninstall_confirmation < /dev/tty 2>/dev/null || uninstall_confirmation=""
+    [[ "$uninstall_confirmation" == "UNINSTALL" ]]
+}
+
 do_uninstall() {
     echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -2137,10 +2165,14 @@ OLSCHECKMAINEOF
     exit 0
 fi
 init_install_workdir
-prepare_panel_candidate
 exec 9>/run/lock/ols-wpanel-install.lock
 flock -n 9 || log_error "另一个 OLS WPanel 安装或 repair 进程正在运行"
-log_info "权限、${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台与发布包安全预检通过"
+if [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
+    log_info "权限与 ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台预检通过；普通卸载不下载发布包"
+else
+    prepare_panel_candidate
+    log_info "权限、${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台与发布包安全预检通过"
+fi
 
 # ============================================================
 # 重复安装/残留安装检测
@@ -2165,7 +2197,22 @@ if [[ -e "$CONFIG_FILE" ]] || [[ -L "$CONFIG_FILE" ]] || \
     INSTALL_TRACES=true
 fi
 
-if $INSTALL_COMPLETE; then
+if [[ "$REQUESTED_ACTION" == "repair" ]]; then
+    $INSTALL_COMPLETE || log_error "未检测到完整的 OLS WPanel 安装，不能执行更新/修复；请运行普通安装命令处理残留或全新安装"
+    REPAIR_MODE=true
+    log_info "已进入非交互更新/修复模式：保留现有面板身份、配置和 TLS 证书"
+elif [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
+    if ! $INSTALL_TRACES; then
+        log_info "未检测到 OLS WPanel 安装或残留，无需卸载"
+        exit 0
+    fi
+    if ! confirm_ordinary_uninstall; then
+        log_info "未输入精确的 UNINSTALL，已取消普通卸载"
+        exit 0
+    fi
+    do_uninstall
+    exit 0
+elif $INSTALL_COMPLETE; then
     echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}  检测到 OLS WPanel 已安装${NC}"
@@ -3165,6 +3212,8 @@ echo -e "  o restart      重启面板 / Restart panel"
 echo -e "  o password     一键重置管理员密码 / Reset admin password"
 echo -e "  o unban        一键清空所有IP封禁 / Clear all IP bans"
 echo -e "  o status       查看运行状态 / Show runtime status"
+echo -e "  o update       签名更新/修复面板 / Signed update and repair"
+echo -e "  o uninstall    普通卸载面板（保留站点与数据库）/ Ordinary uninstall"
 echo -e "  大写 O 与小写 o 完全兼容 / Uppercase O is fully equivalent to lowercase o"
 echo ""
 if ! $REPAIR_MODE; then

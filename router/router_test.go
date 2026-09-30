@@ -36,6 +36,7 @@ var pageTemplates = map[string]string{
 	"settings.html":               "settings_content",
 	"alert.html":                  "alert_content",
 	"software.html":               "software_content",
+	"vps.html":                    "vps_content",
 	"help.html":                   "help_content",
 }
 
@@ -232,7 +233,7 @@ func TestContentTemplatesRender(t *testing.T) {
 		"dashboard_content", "websites_content", "wordpress_overview_content", "websites_new_content",
 		"websites_detail_content", "wordpress_site_detail_content", "databases_content", "database_detail_content", "ai_diagnostics_content", "log_analysis_content", "cron_content", "backups_content", "remote_backup_settings_content", "firewall_content",
 		"files_content", "security_content", "settings_content",
-		"alert_content", "software_content", "help_content",
+		"alert_content", "software_content", "vps_content", "help_content",
 	}
 	for _, content := range contents {
 		t.Run(content, func(t *testing.T) {
@@ -1557,6 +1558,7 @@ func TestSidebarNavigationOrder(t *testing.T) {
 		[]byte(`href="/{{$.RandomSuffix}}/software"`),
 		[]byte(`href="/{{$.RandomSuffix}}/alert"`),
 		[]byte(`href="/{{$.RandomSuffix}}/ai-diagnostics"`),
+		[]byte(`href="/{{$.RandomSuffix}}/vps"`),
 		[]byte(`href="/{{$.RandomSuffix}}/settings"`),
 		[]byte(`href="/{{$.RandomSuffix}}/help"`),
 	}
@@ -1646,6 +1648,35 @@ func TestCronPageExplainsManagedAndAutomaticTasks(t *testing.T) {
 		if !bytes.Contains(source, required) {
 			t.Fatalf("cron guidance is missing %q", required)
 		}
+	}
+}
+
+func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
+	source, err := os.ReadFile("../templates/vps.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range [][]byte{
+		[]byte(`api('/vps/overview')`),
+		[]byte(`command: 'o update'`),
+		[]byte(`command: 'o uninstall'`),
+		[]byte(`/firewall?tab=ports`),
+		[]byte(`vps.destructive_note`),
+	} {
+		if !bytes.Contains(source, required) {
+			t.Fatalf("VPS management page is missing %q", required)
+		}
+	}
+	if bytes.Contains(source, []byte(`exec`)) || bytes.Contains(source, []byte(`shell`)) {
+		t.Fatal("VPS management page must not expose arbitrary command execution")
+	}
+
+	firewall, err := os.ReadFile("../templates/firewall.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(firewall, []byte(`new URLSearchParams(window.location.search).get('tab')`)) {
+		t.Fatal("firewall page does not honor the VPS management ports deep link")
 	}
 }
 

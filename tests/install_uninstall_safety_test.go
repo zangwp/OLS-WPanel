@@ -92,6 +92,45 @@ func TestPurgeRequiresExactSecondConfirmationBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestExplicitLifecycleFlagsAreSafeAndUnambiguous(t *testing.T) {
+	script := readUninstallSafetyScript(t)
+	for _, required := range []string{
+		`--repair|--update)`,
+		`REQUESTED_ACTION="repair"`,
+		`--uninstall)`,
+		`REQUESTED_ACTION="uninstall"`,
+		`confirm_ordinary_uninstall() {`,
+		`请输入精确的 ${BOLD}UNINSTALL${NC}`,
+		`read -r -p "  > " uninstall_confirmation < /dev/tty`,
+		`[[ "$uninstall_confirmation" == "UNINSTALL" ]]`,
+		`if ! confirm_ordinary_uninstall; then`,
+		`$INSTALL_COMPLETE || log_error`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("installer lifecycle flags are missing %q", required)
+		}
+	}
+	confirmation := strings.Index(script, `if ! confirm_ordinary_uninstall; then`)
+	if confirmation < 0 {
+		t.Fatal("explicit uninstall confirmation guard is missing")
+	}
+	mutation := strings.Index(script[confirmation:], "do_uninstall")
+	if mutation < 0 {
+		t.Fatal("explicit uninstall is not guarded before mutation")
+	}
+}
+
+func TestExplicitUninstallSkipsReleaseBundleDownload(t *testing.T) {
+	script := readUninstallSafetyScript(t)
+	needle := `if [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
+    log_info "权限与 ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台预检通过；普通卸载不下载发布包"
+else
+    prepare_panel_candidate`
+	if !strings.Contains(script, needle) {
+		t.Fatal("explicit uninstall must run without downloading the full release bundle")
+	}
+}
+
 func TestUninstallCleanupUsesExactOLSOwnedResources(t *testing.T) {
 	script := readUninstallSafetyScript(t)
 	cleanup := extractUninstallSafetyFunction(t, script, "cleanup_ols_runtime_integrations", "do_uninstall() {")

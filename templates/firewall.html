@@ -532,6 +532,11 @@ function firewallManager() {
         portsLoading: false,
         portSubmitting: false,
         init() {
+            const requestedTab = new URLSearchParams(window.location.search).get('tab');
+            if (['current', 'wp', 'files', 'history', 'ports'].includes(requestedTab)) {
+                this.loadTab(requestedTab);
+                return;
+            }
             this.fetchBans();
         },
         loadTab(tab) {

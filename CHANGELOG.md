@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.0 — 2026-09-30
+
+- Adds a focused VPS Management page with host identity, operating system, kernel, CPU, resource, DNS, NTP, BBR/qdisc, reboot-required, and core systemd service visibility.
+- Groups system updates, managed ports, software health, backups, and log analysis into safe operational entry points without exposing arbitrary root shell execution in the browser.
+- Adds `o update` for signed in-place update/repair and `o uninstall` for an ordinary panel uninstall that requires the exact `UNINSTALL` confirmation phrase.
+- Keeps website files, logs, certificates, OpenLiteSpeed site configuration, MariaDB databases, and shared software during ordinary uninstall; destructive purge remains intentionally outside the web UI.
+- Adds deep links from VPS Management to the managed firewall Ports tab and improves the responsive system-page layout.
+
 ## v1.5.0 — 2026-09-30
 
 - Reworks the website performance card around the real cache architecture: the official LiteSpeed Cache plugin manages WordPress integration, OpenLiteSpeed provides page cache, and Redis provides a separate object-cache layer.

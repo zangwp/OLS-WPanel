@@ -1498,6 +1498,8 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.POST("/api/auth/logout", authHandler.Logout)
 	protected.GET("/api/auth/check", authHandler.Check)
 	protected.GET("/api/auth/csrf-token", authHandler.CSRFToken)
+	vpsHandler := &handlers.VPSHandler{}
+	protected.GET("/api/vps/overview", vpsHandler.Overview)
 
 	websiteHandler := &handlers.WebsiteHandler{DB: db}
 	wpInventoryHandler := &handlers.WPInventoryHandler{DB: db}
@@ -1766,6 +1768,9 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/alert", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "alert.html", pageData(suffix, "alert", "alert_content", c))
 	})
+	protected.GET("/vps", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "vps.html", pageData(suffix, "vps", "vps_content", c))
+	})
 	protected.GET("/settings", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "settings.html", pageData(suffix, "settings", "settings_content", c))
 	})
@@ -1862,6 +1867,7 @@ var pageTitleKeys = map[string]string{
 	"files":              "nav.files",
 	"software":           "nav.software",
 	"alert":              "nav.alert",
+	"vps":                "nav.vps",
 	"settings":           "nav.settings",
 	"help":               "nav.help",
 }

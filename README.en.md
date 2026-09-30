@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.5.0`.
+The current stable release is `v1.6.0`.
 
 ### Minimal images / download failures
 
@@ -63,7 +63,11 @@ o password        reset the administrator password
 o info            show version and access information
 o status          show runtime status
 o unban           clear managed IP bans
+o update          update or repair through the signed release chain
+o uninstall       ordinary uninstall that preserves sites, databases, and shared software
 ```
+
+`o uninstall` requires the exact `UNINSTALL` confirmation phrase in the terminal. OS reinstall, disk partitioning, and destructive purge are intentionally not exposed as one-click web actions.
 
 ## Security and release model
 
