@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.9.0 — 2026-09-30
+
+- Reorganizes Panel Settings into focused General, Updates, WordPress Package, Panel Backups, and Operation Logs sections so the page no longer grows into one long workspace.
+- Keeps large system-update package lists collapsed by default, moves the GitHub proxy into advanced download settings, and clarifies current-version and last-automatic-update states.
+- Separates BasicAuth and Web-login saves; username or password changes now require the current password and commit atomically before active sessions are revoked.
+- Adds searchable, status-filtered, paginated operation logs with localized operation names and visible result messages.
+- Clarifies that the local WordPress package is only for future site creation and that panel database backups exclude website files, site databases, certificates, and system configuration.
+- Adds regression coverage for account mutation safety, log filtering, query validation, and Linux handler compilation.
+
 ## v1.8.0 — 2026-09-30
 
 - Adds two bounded DNS presets to VPS Management: Cloudflare for international routing and Alibaba Public DNS for mainland China, each with paired IPv4 and IPv6 resolvers.
