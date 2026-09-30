@@ -146,18 +146,80 @@ func (h *SettingsHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
-	if req.Username != nil && *req.Username != "" {
-		result, err := db.Exec("UPDATE admin_users SET username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1 AND username <> ?", *req.Username, *req.Username)
+	// Changing the administrator identity is security-sensitive. Validate the
+	// current credential before mutating either the username or password so a
+	// failed password check can never leave a partial username change behind.
+	var currentUsername, currentPasswordHash string
+	requestedUsername := ""
+	usernameChanged := false
+	passwordRequested := req.NewPassword != nil && *req.NewPassword != ""
+	passwordChanged := false
+	newPasswordHash := ""
+	if req.Username != nil || passwordRequested {
+		if err := db.QueryRow("SELECT username, password_hash FROM admin_users LIMIT 1").Scan(&currentUsername, &currentPasswordHash); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询用户失败"))
+			return
+		}
+		requestedUsername = currentUsername
+		if req.Username != nil {
+			requestedUsername = strings.TrimSpace(*req.Username)
+			if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$`).MatchString(requestedUsername) {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse("用户名应为3-64位字母、数字、点、下划线或连字符"))
+				return
+			}
+			usernameChanged = requestedUsername != currentUsername
+		}
+		if usernameChanged || passwordRequested {
+			if req.OldPassword == nil || *req.OldPassword == "" {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse("请输入当前密码"))
+				return
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(currentPasswordHash), []byte(*req.OldPassword)); err != nil {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse("当前密码错误"))
+				return
+			}
+		}
+		if passwordRequested {
+			if len(*req.NewPassword) < 8 {
+				c.JSON(http.StatusBadRequest, models.ErrorResponse("新密码至少8位"))
+				return
+			}
+			passwordChanged = bcrypt.CompareHashAndPassword([]byte(currentPasswordHash), []byte(*req.NewPassword)) != nil
+			if passwordChanged {
+				hash, err := bcrypt.GenerateFromPassword([]byte(*req.NewPassword), 12)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, models.ErrorResponse("密码加密失败"))
+					return
+				}
+				newPasswordHash = string(hash)
+			}
+		}
+	}
+
+	if usernameChanged || passwordChanged {
+		tx, err := db.Begin()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse("更新用户名失败"))
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("启动账户更新失败"))
 			return
 		}
-		if changed, err := result.RowsAffected(); err != nil {
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse("确认用户名更新结果失败"))
-			return
-		} else if changed > 0 {
-			middleware.GlobalSessionStore.DeleteAll()
+		defer tx.Rollback()
+		if usernameChanged {
+			if _, err := tx.Exec("UPDATE admin_users SET username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1", requestedUsername); err != nil {
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse("更新用户名失败"))
+				return
+			}
 		}
+		if passwordChanged {
+			if _, err := tx.Exec("UPDATE admin_users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1", newPasswordHash); err != nil {
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse("更新密码失败"))
+				return
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("提交账户更新失败"))
+			return
+		}
+		middleware.GlobalSessionStore.DeleteAll()
 	}
 
 	if req.BasicAuthUser != nil && *req.BasicAuthUser != "" {
@@ -166,40 +228,6 @@ func (h *SettingsHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 		config.AppConfig.BasicAuth.Username = *req.BasicAuthUser
-	}
-
-	if req.NewPassword != nil && *req.NewPassword != "" {
-		if req.OldPassword == nil || *req.OldPassword == "" {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse("请输入当前密码"))
-			return
-		}
-		if len(*req.NewPassword) < 8 {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse("新密码至少8位"))
-			return
-		}
-		var currentHash string
-		err := db.QueryRow("SELECT password_hash FROM admin_users LIMIT 1").Scan(&currentHash)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询用户失败"))
-			return
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(*req.OldPassword)); err != nil {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse("当前密码错误"))
-			return
-		}
-		if bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(*req.NewPassword)) != nil {
-			newHash, err := bcrypt.GenerateFromPassword([]byte(*req.NewPassword), 12)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, models.ErrorResponse("密码加密失败"))
-				return
-			}
-			_, err = db.Exec("UPDATE admin_users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1", string(newHash))
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, models.ErrorResponse("更新密码失败"))
-				return
-			}
-			middleware.GlobalSessionStore.DeleteAll()
-		}
 	}
 
 	if req.BasicAuthPw != nil && *req.BasicAuthPw != "" {
@@ -414,16 +442,49 @@ func (h *SettingsHandler) GetOperationLogs(c *gin.Context) {
 	if page < 1 {
 		page = 1
 	}
-	perPage := 30
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+	if perPage != 10 && perPage != 20 && perPage != 50 {
+		perPage = 10
+	}
+
+	where := make([]string, 0, 2)
+	args := make([]interface{}, 0, 4)
+	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
+	if status != "" {
+		allowed := map[string]bool{"success": true, "failed": true, "running": true, "waiting": true, "skipped": true, "info": true}
+		if !allowed[status] {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse("无效的日志状态筛选"))
+			return
+		}
+		where = append(where, "status = ?")
+		args = append(args, status)
+	}
+	queryText := strings.TrimSpace(c.Query("q"))
+	if len(queryText) > 64 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("日志搜索内容不能超过64个字符"))
+		return
+	}
+	if queryText != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(queryText)
+		where = append(where, `(operation LIKE ? ESCAPE '\' OR target LIKE ? ESCAPE '\')`)
+		pattern := "%" + escaped + "%"
+		args = append(args, pattern, pattern)
+	}
+	whereSQL := ""
+	if len(where) > 0 {
+		whereSQL = " WHERE " + strings.Join(where, " AND ")
+	}
 
 	var total int
-	db.QueryRow("SELECT COUNT(*) FROM operation_logs").Scan(&total)
+	if err := db.QueryRow("SELECT COUNT(*) FROM operation_logs"+whereSQL, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
+		return
+	}
 
 	offset := (page - 1) * perPage
-	rows, err := db.Query(
-		`SELECT id, operation, target, status, message, created_at
-		 FROM operation_logs ORDER BY created_at DESC LIMIT ? OFFSET ?`, perPage, offset,
-	)
+	listArgs := append(append([]interface{}{}, args...), perPage, offset)
+	rows, err := db.Query(`SELECT id, operation, target, status, message, created_at
+		FROM operation_logs`+whereSQL+` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, listArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
 		return

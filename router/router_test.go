@@ -211,7 +211,8 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range [][]byte{
-		[]byte(`grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-6`),
+		[]byte(`grid grid-cols-1 md:grid-cols-2 gap-6 items-start mb-6`),
+		[]byte(`listOpen: false`),
 		[]byte(`style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;"`),
 		[]byte(`x-for="pkg in filteredPackages"`),
 		[]byte(`filter === 'security'`),

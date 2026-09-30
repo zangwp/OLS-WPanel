@@ -35,11 +35,59 @@ func requireSessions(t *testing.T, tokens []string, present bool) {
 
 func TestUpdateSettingsRevokesAllSessionsAfterUsernameChange(t *testing.T) {
 	first, second := setupSettingsSessionTest(t)
-	recorder := updateSystemSetting(t, `{"username":"renamed-admin"}`)
+	recorder := updateSystemSetting(t, `{"username":"renamed-admin","old_password":"old-password"}`)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	requireSessions(t, []string{first, second}, false)
+}
+
+func TestUpdateSettingsRequiresCurrentPasswordBeforeUsernameChange(t *testing.T) {
+	first, second := setupSettingsSessionTest(t)
+	recorder := updateSystemSetting(t, `{"username":"renamed-admin"}`)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var username string
+	if err := database.GetDB().QueryRow(`SELECT username FROM admin_users WHERE id = 1`).Scan(&username); err != nil {
+		t.Fatal(err)
+	}
+	if username != "admin" {
+		t.Fatalf("username=%q, want admin", username)
+	}
+	requireSessions(t, []string{first, second}, true)
+}
+
+func TestUpdateSettingsDoesNotPartiallyChangeUsernameWhenPasswordIsWrong(t *testing.T) {
+	first, second := setupSettingsSessionTest(t)
+	recorder := updateSystemSetting(t, `{"username":"renamed-admin","old_password":"wrong-password","new_password":"new-password"}`)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var username string
+	if err := database.GetDB().QueryRow(`SELECT username FROM admin_users WHERE id = 1`).Scan(&username); err != nil {
+		t.Fatal(err)
+	}
+	if username != "admin" {
+		t.Fatalf("username=%q, want admin", username)
+	}
+	requireSessions(t, []string{first, second}, true)
+}
+
+func TestUpdateSettingsDoesNotPartiallyChangeUsernameWhenNewPasswordIsTooShort(t *testing.T) {
+	first, second := setupSettingsSessionTest(t)
+	recorder := updateSystemSetting(t, `{"username":"renamed-admin","old_password":"old-password","new_password":"short"}`)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var username string
+	if err := database.GetDB().QueryRow(`SELECT username FROM admin_users WHERE id = 1`).Scan(&username); err != nil {
+		t.Fatal(err)
+	}
+	if username != "admin" {
+		t.Fatalf("username=%q, want admin", username)
+	}
+	requireSessions(t, []string{first, second}, true)
 }
 
 func TestUpdateSettingsKeepsSessionsWhenUsernameIsUnchanged(t *testing.T) {
