@@ -69,3 +69,24 @@ func TestLoginRequiresMatchingCSRFToken(t *testing.T) {
 		t.Fatal("successful login did not set a session cookie")
 	}
 }
+
+func TestCSRFTokenUsesFreshTokenFromRequestContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handler := &AuthHandler{}
+	router.GET("/csrf", func(c *gin.Context) {
+		if !middleware.SetCSRFToken(c) {
+			return
+		}
+		handler.CSRFToken(c)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/csrf", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"success":true`) || !strings.Contains(recorder.Body.String(), `"token":`) {
+		t.Fatalf("fresh CSRF response status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(recorder.Result().Cookies()) != 1 || recorder.Result().Cookies()[0].Name != "csrf_token" {
+		t.Fatalf("fresh CSRF response did not set the token cookie: %+v", recorder.Result().Cookies())
+	}
+}

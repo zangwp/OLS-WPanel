@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.1 — 2026-09-30
+
+- Fixes panel login failures caused by a missing or stale CSRF cookie after browser page restoration, cache reuse, or a panel upgrade.
+- Refreshes the login CSRF token immediately before authentication and retries one rejected pre-handler request once without weakening CSRF validation.
+- Prevents the login page and token endpoint from being cached while keeping both routes behind the panel's random path and BasicAuth layer.
+
 ## v1.7.0 — 2026-09-30
 
 - Adds explicit additional-domain policies: new sites default to a canonical 301 redirect, while 302 and same-site serving remain available and existing sites retain their prior behavior.

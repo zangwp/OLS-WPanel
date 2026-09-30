@@ -450,6 +450,29 @@ func TestLoginRouteUsesCSRFMiddleware(t *testing.T) {
 	if !bytes.Contains(source, []byte(`panelGroup.POST("/api/auth/login", middleware.CSRF(), func(c *gin.Context)`)) {
 		t.Fatal("login route is missing CSRF middleware")
 	}
+	for _, required := range [][]byte{
+		[]byte(`panelGroup.GET("/api/auth/csrf-token", func(c *gin.Context)`),
+		[]byte(`c.Header("Cache-Control", "no-store, no-cache, must-revalidate")`),
+		[]byte(`if !middleware.SetCSRFToken(c)`),
+	} {
+		if !bytes.Contains(source, required) {
+			t.Fatalf("login CSRF recovery is missing %q", required)
+		}
+	}
+	login, err := os.ReadFile("../templates/login.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range [][]byte{
+		[]byte(`async refreshCSRFToken()`),
+		[]byte(`cache: 'no-store'`),
+		[]byte(`credentials: 'same-origin'`),
+		[]byte(`if (e.status !== 403 || attempt > 0) throw e;`),
+	} {
+		if !bytes.Contains(login, required) {
+			t.Fatalf("login template CSRF recovery is missing %q", required)
+		}
+	}
 }
 
 func TestWPFleetOverviewPanelIsIsolatedAndWired(t *testing.T) {

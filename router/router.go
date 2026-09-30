@@ -1427,6 +1427,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	panelGroup := r.Group(prefix)
 	panelGroup.Use(middleware.RandomPath(suffix))
 	panelGroup.Use(middleware.BasicAuth(basicAuthChecker))
+	authHandler := &handlers.AuthHandler{DB: db, Prefix: suffix, Tracker: attemptTracker}
 
 	// 面板根路径重定向到登录页（解决用户访问面板地址不带 /login 的问题）
 	panelGroup.GET("", func(c *gin.Context) {
@@ -1438,6 +1439,8 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	})
 
 	panelGroup.GET("/login", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
 		i18n.MaybeSetLanguageCookie(c.Writer, c.Request)
 		lang := i18n.LangFromRequest(c.Request)
 		if !middleware.SetCSRFToken(c) {
@@ -1457,9 +1460,15 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 			"MessagesJSON": i18n.MessagesJSON(lang, i18nKeys),
 		})
 	})
+	panelGroup.GET("/api/auth/csrf-token", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		if !middleware.SetCSRFToken(c) {
+			return
+		}
+		authHandler.CSRFToken(c)
+	})
 
 	panelGroup.POST("/api/auth/login", middleware.CSRF(), func(c *gin.Context) {
-		authHandler := &handlers.AuthHandler{DB: db, Prefix: suffix, Tracker: attemptTracker}
 		authHandler.Login(c)
 	})
 
@@ -1507,10 +1516,8 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	adminerTool.Any("/tools/adminer/:id", adminerHandler.Proxy)
 	adminerTool.Any("/tools/adminer/:id/*path", adminerHandler.Proxy)
 
-	authHandler := &handlers.AuthHandler{DB: db, Prefix: suffix, Tracker: attemptTracker}
 	protected.POST("/api/auth/logout", authHandler.Logout)
 	protected.GET("/api/auth/check", authHandler.Check)
-	protected.GET("/api/auth/csrf-token", authHandler.CSRFToken)
 	vpsHandler := &handlers.VPSHandler{}
 	protected.GET("/api/vps/overview", vpsHandler.Overview)
 	protected.GET("/api/vps/swap", vpsHandler.SwapStatus)

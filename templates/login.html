@@ -98,6 +98,20 @@
             success: false,
             quote: '',
             error: '',
+            async refreshCSRFToken() {
+                const prefix = document.body.dataset.panelPrefix || '';
+                const response = await fetch(prefix + '/api/auth/csrf-token', {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    headers: { 'Accept': 'application/json' }
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success || !data.data?.token) {
+                    throw new Error(data.message || t('auth.missing_csrf'));
+                }
+                document.querySelector('meta[name="csrf-token"]').content = data.data.token;
+            },
             async login() {
                 if (!this.username || !this.password) {
                     this.error = t('auth.missing_credentials');
@@ -106,11 +120,20 @@
                 this.loading = true;
                 this.error = '';
                 try {
-                    const resp = await api('/auth/login', {
-                        method: 'POST',
-                        body: { username: this.username, password: this.password },
-                        silent: true
-                    });
+                    let resp;
+                    for (let attempt = 0; attempt < 2; attempt++) {
+                        await this.refreshCSRFToken();
+                        try {
+                            resp = await api('/auth/login', {
+                                method: 'POST',
+                                body: { username: this.username, password: this.password },
+                                silent: true
+                            });
+                            break;
+                        } catch (e) {
+                            if (e.status !== 403 || attempt > 0) throw e;
+                        }
+                    }
                     if (resp.success) {
                         this.success = true;
                         this.quote = quotes[Math.floor(Math.random() * quotes.length)];

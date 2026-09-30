@@ -93,8 +93,15 @@ func (h *AuthHandler) Check(c *gin.Context) {
 }
 
 func (h *AuthHandler) CSRFToken(c *gin.Context) {
-	token, err := c.Cookie("csrf_token")
-	if err != nil || token == "" {
+	token := middleware.GetCSRFToken(c)
+	if token == "" {
+		var err error
+		token, err = c.Cookie("csrf_token")
+		if err != nil {
+			token = ""
+		}
+	}
+	if token == "" {
 		c.JSON(http.StatusOK, models.ErrorResponse(i18n.TE(c.Request, "auth.missing_csrf")))
 		return
 	}
