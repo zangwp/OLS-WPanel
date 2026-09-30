@@ -666,6 +666,20 @@ var i18nKeys = []string{
 	"security.cdn_mode_cloudflare_auto",
 	"security.cdn_mode_compatible_missing_origin_ips",
 	"security.cdn_mode_compatible_no_origin_ips",
+	"security.cdn_mode_disabled_missing_origin_ips",
+	"security.cdn_ranges_required",
+	"security.status_unknown",
+	"security.status_active_enabled",
+	"security.status_active_not_enabled",
+	"security.status_inactive",
+	"security.status_disabled_by_setting",
+	"security.status_normal",
+	"security.status_attention",
+	"security.active_bans",
+	"security.next_run",
+	"security.next_run_unknown",
+	"security.cdn_status_summary",
+	"security.entries_count",
 	"security.confirm_delete_cdn_group",
 	"security.fetch_cdn_groups_failed",
 	"security.got_it",
@@ -852,12 +866,12 @@ var i18nKeys = []string{
 	"website.backup_completed",
 	"website.backup_settings_saved",
 	"website.cache_cleared",
-	"website.cdn_compatible_no_origin_ips",
 	"website.cdn_header_mismatch",
 	"website.cdn_realip_saved",
 	"website.cdn_select_non_cloudflare_help",
 	"website.cdn_select_non_cloudflare_required",
 	"website.cdn_strict_origin_ips",
+	"website.cdn_unavailable_no_origin_ips",
 	"website.confirm_change",
 	"website.confirm_clear_cache",
 	"website.confirm_clear_database",
@@ -1685,6 +1699,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 
 	securityHandler := &handlers.SecurityHandler{}
 	protected.GET("/api/security/settings", securityHandler.GetSettings)
+	protected.GET("/api/security/status", securityHandler.GetStatus)
 	protected.PUT("/api/security/settings", securityHandler.UpdateSettings)
 	protected.POST("/api/security/whitelist/refresh", securityHandler.RefreshWhitelist)
 	protected.PUT("/api/security/whitelist/googlebot", securityHandler.ImportGooglebotRanges)

@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.9.1`.
+The current stable release is `v1.10.0`.
 
 ### Minimal images / download failures
 
@@ -75,6 +75,7 @@ o uninstall       ordinary uninstall that preserves sites, databases, and shared
 - The installer pins and verifies the LiteSpeed APT signing keys before adding its HTTPS repository.
 - Each generated OpenLiteSpeed configuration is validated before activation and updated atomically with rollback.
 - The management service uses its own TLS listener and does not expose OpenLiteSpeed WebAdmin.
+- Website and SSH allowlists are isolated; crawler and CDN trust never bypasses SSH protection, and custom CDN real-IP handling requires declared vendor origin ranges.
 - Optional telemetry is disabled by default.
 
 ## Runtime updates and OpenLiteSpeed administration

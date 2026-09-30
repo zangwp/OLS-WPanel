@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.10.0 — 2026-09-30
+
+- Reorganizes Security Settings into runtime status, protection, trust-boundary, and privacy workspaces so effective service state is visible without one long page.
+- Splits website and SSH allowlists. Official crawler ranges, CDN origins, and website exceptions no longer bypass the SSH Fail2ban jail; existing custom entries remain web-only after upgrade.
+- Adds live Fail2ban, nftables, whitelist-timer, active-ban, and CDN trust-boundary status through a read-only diagnostics endpoint.
+- Removes the unsafe CDN “compatible mode” guidance. Custom CDN real-IP groups now require trusted vendor origin IP/CIDR ranges before they can be enabled, while Cloudflare continues using system-maintained official ranges.
+- Propagates whitelist timer deployment failures instead of silently reporting a saved configuration, adds database migration safeguards, and expands security regression coverage.
+- Rebuilds the bundled stylesheet so the Security and VPS workspaces use their intended responsive multi-column layouts instead of falling back to a single column.
+
 ## v1.9.1 — 2026-09-30
 
 - Stops a completed system-update result from reappearing as a large success banner every time Panel Settings opens.

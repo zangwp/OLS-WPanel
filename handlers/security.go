@@ -32,11 +32,21 @@ var (
 	websiteIDsForCDNRealIPGroup       = executor.WebsiteIDsForCDNRealIPGroup
 	restoreCDNRealIPGroupWithBindings = executor.RestoreCDNRealIPGroupWithBindings
 	withFail2banSettingsLock          = executor.WithFail2banSettingsLock
+	getSecurityRuntimeStatus          = executor.GetSecurityRuntimeStatus
 	enqueueOfficialWhitelistRefresh   = func(ctx context.Context) error {
 		_, err := executor.GlobalQueue.EnqueueContext(ctx, executor.TaskRefreshWhitelist, nil)
 		return err
 	}
 )
+
+func (h *SecurityHandler) GetStatus(c *gin.Context) {
+	status, err := getSecurityRuntimeStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取安全运行状态失败"))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(status))
+}
 
 func (h *SecurityHandler) GetSettings(c *gin.Context) {
 	db := database.GetDB()
@@ -247,7 +257,7 @@ func applySecuritySettingsRuntime(settings map[string]string, applyFail2ban func
 }
 
 func needsFail2banApply(settings map[string]string) bool {
-	for _, key := range []string{"fail2ban_maxretry", "fail2ban_findtime", "auto_whitelist_enabled", "whitelist_ips"} {
+	for _, key := range []string{"fail2ban_maxretry", "fail2ban_findtime", "auto_whitelist_enabled", "whitelist_ips", "ssh_whitelist_ips"} {
 		if _, ok := settings[key]; ok {
 			return true
 		}
@@ -653,6 +663,9 @@ func normalizeCDNRealIPGroupPayload(name, headerName, rawRanges string, enabled 
 	if enabled != nil {
 		isEnabled = *enabled
 	}
+	if isEnabled && len(ranges) == 0 {
+		return "", "", "", false, "", fmt.Errorf("启用 CDN 真实 IP 配置前必须填写可信回源 IP/CIDR")
+	}
 	description = strings.TrimSpace(description)
 	if len(description) > 200 {
 		return "", "", "", false, "", fmt.Errorf("备注过长")
@@ -691,7 +704,7 @@ func normalizeSecuritySetting(key string, val interface{}) (string, bool, error)
 	case "telemetry_url":
 		v, err := normalizeTelemetryURL(val)
 		return v, true, err
-	case "whitelist_ips":
+	case "whitelist_ips", "ssh_whitelist_ips":
 		v, ok := val.(string)
 		if !ok {
 			return "", false, fmt.Errorf("白名单格式不正确")
@@ -797,8 +810,13 @@ func validateWhitelistIPs(raw string) error {
 			return fmt.Errorf("白名单 %s 格式不正确", item)
 		}
 		if strings.Contains(item, "/") {
-			if _, _, err := net.ParseCIDR(item); err != nil {
+			_, network, err := net.ParseCIDR(item)
+			if err != nil {
 				return fmt.Errorf("白名单 %s 格式不正确", item)
+			}
+			prefix, _ := network.Mask.Size()
+			if prefix == 0 {
+				return fmt.Errorf("白名单不能使用全网段 %s", item)
 			}
 			continue
 		}

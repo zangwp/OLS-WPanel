@@ -963,3 +963,56 @@ func decodeAPIResponse(t *testing.T, rec *httptest.ResponseRecorder) models.ApiR
 	}
 	return resp
 }
+
+func TestNormalizeSecuritySettingAcceptsIndependentSSHWhitelist(t *testing.T) {
+	got, ok, err := normalizeSecuritySetting("ssh_whitelist_ips", "203.0.113.10\n2001:db8::10")
+	if err != nil || !ok {
+		t.Fatalf("normalizeSecuritySetting() = %q, %v, %v", got, ok, err)
+	}
+	if got != "203.0.113.10\n2001:db8::10" {
+		t.Fatalf("normalized SSH whitelist = %q", got)
+	}
+}
+
+func TestNormalizeSecuritySettingRejectsGlobalWhitelistBypass(t *testing.T) {
+	for _, raw := range []string{"0.0.0.0/0", "::/0"} {
+		for _, key := range []string{"whitelist_ips", "ssh_whitelist_ips"} {
+			if _, _, err := normalizeSecuritySetting(key, raw); err == nil {
+				t.Fatalf("normalizeSecuritySetting(%q, %q) accepted a global bypass", key, raw)
+			}
+		}
+	}
+}
+
+func TestNormalizeCDNRealIPGroupRequiresTrustedRangesWhenEnabled(t *testing.T) {
+	enabled := true
+	if _, _, _, _, _, err := normalizeCDNRealIPGroupPayload("Example CDN", "X-Forwarded-For", "", &enabled, ""); err == nil {
+		t.Fatal("expected enabled CDN group without trusted ranges to be rejected")
+	}
+	disabled := false
+	if _, _, _, gotEnabled, _, err := normalizeCDNRealIPGroupPayload("Example CDN", "X-Forwarded-For", "", &disabled, ""); err != nil || gotEnabled {
+		t.Fatalf("disabled draft group = enabled %v, error %v", gotEnabled, err)
+	}
+}
+
+func TestSecurityStatusEndpoint(t *testing.T) {
+	old := getSecurityRuntimeStatus
+	getSecurityRuntimeStatus = func() (models.SecurityRuntimeStatus, error) {
+		return models.SecurityRuntimeStatus{
+			Fail2ban:   models.SecurityServiceStatus{Active: true, Enabled: true},
+			Nftables:   models.SecurityServiceStatus{Active: true},
+			ActiveBans: 3,
+		}, nil
+	}
+	t.Cleanup(func() { getSecurityRuntimeStatus = old })
+
+	rec := performSecurityRequest(http.MethodGet, "/status", "", func(r *gin.Engine, h *SecurityHandler) {
+		r.GET("/status", h.GetStatus)
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"active_bans":3`) || !strings.Contains(rec.Body.String(), `"active":true`) {
+		t.Fatalf("unexpected response: %s", rec.Body.String())
+	}
+}

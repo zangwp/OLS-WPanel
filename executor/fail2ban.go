@@ -706,6 +706,7 @@ func applyFail2banSettingsLocked() error {
 	for _, key := range []string{
 		"official_whitelist_ips",
 		"whitelist_ips",
+		"ssh_whitelist_ips",
 		"fail2ban_maxretry",
 		"fail2ban_findtime",
 		"wp_sqli_ban_threshold",
@@ -723,20 +724,7 @@ func applyFail2banSettingsLocked() error {
 		return err
 	}
 
-	baseIPs := strings.TrimSpace(settings["official_whitelist_ips"])
-	if customIPs := settings["whitelist_ips"]; customIPs != "" {
-		if baseIPs != "" {
-			baseIPs += "\n"
-		}
-		baseIPs += customIPs
-	}
-	webIPs := baseIPs
-	if cdnRealIPIPs != "" {
-		if webIPs != "" {
-			webIPs += "\n"
-		}
-		webIPs += cdnRealIPIPs
-	}
+	webIPs, sshIPs := fail2banWhitelistScopes(settings, cdnRealIPIPs)
 
 	mr, err := parseRequiredPositiveSetting("fail2ban_maxretry", settings["fail2ban_maxretry"])
 	if err != nil {
@@ -761,17 +749,45 @@ func applyFail2banSettingsLocked() error {
 	// The incremental ladder is intentionally fixed at 10m, 1h, 6h, 24h and 7d.
 	bt := 600
 
-	if err := deployFail2ban(webIPs, baseIPs, mr, ft, bt, sqliMR, sqliFT); err != nil {
+	if err := deployFail2ban(webIPs, sshIPs, mr, ft, bt, sqliMR, sqliFT); err != nil {
 		return err
 	}
 
 	if autoEnabled == "false" {
-		executeCommand("systemctl", "stop", "olswpanel-whitelist.timer")
-		executeCommand("systemctl", "disable", "olswpanel-whitelist.timer")
+		if out, err := executeCommand("systemctl", "stop", "olswpanel-whitelist.timer"); err != nil {
+			return fmt.Errorf("stop whitelist timer: %w: %s", err, strings.TrimSpace(out))
+		}
+		if out, err := executeCommand("systemctl", "disable", "olswpanel-whitelist.timer"); err != nil {
+			return fmt.Errorf("disable whitelist timer: %w: %s", err, strings.TrimSpace(out))
+		}
 	} else {
-		DeployWhitelistTimer()
+		if err := DeployWhitelistTimer(); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func fail2banWhitelistScopes(settings map[string]string, cdnRealIPIPs string) (webIPs, sshIPs string) {
+	// Official crawler/CDN ranges and website exceptions are only safe for web
+	// jails. SSH has a separate, deliberately empty-by-default allowlist.
+	webIPs = joinSecurityIPLists(
+		settings["official_whitelist_ips"],
+		settings["whitelist_ips"],
+		cdnRealIPIPs,
+	)
+	sshIPs = strings.TrimSpace(settings["ssh_whitelist_ips"])
+	return webIPs, sshIPs
+}
+
+func joinSecurityIPLists(values ...string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func readRequiredFail2banSetting(db *sql.DB, key string) (string, error) {
@@ -1840,7 +1856,7 @@ func RunWhitelistRefresh() string {
 	return executeRefreshWhitelist(&Task{ID: "cli-refresh", Type: TaskRefreshWhitelist}).Message
 }
 
-func DeployWhitelistTimer() {
+func DeployWhitelistTimer() error {
 	timerUnit := `[Unit]
 Description=OLS WPanel Weekly Whitelist Refresh
 Requires=olswpanel-whitelist.service
@@ -1861,11 +1877,22 @@ Type=oneshot
 ExecStart=/usr/local/bin/ols-wpanel --refresh-whitelist --config=/www/ols-wpanel/config.json
 `
 
-	os.WriteFile("/etc/systemd/system/olswpanel-whitelist.timer", []byte(timerUnit), 0644)
-	os.WriteFile("/etc/systemd/system/olswpanel-whitelist.service", []byte(serviceUnit), 0644)
-	executeCommand("systemctl", "daemon-reload")
-	executeCommand("systemctl", "enable", "olswpanel-whitelist.timer")
-	executeCommand("systemctl", "start", "olswpanel-whitelist.timer")
+	if err := os.WriteFile("/etc/systemd/system/olswpanel-whitelist.timer", []byte(timerUnit), 0644); err != nil {
+		return fmt.Errorf("写入白名单定时器失败: %w", err)
+	}
+	if err := os.WriteFile("/etc/systemd/system/olswpanel-whitelist.service", []byte(serviceUnit), 0644); err != nil {
+		return fmt.Errorf("写入白名单刷新服务失败: %w", err)
+	}
+	if _, err := executeCommand("systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("重载 systemd 配置失败: %w", err)
+	}
+	if _, err := executeCommand("systemctl", "enable", "olswpanel-whitelist.timer"); err != nil {
+		return fmt.Errorf("启用白名单定时器失败: %w", err)
+	}
+	if _, err := executeCommand("systemctl", "start", "olswpanel-whitelist.timer"); err != nil {
+		return fmt.Errorf("启动白名单定时器失败: %w", err)
+	}
+	return nil
 }
 
 func UnbanAllIPs() string {
