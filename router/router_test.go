@@ -233,6 +233,17 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 	}
 }
 
+func TestDashboardUpdateBadgesDeepLinkToSystemUpdates(t *testing.T) {
+	source, err := os.ReadFile("../templates/dashboard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deepLink := []byte(`href="/{{.RandomSuffix}}/settings#system-updates"`)
+	if count := bytes.Count(source, deepLink); count != 2 {
+		t.Fatalf("dashboard update badges deep-link count = %d, want 2", count)
+	}
+}
+
 func TestSettingsSystemUpdateCompletionDoesNotPersistAsBanner(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -1757,6 +1768,7 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 		[]byte(`command: 'o update'`),
 		[]byte(`command: 'o uninstall'`),
 		[]byte(`/firewall?tab=ports`),
+		[]byte(`/settings#system-updates`),
 		[]byte(`vps.destructive_note`),
 	} {
 		if !bytes.Contains(source, required) {
@@ -1773,6 +1785,24 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 	}
 	if !bytes.Contains(firewall, []byte(`new URLSearchParams(window.location.search).get('tab')`)) {
 		t.Fatal("firewall page does not honor the VPS management ports deep link")
+	}
+	for _, required := range [][]byte{
+		[]byte(`source_mode: 'current'`),
+		[]byte(`duration_mode: 'permanent'`),
+		[]byte(`firewall.scope_current_ip`),
+		[]byte(`firewall.scope_specific`),
+		[]byte(`firewall.scope_any`),
+		[]byte(`firewall.confirm_any_source`),
+		[]byte(`'/firewall/ports/protection'`),
+		[]byte(`'/firewall/ports/protection/confirm'`),
+		[]byte(`listener.address`),
+		[]byte(`rule.hit_packets`),
+		[]byte(`rule.created_at`),
+		[]byte(`rule.expires_at`),
+	} {
+		if !bytes.Contains(firewall, required) {
+			t.Fatalf("firewall ports UI is missing %q", required)
+		}
 	}
 }
 

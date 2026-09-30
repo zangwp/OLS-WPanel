@@ -194,6 +194,8 @@ var i18nKeys = []string{
 	"settings.operation_dns_restore_automatic",
 	"settings.operation_firewall_port_open",
 	"settings.operation_firewall_port_close",
+	"settings.operation_firewall_protection_enable",
+	"settings.operation_firewall_protection_confirm",
 	"settings.operation_create_site",
 	"settings.operation_wp_package_auto_check",
 	"settings.operation_litespeed_cache_recommended",
@@ -772,13 +774,31 @@ var i18nKeys = []string{
 	"firewall.confirm_unban",
 	"firewall.confirm_open_port",
 	"firewall.confirm_close_port",
+	"firewall.confirm_any_source",
+	"firewall.confirm_enable_protection",
 	"firewall.any_source",
+	"firewall.core_ports_summary",
+	"firewall.current_ip_help",
+	"firewall.custom_service",
+	"firewall.duration_required",
+	"firewall.enable_protected_mode",
+	"firewall.exposure_allowed_by_default",
+	"firewall.exposure_local_only",
+	"firewall.exposure_rule_dependent",
+	"firewall.local_only",
+	"firewall.listening_ports_summary",
+	"firewall.network_listening",
 	"firewall.port_opened",
 	"firewall.port_closed",
+	"firewall.protection_confirmation_failed",
+	"firewall.protection_enabled",
+	"firewall.protection_rollback_pending",
 	"firewall.refresh",
 	"firewall.applied",
 	"firewall.open_port",
 	"firewall.pending_reconcile",
+	"firewall.source_required",
+	"firewall.source_scope_help",
 	"firewall.unknown_process",
 	"alert.configured",
 	"alert.not_configured",
@@ -1695,6 +1715,8 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.POST("/api/firewall/bans/:id/permanent", firewallHandler.PermanentBan)
 	protected.GET("/api/firewall/ports", firewallHandler.PortStatus)
 	protected.POST("/api/firewall/ports", firewallHandler.AddPortRule)
+	protected.POST("/api/firewall/ports/protection", firewallHandler.EnablePortProtection)
+	protected.POST("/api/firewall/ports/protection/confirm", firewallHandler.ConfirmPortProtection)
 	protected.DELETE("/api/firewall/ports/:id", firewallHandler.DeletePortRule)
 
 	securityHandler := &handlers.SecurityHandler{}

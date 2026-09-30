@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.11.0 — 2026-10-01
+
+- Reworks Ports & Firewall around explicit access scope, permanent or temporary rules, common service presets, compact empty states, creation and expiry times, and nftables packet-hit counters.
+- Separates local-only and network-bound listeners, explains host-firewall versus cloud-security-group reachability, and flags network-bound MariaDB or Redis listeners without claiming every listening socket is publicly reachable.
+- Adds a guarded protected mode that preflights SSH and panel listeners, restricts both management ports to the current direct administrator IP, switches the input policy from `accept` to `drop`, and automatically rolls back unless the browser confirms connectivity within 90 seconds.
+- Makes fresh installs create and validate a persistent nftables `drop` baseline only on an otherwise unmanaged host, preserving repair mode, active UFW, and existing nftables policy ownership.
+- Keeps SSH, HTTP, HTTPS, HTTP/3, and OLS WPanel reachable in the fresh baseline while leaving OpenLiteSpeed WebAdmin, MariaDB, and Redis closed by default.
+- Sends dashboard and VPS update badges directly to Panel Settings → Panel & System Updates and localizes the new firewall protection operation records.
+- Expands installer, router, translation, validation, and secure-default regression coverage for the new behavior.
+
 ## v1.10.0 — 2026-09-30
 
 - Reorganizes Security Settings into runtime status, protection, trust-boundary, and privacy workspaces so effective service state is visible without one long page.

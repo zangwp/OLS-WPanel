@@ -23,6 +23,7 @@ func (h *FirewallHandler) PortStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取端口与防火墙状态失败"))
 		return
 	}
+	status.CurrentManagementIP = c.ClientIP()
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
@@ -32,12 +33,46 @@ func (h *FirewallHandler) AddPortRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("端口规则格式不正确"))
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(req.SourceMode), "current") {
+		req.Source = c.ClientIP()
+	}
 	rule, err := executor.AddFirewallPortRule(req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(rule))
+}
+
+func (h *FirewallHandler) EnablePortProtection(c *gin.Context) {
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("必须确认防锁死说明后才能启用保护模式"))
+		return
+	}
+	result, err := executor.EnableFirewallProtection(c.ClientIP())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(result))
+}
+
+func (h *FirewallHandler) ConfirmPortProtection(c *gin.Context) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("确认参数不正确"))
+		return
+	}
+	if err := executor.ConfirmFirewallProtection(strings.TrimSpace(req.Token)); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"confirmed": true}))
 }
 
 func (h *FirewallHandler) DeletePortRule(c *gin.Context) {
