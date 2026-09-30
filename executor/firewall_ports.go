@@ -140,6 +140,12 @@ func normalizeFirewallPortRule(req FirewallPortRuleRequest) (FirewallPortRuleReq
 	if req.SourceMode == "current" && req.Source == "" {
 		return req, errors.New("无法识别当前管理 IP")
 	}
+	// OpenLiteSpeed WebAdmin must never be exposed to the whole Internet.
+	// Reject this before the generic public-access confirmation so callers get
+	// the non-overridable 7080 restriction instead of a misleading prompt.
+	if req.Port == 7080 && (req.SourceMode == "any" || req.Source == "0.0.0.0/0" || req.Source == "::/0") {
+		return req, errors.New("OpenLiteSpeed WebAdmin 7080 只能向指定管理 IP/CIDR 开放")
+	}
 	if req.SourceMode == "any" {
 		req.Source = ""
 		if !req.ConfirmPublic {
@@ -189,10 +195,6 @@ func normalizeFirewallPortRule(req FirewallPortRuleRequest) (FirewallPortRuleReq
 	}
 	if req.DurationMinute < 0 || req.DurationMinute > 10080 {
 		return req, errors.New("临时放行时长必须在 1 分钟到 7 天之间")
-	}
-	// OpenLiteSpeed WebAdmin must never be exposed to the whole Internet.
-	if req.Port == 7080 && req.Source == "" {
-		return req, errors.New("OpenLiteSpeed WebAdmin 7080 只能向指定管理 IP/CIDR 开放")
 	}
 	return req, nil
 }
