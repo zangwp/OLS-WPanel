@@ -2482,6 +2482,8 @@
     "target_version": "Target version: ",
     "last_success": "Last automatic update: ",
     "system_updates": "System Updates",
+    "last_system_update": "Last system update: ",
+    "dismiss_status": "Dismiss this message",
     "up_to_date": "Up to date",
     "update_filter_all": "All",
     "update_filter_security": "Security",

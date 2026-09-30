@@ -2501,6 +2501,8 @@
     "target_version": "目标版本：",
     "last_success": "上次自动更新：",
     "system_updates": "系统更新",
+    "last_system_update": "上次系统更新：",
+    "dismiss_status": "关闭此提示",
     "up_to_date": "已是最新",
     "update_filter_all": "全部",
     "update_filter_security": "安全更新",

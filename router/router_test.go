@@ -219,6 +219,10 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 		[]byte(`filter === 'regular'`),
 		[]byte(`@click="listOpen = !listOpen"`),
 		[]byte(`@click="check(true)"`),
+		[]byte(`this.resume(true)`),
+		[]byte(`x-show="lastMessage && !msg"`),
+		[]byte(`setTimeout(() => this.dismissStatus(), 10000)`),
+		[]byte(`@click="dismissStatus()"`),
 	} {
 		if !bytes.Contains(settings, expected) {
 			t.Fatalf("compact system update panel is missing %q", expected)
@@ -226,6 +230,65 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 	}
 	if bytes.Contains(settings, []byte(`space-y-2 max-h-80 overflow-y-auto`)) {
 		t.Fatal("system update list still depends on an uncompiled max-h-80 utility")
+	}
+}
+
+func TestSettingsSystemUpdateCompletionDoesNotPersistAsBanner(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+	rendered := renderPage(t, "settings.html", "settings_content")
+	scripts := regexp.MustCompile(`(?s)<script>(.*?)</script>`).FindAllSubmatch(rendered, -1)
+	var pageScript []byte
+	for _, script := range scripts {
+		if bytes.Contains(script[1], []byte("function systemUpdate()")) {
+			pageScript = script[1]
+			break
+		}
+	}
+	if len(pageScript) == 0 {
+		t.Fatal("settings system update script not found")
+	}
+	harness := []byte(`
+let scheduled = null;
+globalThis.setTimeout = (fn, ms) => { scheduled = { fn, ms }; return 1; };
+globalThis.clearTimeout = () => {};
+
+const restored = systemUpdate();
+restored.check = () => {};
+restored.applyStatus({ status: 'success', message: 'done', stage: 'complete', updated_at: '2026-09-30T03:00:00Z' }, true);
+if (restored.msg !== '' || restored.lastMessage !== 'done' || restored.lastUpdatedAt === '') {
+    throw new Error('restored success should be compact history, not a banner');
+}
+
+const active = systemUpdate();
+active.check = () => {};
+active.updating = true;
+active.applyStatus({ status: 'success', message: 'done', stage: 'complete', updated_at: '2026-09-30T03:00:00Z' }, false);
+if (active.msg !== 'done' || !scheduled || scheduled.ms !== 10000) {
+    throw new Error('fresh success should display temporarily');
+}
+scheduled.fn();
+if (active.msg !== '' || active.lastMessage !== 'done') {
+    throw new Error('success banner should collapse into compact history');
+}
+
+const failed = systemUpdate();
+failed.check = () => {};
+scheduled = null;
+failed.applyStatus({ status: 'failed', message: 'failed', detail: 'detail', stage: 'packages', updated_at: '2026-09-30T03:00:00Z' }, true);
+if (failed.msg !== 'failed' || !failed.failed || scheduled !== null) {
+    throw new Error('failure should remain visible until dismissed');
+}
+`)
+	testScript := append(append([]byte{}, pageScript...), harness...)
+	scriptPath := filepath.Join(t.TempDir(), "settings-system-update-status.js")
+	if err := os.WriteFile(scriptPath, testScript, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(node, scriptPath).CombinedOutput(); err != nil {
+		t.Fatalf("settings system update status behavior failed: %v\n%s", err, output)
 	}
 }
 

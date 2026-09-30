@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.1 — 2026-09-30
+
+- Stops a completed system-update result from reappearing as a large success banner every time Panel Settings opens.
+- Shows persisted successful updates as a compact timestamped history line, while a newly completed update remains visible for 10 seconds before collapsing automatically.
+- Adds an explicit dismiss control for terminal update results and keeps failed updates prominent until the administrator dismisses them.
+- Adds JavaScript behavior coverage for restored success, fresh completion, automatic collapse, and persistent failure states.
+
 ## v1.9.0 — 2026-09-30
 
 - Reorganizes Panel Settings into focused General, Updates, WordPress Package, Panel Backups, and Operation Logs sections so the page no longer grows into one long workspace.
