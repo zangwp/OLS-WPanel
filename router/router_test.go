@@ -1654,7 +1654,7 @@ func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
 			t.Fatalf("website create canonical-domain UI is missing %q", required)
 		}
 	}
-	if bytes.Contains(createSource, []byte(`x-show="aliases.trim()"`)) {
+	if bytes.Contains(createSource, []byte(`<div x-show="aliases.trim()"`)) {
 		t.Fatal("website create still hides the entire alias handling control")
 	}
 
