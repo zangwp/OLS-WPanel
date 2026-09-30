@@ -1526,6 +1526,18 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 	if !bytes.Contains(source, []byte(`site.site_type === 'wordpress' ? '' : 'md:col-span-2'`)) {
 		t.Fatal("non-WordPress optimization card does not span the full desktop row")
 	}
+	for _, required := range [][]byte{
+		[]byte(`website.performance_cache`),
+		[]byte(`cacheRuntime.plugin_status`),
+		[]byte(`cacheRuntime.redis_object_cache_configured`),
+		[]byte(`/litespeed-cache/recommended`),
+		[]byte(`/redis-object-cache`),
+		[]byte(`/wp-admin/admin.php?page=litespeed-cache#object`),
+	} {
+		if !bytes.Contains(source, required) {
+			t.Fatalf("website detail cache workspace is missing %q", required)
+		}
+	}
 }
 
 func TestSidebarNavigationOrder(t *testing.T) {

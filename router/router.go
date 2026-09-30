@@ -401,6 +401,30 @@ var i18nKeys = []string{
 	"website.save_other_cdn_settings",
 	"website.save_settings",
 	"website.wp_optimization",
+	"website.performance_cache",
+	"website.performance_cache_help",
+	"website.litespeed_plugin",
+	"website.page_cache",
+	"website.page_cache_help",
+	"website.redis_object_cache",
+	"website.server_page_cache",
+	"website.enable_server_page_cache",
+	"website.open_litespeed_settings",
+	"website.clear_page_cache",
+	"website.apply_recommended_cache",
+	"website.apply_recommended_cache_confirm",
+	"website.applying_recommended_cache",
+	"website.cache_status_checking",
+	"website.clear_redis_cache",
+	"website.clearing_redis_cache",
+	"website.configured",
+	"website.confirm_clear_redis_cache",
+	"website.litespeed_recommended_applied",
+	"website.litespeed_recommended_failed",
+	"website.not_configured",
+	"website.redis_cache_cleared",
+	"website.redis_cache_clear_failed",
+	"website.refresh_cache_status",
 	"website.litespeed_cache_title",
 	"website.restore",
 	"website.processing",
@@ -1536,6 +1560,9 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.PUT("/api/websites/:id/domains", websiteHandler.UpdateDomains)
 	protected.PUT("/api/websites/:id/cache", websiteHandler.UpdateCache)
 	protected.DELETE("/api/websites/:id/cache", websiteHandler.ClearCache)
+	protected.GET("/api/websites/:id/litespeed-cache/status", websiteHandler.LiteSpeedCacheStatus)
+	protected.POST("/api/websites/:id/litespeed-cache/recommended", websiteHandler.ApplyRecommendedLiteSpeedCache)
+	protected.DELETE("/api/websites/:id/redis-object-cache", websiteHandler.ClearRedisObjectCache)
 	protected.PUT("/api/websites/:id/wp-optimizations", websiteHandler.SaveWPOptimizations)
 	protected.PUT("/api/websites/:id/wp-update-checks", websiteHandler.SetWPUpdateChecks)
 	protected.PUT("/api/websites/:id/file-editor", websiteHandler.SetFileEditingProtection)

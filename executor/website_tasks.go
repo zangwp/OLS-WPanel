@@ -425,7 +425,7 @@ func executeCreateSite(task *Task) TaskResult {
 			removeUnusedThemes(webRoot)
 			log.Printf("已删除未使用默认主题 site=%s", domain)
 		}
-		if err := installRedisCachePlugin(webRoot, systemUser); err != nil {
+		if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
 			rollback()
 			log.Printf("准备 LiteSpeed Cache + Redis Object Cache 失败 site=%s: %v", domain, err)
 			return taskFailure("准备 LiteSpeed Cache + Redis Object Cache 失败", err)
@@ -1342,7 +1342,7 @@ func ReinstallWordPress(ctx context.Context, webRoot, dbName, dbUser, systemUser
 	if removeThemes {
 		removeUnusedThemes(webRoot)
 	}
-	if err := installRedisCachePlugin(webRoot, systemUser); err != nil {
+	if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
 		return fmt.Errorf("重装后准备 LiteSpeed Cache + Redis Object Cache 失败: %w", err)
 	}
 

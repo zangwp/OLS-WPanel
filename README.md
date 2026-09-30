@@ -17,7 +17,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.4.1`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前稳定版：`v1.5.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
 
 精简镜像如果连 `curl` 都没有，请先执行：
 
@@ -35,7 +35,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 | OpenLiteSpeed | 官方稳定软件源，每站点独立虚拟主机 |
 | LSPHP | 默认 8.5；可按需增加 8.4 / 8.3，并逐站点切换 |
 | MariaDB | 全新安装默认 11.8；现有数据库仅跟随当前系列的补丁与安全更新 |
-| Redis | 官方签名 APT 源，每个 WordPress 站点使用独立缓存前缀 |
+| Redis | 官方签名 APT 源；由 LiteSpeed Cache 集成对象缓存，每个 WordPress 站点使用独立缓存前缀 |
 | 安全组件 | Fail2ban + nftables，跟随系统软件源更新 |
 
 ## 核心能力
@@ -43,7 +43,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 | 板块 | 主要能力 |
 |---|---|
 | 网站 | 创建 WordPress 或通用 PHP 站点，独立系统用户、LSPHP 进程、数据库与日志 |
-| WordPress | 核心/主题/插件更新检查，LiteSpeed Cache，Redis 对象缓存，定时任务与临时维护 |
+| WordPress | 核心/主题/插件更新检查，LiteSpeed 页面缓存与 Redis 对象缓存一键配置，定时任务与临时维护 |
 | SSL | Let's Encrypt 申请与自动续签，支持手动证书，失败时保留 HTTP 站点便于排查 |
 | 备份 | 站点与数据库备份/恢复，面板 SQLite 自动备份，支持 SFTP / S3 异地保存 |
 | 安全 | 登录防爆破、恶意扫描检测、CDN 真实 IP、白名单、Fail2ban、nftables 封禁与受管端口放行 |

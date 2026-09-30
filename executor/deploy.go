@@ -119,7 +119,7 @@ func removeUnusedThemes(webRoot string) {
 	}
 }
 
-func installRedisCachePlugin(webRoot, systemUser string) error {
+func installLiteSpeedCachePlugin(webRoot, systemUser string) error {
 	const packageURL = "https://downloads.wordpress.org/plugin/litespeed-cache.7.9.1.zip"
 	const packageSHA256 = "03ee3e4904dda9b8326fbedb89297fbd03a6c3a3bc77af4e0a94fad03e7a7556"
 	destDir := filepath.Join(webRoot, "wp-content", "plugins")
@@ -159,6 +159,32 @@ func installRedisCachePlugin(webRoot, systemUser string) error {
 	if _, err := executeCommand("chown", "-R", siteOwner(systemUser), pluginDir); err != nil {
 		return fmt.Errorf("设置 LiteSpeed Cache 插件权限失败: %w", err)
 	}
+	return writeLiteSpeedCacheActivator(webRoot, systemUser)
+}
+
+// EnsureLiteSpeedCachePlugin installs the official WordPress plugin only when
+// it is missing. Existing installations are never overwritten; an activation
+// helper is refreshed so the next WordPress bootstrap can safely activate it.
+func EnsureLiteSpeedCachePlugin(webRoot, systemUser string) (bool, error) {
+	mainFile := filepath.Join(webRoot, "wp-content", "plugins", "litespeed-cache", "litespeed-cache.php")
+	info, err := os.Lstat(mainFile)
+	switch {
+	case err == nil:
+		if !info.Mode().IsRegular() {
+			return false, fmt.Errorf("LiteSpeed Cache 插件入口不是普通文件")
+		}
+		return false, writeLiteSpeedCacheActivator(webRoot, systemUser)
+	case !os.IsNotExist(err):
+		return false, fmt.Errorf("检查 LiteSpeed Cache 插件失败: %w", err)
+	default:
+		if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+}
+
+func writeLiteSpeedCacheActivator(webRoot, systemUser string) error {
 	muDir := filepath.Join(webRoot, "wp-content", "mu-plugins")
 	if err := os.MkdirAll(muDir, 0755); err != nil {
 		return fmt.Errorf("创建 WordPress MU 插件目录失败: %w", err)
