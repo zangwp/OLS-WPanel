@@ -2,8 +2,19 @@
 {{define "websites_detail_content"}}
 <div x-data="websiteDetail()" x-init="init()">
 
-    <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold text-white">{{t .Lang "website.detail_title"}}</h2>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+        <div>
+            <h2 class="text-xl font-bold text-white">
+                {{t .Lang "website.detail_title"}}
+                <span x-show="site" class="ml-2 text-base font-medium text-blue-300" x-text="site?.domain || ''"></span>
+            </h2>
+            <p class="text-sm text-gray-500 mt-1">{{t .Lang "website.detail_subtitle"}}</p>
+            <div x-show="site" class="flex flex-wrap items-center gap-2 mt-2">
+                <span :class="site?.status === 'active' ? 'badge-success' : 'badge-warning'" x-text="site?.status === 'active' ? t('website.status_running') : (site?.status === 'migrated' ? t('website.status_migrated') : (site?.status === 'deleting' ? t('website.status_deleting') : t('website.status_paused')))"></span>
+                <span class="badge-info" x-text="site?.site_type === 'php' ? t('website.generic_php_site') : 'WordPress'"></span>
+                <span :class="site?.ssl_enabled ? 'badge-success' : 'badge-warning'" x-text="site?.ssl_enabled ? t('website.ssl_enabled') : t('website.ssl_not_enabled')"></span>
+            </div>
+        </div>
         <a href="/{{.RandomSuffix}}/websites" class="btn-secondary">{{t .Lang "website.back_to_list"}}</a>
     </div>
 
@@ -13,21 +24,28 @@
 <template x-if="site">
     <div>
 
+    <nav class="card py-3 px-4 mb-6 flex flex-wrap items-center gap-2" aria-label="{{t .Lang "website.detail_title"}}">
+        <a href="#site-overview" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_overview"}}</a>
+        <a href="#site-performance" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_cache"}}</a>
+        <a x-show="site.site_type === 'wordpress'" href="#site-protection" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_protection"}}</a>
+        <a href="#site-logs" @click="openLogs()" class="text-sm px-3 py-1.5 rounded bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700">{{t .Lang "website.detail_nav_logs"}}</a>
+    </nav>
+
     <!-- Row 1: 基本信息 | 网站运行与配置 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+    <div id="site-overview" class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start scroll-mt-4">
         <div class="card" :class="aiAccess.status !== 'disabled' ? 'border border-purple-500 shadow-lg shadow-purple-950/30' : ''">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "website.basic_info"}}</h3>
             <dl class="space-y-3">
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.domain"}}</dt><dd><a :href="(site.ssl_enabled ? 'https' : 'http') + '://' + site.domain" target="_blank" class="text-blue-400 hover:text-blue-300 hover:underline" x-text="site.domain"></a></dd></div>
-                <div><dt class="text-sm text-gray-400">{{t .Lang "website.aliases"}}</dt><dd class="text-white" x-text="site.aliases || t('common.none')"></dd></div>
+                <div><dt class="text-sm text-gray-400">{{t .Lang "website.aliases"}}</dt><dd class="text-white whitespace-pre-line break-all" x-text="site.aliases || t('common.none')"></dd></div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.alias_handling"}}</dt><dd class="text-white" x-text="aliasModeLabel(site.alias_redirect_mode)"></dd></div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.https_policy"}}</dt><dd class="text-white" x-text="site.ssl_enabled ? t('website.https_forced') : t('website.https_requires_ssl')"></dd></div>
-                <div class="pt-2">
+                <div class="pt-2 flex flex-wrap gap-2">
                     <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.edit_domain"}}</button>
-                    <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded ml-2 inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.files"}}</a>
-                    <a :href="(document.body.dataset.panelPrefix || '') + '/databases/' + site.id" class="text-sm py-1.5 px-3 rounded ml-2 inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.databases"}}</a>
-                    <a :href="(document.body.dataset.panelPrefix || '') + '/ai-diagnostics?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded ml-2 inline-block" style="background-color: #14532d; color: #86efac;">{{t .Lang "nav.ai_diagnostics"}}</a>
-                    <button @click="aiDevelopmentModalOpen = true; fetchAIDevelopment()" class="text-sm py-1.5 px-3 rounded ml-2" style="background-color: #581c87; color: #e9d5ff;">{{t .Lang "ai_development.title"}}</button>
+                    <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.files"}}</a>
+                    <a :href="(document.body.dataset.panelPrefix || '') + '/databases/' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.databases"}}</a>
+                    <a :href="(document.body.dataset.panelPrefix || '') + '/ai-diagnostics?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: #14532d; color: #86efac;">{{t .Lang "nav.ai_diagnostics"}}</a>
+                    <button @click="aiDevelopmentModalOpen = true; fetchAIDevelopment()" class="text-sm py-1.5 px-3 rounded" style="background-color: #581c87; color: #e9d5ff;">{{t .Lang "ai_development.title"}}</button>
                 </div>
                 <div>
                     <dt class="text-sm text-gray-400">{{t .Lang "website.status"}}</dt>
@@ -38,7 +56,10 @@
                     </dd>
                 </div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.type"}}</dt><dd class="text-white" x-text="site.site_type === 'php' ? t('website.generic_php_site') : 'WordPress'"></dd></div>
-                <div class="pt-2 border-t border-gray-700/50">
+                <details class="pt-3 border-t border-gray-700/50">
+                    <summary class="cursor-pointer text-sm font-medium text-gray-300">{{t .Lang "website.advanced_site_info"}}</summary>
+                    <div class="mt-4 space-y-4">
+                    <div>
                     <dt class="text-sm text-gray-400 mb-2">{{t .Lang "website.cdn_real_ip"}}</dt>
                     <div class="rounded border border-blue-900/60 bg-blue-950/30 p-2 mb-2 text-xs text-blue-200">
                         <p>{{t .Lang "website.cloudflare_realip_auto"}}</p>
@@ -63,9 +84,9 @@
                         <p class="text-xs text-gray-500" x-text="cdnRealIPModeText()"></p>
                     </div>
                     <button @click="saveCDNRealIP()" :disabled="cdnRealIPSaving" class="btn-primary text-sm mt-2" x-text="cdnRealIPSaving ? t('common.saving') : t('website.save_other_cdn_settings')"></button>
-                </div>
-                <div><dt class="text-sm text-gray-400">{{t .Lang "website.system_user"}}</dt><dd class="text-white font-mono" x-text="site.system_user"></dd></div>
-                <div><dt class="text-sm text-gray-400">{{t .Lang "website.site_root"}}</dt><dd class="text-white font-mono text-sm" x-text="site.web_root"></dd></div>
+                    </div>
+                    <div><dt class="text-sm text-gray-400">{{t .Lang "website.system_user"}}</dt><dd class="text-white font-mono" x-text="site.system_user"></dd></div>
+                    <div><dt class="text-sm text-gray-400">{{t .Lang "website.site_root"}}</dt><dd class="text-white font-mono text-sm break-all" x-text="site.web_root"></dd></div>
                 <div x-show="site.site_type === 'php'">
                     <dt class="text-sm text-gray-400">{{t .Lang "website.document_root"}}</dt>
                     <dd class="flex items-center space-x-2 mt-1">
@@ -77,7 +98,9 @@
                     </dd>
                     <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.document_root_detail_help"}}</p>
                 </div>
-                <div><dt class="text-sm text-gray-400">{{t .Lang "website.log_dir"}}</dt><dd class="text-white font-mono text-sm" x-text="site.log_dir"></dd></div>
+                    <div><dt class="text-sm text-gray-400">{{t .Lang "website.log_dir"}}</dt><dd class="text-white font-mono text-sm break-all" x-text="site.log_dir"></dd></div>
+                    </div>
+                </details>
                 <div>
                     <dt class="text-sm text-gray-400">{{t .Lang "website.expiry_time"}}</dt>
                     <dd class="text-white" x-show="!editingExpiry" x-text="site.expires_at ? new Date(site.expires_at).toLocaleDateString('zh-CN') : t('common.none')"></dd>
@@ -166,7 +189,7 @@
          "仅 WordPress 站点显示"的元素时，必须把本卡片内所有同类元素都加上
          x-show="site.site_type === 'wordpress'"，不能只改自己新加的那一个——
          之前"高级设置"折叠面板就漏加过，导致通用 PHP 站点也看到了停止更新检查等选项。 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
+    <div id="site-performance" class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 items-start scroll-mt-4">
         <div class="card" :class="site.site_type === 'wordpress' ? '' : 'md:col-span-2'">
             <h3 class="text-lg font-semibold text-white mb-1" x-text="site.site_type === 'wordpress' ? t('website.performance_cache') : t('website.litespeed_cache_title')"></h3>
             <p x-show="site.site_type === 'wordpress'" class="text-sm text-gray-400 mb-4">{{t .Lang "website.performance_cache_help"}}</p>
@@ -191,12 +214,16 @@
 
             <div x-show="site.site_type === 'wordpress'" class="flex flex-wrap items-center gap-2 mb-4">
                 <button @click="applyRecommendedLiteSpeedCache()" :disabled="cacheApplying || site.file_lock_enabled" class="btn-primary text-sm" x-text="cacheApplying ? t('website.applying_recommended_cache') : t('website.apply_recommended_cache')"></button>
-                <button @click="fetchLiteSpeedCacheStatus()" :disabled="cacheStatusLoading || cacheApplying" class="btn-secondary text-sm" x-text="cacheStatusLoading ? t('website.cache_status_checking') : t('website.refresh_cache_status')"></button>
                 <a x-show="cacheRuntime.plugin_status === 'active' || cacheRuntime.plugin_status === 'inactive'" :href="liteSpeedCacheAdminURL()" target="_blank" rel="noopener noreferrer" class="btn-secondary text-sm inline-block">{{t .Lang "website.open_litespeed_settings"}}</a>
+                <button @click="fetchLiteSpeedCacheStatus()" :disabled="cacheStatusLoading || cacheApplying" class="btn-secondary text-sm" x-text="cacheStatusLoading ? t('website.cache_status_checking') : t('website.refresh_cache_status')"></button>
                 <span x-show="site.file_lock_enabled" class="text-xs text-yellow-300">{{t .Lang "website.cache_unlock_to_configure"}}</span>
             </div>
 
-            <div class="rounded-lg border border-gray-700 bg-gray-900/30 p-3 mb-4">
+            <div x-show="site.site_type === 'wordpress'" class="rounded-lg border border-blue-900/60 bg-blue-950/30 p-3 mb-4 text-xs text-blue-200">
+                {{t .Lang "website.wordpress_cache_owner_notice"}}
+            </div>
+
+            <div x-show="site.site_type === 'php'" class="rounded-lg border border-gray-700 bg-gray-900/30 p-3 mb-4">
                 <p class="text-sm font-medium text-white mb-2">{{t .Lang "website.server_page_cache"}}</p>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
                     <input type="checkbox" x-model="lscacheEnabled">
@@ -207,6 +234,18 @@
                     <input type="number" x-model="lscacheTTL" class="input-field w-32 text-sm py-1" min="10" max="86400">
                 </div>
             </div>
+            <details x-show="site.site_type === 'wordpress'" class="mb-4 rounded border border-gray-700 bg-gray-900/30 px-3 py-2">
+                <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "website.server_cache_advanced"}}</summary>
+                <p class="text-xs text-gray-500 mt-2">{{t .Lang "website.server_cache_advanced_help"}}</p>
+                <label class="mt-3 flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
+                    <input type="checkbox" x-model="lscacheEnabled">
+                    <span>{{t .Lang "website.enable_server_page_cache"}}</span>
+                </label>
+                <div x-show="lscacheEnabled" class="mt-3 ml-6">
+                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "website.cache_ttl_seconds"}}</label>
+                    <input type="number" x-model="lscacheTTL" class="input-field w-32 text-sm py-1" min="10" max="86400">
+                </div>
+            </details>
             <details class="mb-4 rounded border border-gray-700 bg-gray-900/30 px-3 py-2" x-show="site.site_type === 'wordpress'">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "website.wp_optimization_advanced"}}</summary>
                 <label class="mt-3 flex items-start space-x-2 text-sm text-gray-300 cursor-pointer">
@@ -216,7 +255,6 @@
                         <span class="block text-xs text-yellow-300 mt-1">{{t .Lang "website.disable_wp_updates_help"}}</span>
                     </span>
                 </label>
-            </details>
             <div class="flex items-center space-x-3 mb-3" x-show="site.site_type === 'wordpress'">
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
                     <input type="checkbox" x-model="wpDebug">
@@ -261,6 +299,7 @@
                 </label>
                 <span class="text-xs text-gray-500">{{t .Lang "website.disable_application_passwords_help"}}</span>
             </div>
+            </details>
             <div class="flex items-center space-x-3 mb-3">
                 <button @click="saveWPOptimizations()" :disabled="optimizationSaving || site.file_lock_enabled" class="btn-primary text-sm" x-text="optimizationSaving ? t('common.saving') : t('website.save_settings')"></button>
                 <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_page_cache"}}</button>
@@ -279,20 +318,20 @@
             </div>
             <p x-show="site.file_lock_enabled" class="text-xs text-yellow-300 mb-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
 
-            <div class="mt-3 p-3 rounded text-xs" style="background-color: #0f172a;">
-                <p class="text-gray-300 font-medium mb-2">{{t .Lang "website.litespeed_cache_how_it_works"}}</p>
-                <ul class="text-gray-400 space-y-1 list-disc list-inside">
+            <details class="mt-3 p-3 rounded text-xs" style="background-color: #0f172a;">
+                <summary class="cursor-pointer text-gray-300 font-medium">{{t .Lang "website.litespeed_cache_how_it_works"}}</summary>
+                <ul class="text-gray-400 space-y-1 list-disc list-inside mt-2">
                     <li>{{t .Lang "website.litespeed_cache_point_static"}}</li>
                     <li>{{t .Lang "website.litespeed_cache_point_key"}}</li>
                     <li x-show="site.site_type === 'wordpress'">{{t .Lang "website.litespeed_cache_point_wp_skip"}}</li>
                     <li x-show="site.site_type === 'php'">{{t .Lang "website.litespeed_cache_point_php_skip"}}</li>
                 </ul>
                 <p class="text-gray-500 mt-2" x-show="site.site_type === 'wordpress'">{{t .Lang "website.wp_optimizer_plugin_help"}}</p>
-            </div>
+            </details>
             {{template "wp_anomaly_panel" .}}
         </div>
 
-        <div x-show="site.site_type === 'wordpress'" class="card">
+        <div id="site-protection" x-show="site.site_type === 'wordpress'" class="card scroll-mt-4">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div>
                     <div class="flex items-center gap-2 mb-1">
@@ -413,8 +452,12 @@
 
     <!-- Row 3: 网站日志 -->
     <div class="mt-6">
-        <div class="card">
-            <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "website.site_logs"}}</h3>
+        <details id="site-logs" x-ref="siteLogs" @toggle="if ($event.target.open) loadLogs()" class="card scroll-mt-4">
+            <summary class="cursor-pointer list-none flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <span class="text-lg font-semibold text-white">{{t .Lang "website.site_logs"}}</span>
+                <span class="text-xs font-normal text-gray-500">{{t .Lang "website.logs_collapsed_help"}}</span>
+            </summary>
+            <div class="mt-5">
             <div class="flex flex-wrap items-center gap-2 mb-3">
                 <button @click="selectLogType('access')" :class="logType === 'access' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.access_log"}}</button>
                 <button @click="selectLogType('error')" :class="logType === 'error' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.error_log"}}</button>
@@ -481,7 +524,8 @@
                     </table>
                 </div>
             </div>
-        </div>
+            </div>
+        </details>
     </div>
 
     <!-- 日志全屏弹窗 -->
@@ -613,17 +657,22 @@
                 <input type="text" x-model="editDomain" class="w-full rounded p-2 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
             </div>
             <div class="mb-3">
-                <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.aliases_one_per_line"}}</label>
-                <textarea x-model="editAliasesStr" rows="4" class="w-full rounded p-2 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;" placeholder="www.aaa.com&#10;blog.aaa.com"></textarea>
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                    <label class="block text-sm text-gray-300">{{t .Lang "website.aliases_one_per_line"}}</label>
+                    <button type="button" @click="addEditedWWWRedirect()" :disabled="!editedWWWAliasCandidate()" class="btn-secondary text-xs py-1 disabled:opacity-50 disabled:cursor-not-allowed">{{t .Lang "website.add_www_redirect"}}</button>
+                </div>
+                <textarea x-model="editAliasesStr" rows="4" class="w-full rounded p-2 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;" placeholder="{{t .Lang "website.alias_placeholder"}}"></textarea>
+                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.add_www_redirect_help"}}</p>
             </div>
-            <div class="mb-3">
+            <div class="mb-3" :class="editAliasesStr.trim() ? '' : 'opacity-60'">
                 <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.alias_handling"}}</label>
-                <select x-model="editAliasRedirectMode" class="input-field">
+                <select x-model="editAliasRedirectMode" class="input-field" :disabled="!editAliasesStr.trim()">
                     <option value="301">{{t .Lang "website.alias_redirect_301"}}</option>
                     <option value="302">{{t .Lang "website.alias_redirect_302"}}</option>
                     <option value="serve">{{t .Lang "website.alias_serve_same_site"}}</option>
                 </select>
-                <p class="text-xs text-gray-400 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
+                <p x-show="!editAliasesStr.trim()" class="text-xs text-gray-400 mt-1">{{t .Lang "website.alias_empty_hint"}}</p>
+                <p x-show="editAliasesStr.trim()" class="text-xs text-gray-400 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
             </div>
             <div x-show="firstEditedAlias()" class="mb-3 p-3 rounded text-xs font-mono break-all" style="background-color: #0f172a; border: 1px solid #334155;">
                 <div class="text-gray-400 mb-1">{{t .Lang "website.redirect_preview"}}</div>
@@ -781,6 +830,8 @@ function websiteDetail() {
         logContent: '',
         logLineLimit: 200,
         logFiles: [],
+        logsLoaded: false,
+        logsLoading: false,
         logFullscreen: false,
         lscacheEnabled: false,
         lscacheTTL: 300,
@@ -889,10 +940,6 @@ function websiteDetail() {
                 this.fetchAIDevelopment(),
                 this.fetchPHPRuntimes()
             ]);
-            deferTask(() => {
-                this.fetchLogs();
-                this.fetchLogFiles();
-            }, 400);
         },
         installedPHPRuntimes() {
             return this.phpRuntimes.filter(runtime => runtime.installed);
@@ -1180,6 +1227,21 @@ function websiteDetail() {
             } catch(e) { showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
             finally { this.domainSubmitting = false; }
         },
+        editedWWWAliasCandidate() {
+            const value = this.editDomain.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/\.$/, '');
+            if (!value || value.startsWith('www.') || !value.includes('.')) return '';
+            return 'www.' + value;
+        },
+        addEditedWWWRedirect() {
+            const alias = this.editedWWWAliasCandidate();
+            if (!alias) return;
+            const values = this.editAliasesStr.split('\n').map(item => item.trim()).filter(Boolean);
+            if (!values.some(value => value.toLowerCase() === alias)) values.unshift(alias);
+            this.editAliasesStr = values.join('\n');
+            this.editAliasRedirectMode = '301';
+            if (this.site?.ssl_enabled && this.site?.ssl_cert_source === 'auto') this.reissueSSL = true;
+            this.domainDNSResult = null;
+        },
         async openDomainModal() {
             this.editDomain = this.site.domain;
             this.editAliasesStr = this.site.aliases || '';
@@ -1312,6 +1374,20 @@ function websiteDetail() {
                     this.logFiles = r.data.files || [];
                 }
             } catch(e) { showToast(t('website.load_log_files_failed', { error: e.message }), 'error'); }
+        },
+        async loadLogs() {
+            if (this.logsLoaded || this.logsLoading) return;
+            this.logsLoading = true;
+            try {
+                await Promise.all([this.fetchLogs(), this.fetchLogFiles()]);
+                this.logsLoaded = true;
+            } finally {
+                this.logsLoading = false;
+            }
+        },
+        openLogs() {
+            if (this.$refs.siteLogs) this.$refs.siteLogs.open = true;
+            this.loadLogs();
         },
         selectLogType(type) {
             this.logType = type;

@@ -20,6 +20,10 @@
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.main_domain"}}</label>
                 <input type="text" x-model="domain" class="input-field" placeholder="example.com" required>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <button type="button" @click="addWWWRedirect()" :disabled="!wwwAliasCandidate()" class="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed">{{t .Lang "website.add_www_redirect"}}</button>
+                    <span class="text-xs text-gray-500">{{t .Lang "website.add_www_redirect_help"}}</span>
+                </div>
             </div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.php_runtime"}}</label>
@@ -32,17 +36,18 @@
             </div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.aliases_one_per_line"}}</label>
-                <textarea x-model="aliases" class="input-field" rows="3" placeholder="www.example.com"></textarea>
+                <textarea x-model="aliases" class="input-field" rows="3" placeholder="{{t .Lang "website.alias_placeholder"}}"></textarea>
             </div>
-            <div class="mb-4" x-show="aliases.trim()">
+            <div class="mb-4 rounded-lg border border-gray-700 bg-gray-900/30 p-3" :class="aliases.trim() ? '' : 'opacity-60'">
                 <label class="label">{{t .Lang "website.alias_handling"}}</label>
-                <select x-model="aliasRedirectMode" class="input-field">
+                <select x-model="aliasRedirectMode" class="input-field" :disabled="!aliases.trim()">
                     <option value="301">{{t .Lang "website.alias_redirect_301"}}</option>
                     <option value="302">{{t .Lang "website.alias_redirect_302"}}</option>
                     <option value="serve">{{t .Lang "website.alias_serve_same_site"}}</option>
                 </select>
-                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
-                <p class="text-xs font-mono text-green-300 mt-2" x-text="aliasPreview()"></p>
+                <p x-show="!aliases.trim()" class="text-xs text-gray-500 mt-1">{{t .Lang "website.alias_empty_hint"}}</p>
+                <p x-show="aliases.trim()" class="text-xs text-gray-500 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
+                <p x-show="aliases.trim()" class="text-xs font-mono text-green-300 mt-2" x-text="aliasPreview()"></p>
             </div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.database_password"}}</label>
@@ -120,6 +125,19 @@ function createWebsite() {
             let pw = '';
             for (let i = 0; i < 24; i++) pw += chars[Math.floor(Math.random() * chars.length)];
             this.dbPassword = pw;
+        },
+        wwwAliasCandidate() {
+            const value = this.domain.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/\.$/, '');
+            if (!value || value.startsWith('www.') || !value.includes('.')) return '';
+            return 'www.' + value;
+        },
+        addWWWRedirect() {
+            const alias = this.wwwAliasCandidate();
+            if (!alias) return;
+            const values = this.aliases.split('\n').map(s => s.trim()).filter(Boolean);
+            if (!values.some(value => value.toLowerCase() === alias)) values.unshift(alias);
+            this.aliases = values.join('\n');
+            this.aliasRedirectMode = '301';
         },
         aliasPreview() {
             const alias = this.aliases.split('\n').map(s => s.trim()).find(Boolean);
