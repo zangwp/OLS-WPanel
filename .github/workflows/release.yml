@@ -31,49 +31,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare_tag:
-    name: Validate or create release tag
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Bind tag to the exact current main commit
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Unsupported release tag: $RELEASE_TAG" >&2
-            exit 1
-          fi
-          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          test "$GITHUB_REF" = 'refs/heads/main'
-
-          main_commit="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
-          if [[ "$main_commit" != "$RELEASE_COMMIT" ]] || [[ "$GITHUB_SHA" != "$RELEASE_COMMIT" ]]; then
-            echo "Manual releases must target the exact current main commit" >&2
-            echo "input=$RELEASE_COMMIT event=$GITHUB_SHA main=$main_commit" >&2
-            exit 1
-          fi
-
-          if existing="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null)"; then
-            test "$existing" = "$RELEASE_COMMIT"
-            echo "Tag $RELEASE_TAG already points to the requested commit"
-          else
-            gh api --method POST "/repos/$GITHUB_REPOSITORY/git/refs" \
-              -f "ref=refs/tags/$RELEASE_TAG" \
-              -f "sha=$RELEASE_COMMIT" >/dev/null
-            echo "Created tag $RELEASE_TAG at $RELEASE_COMMIT"
-          fi
-
   build:
     name: Build and test
-    needs: prepare_tag
-    if: always() && (github.event_name == 'push' || needs.prepare_tag.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -118,16 +77,16 @@ jobs:
             echo "Unsupported release tag: $RELEASE_TAG" >&2
             exit 1
           fi
-          test "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")" = "$RELEASE_COMMIT"
           case "$GITHUB_EVENT_NAME" in
             push)
+              test "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")" = "$RELEASE_COMMIT"
               test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
               test "$(git rev-parse refs/remotes/origin/main)" = "$RELEASE_COMMIT"
               ;;
             workflow_dispatch)
               test "$GITHUB_REF" = 'refs/heads/main'
               test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
-              git merge-base --is-ancestor "$RELEASE_COMMIT" refs/remotes/origin/main
+              test "$RELEASE_COMMIT" = "$GITHUB_SHA"
               ;;
             *)
               echo "Unsupported release event: $GITHUB_EVENT_NAME" >&2
@@ -678,6 +637,27 @@ jobs:
             ols-wpanel-third-party-licenses.tar.gz.sha256
             ols-wpanel-third-party-licenses.tar.gz.sha256.sig
           )
+
+          # Manual recovery may create a missing tag, but only here: this is
+          # the sole contents:write job and it never checks out repository
+          # code. Re-read main immediately before the write so the tag cannot
+          # be attached to an older reviewed commit after main has advanced.
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            main_commit="$(gh api "/repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"
+            if [[ "$main_commit" != "$RELEASE_COMMIT" ]] || [[ "$GITHUB_SHA" != "$RELEASE_COMMIT" ]]; then
+              echo "Manual releases must target the exact current main commit" >&2
+              echo "input=$RELEASE_COMMIT event=$GITHUB_SHA main=$main_commit" >&2
+              exit 1
+            fi
+            if gh api "/repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "Validating existing tag $RELEASE_TAG"
+            else
+              gh api --method POST "/repos/$GH_REPO/git/refs" \
+                -f "ref=refs/tags/$RELEASE_TAG" \
+                -f "sha=$RELEASE_COMMIT" >/dev/null
+              echo "Created tag $RELEASE_TAG at $RELEASE_COMMIT"
+            fi
+          fi
 
           # Re-resolve the remote tag immediately before publication. The build
           # job checked main earlier, but a mutable tag could otherwise be moved

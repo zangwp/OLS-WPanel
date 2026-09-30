@@ -13,18 +13,23 @@ func TestManualReleaseTagIsBoundToExactCurrentMainCommit(t *testing.T) {
 	}
 	source := string(workflow)
 	for _, required := range []string{
-		"prepare_tag:",
-		"if: github.event_name == 'workflow_dispatch'",
+		`test "$RELEASE_COMMIT" = "$GITHUB_SHA"`,
+		`if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then`,
 		"contents: write",
-		`[[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]`,
-		`main_commit="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"`,
+		`main_commit="$(gh api "/repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"`,
 		`[[ "$main_commit" != "$RELEASE_COMMIT" ]] || [[ "$GITHUB_SHA" != "$RELEASE_COMMIT" ]]`,
 		`-f "ref=refs/tags/$RELEASE_TAG"`,
 		`-f "sha=$RELEASE_COMMIT"`,
-		"needs: prepare_tag",
+		"the sole contents:write job",
 	} {
 		if !strings.Contains(source, required) {
 			t.Errorf("manual release gate is missing %q", required)
 		}
+	}
+	if strings.Contains(source, "prepare_tag:") {
+		t.Error("manual tag creation must remain inside the isolated release job")
+	}
+	if strings.Count(source, "contents: write") != 1 {
+		t.Error("only the isolated release job may write repository contents")
 	}
 }
