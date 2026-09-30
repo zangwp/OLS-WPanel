@@ -1639,6 +1639,49 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 	}
 }
 
+func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
+	createSource, err := os.ReadFile("../templates/website_new.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range [][]byte{
+		[]byte(`@click="addWWWRedirect()"`),
+		[]byte(`:disabled="!aliases.trim()"`),
+		[]byte(`alias_redirect_mode: this.aliasRedirectMode`),
+		[]byte(`this.aliasRedirectMode = '301'`),
+	} {
+		if !bytes.Contains(createSource, required) {
+			t.Fatalf("website create canonical-domain UI is missing %q", required)
+		}
+	}
+	if bytes.Contains(createSource, []byte(`x-show="aliases.trim()"`)) {
+		t.Fatal("website create still hides the entire alias handling control")
+	}
+
+	detailSource, err := os.ReadFile("../templates/website_detail.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range [][]byte{
+		[]byte(`@click="addEditedWWWRedirect()"`),
+		[]byte(`this.editAliasRedirectMode = '301'`),
+		[]byte(`this.reissueSSL = true`),
+		[]byte(`id="site-overview"`),
+		[]byte(`id="site-performance"`),
+		[]byte(`id="site-protection"`),
+		[]byte(`id="site-logs"`),
+		[]byte(`@click="openLogs()"`),
+		[]byte(`@toggle="if ($event.target.open) loadLogs()"`),
+		[]byte(`await Promise.all([this.fetchLogs(), this.fetchLogFiles()])`),
+		[]byte(`website.wordpress_cache_owner_notice`),
+		[]byte(`website.server_cache_advanced`),
+	} {
+		if !bytes.Contains(detailSource, required) {
+			t.Fatalf("website detail canonical-domain/layout UI is missing %q", required)
+		}
+	}
+}
+
 func TestSidebarNavigationOrder(t *testing.T) {
 	source, err := os.ReadFile("../templates/base.html")
 	if err != nil {
