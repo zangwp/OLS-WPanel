@@ -7,6 +7,7 @@
 - Adds `o update` for signed in-place update/repair and `o uninstall` for an ordinary panel uninstall that requires the exact `UNINSTALL` confirmation phrase.
 - Keeps website files, logs, certificates, OpenLiteSpeed site configuration, MariaDB databases, and shared software during ordinary uninstall; destructive purge remains intentionally outside the web UI.
 - Adds deep links from VPS Management to the managed firewall Ports tab and improves the responsive system-page layout.
+- Allows a protected manual release run to create a missing SemVer tag only at the exact current `main` commit, while keeping signing and publication in the existing restricted jobs.
 
 ## v1.5.0 — 2026-09-30
 

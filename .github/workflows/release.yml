@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Canonical existing release tag (for protected recovery only)
+        description: Canonical release tag; created at the exact main commit when missing
         required: true
         type: string
       release_commit:
-        description: Full 40-character commit resolved by the release tag
+        description: Full 40-character current main commit to release
         required: true
         type: string
 
@@ -31,8 +31,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare_tag:
+    name: Validate or create release tag
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Bind tag to the exact current main commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Unsupported release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = 'refs/heads/main'
+
+          main_commit="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$main_commit" != "$RELEASE_COMMIT" ]] || [[ "$GITHUB_SHA" != "$RELEASE_COMMIT" ]]; then
+            echo "Manual releases must target the exact current main commit" >&2
+            echo "input=$RELEASE_COMMIT event=$GITHUB_SHA main=$main_commit" >&2
+            exit 1
+          fi
+
+          if existing="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null)"; then
+            test "$existing" = "$RELEASE_COMMIT"
+            echo "Tag $RELEASE_TAG already points to the requested commit"
+          else
+            gh api --method POST "/repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$RELEASE_TAG" \
+              -f "sha=$RELEASE_COMMIT" >/dev/null
+            echo "Created tag $RELEASE_TAG at $RELEASE_COMMIT"
+          fi
+
   build:
     name: Build and test
+    needs: prepare_tag
+    if: always() && (github.event_name == 'push' || needs.prepare_tag.result == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
