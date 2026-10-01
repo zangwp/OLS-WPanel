@@ -366,6 +366,49 @@ systemctl_start_required() {
     fi
 }
 
+ensure_ols_systemd_unit() {
+    local fragment="" legacy_fragment=""
+    local vendor_unit="/usr/local/lsws/admin/misc/lshttpd.service"
+    local target="/etc/systemd/system/lshttpd.service"
+
+    systemctl daemon-reload || log_error "systemd 服务刷新失败"
+    fragment=$(systemctl show lshttpd.service --property=FragmentPath --value) || \
+        log_error "无法检查 OpenLiteSpeed systemd 服务"
+    # Preserve existing native units, including administrator-owned ones.
+    if [[ -n "$fragment" ]]; then
+        return 0
+    fi
+    [[ ! -e "$target" && ! -L "$target" ]] || \
+        log_error "lshttpd.service 已存在但无法加载，拒绝覆盖"
+    [[ -f "$vendor_unit" && ! -L "$vendor_unit" ]] || \
+        log_error "OpenLiteSpeed 软件包缺少原生 systemd 服务文件"
+
+    legacy_fragment=$(systemctl show lsws.service --property=FragmentPath --value) || \
+        log_error "无法检查旧版 OpenLiteSpeed 服务"
+    case "$legacy_fragment" in
+        /run/systemd/generator/lsws.service|/run/systemd/generator.late/lsws.service|/run/systemd/generator.early/lsws.service)
+            # Debian's vendor rc-inst.sh exits after installing a SysV script.
+            # Stop that generated service before registering the native unit,
+            # so two independent service managers cannot own the same daemon.
+            systemctl stop lsws.service || log_error "旧版 OpenLiteSpeed 服务停止失败"
+            systemctl disable lsws.service || log_error "旧版 OpenLiteSpeed 自启关闭失败"
+            ;;
+        "") ;;
+        *) log_error "发现自定义 lsws.service，拒绝自动替换" ;;
+    esac
+    [[ ! -e /etc/systemd/system/lsws.service && ! -L /etc/systemd/system/lsws.service ]] || \
+        log_error "lsws.service 已存在，拒绝覆盖"
+    install -o root -g root -m 0644 "$vendor_unit" "$target" || \
+        log_error "安装 OpenLiteSpeed 原生 systemd 服务失败"
+    ln -s lshttpd.service /etc/systemd/system/lsws.service || \
+        log_error "创建 OpenLiteSpeed 兼容服务别名失败"
+    systemctl daemon-reload || log_error "systemd 服务刷新失败"
+    fragment=$(systemctl show lshttpd.service --property=FragmentPath --value) || \
+        log_error "无法检查 OpenLiteSpeed 原生服务"
+    [[ "$fragment" == "$target" ]] || log_error "OpenLiteSpeed 原生 systemd 服务未正确加载"
+    log_info "已注册 OpenLiteSpeed 原生 systemd 服务及 lsws 兼容别名"
+}
+
 systemctl_wait_active_required() {
     local svc="$1"
     local attempt=""
@@ -2566,6 +2609,7 @@ fi
 log_info "配置 systemd 进程守护..."
 
 if ! $REPAIR_MODE; then
+ensure_ols_systemd_unit
 for svc in mariadb redis-server; do
     DROPDIR="/etc/systemd/system/${svc}.service.d"
     mkdir -p "$DROPDIR"
