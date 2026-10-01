@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixes fresh Debian installs where OpenLiteSpeed's package registers only a SysV `lsws` service: installs the package-provided native `lshttpd` unit and a compatible `lsws` alias before applying process supervision. Preserves existing native units and repair mode, and rejects conflicting custom services.
+
 ## v1.13.0 — 2026-10-01
 
 - Turns Website Details navigation into real Overview, Cache, Security, and Logs workspaces so only the selected section is rendered and long logs no longer stretch unrelated settings.
