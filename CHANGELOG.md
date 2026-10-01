@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.13.1 — 2026-10-01
 
 - Fixes fresh Debian installs where OpenLiteSpeed's package registers only a SysV `lsws` service: installs the package-provided native `lshttpd` unit and a compatible `lsws` alias before applying process supervision. Preserves existing native units and repair mode, and rejects conflicting custom services.
 
