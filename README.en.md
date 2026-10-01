@@ -16,7 +16,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
 
-The current stable release is `v1.13.0`.
+The current stable release is `v1.13.1`.
 
 ### Minimal images / download failures
 
