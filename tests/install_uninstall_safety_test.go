@@ -193,7 +193,7 @@ func TestPanelCommandMigrationProtectsUnrelatedOneCharacterCommands(t *testing.T
 		"remove_managed_panel_command() {",
 		"remove_managed_panel_command /usr/local/bin/o '# OLS WPanel CLI — o'",
 		"remove_managed_panel_command /usr/local/bin/O '# OLS WPanel CLI — o'",
-		"面板 CLI (o / O)",
+		"输入 o 打开管理菜单；o help 查看帮助。",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("installer is missing panel command migration control %q", required)
