@@ -255,6 +255,7 @@ function ols_wpanel_inventory_collect(): array
             'locale' => ols_wpanel_inventory_string(get_locale(), OLS_WPANEL_INVENTORY_VERSION_LIMIT),
             'multisite' => is_multisite(),
         ),
+        'cache' => ols_wpanel_inventory_cache_status(),
         'plugins' => $pluginRows,
         'themes' => $themeRows,
         'current_theme' => $currentTheme,
@@ -397,6 +398,31 @@ function ols_wpanel_inventory_anomaly_sample(array $query): array
     return ols_wpanel_inventory_collect_anomaly($query['since'], $query['until'], $query['known_ids']);
 }
 
+function ols_wpanel_inventory_cache_status(): array {
+    $conf = (array)get_option('litespeed-cache-conf', array());
+    $value = static function($key, $default) use ($conf) {
+        $constant = 'LITESPEED_CONF__' . strtoupper(str_replace('-', '__', $key));
+        return defined($constant) ? constant($constant) : ($conf[$key] ?? $default);
+    };
+    return array('page_enabled'=>(bool)$value('cache', true),
+        'object_enabled'=>(bool)$value('object', false) && (bool)$value('object-kind', false),
+        'host'=>substr((string)$value('object-host', 'localhost'),0,255),
+        'port'=>(int)$value('object-port',11211),'database'=>(int)$value('object-db_id',0));
+}
+
+function ols_wpanel_inventory_migrate_cache(array $patch): void {
+    if (is_multisite()) throw new RuntimeException('multisite_unsupported');
+    $allowed = array('object','object-kind','object-host','object-port','object-db_id','object-persistent');
+    foreach ($patch as $key=>$value) {
+        if (!in_array($key,$allowed,true) || (!is_bool($value) && !is_int($value) && !is_string($value))) throw new RuntimeException('invalid_cache_setting');
+    }
+    $conf=(array)get_option('litespeed-cache-conf',array());
+    foreach ($patch as $key=>$value) $conf[$key]=$value;
+    update_option('litespeed-cache-conf',$conf);
+    $saved=(array)get_option('litespeed-cache-conf',array());
+    foreach ($patch as $key=>$value) if (!array_key_exists($key,$saved) || $saved[$key] != $value) throw new RuntimeException('cache_settings_write_failed');
+}
+
 function ols_wpanel_inventory_retire_optimizer(): void
 {
     if (is_multisite()) throw new RuntimeException('multisite_unsupported');
@@ -457,6 +483,8 @@ define('DISABLE_WP_CRON', true);
 
 try {
     require $realWpLoad;
+    $cachePatch=getenv('OLS_WPANEL_CACHE_SETTINGS');
+    if (is_string($cachePatch) && $cachePatch !== '') ols_wpanel_inventory_migrate_cache(json_decode($cachePatch,true,8,JSON_THROW_ON_ERROR));
     if (getenv('OLS_WPANEL_RETIRE_OPTIMIZER') === '1') ols_wpanel_inventory_retire_optimizer();
     $inventory = ols_wpanel_inventory_collect();
     $anomalyQuery = getenv('OLS_WPANEL_ANOMALY_QUERY');

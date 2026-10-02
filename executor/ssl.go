@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/config"
@@ -274,7 +275,11 @@ func saveACMERegistration(path string, reg *registration.Resource) error {
 	return os.WriteFile(path, data, 0600)
 }
 
+var acmeAccountMu sync.Mutex
+
 func getOrCreateACMEClient(email string, caDirURL string) (*lego.Client, error) {
+	acmeAccountMu.Lock()
+	defer acmeAccountMu.Unlock()
 	if err := os.MkdirAll(acmeAccountDir, 0700); err != nil {
 		return nil, fmt.Errorf("创建ACME目录失败: %w", err)
 	}

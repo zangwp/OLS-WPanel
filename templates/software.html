@@ -140,7 +140,7 @@
                                 <span x-show="cfg.value !== undefined && cfg.value !== null && cfg.value !== ''" class="text-xs text-gray-600" x-text="t('software.current_value', { value: cfg.value })"></span>
                             </div>
                             <input type="text" x-model="cfg._value" class="input-field w-full text-sm py-1.5">
-                            <p class="text-xs text-gray-500 mt-0.5" x-text="cfg.hint"></p>
+                            <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip" x-text="cfg.hint"></span></details>
                         </div>
                     </template>
                 </div>
@@ -356,6 +356,19 @@ function softwareManager() {
             } catch(e) { showToast(e.message, 'error'); }
         },
         async saveConfig(sw) {
+            if (sw._saving) return;
+            if (sw.name === 'PHP') {
+                const changed = sw.configs.filter(cfg => cfg._value !== cfg.value);
+                if (!changed.length) return;
+                sw._saving = true;
+                try {
+                    await api('/software/php-config', { method: 'PUT', body: { values: Object.fromEntries(changed.map(cfg => [cfg.key, cfg._value])) }, timeout: 120000 });
+                    for (const cfg of changed) cfg.value = cfg._value;
+                    showToast(t('software.config_updated_reloaded', { service: 'OpenLiteSpeed' }), 'success');
+                } catch(e) { showToast(e.message, 'error'); }
+                finally { sw._saving = false; }
+                return;
+            }
             for (const cfg of sw.configs) {
                 if (cfg._value === cfg.value) continue;
                 sw._saving = true;

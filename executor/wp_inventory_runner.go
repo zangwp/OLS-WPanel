@@ -154,12 +154,21 @@ type WPInventoryWarning string
 const WPInventoryWarningStaleCleanupFailed WPInventoryWarning = "stale_runner_cleanup_failed"
 
 type WPInventory struct {
+	Cache        *WPInventoryCache        `json:"cache,omitempty"`
 	Anomaly      *WPAnomalySample         `json:"anomaly,omitempty"`
 	WordPress    WPInventoryWordPress     `json:"wordpress"`
 	Plugins      []WPInventoryPlugin      `json:"plugins"`
 	Themes       []WPInventoryTheme       `json:"themes"`
 	CurrentTheme *WPInventoryCurrentTheme `json:"current_theme"`
 	Updates      WPInventoryUpdates       `json:"updates"`
+}
+
+type WPInventoryCache struct {
+	PageEnabled   bool   `json:"page_enabled"`
+	ObjectEnabled bool   `json:"object_enabled"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Database      int    `json:"database"`
 }
 
 type WPInventoryWordPress struct {
@@ -237,6 +246,7 @@ type wpInventoryRunnerOptions struct {
 }
 
 type WPInventoryRunner struct {
+	cacheSettings   map[string]any
 	retireOptimizer bool            // Explicit owner-authorized migration, never inherited from parent environment.
 	anomalyQuery    *wpAnomalyQuery // Only set on a fresh monitor-owned runner, never a shared inventory runner.
 	source          []byte
@@ -710,6 +720,13 @@ func (r *WPInventoryRunner) execute(ctx context.Context, input wpInventoryValida
 		forceEnv = "OLS_WPANEL_FORCE_UPDATE_CHECK=1"
 	}
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "HOME=" + input.user.HomeDir, "USER=" + input.user.Name, "LOGNAME=" + input.user.Name, "TMPDIR=/tmp", "OLS_WPANEL_RUNNER_TOKEN=" + token, forceEnv}
+	if r.cacheSettings != nil {
+		patch, err := json.Marshal(r.cacheSettings)
+		if err != nil {
+			return WPInventoryRunResult{}, err
+		}
+		cmd.Env = append(cmd.Env, "OLS_WPANEL_CACHE_SETTINGS="+string(patch))
+	}
 	if r.retireOptimizer {
 		cmd.Env = append(cmd.Env, "OLS_WPANEL_RETIRE_OPTIMIZER=1")
 	}

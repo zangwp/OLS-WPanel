@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Adds a compact VPS maintenance menu to o/O while retaining panel information and existing shortcuts; keeps domain login as the main entry and IP as fallback.
+- Adds VPS information, system-update status, bounded cache/journal cleanup, managed DNS, reversible IP preference and connection queue presets, and server locale selection.
+- Refreshes the VPS layout with overview/maintenance tabs, resource meters, compact help and advanced lifecycle commands; adds a dashboard introduction and explicit update checks.
+- Adds explicit complete-uninstall dispatch, website/database inventory checks, website database deletion, and separate backup retention choice. Redis, Fail2ban and unrelated dependencies are preserved.
+
+- Keeps manual update-check failures visible instead of reporting that the panel is current.
+- Saves PHP performance changes in one validated batch, with one reload and restoration on failure.
+- Stops generating forced LiteSpeed object-cache constants; adds an explicit migration preserving existing effective values in LiteSpeed Cache settings.
+- Adds configurable panel domains, staged trusted-certificate installation, hot certificate replacement and automatic renewal. HTTP-01 requires a reachable dedicated domain on port 80.
+- Adds compact help disclosures, visible stale-data warnings and timer cleanup; moves WordPress memory editing to software performance configuration.
+
 - Restores missing native OpenLiteSpeed service registration on panel startup and after system package updates, migrates generated Debian SysV service ownership, preserves custom/stopped native services, and rolls back failed recovery.
 - Validates OpenLiteSpeed configuration before PHP baseline restarts and reports restart errors instead of silently ignoring them.
 

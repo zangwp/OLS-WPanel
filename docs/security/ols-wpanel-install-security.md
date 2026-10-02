@@ -6,7 +6,7 @@
 
 OLS WPanel 要安装和管理 OpenLiteSpeed、LSPHP、MariaDB、Redis、Fail2ban、nftables 与 systemd，因此安装器必须以 root 运行。root 脚本理论上可以修改整台服务器，开源可读不等于下载内容真实，也不等于代码没有缺陷。
 
-生产服务器应使用[验签安装指南](../docs/verified-install.md)：
+生产服务器应使用[验签安装指南](../verified-install.md)：
 
 1. 从 GitHub Release 下载安装器、SHA-256 清单和 Ed25519 签名；
 2. 使用独立固定的 OLS WPanel 发布公钥先验证清单签名；
@@ -65,7 +65,7 @@ Release 签名只覆盖以下四组资产及各自的校验清单：
 安装器面向专用、干净的 Debian 13/Trixie、Ubuntu 24.04/Noble 或 Ubuntu 26.04/Resolute 主机，支持 amd64 与 arm64。它不是通用的“接管任意现有 LEMP 环境”工具，也不会把支持范围自动延伸到其他大版本。
 
 - 现有 MariaDB 已设置未知 root 密码时，fresh install 不会自动导入该密码，可能失败；
-- 由不同发行身份创建的面板不能通过手动改名或 repair 安全迁移，见[升级兼容性说明](../docs/upgrade-compatibility.md)；
+- 由不同发行身份创建的面板不能通过手动改名或 repair 安全迁移，见[升级兼容性说明](../upgrade-compatibility.md)；
 - 云厂商镜像、自定义 APT 源、现有 OpenLiteSpeed/LSPHP/防火墙策略可能与安装器冲突；
 - 建议先使用可丢弃 VM 验证，再在已有完整快照的主机执行。
 

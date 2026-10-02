@@ -68,7 +68,7 @@ func TestPurgeRequiresExactSecondConfirmationBeforeMutation(t *testing.T) {
 		"全部 OpenLiteSpeed/LSPHP 站点配置",
 		"/www/wwwroot、/www/wwwlogs、/www/server/certificates",
 		"面板状态、凭据、备份和共享安装包缓存",
-		"共享系统软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB、Redis、Fail2ban",
+		"卸载软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB；保留 Redis、Fail2ban",
 		"可能同时被非 OLS 工作负载使用",
 		"选择“彻底清空”后的第二次确认",
 		"请输入精确的 ${BOLD}PURGE${NC}",
@@ -124,6 +124,8 @@ func TestExplicitUninstallSkipsReleaseBundleDownload(t *testing.T) {
 	script := readUninstallSafetyScript(t)
 	needle := `if [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
     log_info "权限与 ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台预检通过；普通卸载不下载发布包"
+elif [[ "$REQUESTED_ACTION" == "purge" ]]; then
+    log_info "完全卸载无需下载完整发布包"
 else
     prepare_panel_candidate`
 	if !strings.Contains(script, needle) {
@@ -311,5 +313,19 @@ func TestInstallerFailureAndCertificateGuidanceAreEvidenceBased(t *testing.T) {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("installer still contains misleading guidance %q", forbidden)
 		}
+	}
+}
+
+func TestCompleteUninstallHasInventoryAndSeparateBackupChoice(t *testing.T) {
+	script := readUninstallSafetyScript(t)
+	for _, required := range []string{`--purge)`, `REQUESTED_ACTION="purge"`, `o`, `purge_inventory_preflight ||`, `SELECT web_root,db_name FROM websites`, `SHOW DATABASES`, `DELETE BACKUPS`, `ols-wpanel-preserved-backups`, `purge-databases.sql`} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("missing full uninstall safeguard %q", required)
+		}
+	}
+	start := strings.Index(script, "do_purge() {")
+	purge := script[start:]
+	if strings.Index(purge, "purge_inventory_preflight ||") > strings.Index(purge, "systemctl stop ols-wpanel") {
+		t.Fatal("inventory checked after stopping service")
 	}
 }

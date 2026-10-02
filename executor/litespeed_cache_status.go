@@ -15,6 +15,8 @@ import (
 const liteSpeedCachePluginFile = "litespeed-cache/litespeed-cache.php"
 
 type LiteSpeedCacheRuntimeStatus struct {
+	StatusKnown                bool   `json:"status_known"`
+	OverridesPresent           bool   `json:"overrides_present"`
 	PluginStatus               string `json:"plugin_status"`
 	PluginVersion              string `json:"plugin_version,omitempty"`
 	PageCacheEnabled           bool   `json:"page_cache_enabled"`
@@ -39,6 +41,8 @@ func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInvento
 	if site == nil {
 		return status
 	}
+	content, _ := os.ReadFile(filepath.Join(site.WebRoot, "wp-config.php"))
+	status.OverridesPresent = strings.Contains(string(content), "LITESPEED_CONF__OBJECT")
 	status.PageCacheEnabled = site.LSCacheEnabled
 	status.RedisHost, status.RedisPort, status.RedisDatabase, status.RedisObjectCacheConfigured = readLiteSpeedObjectCacheConfig(site.WebRoot)
 	if site.SiteType != "wordpress" || site.Status != models.StatusActive {
@@ -47,6 +51,9 @@ func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInvento
 	info, err := os.Lstat(filepath.Join(site.WebRoot, "wp-content", "plugins", liteSpeedCachePluginFile))
 	if os.IsNotExist(err) {
 		status.PluginStatus = "not_installed"
+		status.StatusKnown = true
+		status.PageCacheEnabled = false
+		status.RedisObjectCacheConfigured = false
 		return status
 	}
 	if err != nil || !info.Mode().IsRegular() {
@@ -66,6 +73,14 @@ func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInvento
 			status.PluginStatus = "active"
 		}
 		break
+	}
+	if result.Inventory.Cache != nil {
+		cache := result.Inventory.Cache
+		status.StatusKnown = true
+		active := status.PluginStatus == "active"
+		status.PageCacheEnabled = active && site.LSCacheEnabled && cache.PageEnabled
+		status.RedisObjectCacheConfigured = active && cache.ObjectEnabled
+		status.RedisHost, status.RedisPort, status.RedisDatabase = cache.Host, cache.Port, cache.Database
 	}
 	return status
 }

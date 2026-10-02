@@ -347,6 +347,8 @@ func phpConfigRequiresVHostRegeneration(key string) bool {
 }
 
 func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
+	softwareConfigMu.Lock()
+	defer softwareConfigMu.Unlock()
 	lang := softwareLang(c)
 	var req struct {
 		Name  string `json:"name"`

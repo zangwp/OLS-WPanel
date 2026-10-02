@@ -554,6 +554,13 @@ while [[ $# -gt 0 ]]; do
             REQUESTED_ACTION="repair"
             shift
             ;;
+        --purge)
+            if [[ -n "$REQUESTED_ACTION" ]] && [[ "$REQUESTED_ACTION" != "purge" ]]; then
+                log_error "不能同时请求完全卸载与其他操作"
+            fi
+            REQUESTED_ACTION="purge"
+            shift
+            ;;
         --uninstall)
             if [[ -n "$REQUESTED_ACTION" ]] && [[ "$REQUESTED_ACTION" != "uninstall" ]]; then
                 log_error "不能同时请求更新/修复和卸载"
@@ -2063,15 +2070,58 @@ do_uninstall() {
     log_info "  - 系统软件包（openlitespeed/lsphp/mariadb/redis/fail2ban）"
 }
 
+# 完全卸载会删除网站文件、网站数据库和 OLS 面板。
+# 仅在专用于本面板的服务器上使用；备份默认转移保存，删除备份需单独确认。
+# 不执行来自第三方的一键卸载或删除不属于面板的数据库。
+purge_inventory_preflight() {
+    python3 - "$CONFIG_FILE" "$INSTALL_WORKDIR" <<'PYPURGEPREFLIGHT'
+import json,os,pathlib,re,sqlite3,subprocess,sys
+cfg=json.load(open(sys.argv[1]));work=pathlib.Path(sys.argv[2])
+if cfg['panel'].get('backup_dir','/www/ols-wpanel/backups') != '/www/ols-wpanel/backups':raise SystemExit('自定义备份路径，请手动保留备份并采用普通卸载')
+conn=sqlite3.connect('file:'+cfg['sqlite']['path']+'?mode=ro',uri=True)
+rows=conn.execute('SELECT web_root,db_name FROM websites').fetchall();conn.close()
+roots=set();dbs=set()
+for root,db in rows:
+ path=pathlib.Path(root)
+ if not path.is_absolute() or not path.is_relative_to('/www/wwwroot'):raise SystemExit('拒绝完全卸载：检测到自定义网站路径 '+root)
+ roots.add(path.relative_to('/www/wwwroot').parts[0])
+ if db:
+  if not re.fullmatch(r'[A-Za-z0-9_]+',db):raise SystemExit('数据库名称异常')
+  dbs.add(db)
+for root in ['/www/wwwroot','/www/wwwlogs','/www/server/certificates','/www/ols-wpanel','/usr/local/lsws/conf/ols-wpanel']:
+ path=pathlib.Path(root)
+ if path.is_symlink():raise SystemExit('拒绝删除链接目录：'+root)
+web=pathlib.Path('/www/wwwroot')
+if web.exists():
+ unknown=[p.name for p in web.iterdir() if p.name not in roots]
+ if unknown:raise SystemExit('检测到未纳入面板的网站目录，保留共享环境：'+', '.join(unknown))
+main=pathlib.Path('/usr/local/lsws/conf/httpd_config.conf')
+if main.exists():
+ for name in re.findall(r'(?im)^\s*virtualHost\s+(\S+)',main.read_text()):
+  if name!='olsw_default' and not name.startswith('olsw_'):raise SystemExit('检测到共享 OpenLiteSpeed 虚拟主机：'+name)
+client=next((p for p in ['/usr/bin/mariadb','/usr/bin/mysql'] if os.path.isfile(p)),None)
+if not client:raise SystemExit('无法确认数据库归属，取消完全卸载')
+result=subprocess.run([client,'--protocol=socket','-N','-B','-e','SHOW DATABASES'],capture_output=True,text=True,timeout=15)
+if result.returncode:raise SystemExit('无法读取数据库清单，取消完全卸载')
+existing=set(result.stdout.splitlines());unknown=existing-dbs-{'mysql','sys','information_schema','performance_schema'}
+if unknown:raise SystemExit('检测到其他程序数据库，保留共享环境：'+', '.join(sorted(unknown)))
+(work/'purge-databases.sql').write_text(''.join('DROP DATABASE IF EXISTS `'+db+'`;\n' for db in sorted(dbs)))
+(work/'purge-client').write_text(client)
+print('将删除的网站目录：'+', '.join(sorted(roots)))
+print('将删除的数据库：'+', '.join(sorted(dbs)))
+PYPURGEPREFLIGHT
+}
+
 do_purge() {
     echo ""
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${RED}  高风险警告：彻底清空会删除下列数据和配置：${NC}"
     echo -e "  - /usr/local/lsws/conf/ols-wpanel（全部 OpenLiteSpeed/LSPHP 站点配置）"
     echo -e "  - /www/wwwroot、/www/wwwlogs、/www/server/certificates"
-    echo -e "  - /www/ols-wpanel（面板状态、凭据、备份和共享安装包缓存）"
-    echo -e "  - 共享系统软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB、Redis、Fail2ban"
+    echo -e "  - /www/ols-wpanel（面板状态、凭据、备份和共享安装包缓存；备份默认另行保留）"
+    echo -e "  - 卸载软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB；保留 Redis、Fail2ban"
     echo -e "${RED}  这些目录和软件可能同时被非 OLS 工作负载使用；操作可能使其停机或永久丢失数据。${NC}"
+    echo -e "  Redis、Fail2ban 等可能共享的软件保留，只清理面板自身集成。"
     echo -e "${RED}  此操作不可逆。${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
@@ -2086,14 +2136,31 @@ do_purge() {
     fi
 
     echo ""
+    purge_inventory_preflight || { log_warn "无法确认专用环境，已取消；可使用普通卸载保留共享环境"; return 1; }
+    local backup_choice="" backup_destination=""
+    echo "备份默认保留到 /www/ols-wpanel-preserved-backups；输入 DELETE BACKUPS 才删除备份。"
+    read -r -p "备份选择（回车保留）: " backup_choice < /dev/tty || backup_choice=""
+    systemctl stop ols-wpanel || log_error "无法停止面板，取消完全卸载"
+    if [[ "$backup_choice" != "DELETE BACKUPS" ]] && [[ -d "$INSTALL_DIR/backups" ]]; then
+        [[ ! -L "$INSTALL_DIR/backups" ]] || log_error "备份目录是链接，拒绝移动"
+        backup_destination=$(mktemp -d /www/ols-wpanel-preserved-backups.XXXXXXXXXX) || log_error "无法创建备份保留目录"
+        chmod 0700 "$backup_destination"
+        if ! mv -- "$INSTALL_DIR/backups" "$backup_destination/backups"; then
+            systemctl start ols-wpanel || true
+            log_error "备份保留失败，取消卸载"
+        fi
+        log_info "备份已保留: $backup_destination/backups"
+    fi
     echo -e "${BOLD}正在清空，请耐心等待...${NC}"
 
     echo -e "  → 停止所有服务..."
     systemctl stop ols-wpanel 2>/dev/null || true
     systemctl stop lshttpd 2>/dev/null || true
+    local purge_client=""
+    purge_client=$(cat "$INSTALL_WORKDIR/purge-client")
+    "$purge_client" --protocol=socket < "$INSTALL_WORKDIR/purge-databases.sql" || log_error "数据库删除失败，停止后续卸载"
     systemctl stop mariadb 2>/dev/null || true
-    systemctl stop redis-server 2>/dev/null || true
-    systemctl stop fail2ban 2>/dev/null || true
+    # Redis 和 Fail2ban 可能被共享工作负载使用，保留其服务与软件包。
     echo -e "  ${GREEN}✓${NC} 服务已停止"
 
     echo -e "  → 清理 OLS 定时任务、systemd、Fail2ban 和 logrotate 集成..."
@@ -2105,12 +2172,12 @@ do_purge() {
     echo -e "  ${GREEN}✓${NC} 配置已清理"
 
     echo -e "  → 卸载软件包（可能需要 1-2 分钟）..."
-    DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' 'lsphp84*' 'lsphp85*' mariadb-server mariadb-common redis-server fail2ban 2>/dev/null || true
-    DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' 'lsphp84*' 'lsphp85*' mariadb-server mariadb-common 2>/dev/null || log_error "软件包卸载失败，请检查 APT 日志"
+    # 不自动 autoremove，避免连带移除其他应用的依赖。
     echo -e "  ${GREEN}✓${NC} 软件包已卸载"
 
     echo -e "  → 移除 OLS 系统调优配置..."
-    rm -f /etc/sysctl.d/99-ols-wpanel.conf
+    rm -f /etc/sysctl.d/99-ols-wpanel.conf /etc/sysctl.d/99-ols-wpanel-vps.conf /etc/sysctl.d/.ols-wpanel-vps-original.json
     sysctl --system >/dev/null 2>&1
     sed -i '/nofile 65535/d' /etc/security/limits.conf 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} OLS 系统调优配置已移除"
@@ -2328,6 +2395,8 @@ fi
 init_install_workdir
 if [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
     log_info "权限与 ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台预检通过；普通卸载不下载发布包"
+elif [[ "$REQUESTED_ACTION" == "purge" ]]; then
+    log_info "完全卸载无需下载完整发布包"
 else
     prepare_panel_candidate
     log_info "权限、${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH} 平台与发布包安全预检通过"
@@ -2372,6 +2441,12 @@ elif [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
         exit 0
     fi
     do_uninstall
+    exit 0
+elif [[ "$REQUESTED_ACTION" == "purge" ]]; then
+    echo "完全卸载会删除网站、网站数据库、OLS 面板及其运行环境。"
+    read -r -p "请输入 完全卸载 继续: " full_confirmation < /dev/tty || full_confirmation=""
+    [[ "$full_confirmation" == "完全卸载" ]] || { log_info "已取消"; exit 0; }
+    do_purge
     exit 0
 elif $INSTALL_COMPLETE; then
     echo ""
@@ -2735,6 +2810,12 @@ index {
 context / {
   location               /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
   allowBrowse            0
+  addDefaultCharset      off
+}
+context /.well-known/acme-challenge/ {
+  location               /usr/local/lsws/conf/ols-wpanel/default-vhost-root/.well-known/acme-challenge/
+  allowBrowse            1
+  autoIndex              0
   addDefaultCharset      off
 }
 OLSDEFAULTVHOSTEOF

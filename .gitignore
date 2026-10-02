@@ -42,8 +42,8 @@ AGENTS.md
 setup.sh
 
 # Wrangler
-stats-worker/.wrangler/
-stats-worker/wrangler.toml
+deploy/stats-worker/.wrangler/
+deploy/stats-worker/wrangler.toml
 deploy/cloudflare/.wrangler/
 .wrangler/
 .wrangler-tmp/

@@ -27,7 +27,7 @@ func TestEnsureWPConfigCachePrefixesInsertBeforeStopMarker(t *testing.T) {
 	}
 }
 
-func TestGeneratedWPConfigForcesLiteSpeedCacheAndRedisIsolation(t *testing.T) {
+func TestGeneratedWPConfigPreservesIsolationWithoutForcingPluginSettings(t *testing.T) {
 	dir := t.TempDir()
 	if err := generateWPConfig(dir, "example.com", "db", "user", "password"); err != nil {
 		t.Fatal(err)
@@ -37,13 +37,11 @@ func TestGeneratedWPConfigForcesLiteSpeedCacheAndRedisIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
+	if strings.Contains(content, "LITESPEED_CONF__") {
+		t.Fatal("new sites must not override LiteSpeed Cache settings")
+	}
 	for _, required := range []string{
 		"define('WP_CACHE', true);",
-		"define('LITESPEED_CONF__OBJECT', true);",
-		"define('LITESPEED_CONF__OBJECT__KIND', true);",
-		"define('LITESPEED_CONF__OBJECT__HOST', '127.0.0.1');",
-		"define('LITESPEED_CONF__OBJECT__PORT', 6379);",
-		"define('LITESPEED_CONF__OBJECT__PERSISTENT', true);",
 		"define('LSOC_PREFIX', 'example.com:');",
 	} {
 		if !strings.Contains(content, required) {

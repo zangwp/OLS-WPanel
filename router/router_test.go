@@ -1634,7 +1634,7 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 		[]byte(`website.performance_cache`),
 		[]byte(`cacheRuntime.plugin_status`),
 		[]byte(`cacheRuntime.redis_object_cache_configured`),
-		[]byte(`/litespeed-cache/recommended`),
+		[]byte(`/litespeed-cache/migrate`),
 		[]byte(`/redis-object-cache`),
 		[]byte(`/wp-admin/admin.php?page=litespeed-cache#object`),
 	} {
@@ -1683,7 +1683,7 @@ func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
 		[]byte(`'security-maintenance': 'security'`),
 		[]byte(`await Promise.all([this.fetchLogs(), this.fetchLogFiles()])`),
 		[]byte(`website.wordpress_cache_owner_notice`),
-		[]byte(`website.server_cache_advanced`),
+		[]byte(`website.manage_php_memory`),
 	} {
 		if !bytes.Contains(detailSource, required) {
 			t.Fatalf("website detail canonical-domain/layout UI is missing %q", required)
