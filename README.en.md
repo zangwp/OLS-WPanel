@@ -14,7 +14,7 @@ Supports fresh **Debian 13 and Ubuntu 24.04 LTS / Ubuntu 26.04 LTS** servers on 
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The current stable release is `v1.15.1`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
+The current stable release is `v1.16.0`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
 
 On minimal images without curl, install the prerequisites first:
 
@@ -52,6 +52,13 @@ o uninstall       remove the panel, preserving websites, databases and shared so
 ```
 
 Ordinary uninstall requires the exact `UNINSTALL` confirmation. Updates use the signed published installation entry.
+
+## v1.16.0 changes
+
+- Rebuilds SSH menus around current status, consistent navigation and explicit confirmations.
+- Shows dual-stack DNS ownership and probe results; adds connectivity and time synchronization tools.
+- Makes performance status read-only by default; advanced queue changes are verified and reversible.
+- Adds version-aware installation maintenance with nested reinstall and uninstall actions.
 
 ## v1.15.1 changes
 
