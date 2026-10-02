@@ -466,6 +466,16 @@ var i18nKeys = []string{
 	"website.cache_status_checking",
 	"website.clear_redis_cache",
 	"website.clearing_redis_cache",
+	"dashboard.data_stale",
+	"settings.panel_certificate_confirm",
+	"settings.panel_domain_verified",
+	"settings.update_check_failed",
+	"website.cache_settings_migrated",
+	"website.cache_status_unknown",
+	"website.migrate_cache_settings",
+	"website.migrate_cache_settings_confirm",
+	"vps.confirm_tool",
+	"vps.cleanup_help",
 	"website.configured",
 	"website.confirm_clear_redis_cache",
 	"website.litespeed_recommended_applied",
@@ -1592,6 +1602,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/api/auth/check", authHandler.Check)
 	vpsHandler := &handlers.VPSHandler{}
 	protected.GET("/api/vps/overview", vpsHandler.Overview)
+	protected.POST("/api/vps/tools", vpsHandler.SimpleTool)
 	protected.GET("/api/vps/swap", vpsHandler.SwapStatus)
 	protected.POST("/api/vps/swap/recommended", vpsHandler.ApplyRecommendedSwap)
 	protected.PUT("/api/vps/swap", vpsHandler.ApplyCustomSwap)
@@ -1665,7 +1676,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.PUT("/api/websites/:id/cache", websiteHandler.UpdateCache)
 	protected.DELETE("/api/websites/:id/cache", websiteHandler.ClearCache)
 	protected.GET("/api/websites/:id/litespeed-cache/status", websiteHandler.LiteSpeedCacheStatus)
-	protected.POST("/api/websites/:id/litespeed-cache/recommended", websiteHandler.ApplyRecommendedLiteSpeedCache)
+	protected.POST("/api/websites/:id/litespeed-cache/migrate", websiteHandler.MigrateLiteSpeedCacheSettings)
 	protected.DELETE("/api/websites/:id/redis-object-cache", websiteHandler.ClearRedisObjectCache)
 	protected.PUT("/api/websites/:id/wp-optimizations", websiteHandler.SaveWPOptimizations)
 	protected.PUT("/api/websites/:id/wp-update-checks", websiteHandler.SetWPUpdateChecks)
@@ -1790,6 +1801,9 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	aiHandler := &handlers.AIHandler{}
 	logAnalysisHandler := &handlers.LogAnalysisHandler{}
 	protected.GET("/api/settings", settingsHandler.GetSettings)
+	protected.GET("/api/settings/panel-certificate", settingsHandler.PanelCertificateStatus)
+	protected.POST("/api/settings/panel-domain/check", settingsHandler.CheckPanelDomain)
+	protected.POST("/api/settings/panel-certificate", settingsHandler.ApplyPanelCertificate)
 	protected.PUT("/api/settings", settingsHandler.UpdateSettings)
 	protected.GET("/api/settings/logs", settingsHandler.GetOperationLogs)
 	protected.GET("/api/settings/wp-package", settingsHandler.GetWPPackage)
@@ -1897,6 +1911,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/api/software/guard", softwareHandler.GetGuardStatus)
 	protected.POST("/api/software/guard/action", softwareHandler.GuardAction)
 	protected.PUT("/api/software/config", softwareHandler.SaveConfig)
+	protected.PUT("/api/software/php-config", softwareHandler.SavePHPBatchConfig)
 	protected.GET("/api/software/log", softwareHandler.ViewLog)
 	protected.DELETE("/api/software/log", softwareHandler.ClearLog)
 	updateHandler := &handlers.UpdateHandler{CurrentVersion: version, ConfigPath: configPath, Config: cfg}

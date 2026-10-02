@@ -130,13 +130,6 @@ define('WP_DEBUG', false);
 /* Add any custom values between this line and the "stop editing" line. */
 
 define('WP_CACHE', true);
-define('LITESPEED_CONF', true);
-define('LITESPEED_CONF__OBJECT', true);
-define('LITESPEED_CONF__OBJECT__KIND', true);
-define('LITESPEED_CONF__OBJECT__HOST', '127.0.0.1');
-define('LITESPEED_CONF__OBJECT__PORT', 6379);
-define('LITESPEED_CONF__OBJECT__DB_ID', 0);
-define('LITESPEED_CONF__OBJECT__PERSISTENT', true);
 define('LSOC_PREFIX', '%s');
 define('WP_REDIS_PREFIX', '%s');
 define('WP_CACHE_KEY_SALT', '%s');

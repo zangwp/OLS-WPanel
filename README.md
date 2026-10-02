@@ -1,112 +1,90 @@
 # OLS WPanel
 
-<p><img src="static/logo.png" alt="OLS WPanel" width="120"></p>
+<img src="static/logo.png" alt="OLS WPanel" width="88">
 
-面向 WordPress 的轻量服务器管理面板，集成 OpenLiteSpeed、LSPHP、LiteSpeed Cache、MariaDB 和 Redis。支持 Debian 13 / Ubuntu 24.04、26.04 LTS 的 amd64 与 arm64 系统。
+轻量的 VPS 与 WordPress 管理面板。集中管理网站、数据库、SSL 证书、缓存、备份和服务器维护，基于 OpenLiteSpeed、LSPHP、MariaDB 与 Redis。
 
-[English](README.en.md) · [问题反馈](https://github.com/zangwp/OLS-WPanel/issues) · [安全报告](https://github.com/zangwp/OLS-WPanel/security)
+[English](README.en.md) · [使用文档](docs/operations-and-recovery.md) · [更新记录](CHANGELOG.md) · [问题反馈](https://github.com/zangwp/OLS-WPanel/issues)
 
-[![License](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
+## 安装
 
-## 🚀 快速安装
-
-> 仅用于全新的 Debian 13 (Trixie)、Ubuntu 24.04 LTS (Noble) 或 Ubuntu 26.04 LTS (Resolute) 服务器，使用 `root` 执行。
+支持全新的 **Debian 13、Ubuntu 24.04 / 26.04 LTS**，架构为 **amd64 / arm64**。最低 1 核 CPU、1 GiB 内存。使用 root 执行：
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.14.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前发布版为 **v1.14.0**。短链接固定到已发布版本，验证 Ed25519 签名与 SHA-256 后安装。源码中的下一版修改尚未发布为 Release，安装短链接仍获取当前发布版。
 
-精简镜像如果连 `curl` 都没有，请先执行：
+没有 curl 的精简系统先执行：
 
 ```bash
 apt-get update && apt-get install -y --no-install-recommends curl wget ca-certificates openssl
-curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-需要手动验签、国内网络或离线安装时，使用 [完整验签安装指南](docs/verified-install.md)。
+手动验签、国内网络与离线安装见 [安装指南](docs/verified-install.md)。其他系统版本、已有生产环境及 ARM64 16 KiB 页大小不在自动安装支持范围内。
 
-## 默认运行栈
+## 可以做什么
 
-| 组件 | 默认策略 |
+| 功能 | 内容 |
 |---|---|
-| OpenLiteSpeed | 官方稳定软件源，每站点独立虚拟主机 |
-| LSPHP | 默认 8.5；可按需增加 8.4 / 8.3，并逐站点切换 |
-| MariaDB | 全新安装默认 11.8；现有数据库仅跟随当前系列的补丁与安全更新 |
-| Redis | 官方签名 APT 源；由 LiteSpeed Cache 集成对象缓存，每个 WordPress 站点使用独立缓存前缀 |
-| 安全组件 | Fail2ban + nftables，跟随系统软件源更新 |
+| 网站与 WordPress | 创建 WordPress / PHP 网站，管理域名、PHP 版本、文件、数据库及 WordPress 更新 |
+| 证书与缓存 | 网站证书申请与续签；使用官方 LiteSpeed Cache 管理页面及 Redis 对象缓存 |
+| 备份与恢复 | 网站、数据库和面板备份，支持 SFTP / S3 异地保存 |
+| VPS 维护 | 查看资源与服务状态，管理系统更新、DNS、Swap、时间同步和开放端口 |
+| 安全与告警 | 登录保护、文件保护、Fail2ban、nftables、邮件通知和日志分析 |
 
-## 核心能力
+全新安装默认使用 **LSPHP 8.5、MariaDB 11.8**；可为网站增加 LSPHP 8.4 / 8.3。现有数据库保留当前系列，常规系统更新不会自动跨系列升级。
 
-| 板块 | 主要能力 |
-|---|---|
-| 网站 | 创建 WordPress 或通用 PHP 站点，独立系统用户、LSPHP 进程、数据库与日志；附加域名可自动 301/302 到主域名或显示同一网站 |
-| WordPress | 核心/主题/插件更新检查，LiteSpeed 页面缓存与 Redis 对象缓存一键配置，定时任务与临时维护 |
-| SSL | Let's Encrypt 申请与自动续签，域名 DNS 预检及主域名/附加域名证书覆盖，支持手动证书 |
-| 备份 | 站点与数据库备份/恢复，面板 SQLite 自动备份，支持 SFTP / S3 异地保存 |
-| 安全 | 登录防爆破、恶意扫描检测、严格 CDN 真实 IP 信任、网站/SSH 独立白名单、Fail2ban、nftables 封禁与受管端口放行 |
-| 运维 | VPS 系统概况、CPU/内存/磁盘监控、核心服务健康、BBR/DNS/NTP 状态、文件与数据库管理、计划任务、邮件告警、日志分析与 AI 诊断 |
-| 更新 | 面板 Release 验签更新与回滚；系统软件通过已配置的签名 APT 源更新 |
+## SSH 快捷命令
 
-OLS WPanel 不提供邮件服务器、FTP、Docker 编排或通用 Java/Python 应用托管，以减少攻击面和无关依赖。
-
-## 系统要求
-
-| 项目 | 要求 |
-|---|---|
-| 操作系统 | Debian 13 (Trixie)、Ubuntu 24.04 LTS (Noble) 或 Ubuntu 26.04 LTS (Resolute) |
-| 架构 | amd64/x86_64 或 arm64/aarch64 |
-| CPU | 1 核及以上 |
-| 内存 | 1 GiB 及以上 |
-| ARM64 页大小 | 4 KiB 或 8 KiB；16 KiB 会因 OLS 官方二进制不兼容而中止 |
-
-其他 Debian/Ubuntu 大版、非标准云镜像或已有生产环境不在自动安装承诺范围内。
-
-## SSH 管理命令
-
-`o` 与 `O` 完全等价：
+`o` 与大写 `O` 等价，面板信息会显示版本、端口和安全入口。
 
 ```text
-o / O             查看面板信息
+o                 查看面板信息
+o status          诊断面板运行状态
+o log [N]         查看最近 N 条面板日志
 o restart         重启面板
 o password        重置管理员密码
-o info            查看版本、端口和入口
-o status          查看运行状态
 o unban           清空面板管理的 IP 封禁
-o update          通过签名发布链更新/修复面板
-o uninstall       普通卸载面板（保留网站、数据库与共享软件）
+o update          更新 / 修复面板
+o uninstall       卸载面板，保留网站、数据库与共享软件
 ```
 
-`o uninstall` 会在终端要求输入精确的 `UNINSTALL` 后才执行。系统重装、磁盘分区和彻底清空等高风险动作不会放在网页中一键执行。
+普通卸载要求输入 `UNINSTALL` 确认。更新脚本使用已发布的签名安装入口。
 
-## 安全与文档
+## 下一版开发中
 
-- [验签安装指南](docs/verified-install.md)
-- [日常运维与面板数据库恢复](docs/operations-and-recovery.md)
-- [安装身份与升级兼容性](docs/upgrade-compatibility.md)
-- [仓库结构与有意保留的资产](docs/repository-layout.md)
-- [安装器安全边界](security/ols-wpanel-install-security.md)
-- [运行时多层防护](security/ols-wpanel-runtime-security.md)
+以下功能已纳入下一版源码，尚未发布为 Release，安装短链接保持当前发布版：
 
-面板使用随机入口、BasicAuth 和 Web 登录两层验证。这些措施能提高扫描和口令猜测成本，但不能替代强密码、可信终端、及时更新、端口访问控制和可恢复备份。
+- VPS 简单菜单及“服务器概况 / 常用维护”布局。
+- 自定义面板域名、证书申请与续期，保留 IP 备用入口。
+- PHP 配置批量保存，解除面板对 LiteSpeed Cache 设置的强制覆盖。
+- 首页项目更新检查；完全卸载入口与备份保留选项。
 
-## 仓库概览
+新增命令与验证情况见 [下一版开发与验证记录](docs/local-next-version.md)。完全卸载会删除网站文件、网站数据库和面板，需要单独确认；请勿将开发稿中的新命令用于旧发布版。
+
+## 文档
+
+- [安装与验签](docs/verified-install.md)
+- [日常维护与恢复](docs/operations-and-recovery.md)
+- [升级兼容性](docs/upgrade-compatibility.md)
+- [旧 Optimizer 迁移](docs/optimizer-migration.md)：v1.14.0 已停止自动部署旧插件，现有网站可显式迁移并移除。
+- [安装安全](docs/security/ols-wpanel-install-security.md) · [运行时安全](docs/security/ols-wpanel-runtime-security.md)
+- [仓库目录说明](docs/repository-layout.md)
+
+## 开发目录
+
+应用代码按 Go 包划分；页面放在 templates/ 与 static/，构建源码在 assets/。文档统一在 docs/，独立 Worker 统一在 deploy/。旧插件源码保留用于兼容与迁移验证。
 
 ```text
-handlers/ collector/ database/ models/ router/  Go 应用模块
-executor/ security/ config/                    系统操作与安全边界
-templates/ static/ assets/                     前端模板、嵌入资产与品牌源文件
-ols-wpanel-optimizer/                          旧插件兼容源码（不再自动部署）
-deploy/cloudflare/ stats-worker/               独立部署组件
-scripts/ tests/ third_party/                   验证脚本、测试与第三方许可材料
+config/ collector/ database/ models/       配置与数据
+handlers/ middleware/ router/ executor/   请求处理与系统操作
+i18n/ templates/ static/ assets/           界面、翻译与资源
+docs/ deploy/                             文档与独立部署组件
+scripts/ tests/ third_party/               验证工具、测试与许可材料
 ```
 
 ## 许可证
 
-OLS WPanel 依据 GNU GPL v3.0 only（SPDX：`GPL-3.0-only`）发布，由 [zangwp](https://github.com/zangwp) 维护。详见 [LICENSE](LICENSE)、[NOTICE.md](NOTICE.md) 和 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## v1.14.0：移除 Optimizer
-
-升级后，在网站详情的缓存与性能页点击“迁移并移除旧 Optimizer”。先关闭文件保护，迁移完成后重新启用。旧插件会停用并归档到网站目录外，LiteSpeed Cache 及其设置保留。异常监控由面板 CLI 采样；WordPress 内部策略由面板维护的少量配置代码及已有密码找回规则执行。详见 [迁移说明](docs/optimizer-migration.md)。
+[GPL-3.0-only](LICENSE)，由 [zangwp](https://github.com/zangwp) 维护。第三方许可见 [NOTICE.md](NOTICE.md) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

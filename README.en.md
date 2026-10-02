@@ -1,91 +1,90 @@
 # OLS WPanel
 
-<p><img src="static/logo.png" alt="OLS WPanel" width="120"></p>
+<img src="static/logo.png" alt="OLS WPanel" width="88">
 
-OLS WPanel is a WordPress-focused server panel built around OpenLiteSpeed, isolated per-site LSPHP 8.3/8.4/8.5 applications, LiteSpeed Cache, Redis, and MariaDB.
+A lightweight VPS and WordPress management panel for websites, databases, TLS certificates, caching, backups and server maintenance. Built around OpenLiteSpeed, LSPHP, MariaDB and Redis.
 
-It supports clean Debian 13, Ubuntu 24.04 LTS, and Ubuntu 26.04 LTS servers on amd64 and arm64. The project is licensed under `GPL-3.0-only` and maintained at [zangwp/OLS-WPanel](https://github.com/zangwp/OLS-WPanel).
+[中文](README.md) · [Operations guide](docs/operations-and-recovery.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/zangwp/OLS-WPanel/issues)
 
-## Quick installation
+## Installation
 
-Run as `root`:
+Supports fresh **Debian 13 and Ubuntu 24.04 / 26.04 LTS** servers on **amd64 / arm64**. Minimum: one CPU core and 1 GiB RAM. Run as root:
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The short entry is pinned to a published release and verifies signed SHA-256 manifests before delegating to the installer. It installs missing bootstrap prerequisites automatically. For minimal images or verification before execution, see [the verified installation guide](docs/verified-install.md).
+The published version is **v1.14.0**. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes. The next-version source changes have not been released and are not available through this installation URL.
 
-The current stable release is `v1.14.0`.
-
-### Minimal images / download failures
-
-If the short command cannot start because the image lacks basic download and TLS tools, install them once and retry:
+On minimal images without curl, install the prerequisites first:
 
 ```bash
-apt-get update && apt-get install -y --no-install-recommends curl wget ca-certificates openssl && curl -fsSL https://ols.zangyubin.top/install | bash
+apt-get update && apt-get install -y --no-install-recommends curl wget ca-certificates openssl
 ```
 
-## What it installs
+See the [installation guide](docs/verified-install.md) for manual verification, restricted networks and offline installation. Other OS versions, existing production environments and ARM64 16 KiB pages are outside the automatic installation support scope.
 
-- OpenLiteSpeed with generated HTTP/HTTPS listeners and one isolated virtual host per site
-- LSPHP 8.5 by default, with optional 8.4 and 8.3 compatibility runtimes assignable per site
-- MariaDB 11.8 on fresh installs; existing databases receive same-series patch and security updates only; Redis follows its official signed APT repository
-- The official LiteSpeed Cache WordPress plugin, automatically activated for new WordPress sites
-- Redis object-cache integration through LiteSpeed Cache with an independent key prefix per site; no second Redis cache plugin is required
-- Fail2ban and nftables for host-level enforcement, listener inventory, and panel-owned allow rules
-- The OLS WPanel Go service on its own HTTPS management port
+## Features
 
-Generic PHP sites use OpenLiteSpeed and LSPHP but do not receive WordPress plugins or the LiteSpeed WordPress cache module configuration.
-
-## Supported systems
-
-| Item | Supported |
+| Area | Capabilities |
 |---|---|
-| Operating systems | Debian 13 (Trixie), Ubuntu 24.04 LTS (Noble), Ubuntu 26.04 LTS (Resolute) |
-| Architectures | amd64/x86_64, arm64/aarch64 |
-| CPU | 1 core or more |
-| Memory | 1 GiB or more |
-| ARM64 page size | 4 KiB or 8 KiB; 16 KiB fails closed because the official OLS binary is incompatible |
+| Websites and WordPress | WordPress / PHP provisioning, domains, PHP versions, files, databases and WordPress updates |
+| Certificates and caching | Website certificate issuance and renewal; official LiteSpeed Cache for page and Redis object caching |
+| Backups and recovery | Website, database and panel backups, with SFTP / S3 remote storage |
+| VPS maintenance | Resource and service status, system updates, DNS, Swap, time synchronization and open ports |
+| Security and alerts | Login protection, file protection, Fail2ban, nftables, email notifications and log analysis |
 
-## Site provisioning
+Fresh installations default to **LSPHP 8.5 and MariaDB 11.8**. LSPHP 8.4 / 8.3 can be added per site. Existing databases retain their installed series; routine updates do not automatically upgrade across database series.
 
-Creating a WordPress site automatically prepares the system user, document root, logs, database, OpenLiteSpeed virtual host and listener mappings, LSPHP application, WordPress files, LiteSpeed Cache, Redis configuration, and optional TLS certificate. Additional domains default to a canonical 301 redirect to the primary domain, with 302 or same-site serving available when needed. Domain management previews the redirect, checks DNS, and can reissue panel-managed certificates for every configured name. Configuration is validated before `lshttpd` is restarted; failed updates restore the previous files and listener registry.
+## SSH commands
 
-## Management commands
-
-Both entry points are equivalent:
+Lowercase `o` and uppercase `O` are equivalent. Panel information shows the version, port and access path.
 
 ```text
-o / O             show panel information
+o                 show panel information
+o status          diagnose panel status
+o log [N]         show the latest N panel log entries
 o restart         restart the panel
-o password        reset the administrator password
-o info            show version and access information
-o status          show runtime status
-o unban           clear managed IP bans
-o update          update or repair through the signed release chain
-o uninstall       ordinary uninstall that preserves sites, databases, and shared software
+o password        reset administrator credentials
+o unban           clear panel-managed IP bans
+o update          update / repair the panel
+o uninstall       remove the panel, preserving websites, databases and shared software
 ```
 
-`o uninstall` requires the exact `UNINSTALL` confirmation phrase in the terminal. OS reinstall, disk partitioning, and destructive purge are intentionally not exposed as one-click web actions.
+Ordinary uninstall requires the exact `UNINSTALL` confirmation. Updates use the signed published installation entry.
 
-## Security and release model
+## Next version in development
 
-- Release assets are architecture-qualified and accompanied by SHA-256 manifests and Ed25519 signatures.
-- The installer pins and verifies the LiteSpeed APT signing keys before adding its HTTPS repository.
-- Each generated OpenLiteSpeed configuration is validated before activation and updated atomically with rollback.
-- The management service uses its own TLS listener and does not expose OpenLiteSpeed WebAdmin.
-- Website and SSH allowlists are isolated; crawler and CDN trust never bypasses SSH protection, and custom CDN real-IP handling requires declared vendor origin ranges.
-- Optional telemetry is disabled by default.
+The following features are included in the next-version source. They have not been published as a release or deployed to the installation entry.
 
-## Runtime updates and OpenLiteSpeed administration
+- A simple VPS menu and Overview / Maintenance page layout.
+- Custom panel domains, certificate issuance and renewal, with an IP fallback entry.
+- Batched PHP configuration saves and removal of forced LiteSpeed Cache overrides.
+- Dashboard update checks and a complete-uninstall entry with backup retention choices.
 
-System Update installs the latest verified stable and security candidates from configured signed APT repositories. OpenLiteSpeed and LSPHP follow the official LiteSpeed repository, MariaDB stays on its installed series, Redis follows Redis' official repository, and nftables and Fail2ban follow the target operating-system repository. LSPHP 8.3, 8.4, and 8.5 can coexist and are assigned per site. Database cross-series changes remain controlled migrations rather than routine unattended updates.
+See the [development and verification notes](docs/local-next-version.md) for new commands and verification limits. Complete uninstall deletes websites, their databases and the panel, and requires separate confirmation. Do not use draft-only commands with an older release.
 
-OLS WPanel owns the generated server and per-site OpenLiteSpeed configuration, so WebAdmin on port 7080 is disabled by default to avoid conflicting edits and an extra public administration endpoint. The installer enables Gzip, Brotli, and HTTP/3/QUIC, and WordPress sites receive LiteSpeed Cache and Redis configuration automatically. The Software page reports their effective status.
+## Documentation
 
-See the [verified installation guide](docs/verified-install.md), [operations and recovery guide](docs/operations-and-recovery.md), [repository layout](docs/repository-layout.md), [NOTICE.md](NOTICE.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- [Installation and signature verification](docs/verified-install.md)
+- [Operations and recovery](docs/operations-and-recovery.md)
+- [Upgrade compatibility](docs/upgrade-compatibility.md)
+- [Optimizer migration](docs/optimizer-migration.md): v1.14.0 stopped automatic deployment; existing sites can explicitly migrate and remove it.
+- [Installer security](docs/security/ols-wpanel-install-security.md) · [Runtime security](docs/security/ols-wpanel-runtime-security.md)
+- [Repository layout](docs/repository-layout.md)
 
-## v1.14.0: retiring Optimizer
+## Development layout
 
-After upgrading, use “Migrate and remove old Optimizer” in Website Details → Cache & Performance. Disable file protection first and re-enable it after migration. The panel deactivates and privately archives Optimizer while preserving LiteSpeed Cache settings. Monitoring uses the isolated panel CLI runner. A small panel-owned configuration block and existing password-reset rules enforce WordPress-specific policy. See the [migration notes](docs/optimizer-migration.md).
+Application code uses separate Go packages. Templates and runtime assets are under templates/ and static/; build sources are under assets/. Documentation lives in docs/ and independent Workers in deploy/. Legacy plugin sources remain for compatibility and migration validation.
+
+```text
+config/ collector/ database/ models/       configuration and data
+handlers/ middleware/ router/ executor/   request handling and system operations
+i18n/ templates/ static/ assets/           UI, translations and assets
+docs/ deploy/                             documentation and deployment components
+scripts/ tests/ third_party/               verification, tests and license material
+```
+
+## License
+
+[GPL-3.0-only](LICENSE), maintained by [zangwp](https://github.com/zangwp). Third-party terms are listed in [NOTICE.md](NOTICE.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

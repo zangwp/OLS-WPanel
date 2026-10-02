@@ -14,13 +14,15 @@ import (
 type VPSHandler struct{}
 
 type VPSIdentity struct {
-	Hostname       string `json:"hostname"`
-	OS             string `json:"os"`
-	Kernel         string `json:"kernel"`
-	Architecture   string `json:"architecture"`
-	CPUModel       string `json:"cpu_model"`
-	CPUCores       int    `json:"cpu_cores"`
-	Virtualization string `json:"virtualization"`
+	Addresses      []string `json:"addresses"`
+	Uptime         string   `json:"uptime"`
+	Hostname       string   `json:"hostname"`
+	OS             string   `json:"os"`
+	Kernel         string   `json:"kernel"`
+	Architecture   string   `json:"architecture"`
+	CPUModel       string   `json:"cpu_model"`
+	CPUCores       int      `json:"cpu_cores"`
+	Virtualization string   `json:"virtualization"`
 }
 
 type VPSTuning struct {

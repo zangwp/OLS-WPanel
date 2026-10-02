@@ -11,15 +11,33 @@
         </button>
     </div>
 
+    <nav class="vps-tabs mb-5" aria-label="VPS">
+        <button @click="tab='overview'" :class="tab==='overview' ? 'active' : ''">{{t .Lang "vps.overview_tab"}}</button>
+        <button @click="tab='maintenance'" :class="tab==='maintenance' ? 'active' : ''">{{t .Lang "vps.maintenance_tab"}}</button>
+    </nav>
+    <section class="card mb-5" x-show="tab==='maintenance'">
+      <div class="vps-actions">
+       <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary">{{t .Lang "vps.tool_updates"}}</a>
+       <button class="btn-secondary" @click="tab='overview'; $nextTick(()=>document.getElementById('vps-dns').scrollIntoView({behavior:'smooth'}))">{{t .Lang "vps.dns_settings"}}</button>
+       <button class="btn-secondary" @click="tool('clean-preview')">{{t .Lang "vps.preview"}}</button>
+       <button class="btn-secondary" @click="clean()" :disabled="toolBusy">{{t .Lang "vps.run_cleanup"}}</button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+<div class="vps-tool-tile"><label class="label">{{t .Lang "vps.ip_priority"}} <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.ip_help"}}</span></details></label><select class="input-field" x-model="ipMode"><option value="">{{t .Lang "vps.choose_setting"}}</option><option value="ipv4">{{t .Lang "vps.ipv4"}}</option><option value="ipv6">{{t .Lang "vps.ipv6"}}</option><option value="default">{{t .Lang "vps.default"}}</option></select><button class="btn-secondary mt-3" @click="tool('ip-priority', ipMode)" :disabled="toolBusy || !ipMode">{{t .Lang "vps.apply_tool"}}</button></div><div class="vps-tool-tile"><label class="label">{{t .Lang "vps.website_tuning"}} <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.tuning_help"}}</span></details></label><select class="input-field" x-model="tuningMode"><option value="">{{t .Lang "vps.choose_setting"}}</option><option value="balanced">{{t .Lang "vps.balanced"}}</option><option value="website">{{t .Lang "vps.website_recommended"}}</option><option value="default">{{t .Lang "vps.default"}}</option></select><button class="btn-secondary mt-3" @click="tool('tuning', tuningMode)" :disabled="toolBusy || !tuningMode">{{t .Lang "vps.apply_tool"}}</button></div><div class="vps-tool-tile"><label class="label">{{t .Lang "vps.system_language"}} <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.locale_help"}}</span></details></label><select class="input-field" x-model="localeMode"><option value="">{{t .Lang "vps.choose_setting"}}</option><option value="en_US.UTF-8">English</option><option value="zh_CN.UTF-8">简体中文</option><option value="zh_TW.UTF-8">繁體中文</option></select><button class="btn-secondary mt-3" @click="tool('locale', localeMode)" :disabled="toolBusy || !localeMode">{{t .Lang "vps.apply_tool"}}</button></div>
+      </div>
+      <pre x-show="toolMessage" x-text="toolMessage" class="vps-tool-output mt-4" :class="toolError ? 'text-red-300' : 'text-green-300'"></pre>
+    </section>
     <div x-show="error" x-cloak class="mb-5 rounded-lg border border-red-700 bg-red-900/20 p-4 text-sm text-red-300" x-text="error"></div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5" x-show="tab === 'overview'">
         <section class="card">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.system_overview"}}</h3>
                 <span class="text-xs text-gray-500" x-text="overview.identity?.hostname || '--'"></span>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">IP</p><p class="text-white mt-1 break-all" x-text="(overview.identity?.addresses || []).join(' · ') || '--'"></p></div>
+                <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.uptime"}}</p><p class="text-white mt-1" x-text="overview.identity?.uptime || '--'"></p></div>
                 <div class="rounded-lg border border-gray-700 p-3">
                     <p class="text-xs text-gray-500">{{t .Lang "vps.operating_system"}}</p>
                     <p class="text-white mt-1" x-text="overview.identity?.os || '--'"></p>
@@ -50,16 +68,16 @@
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "vps.resource_snapshot"}}</h3>
             <div class="space-y-4 text-sm">
                 <div>
-                    <div class="flex justify-between"><span class="text-gray-400">CPU</span><span class="text-white font-mono" x-text="number(overview.stats?.cpu_percent) + '%' "></span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">CPU</span><span class="text-white font-mono" x-text="number(overview.stats?.cpu_percent) + '%' "></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,Number(overview.stats?.cpu_percent || 0))) + '%'"></span></div>
                 </div>
                 <div>
-                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.memory"}}</span><span class="text-white font-mono" x-text="bytes(overview.stats?.memory_used_bytes) + ' / ' + bytes(overview.stats?.memory_total_bytes)"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.memory"}}</span><span class="text-white font-mono" x-text="bytes(overview.stats?.memory_used_bytes) + ' / ' + bytes(overview.stats?.memory_total_bytes)"></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,ratio(overview.stats?.memory_used_bytes,overview.stats?.memory_total_bytes))) + '%'"></span></div>
                 </div>
                 <div>
-                    <div class="flex justify-between"><span class="text-gray-400">Swap</span><span class="text-white font-mono" x-text="bytes(overview.stats?.swap_used_bytes) + ' / ' + bytes(overview.stats?.swap_total_bytes)"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">Swap</span><span class="text-white font-mono" x-text="bytes(overview.stats?.swap_used_bytes) + ' / ' + bytes(overview.stats?.swap_total_bytes)"></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,ratio(overview.stats?.swap_used_bytes,overview.stats?.swap_total_bytes))) + '%'"></span></div>
                 </div>
                 <div>
-                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.disk"}}</span><span class="text-white font-mono" x-text="bytes(overview.stats?.disk_used_bytes) + ' / ' + bytes(overview.stats?.disk_total_bytes)"></span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.disk"}}</span><span class="text-white font-mono" x-text="bytes(overview.stats?.disk_used_bytes) + ' / ' + bytes(overview.stats?.disk_total_bytes)"></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,ratio(overview.stats?.disk_used_bytes,overview.stats?.disk_total_bytes))) + '%'"></span></div>
                 </div>
                 <div>
                     <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.load"}}</span><span class="text-white font-mono" x-text="number(overview.stats?.load_avg_1) + ' / ' + number(overview.stats?.load_avg_5) + ' / ' + number(overview.stats?.load_avg_15)"></span></div>
@@ -71,12 +89,12 @@
         </section>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5" x-show="tab === 'overview'">
         <section class="card">
             <div class="flex items-center justify-between mb-4">
                 <div>
                     <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.service_health"}}</h3>
-                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.service_health_help"}}</p>
+                    <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.service_health_help"}}</span></details>
                 </div>
                 <a href="/{{.RandomSuffix}}/software" class="text-sm text-blue-400 hover:text-blue-300">{{t .Lang "vps.open_software"}}</a>
             </div>
@@ -104,8 +122,8 @@
         </section>
 
         <section class="card">
-            <h3 class="text-lg font-semibold text-white mb-1">{{t .Lang "vps.network_tuning"}}</h3>
-            <p class="text-xs text-gray-500 mb-4">{{t .Lang "vps.network_tuning_help"}}</p>
+            <h3 id="vps-dns" class="text-lg font-semibold text-white mb-1">{{t .Lang "vps.network_tuning"}}</h3>
+            <details class="help-tip mb-4"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.network_tuning_help"}}</span></details>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                 <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.congestion_control"}}</p><p class="text-white mt-1 font-mono" x-text="overview.tuning?.congestion_control || '--'"></p></div>
                 <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.default_qdisc"}}</p><p class="text-white mt-1 font-mono" x-text="overview.tuning?.default_qdisc || '--'"></p></div>
@@ -149,7 +167,7 @@
         </section>
     </div>
 
-    <section class="card mb-5">
+    <section class="card mb-5" x-show="tab==='maintenance'">
         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 mb-4">
             <div>
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.swap_title"}}</h3>
@@ -212,7 +230,7 @@
         <p class="text-xs text-gray-500 mt-4">{{t .Lang "vps.swap_safety_note"}}</p>
     </section>
 
-    <section class="card mb-5">
+    <section class="card mb-5" x-show="tab==='maintenance'">
         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
             <div>
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.lifecycle_title"}}</h3>
@@ -236,7 +254,16 @@
         </div>
     </section>
 
-    <section class="card">
+    <details class="card mb-5" x-show="tab==='maintenance'">
+      <summary class="cursor-pointer text-gray-400">{{t .Lang "vps.advanced_lifecycle"}}</summary>
+      <p class="text-sm text-gray-400 mt-4">{{t .Lang "vps.command_uninstall_help"}}</p>
+      <button class="btn-secondary mt-2" @click="copy('o uninstall')">{{t .Lang "vps.copy"}}: o uninstall</button>
+      <p class="text-sm text-red-300 mt-5">{{t .Lang "vps.full_uninstall_help"}}</p>
+      <pre class="vps-tool-output mt-3"># {{t .Lang "vps.full_uninstall_help"}}
+o uninstall --all</pre>
+      <button class="btn-secondary mt-2" @click="copy('o uninstall --all')">{{t .Lang "vps.copy"}}</button>
+    </details>
+    <section class="card" x-show="tab==='maintenance'">
         <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "vps.safe_tools"}}</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <a href="/{{.RandomSuffix}}/settings#system-updates" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_updates"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_updates_help"}}</p></a>
@@ -252,7 +279,8 @@
 function vpsPage() {
     return {
         overview: { identity: {}, stats: {}, tuning: {}, services: [], swap: { entries: [], can_manage: false }, dns: { presets: [] } },
-        loading: false,
+        tab:'overview',toolBusy:false,toolMessage:'',toolError:false,ipMode:'',tuningMode:'',localeMode:'',
+loading: false,
         error: '',
         copied: '',
         swapBusy: false,
@@ -270,8 +298,17 @@ function vpsPage() {
         commands: [
             { title: '{{t .Lang "vps.command_update"}}', help: '{{t .Lang "vps.command_update_help"}}', command: 'o update' },
             { title: '{{t .Lang "vps.command_status"}}', help: '{{t .Lang "vps.command_status_help"}}', command: 'o status' },
-            { title: '{{t .Lang "vps.command_uninstall"}}', help: '{{t .Lang "vps.command_uninstall_help"}}', command: 'o uninstall' }
+            { title: '{{t .Lang "vps.command_check_update"}}', help: '', command: 'o check-update' },
+{ title: '{{t .Lang "vps.command_menu"}}', help: '', command: 'o menu' }
         ],
+        async tool(action,value='',confirmed=false) {
+            if(this.toolBusy)return;
+            if(action!=='clean-preview' && !confirmed && !await confirmModal(t('vps.confirm_tool')))return;
+            this.toolBusy=true;this.toolError=false;this.toolMessage='';
+            try {const r=await api('/vps/tools',{method:'POST',body:{action,value,confirm:action},timeout:150000});this.toolMessage=r.data?.message || '';}
+            catch(e){this.toolError=true;this.toolMessage=e.message;}finally{this.toolBusy=false;}
+        },
+        async clean(){if(this.toolBusy)return;await this.tool('clean-preview');if(this.toolError)return;if(!await confirmModal(this.toolMessage+'\n'+t('vps.cleanup_help')))return;await this.tool('clean','',true);},
         async load() {
             this.loading = true;
             this.error = '';
@@ -287,6 +324,7 @@ function vpsPage() {
                 this.loading = false;
             }
         },
+        ratio(used,total){return Number(total)>0 ? Number(used || 0)/Number(total)*100 : 0;},
         bytes(value) { return formatBytes(Number(value || 0)); },
         number(value) { return Number(value || 0).toFixed(1); },
         stateLabel(value) { return value === 'active' ? '{{t .Lang "vps.state_active"}}' : (value === 'activating' ? '{{t .Lang "vps.state_activating"}}' : '{{t .Lang "vps.state_inactive"}}'); },

@@ -92,7 +92,7 @@
                         <button @click="syncNTP()" :disabled="ntpSyncing" class="text-xs py-0.5 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;" x-text="ntpSyncing ? t('settings.ntp_starting') : t('settings.sync')"></button>
                     </div>
                 </div>
-                <p class="mt-2 text-xs text-gray-400">{{t .Lang "settings.time_help"}}</p>
+                <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.time_help"}}</span></details>
                 <p x-show="!ntpService" class="mt-1 text-xs text-yellow-300">{{t .Lang "settings.time_service_missing"}}</p>
             </div>
 
@@ -105,7 +105,23 @@
             </div>
             </div>
 
-            <div x-show="activeSection === 'updates'" x-cloak>
+            <section x-show="activeSection === 'general'" class="card mb-6" x-data="panelCertificateSettings()">
+ <h3 class="text-white font-semibold mb-4">{{t .Lang "settings.panel_domain_https"}}</h3>
+ <label class="label">{{t .Lang "settings.panel_domain"}}</label>
+ <div class="flex flex-wrap gap-2">
+  <input x-model="domain" class="input-field flex-1" placeholder="panel.example.com" :disabled="status.running">
+  <button @click="check()" :disabled="checking || status.running || !domain" class="btn-secondary">{{t .Lang "settings.check_domain"}}</button>
+  <button @click="apply()" :disabled="starting || status.running || !domain" class="btn-primary">{{t .Lang "settings.apply_panel_certificate"}}</button>
+ </div>
+ <details class="help-tip mt-2"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.panel_domain_help"}}</span></details>
+ <p x-show="status.running" class="text-sm text-blue-300 mt-3">{{t .Lang "settings.panel_certificate_running"}}</p>
+ <p x-show="message" x-text="message" class="text-sm mt-3" :class="verified ? 'text-green-400' : 'text-red-400'"></p>
+ <p x-show="status.error || status.renewal_error" x-text="status.error || status.renewal_error" class="text-sm text-red-400 mt-3"></p>
+ <a x-show="status.login_url" :href="status.login_url" x-text="status.login_url" target="_blank" rel="noopener noreferrer" class="block text-blue-400 mt-3 break-all"></a>
+ <p x-show="status.expires_at" class="text-xs text-gray-400 mt-2">{{t .Lang "settings.certificate_expiry"}} <span x-text="status.expires_at"></span></p>
+</section>
+
+<div x-show="activeSection === 'updates'" x-cloak>
             <details class="mb-5 rounded border border-gray-700 p-4" style="background-color: #0f172a;">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "settings.advanced_download_settings"}}</summary>
             <div class="mt-4">
@@ -558,6 +574,8 @@ function panelSettings() {
             lastSuccessVersion: ''
         },
         pw: { old: '', new1: '', new2: '', basic: '' },
+        timeTimer: null,
+        destroy() { if (this.timeTimer) clearInterval(this.timeTimer); },
         initPage() {
             this.activeSection = this.sectionFromHash();
             this.fetchSettings();
@@ -619,7 +637,8 @@ function panelSettings() {
                 }
             } catch(e) {}
             this.tickTime();
-            setInterval(() => this.tickTime(), 1000);
+            if (this.timeTimer) clearInterval(this.timeTimer);
+this.timeTimer = setInterval(() => this.tickTime(), 1000);
         },
         tickTime() {
             if (this.serverTimeBase) {
@@ -761,15 +780,18 @@ function versionCheck() {
                     this.latestVersion = r.data.latest_version || "";
                     this.releaseNotes = r.data.release_notes || "";
                     this.hasUpdate = r.data.has_update;
-                    if (r.data.error) this.updateError = r.data.error;
+                    this.updateError = r.data.error || "";
+return !this.updateError;
                 }
-            } catch(e) {}
+                this.updateError = r.message || t("settings.update_check_failed");
+            } catch(e) { this.updateError = e.message || t("settings.update_check_failed"); }
+return false;
         },
         async checkUpdate() {
             this.checking = true;
             this.updateError = "";
-            await this.fetchVersion();
-            if (!this.hasUpdate && !this.updateError) showToast(t('settings.up_to_date_message'), "success");
+            const checked = await this.fetchVersion();
+            if (checked && !this.hasUpdate && !this.updateError) showToast(t('settings.up_to_date_message'), "success");
             this.checking = false;
         },
         progressPercent() {
@@ -1185,4 +1207,19 @@ function systemUpdate() {
     }
 }
 </script>
+
+
+<script>
+function panelCertificateSettings() {
+ return {
+  domain:'', status:{running:false}, timer:null, refreshing:false, checking:false, starting:false, message:'', verified:false,
+  async init(){await this.refresh();this.domain=this.status.domain || '';this.timer=setInterval(()=>{if(!document.hidden)this.refresh();},30000);},
+  destroy(){if(this.timer)clearInterval(this.timer);},
+  async refresh(){if(this.refreshing)return;this.refreshing=true;try{const r=await api('/settings/panel-certificate');this.status=r.data || {};}catch(e){this.message=e.message;this.verified=false;}finally{this.refreshing=false;}},
+  async check(){this.checking=true;this.message='';try{await api('/settings/panel-domain/check',{method:'POST',body:{domain:this.domain},timeout:45000});this.message=t('settings.panel_domain_verified');this.verified=true;}catch(e){this.message=e.message;this.verified=false;}finally{this.checking=false;}},
+  async apply(){if(!await confirmModal(t('settings.panel_certificate_confirm')))return;this.starting=true;this.message='';try{await api('/settings/panel-certificate',{method:'POST',body:{domain:this.domain}});await this.refresh();}catch(e){this.message=e.message;this.verified=false;}finally{this.starting=false;}}
+ };
+}
+</script>
+
 {{end}}

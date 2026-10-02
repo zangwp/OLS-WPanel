@@ -303,3 +303,17 @@ function alertModal(message) {
         overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(); } };
     });
 }
+
+// Native details handles taps; opening on hover also exposes its closed content.
+document.addEventListener('pointerover', event => {
+    const tip = event.target.closest('.help-tip');
+    if (tip && event.pointerType !== 'touch' && !tip.open) {
+        tip.dataset.hoverOpened = '1'; tip.open = true;
+    }
+});
+document.addEventListener('pointerout', event => {
+    const tip = event.target.closest('.help-tip');
+    if (tip && !tip.contains(event.relatedTarget) && tip.dataset.hoverOpened) {
+        delete tip.dataset.hoverOpened; tip.open = false;
+    }
+});

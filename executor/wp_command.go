@@ -158,7 +158,85 @@ diag() {
     fi
 }
 
+vps_info() {
+    echo "── VPS 信息 ──"
+    . /etc/os-release
+    echo "系统: ${PRETTY_NAME:-Linux}"
+    echo "主机: $(hostname)    内核: $(uname -r)    架构: $(uname -m)"
+    echo "CPU: $(getconf _NPROCESSORS_ONLN) 核"
+    grep -m1 'model name' /proc/cpuinfo 2>/dev/null || true
+    free -h
+    df -h /
+    echo "IP: $(hostname -I)"
+    uptime -p
+    date
+}
+need_root() { [ "${EUID:-$(id -u)}" -eq 0 ] || { red "需要 root 权限"; return 1; }; }
+confirm_vps() {
+    local answer=""
+    echo "$1"
+    read -r -p "输入 YES 继续，其他输入取消: " answer < /dev/tty || return 1
+    [ "$answer" = "YES" ]
+}
+vps_choose() {
+    local value=""
+    read -r -p "$2" value < /dev/tty || return 1
+    case "$1:$value" in
+      dns:1) value=international;; dns:2) value=mainland_china;; dns:0) value=default;;
+      ip-priority:1) value=ipv4;; ip-priority:2) value=ipv6;; ip-priority:0) value=default;;
+      tuning:1) value=balanced;; tuning:2) value=website;; tuning:0) value=default;;
+      locale:1) value=en_US.UTF-8;; locale:2) value=zh_CN.UTF-8;; locale:3) value=zh_TW.UTF-8;;
+      *) echo "已取消"; return 0;;
+    esac
+    need_root && confirm_vps "将修改 $1 设置: $value" && "$BIN" --vps-tool "$1" --vps-value "$value" --config "$CFG"
+}
+check_project_update() {
+    local current=""
+    current=$("$BIN" --info --config "$CFG" | sed -n 's/^版本: \([^ ]*\).*/\1/p')
+    python3 - "$current" <<'PYUPDATE'
+import json,sys,urllib.request
+try:
+ request=urllib.request.Request('https://api.github.com/repos/zangwp/OLS-WPanel/releases/latest',headers={'User-Agent':'OLS-WPanel'})
+ with urllib.request.urlopen(request,timeout=15) as response: release=json.load(response)
+ latest=release['tag_name']; current=sys.argv[1]
+ def version(s):return tuple(map(int,s.lstrip('v').split('.')))
+ print('当前版本: '+current+'  最新发布: '+latest)
+ print('有新版本，使用 o update 更新' if version(latest)>version(current) else '当前版本没有可用更新')
+except Exception as error:
+ print('检查更新失败: '+str(error),file=sys.stderr);sys.exit(1)
+PYUPDATE
+}
+vps_menu() {
+    local choice=""
+    while true; do
+      echo ""
+      echo "1. VPS 信息   2. 更新系统   3. 系统清理"
+      echo "4. 设置 DNS   5. IPv4/IPv6 优先   6. 网站调优   7. 系统语言"
+      echo "8. 检查项目更新   9. 更新面板   0. 退出"
+      read -r -p "请选择: " choice < /dev/tty || return 0
+      case "$choice" in
+        1) vps_info;; 2) "$0" system-update;; 3) "$0" clean;;
+        4) "$0" dns;; 5) "$0" ip;; 6) "$0" tuning;; 7) "$0" language;;
+        8) check_project_update;; 9) "$0" update;; 0) return 0;; *) echo "无效选项";;
+      esac
+    done
+}
+
 case "${1:-}" in
+    menu) vps_menu ;;
+    vps) vps_info ;;
+    check-update) check_project_update ;;
+    system-update)
+        need_root && confirm_vps "更新 VPS 软件包，不更新面板、不自动重启服务器。" && "$BIN" --vps-tool system-update --config "$CFG" ;;
+    system-update-status) "$BIN" --vps-tool system-update-status --config "$CFG" ;;
+    clean)
+        need_root || exit 1
+        "$BIN" --vps-tool clean-preview --config "$CFG" || exit 1
+        confirm_vps "清理 APT 下载缓存和超过14天的归档系统日志；保留网站、数据库、备份，不卸载软件。" && "$BIN" --vps-tool clean --config "$CFG" ;;
+    dns) vps_choose dns "1 国外 DNS / 2 国内 DNS / 0 恢复原配置: " ;;
+    ip) vps_choose ip-priority "1 IPv4优先 / 2 IPv6优先 / 0 系统默认: " ;;
+    tuning) vps_choose tuning "1 均衡 / 2 网站推荐 / 0 恢复原配置: " ;;
+    language) vps_choose locale "1 英文 / 2 简体中文 / 3 繁体中文: " ;;
     restart)
         echo "正在重启面板..."
         if systemctl restart "$SVC" 2>/dev/null; then
@@ -193,8 +271,16 @@ case "${1:-}" in
         run_lifecycle --repair
         ;;
     uninstall)
-        echo "普通卸载会保留网站、数据库、站点证书和共享软件。"
-        run_lifecycle --uninstall
+        if [ "${2:-}" = "--all" ]; then
+            # 完全卸载将删除网站文件、网站数据库与 OLS 面板；备份另行选择。
+            red "完全卸载：删除网站、数据库与面板，并移除运行环境。"
+            run_lifecycle --purge
+        elif [ -z "${2:-}" ]; then
+            echo "普通卸载会保留网站、数据库、站点证书和共享软件。"
+            run_lifecycle --uninstall
+        else
+            red "用法: o uninstall [--all]"; exit 1
+        fi
         ;;
     status|check)
         echo "OLS WPanel 诊断检查"
@@ -213,7 +299,21 @@ case "${1:-}" in
             SUFFIX=$(python3 -c "import json; d=json.load(open('$CFG')); print(d['panel']['random_suffix'])" 2>/dev/null)
             IP=$(hostname -I 2>/dev/null | awk '{print $1}')
             TLS_PORT=$(python3 -c "import json; d=json.load(open('$CFG')); print(d['panel'].get('tls_port', d['panel']['port']))" 2>/dev/null)
-            [ -n "$TLS_PORT" ] && [ -n "$SUFFIX" ] && [ -n "$IP" ] && echo "面板地址: https://$IP:$TLS_PORT/$SUFFIX"
+            DOMAIN=$(python3 - "$CFG" <<'PYDOMAIN'
+import json,os,re,sys
+try:
+ cfg=json.load(open(sys.argv[1]));path=os.path.join(os.path.dirname(cfg['panel']['tls_cert_path']),'panel-tls-active.json')
+ state=json.load(open(path));domain=state['domain']
+ if re.fullmatch(r'[a-zA-Z0-9.-]+',domain):print(domain)
+except (OSError,KeyError,ValueError):pass
+PYDOMAIN
+)
+            if [ -n "$DOMAIN" ]; then
+                echo "主要地址: https://$DOMAIN:$TLS_PORT/$SUFFIX"
+                echo "备用地址: https://$IP:$TLS_PORT/$SUFFIX（IP 访问可能有证书警告）"
+            else
+                [ -n "$TLS_PORT" ] && [ -n "$SUFFIX" ] && [ -n "$IP" ] && echo "面板地址: https://$IP:$TLS_PORT/$SUFFIX"
+            fi
         fi
         if systemctl is-active --quiet "$SVC"; then
             green "运行状态: 运行中"
@@ -232,6 +332,10 @@ case "${1:-}" in
         echo "  o unban       一键清空所有IP封禁"
         echo "  o update      通过签名发布链更新/修复面板"
         echo "  o uninstall   普通卸载面板（保留网站与数据库）"
+        echo "  o uninstall --all  完全卸载（删除网站和数据库，备份另行选择）"
+        echo "  o check-update     检查项目更新"
+        echo "  o vps / o menu     VPS 信息 / 常用菜单"
+        if [ -t 0 ] && [ -t 1 ]; then vps_menu; fi
         ;;
 esac
 `

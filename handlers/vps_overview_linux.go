@@ -4,6 +4,8 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -41,6 +43,8 @@ func collectVPSOverview() VPSOverview {
 	swapStatus, _ := executor.GetSwapStatus()
 	return VPSOverview{
 		Identity: VPSIdentity{
+			Addresses:      vpsHostAddresses(),
+			Uptime:         runHostCommand("uptime", "-p"),
 			Hostname:       fallback(hostname, "unknown"),
 			OS:             fallback(osName, "Linux"),
 			Kernel:         fallback(runHostCommand("uname", "-r"), "unknown"),
@@ -166,4 +170,25 @@ func fallback(value, replacement string) string {
 func regularFileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+func vpsHostAddresses() []string {
+	result := []string{}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return result
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, _ := iface.Addrs()
+		for _, address := range addresses {
+			ip, _, err := net.ParseCIDR(address.String())
+			if err == nil && ip.IsGlobalUnicast() {
+				result = append(result, fmt.Sprint(ip))
+			}
+		}
+	}
+	return result
 }

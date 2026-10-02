@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -62,6 +63,8 @@ func main() {
 	fileBackup := flag.String("file-backup", "", "执行文件备份: siteID:mode")
 	runScheduledCron := flag.Int("run-scheduled-cron", 0, "内部使用：执行 "+config.ProductName+" 受管计划任务")
 	runAutoBackup := flag.Bool("run-auto-backup", false, "手动触发自动备份（测试用）")
+	vpsTool := flag.String("vps-tool", "", "VPS operation")
+	vpsValue := flag.String("vps-value", "", "VPS operation option")
 	showInfo := flag.Bool("info", false, "查看面板信息")
 	repairConfigCheck := flag.Bool("repair-config-check", false, "内部使用：只读校验 repair 配置")
 	updateWatchdog := flag.String("update-watchdog", "", "内部使用：面板更新健康检查守护")
@@ -88,6 +91,7 @@ func main() {
 			log.Fatalf("加载配置失败: %v", err)
 		}
 		fmt.Printf("%s 面板信息\n", config.ProductName)
+		fmt.Println("管理 VPS 与 WordPress 网站：网站、数据库、缓存、备份和服务器维护。")
 		fmt.Println("─────────────────")
 		if BuildTime != "" && BuildTime != "unknown" {
 			displayTime := BuildTime
@@ -154,6 +158,44 @@ func main() {
 			log.Printf("面板数据库恢复失败: %v", err)
 			os.Exit(1)
 		}
+		return
+	}
+	if *vpsTool != "" {
+		if *vpsTool == "system-update" {
+			status, err := executor.StartSystemPackageUpdate(cfg)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("系统更新已启动: %s\n使用 o system-update-status 查看进度\n", status.ID)
+			return
+		}
+		if *vpsTool == "system-update-status" {
+			status := executor.ReadSystemPackageUpdateStatus(cfg)
+			fmt.Printf("%s / %s\n%s\n", status.Status, status.Stage, status.Detail)
+			return
+		}
+		if *vpsTool == "dns" {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			var err error
+			if *vpsValue == "default" {
+				_, err = executor.RestoreAutomaticDNS(ctx)
+			} else {
+				_, err = executor.ApplyDNSPreset(ctx, *vpsValue)
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("DNS 已更新")
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), executor.SimpleVPSToolTimeout())
+		defer cancel()
+		out, err := executor.RunSimpleVPSTool(ctx, *vpsTool, *vpsValue)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(out)
 		return
 	}
 	if *recordFail2banIP != "" || *unbanFail2banIP != "" {
@@ -315,6 +357,9 @@ func main() {
 	if err := executor.EnsureOpenLiteSpeedServiceRegistration(); err != nil {
 		log.Printf("OpenLiteSpeed service registration recovery failed: %v", err)
 	}
+	if err := executor.EnsurePanelACMEContext(); err != nil {
+		log.Printf("Panel ACME routing migration failed: %v", err)
+	}
 	executor.EnsureWordPressBaseline()
 	// 升级后重建全部 OpenLiteSpeed 虚拟主机，确保新模板和 LSPHP 设置生效。
 	executor.GoSafe(func() {
@@ -370,8 +415,14 @@ func main() {
 	serverErr := make(chan error, 1)
 	go func() {
 		if useTLS {
+			if err := executor.InitializePanelCertificate(cfg.Panel.TLSCertPath, cfg.Panel.TLSKeyPath); err != nil {
+				serverErr <- err
+				return
+			}
+			server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: executor.GetPanelCertificate}
+			executor.StartPanelCertificateRenewal(cfg)
 			log.Printf("%s 启动于端口 %d (HTTPS)", config.ProductName, port)
-			serverErr <- server.ListenAndServeTLS(cfg.Panel.TLSCertPath, cfg.Panel.TLSKeyPath)
+			serverErr <- server.ListenAndServeTLS("", "")
 			return
 		}
 		log.Printf("%s 启动于端口 %d（HTTP，未配置TLS）", config.ProductName, port)
