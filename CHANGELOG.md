@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.15.1 — 2026-10-02
 
 - Simplifies installation completion and the o/O home screen into a compact Chinese summary and vertically grouped VPS/panel menus; moves details and complete uninstall into explicit help/advanced entries.
 - Labels interface addresses accurately and brackets IPv6 addresses in panel URLs.
