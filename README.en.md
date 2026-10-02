@@ -14,7 +14,7 @@ Supports fresh **Debian 13 and Ubuntu 24.04 LTS / Ubuntu 26.04 LTS** servers on 
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The current stable release is `v1.14.0`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes. The next-version source changes have not been released and are not available through this installation URL.
+The current stable release is `v1.15.0`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
 
 On minimal images without curl, install the prerequisites first:
 
@@ -53,16 +53,16 @@ o uninstall       remove the panel, preserving websites, databases and shared so
 
 Ordinary uninstall requires the exact `UNINSTALL` confirmation. Updates use the signed published installation entry.
 
-## Next version in development
+## v1.15.0 changes
 
-The following features are included in the next-version source. They have not been published as a release or deployed to the installation entry.
+New in this release:
 
 - A simple VPS menu and Overview / Maintenance page layout.
 - Custom panel domains, certificate issuance and renewal, with an IP fallback entry.
 - Batched PHP configuration saves and removal of forced LiteSpeed Cache overrides.
 - Dashboard update checks and a complete-uninstall entry with backup retention choices.
 
-See the [development and verification notes](docs/local-next-version.md) for new commands and verification limits. Complete uninstall deletes websites, their databases and the panel, and requires separate confirmation. Do not use draft-only commands with an older release.
+See the [development and verification notes](docs/local-next-version.md) for new commands and verification limits. Complete uninstall deletes websites, their databases and the panel, and requires separate confirmation. These commands require v1.15.0 or newer.
 
 ## Documentation
 
