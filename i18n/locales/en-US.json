@@ -16,7 +16,7 @@
     "database_object_count": "Database persistence objects: {{count}}",
     "database_object_pending": "Database persistence objects: awaiting the first companion-plugin check",
     "baseline_help": "These are the last observed administrators, not an approved trust list. Successful checks also compare application passwords, database persistence objects, published content, and critical settings. Each change alerts once; volume must fall back within the threshold before another alert can trigger. Rotating site keys changes credential and database-object fingerprints and triggers aggregate review alerts.",
-    "plugin_required": "Cannot check: install and activate OLS WPanel companion plugin 1.1.18 or later.",
+    "plugin_required": "Cannot check: the panel sampler is outdated or incompatible. Update or restart the panel and retry.",
     "multisite_unsupported": "WordPress multisite is not supported.",
     "sample_malformed": "Check failed: malformed application-password, database-object, or sampling data was found. Review the WordPress site records manually. Previous results were not updated.",
     "sample_too_large": "Check failed: the inventory or anomaly sample exceeded the safe capacity limit. Previous results were not updated; review the site scale or abnormal data and retry.",

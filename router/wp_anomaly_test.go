@@ -45,10 +45,10 @@ func TestWPAnomalyPanelPlacementAndScript(t *testing.T) {
 		t.Fatal("alert link bypasses random prefix")
 	}
 	code := string(html)
-	if !strings.Contains(code, `x-show="site.site_type === 'wordpress'" id="companion-plugin-controls"`) {
-		t.Fatal("companion controls must not depend on optimization toggles")
+	if !strings.Contains(code, `@click="retireOptimizer()"`) || strings.Contains(code, `@click="installPlugin()"`) {
+		t.Fatal("legacy plugin must offer migration instead of installation")
 	}
-	for _, marker := range []string{"pluginStatus === 'inactive'", "pluginStatus === 'unknown'", "pluginStatusLoading", "fetchPluginStatus()"} {
+	for _, marker := range []string{".includes(pluginStatus)", "pluginStatus === 'not_installed'", "pluginStatusLoading", "fetchPluginStatus()"} {
 		if !strings.Contains(code, marker) {
 			t.Fatalf("missing plugin state UI: %s", marker)
 		}
