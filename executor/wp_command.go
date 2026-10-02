@@ -21,6 +21,7 @@ ENTRY_MAX_BYTES=$((4 * 1024 * 1024))
 
 red()  { echo -e "\033[31m$*\033[0m"; }
 green(){ echo -e "\033[32m$*\033[0m"; }
+blue() { echo -e "\033[1;34m$*\033[0m"; }
 dim()  { echo -e "\033[2m$*\033[0m"; }
 
 run_lifecycle() {
@@ -206,24 +207,77 @@ except Exception as error:
  print('检查更新失败: '+str(error),file=sys.stderr);sys.exit(1)
 PYUPDATE
 }
+panel_help() {
+    blue "OLS WPanel · 命令帮助"
+    echo "用法: o <命令>（也可使用大写 O）"
+    echo "  o / o menu       打开管理菜单"
+    echo "  o vps            查看 VPS 信息"
+    echo "  o info           查看面板详情与安装路径"
+    echo "  o status         诊断检查"
+    echo "  o log [N]        查看最近日志（默认30条）"
+    echo "  o check-update   检查项目更新"
+    echo "  o update         签名更新 / 修复面板"
+    echo "  o restart        重启面板"
+    echo "  o password       重置登录账号密码"
+    echo "  o unban          清除面板 IP 封禁"
+    echo "  o uninstall      普通卸载（保留网站和数据库）"
+    echo "  o advanced       高级操作与完全卸载"
+    echo "  o system-update / system-update-status / clean / dns / ip / tuning / language"
+    dim "项目: https://github.com/zangwp/OLS-WPanel"
+    dim "访问排查: 放行面板端口；运行 o status 或 o log"
+}
+advanced_menu() {
+    local choice=""
+    blue "高级操作"
+    echo "  1. 普通卸载（保留网站和数据库）"
+    echo "  2. 完全卸载（删除网站、数据库和面板）"
+    echo "  0. 返回"
+    read -r -p "请选择: " choice < /dev/tty || return 0
+    case "$choice" in
+      1) "$0" uninstall;;
+      2) "$0" uninstall --all;;
+      0) return 0;;
+      *) echo "无效选项";;
+    esac
+}
 vps_menu() {
     local choice=""
     while true; do
       echo ""
-      echo "1. VPS 信息   2. 更新系统   3. 系统清理"
-      echo "4. 设置 DNS   5. IPv4/IPv6 优先   6. 网站调优   7. 系统语言"
-      echo "8. 检查项目更新   9. 更新面板   0. 退出"
+      blue "VPS 管理"
+      echo "  1. 查看 VPS 信息"
+      echo "  2. 更新系统"
+      echo "  3. 清理系统缓存"
+      echo "  4. 设置 DNS"
+      echo "  5. IPv4 / IPv6 优先"
+      echo "  6. 网站调优"
+      echo "  7. 系统语言"
+      echo ""
+      blue "面板管理"
+      echo "  8. 检查项目更新"
+      echo "  9. 更新面板"
+      echo " 10. 面板详情"
+      echo " 11. 诊断检查"
+      echo " 12. 重启面板"
+      echo " 13. 命令帮助"
+      echo " 14. 高级操作"
+      echo "  0. 退出"
+      echo ""
       read -r -p "请选择: " choice < /dev/tty || return 0
       case "$choice" in
         1) vps_info;; 2) "$0" system-update;; 3) "$0" clean;;
         4) "$0" dns;; 5) "$0" ip;; 6) "$0" tuning;; 7) "$0" language;;
-        8) check_project_update;; 9) "$0" update;; 0) return 0;; *) echo "无效选项";;
+        8) check_project_update;; 9) "$0" update;; 10) "$0" info;;
+        11) "$0" status;; 12) "$0" restart;; 13) panel_help;; 14) advanced_menu;;
+        0) return 0;; *) echo "无效选项";;
       esac
     done
 }
 
 case "${1:-}" in
     menu) vps_menu ;;
+    help|-h|--help) panel_help ;;
+    advanced) advanced_menu ;;
     vps) vps_info ;;
     check-update) check_project_update ;;
     system-update)
@@ -261,7 +315,9 @@ case "${1:-}" in
         $BIN --reset-admin
         ;;
     info)
-        $BIN --info
+        "$BIN" --info --config "$CFG"
+        echo "OpenLiteSpeed: /usr/local/lsws/"
+        echo "MariaDB: /etc/mysql/    Redis: /etc/redis/"
         ;;
     unban)
         $BIN --unban-all
@@ -291,14 +347,18 @@ case "${1:-}" in
     log)
         journalctl -u "$SVC" -n "${2:-30}" --no-pager 2>/dev/null
         ;;
-    *)
-        $BIN --info 2>/dev/null
+    "")
+        echo ""
+        blue "OLS WPanel · VPS 与网站管理"
+        dim "管理网站、数据库、缓存、备份和服务器维护。"
+        $BIN --info --config "$CFG" 2>/dev/null | sed -n 's/^版本: /版本: /p'
         echo ""
         if [ -f "$CFG" ]; then
             PORT=$(python3 -c "import json; d=json.load(open('$CFG')); print(d['panel']['port'])" 2>/dev/null)
             SUFFIX=$(python3 -c "import json; d=json.load(open('$CFG')); print(d['panel']['random_suffix'])" 2>/dev/null)
             IP=$(hostname -I 2>/dev/null | awk '{print $1}')
             TLS_PORT=$(python3 -c "import json; d=json.load(open('$CFG')); print(d['panel'].get('tls_port', d['panel']['port']))" 2>/dev/null)
+            case "$IP" in *:*) IP="[$IP]";; esac
             DOMAIN=$(python3 - "$CFG" <<'PYDOMAIN'
 import json,os,re,sys
 try:
@@ -324,19 +384,10 @@ PYDOMAIN
             diag
         fi
         echo ""
-        echo "用法: o <命令>（也可使用大写 O）"
-        echo "  o restart     重启面板"
-        echo "  o status      完整诊断检查"
-        echo "  o log [N]     查看最近 N 条日志（默认30）"
-        echo "  o password    一键重置管理员账号密码"
-        echo "  o unban       一键清空所有IP封禁"
-        echo "  o update      通过签名发布链更新/修复面板"
-        echo "  o uninstall   普通卸载面板（保留网站与数据库）"
-        echo "  o uninstall --all  完全卸载（删除网站和数据库，备份另行选择）"
-        echo "  o check-update     检查项目更新"
-        echo "  o vps / o menu     VPS 信息 / 常用菜单"
+        dim "输入 o help 查看命令，o info 查看面板详情。"
         if [ -t 0 ] && [ -t 1 ]; then vps_menu; fi
         ;;
+    *) red "未知命令: $1；输入 o help 查看用法"; exit 1 ;;
 esac
 `
 
