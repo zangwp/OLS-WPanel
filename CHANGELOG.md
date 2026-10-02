@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Restores missing native OpenLiteSpeed service registration on panel startup and after system package updates, migrates generated Debian SysV service ownership, preserves custom/stopped native services, and rolls back failed recovery.
+- Validates OpenLiteSpeed configuration before PHP baseline restarts and reports restart errors instead of silently ignoring them.
+
 ## v1.14.0 — 2026-10-02
 
 - Retires the standalone OLS WPanel Optimizer: stops automatic upgrades and installation, moves anomaly sampling into the isolated panel CLI runner, and adds an explicit migration/deactivation/archive action that preserves LiteSpeed Cache and other plugins.
