@@ -1,4 +1,4 @@
-const RELEASE_VERSION = "v1.16.0";
+const RELEASE_VERSION = "v1.16.1";
 const RELEASE_BASE = `https://github.com/zangwp/OLS-WPanel/releases/download/${RELEASE_VERSION}`;
 const BOOTSTRAP_NAME = "bootstrap.sh";
 const PUBLIC_KEY_SPKI_B64 = "MCowBQYDK2VwAyEA5rZthMZ8gkeCHSqxa22OlYSpYtTIRY0fBrUtnLvWW9Y=";
