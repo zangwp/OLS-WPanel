@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.16.1 — 2026-10-03
+
+- Groups terminal status output with aligned, width-aware fields; separates current DNS from candidate presets and historical update errors from live service status.
+- Preserves DNS resolver order and reports the actual read source, including non-resolved environments.
+- Separates advanced queue settings from resource status and disables restore without a valid baseline.
+- Adds concise queue profiles identified from live values, with parameter details and a separate pre-change confirmation; keeps existing values unless explicitly changed.
+- Accepts case-insensitive y/yes for ordinary confirmations while retaining exact destructive confirmations.
+
 ## v1.16.0 — 2026-10-02
 
 - Replaces repeated-install prompts with version-aware maintenance navigation, nests destructive actions, requires confirmation before reinstall and prevents Enter from triggering residual-install repair.
