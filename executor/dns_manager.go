@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +30,7 @@ type DNSStatus struct {
 	Configurable    bool        `json:"configurable"`
 	Manager         string      `json:"manager"`
 	Current         []string    `json:"current"`
+	CurrentSource   string      `json:"current_source"`
 	Managed         bool        `json:"managed"`
 	ActivePreset    string      `json:"active_preset"`
 	IPv6Available   bool        `json:"ipv6_available"`
@@ -66,9 +66,9 @@ func GetDNSStatus() DNSStatus {
 		status.ReasonCode = "unsupported"
 		return status
 	}
-	status.Current = activeDNSAddresses()
-	status.IPv6Available = hasIPv6DefaultRoute()
 	status.Manager = detectDNSManager()
+	status.Current, status.CurrentSource = readCurrentDNS(status.Manager)
+	status.IPv6Available = hasIPv6DefaultRoute()
 	if status.Manager != "systemd-resolved" {
 		status.Reason = "当前 DNS 不由 systemd-resolved 管理，面板只读展示以避免覆盖云厂商网络配置"
 		status.ReasonCode = "external_manager"
@@ -254,21 +254,32 @@ func detectDNSManager() string {
 }
 
 func activeDNSAddresses() []string {
+	values, _ := readCurrentDNS(detectDNSManager())
+	return values
+}
+
+func readCurrentDNS(manager string) ([]string, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if output, err := dnsCommandContext(ctx, "resolvectl", "dns", "--no-pager").Output(); err == nil {
-		if values := parseIPAddresses(string(output)); len(values) > 0 {
-			return values
+	if manager == "systemd-resolved" {
+		if output, err := dnsCommandContext(ctx, "resolvectl", "dns", "--no-pager").Output(); err == nil {
+			if values := parseIPAddresses(string(output)); len(values) > 0 {
+				return values, "resolvectl"
+			}
 		}
 	}
 	data, err := os.ReadFile("/etc/resolv.conf")
 	if err != nil {
-		return []string{}
+		return []string{}, "unavailable"
 	}
+	return parseResolvConf(string(data)), "/etc/resolv.conf"
+}
+
+func parseResolvConf(data string) []string {
 	values := []string{}
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[0] == "nameserver" && net.ParseIP(fields[1]) != nil {
+		if len(fields) >= 2 && fields[0] == "nameserver" && net.ParseIP(fields[1]) != nil {
 			values = append(values, fields[1])
 		}
 	}
@@ -295,7 +306,6 @@ func uniqueDNSStrings(values []string) []string {
 			result = append(result, value)
 		}
 	}
-	sort.Strings(result)
 	return result
 }
 

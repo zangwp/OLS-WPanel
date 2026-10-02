@@ -118,8 +118,44 @@ func TestPanelDNSReturnAndRestoreAreSeparateActions(t *testing.T) {
 	}
 }
 
+func TestDNSCandidateViewAndUnavailableActionsNeverMutate(t *testing.T) {
+	out := runPanelMenuFixture(t, "choices=(1 0 0)\nsettings_page dns\n")
+	if !strings.Contains(out, "VIEW:dns-preset") || strings.Contains(out, "MUTATION:") {
+		t.Fatalf("candidate navigation: %s", out)
+	}
+	out = runPanelMenuFixture(t, "read_view() { echo VIEW:$1; return 2; }\nchoices=(2 0)\ndns_preset_page international\n")
+	if strings.Contains(out, "MUTATION:") {
+		t.Fatal("read-only DNS changed")
+	}
+	out = runPanelMenuFixture(t, "read_view() { echo VIEW:$1; return 2; }\nchoices=(4 0)\nsettings_page tuning\n")
+	if strings.Contains(out, "MUTATION:") {
+		t.Fatal("restore without baseline changed system")
+	}
+}
+
+func TestOrdinaryConfirmationAcceptsCaseInsensitiveYes(t *testing.T) {
+	out := runPanelMenuFixture(t, "for input in y Y yes YES Yes; do is_yes \"$input\" || exit 8; done\nfor input in '' n no yesterday; do if is_yes \"$input\"; then exit 9; fi; done\necho CONFIRM_OK\n")
+	if !strings.Contains(out, "CONFIRM_OK") {
+		t.Fatal(out)
+	}
+}
+
+func TestPanelActualPythonFormatter(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	path := "panel_cli_render_test.py"
+	if _, err := os.Stat(path); err != nil {
+		path = filepath.Join("executor", path)
+	}
+	if out, err := exec.Command(python, path).CombinedOutput(); err != nil {
+		t.Fatalf("formatter regression: %v\n%s", err, out)
+	}
+}
+
 func TestPerformanceMenuDispatchAndSimplifiedNavigation(t *testing.T) {
-	out := runPanelMenuFixture(t, "choices=(1 2 3 0)\nsettings_page tuning\n")
+	out := runPanelMenuFixture(t, "choices=(1 2 4 0)\nsettings_page tuning\n")
 	for _, mode := range []string{"balanced", "website", "default"} {
 		if strings.Count(out, "MUTATION:--vps-tool tuning --vps-value "+mode) != 1 {
 			t.Fatalf("wrong tuning dispatch for %s: %s", mode, out)
