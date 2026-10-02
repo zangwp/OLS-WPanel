@@ -470,8 +470,7 @@ apply_system_tuning() {
 # OLS WPanel — 网络与内核优化
 
 # ── 连接队列 ──
-net.core.somaxconn = 65535
-net.ipv4.tcp_max_syn_backlog = 8192
+# 连接队列由 VPS 性能菜单独立管理；首次安装沿用系统默认值。
 net.core.netdev_max_backlog = 16384
 
 # ── TCP 缓冲区 ──
@@ -1123,7 +1122,7 @@ prepare_panel_candidate() {
 
     preflight_panel_candidate || log_error "已验签面板二进制未通过 --info 安全预检"
     PANEL_CANDIDATE_VERIFIED=true
-    log_info "固定版本 ${INSTALLER_RELEASE_VERSION} 的面板与许可发布包验签、内容校验和预检通过: ${bundle_source}"
+    log_info "安装包 ${INSTALLER_RELEASE_VERSION} 签名与完整性验证通过（${bundle_source}）"
 }
 
 create_repair_backup() {
@@ -2404,6 +2403,95 @@ fi
 exec 9>/run/lock/ols-wpanel-install.lock
 flock -n 9 || log_error "另一个 OLS WPanel 安装或 repair 进程正在运行"
 
+# Maintenance navigation only selects an action; mutations are dispatched afterwards.
+maintenance_read_choice() {
+    choice=""
+    read -r -p "请选择 [0 返回/退出，回车不执行]: " choice < /dev/tty 2>/dev/null || choice=0
+}
+maintenance_command_available() {
+    [[ -f /usr/local/bin/o && -x /usr/local/bin/o && ! -L /usr/local/bin/o ]] &&
+        head -n 5 /usr/local/bin/o | grep -Fqx '# OLS WPanel CLI — o'
+}
+maintenance_current_version() {
+    if ! validate_existing_panel_binary; then return 0; fi
+    timeout 5s "$BIN_PATH" --info --config "$CONFIG_FILE" 2>/dev/null |
+        sed -n 's/^版本: \(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
+}
+installed_maintenance_menu() {
+    local choice="" current="" label="" allow_repair=false
+    INSTALL_MENU_ACTION=exit
+    current=$(maintenance_current_version) || current=""
+    label="更新 / 修复面板"
+    if [[ -n "$current" && "$current" == "$INSTALLER_RELEASE_VERSION" ]]; then
+        label="修复当前版本"
+    elif [[ -n "$current" ]] && panel_version_at_least "$INSTALLER_RELEASE_VERSION" "$current"; then
+        label="更新面板"
+    fi
+    [[ -f "$CONFIG_FILE" ]] && allow_repair=true
+    while true; do
+        echo ""
+        echo "OLS WPanel · 安装维护"
+        echo "────────────────────────────────────────"
+        echo "当前版本：${current:-无法读取（可能存在安装残留）}"
+        echo "目标版本：$INSTALLER_RELEASE_VERSION（本次已验证安装包）"
+        if systemctl is-active --quiet ols-wpanel; then echo "面板状态：运行中"; else echo "面板状态：未运行"; fi
+        if $allow_repair; then
+            echo "1. $label"
+            echo "   保留网站、数据库、面板配置、登录信息和证书"
+        else
+            echo "缺少 config.json，无法安全repair；请查看卸载与重装选项。"
+        fi
+        echo "2. 打开管理菜单"
+        echo "3. 查看面板信息与登录地址"
+        echo "4. 卸载与重装"
+        echo "0. 退出"
+        maintenance_read_choice
+        case "$choice" in
+            0) return ;;
+            "") continue ;;
+            1)
+                if ! $allow_repair; then echo "缺少配置，无法执行修复。"; continue; fi
+                if [[ -n "$current" && "$current" != "$INSTALLER_RELEASE_VERSION" ]] &&
+                    ! panel_version_at_least "$INSTALLER_RELEASE_VERSION" "$current"; then
+                    echo "目标版本低于当前版本或版本无法比较；请使用最新安装入口，未执行降级。"
+                    continue
+                fi
+                INSTALL_MENU_ACTION=repair; return ;;
+            2)
+                if maintenance_command_available; then INSTALL_MENU_ACTION=menu; return; fi
+                echo "管理命令不可用，请先修复面板。" ;;
+            3)
+                if maintenance_command_available; then /usr/local/bin/o info
+                elif validate_existing_panel_binary; then "$BIN_PATH" --info --config "$CONFIG_FILE"
+                else echo "面板信息无法读取，请先修复安装。"; fi
+                ;;
+            4)
+                while true; do
+                    echo ""
+                    echo "OLS WPanel · 卸载与重装"
+                    echo "1. 重新安装面板"
+                    echo "   删除面板配置、登录信息、证书和本地备份；保留网站与网站数据库"
+                    echo "2. 普通卸载"
+                    echo "   删除面板及其本地数据；保留网站、网站数据库和共享软件"
+                    echo "3. 完全卸载"
+                    echo "   删除网站、网站数据库、面板及相关运行环境；备份另行选择"
+                    echo "0. 返回"
+                    maintenance_read_choice
+                    case "$choice" in
+                        0) break ;;
+                        "") continue ;;
+                        1) INSTALL_MENU_ACTION=reinstall; return ;;
+                        2) INSTALL_MENU_ACTION=uninstall; return ;;
+                        3) INSTALL_MENU_ACTION=purge; return ;;
+                        *) echo "无效选项" ;;
+                    esac
+                done
+                ;;
+            *) echo "无效选项" ;;
+        esac
+    done
+}
+
 # ============================================================
 # 重复安装/残留安装检测
 # ============================================================
@@ -2448,84 +2536,29 @@ elif [[ "$REQUESTED_ACTION" == "purge" ]]; then
     [[ "$full_confirmation" == "完全卸载" ]] || { log_info "已取消"; exit 0; }
     do_purge
     exit 0
-elif $INSTALL_COMPLETE; then
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  检测到 OLS WPanel 已安装${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  1) 继续/修复安装（${GREEN}保留面板配置、凭据和TLS身份${NC}）"
-    echo -e "  2) 卸载后重新安装（${YELLOW}重建面板身份和状态${NC}）"
-    echo -e "  3) 仅卸载面板（${GREEN}删除面板状态；保留站点数据/数据库/软件${NC}）"
-    echo -e "  4) 彻底清空（${RED}高风险：删除站点目录/配置并卸载共享软件${NC}）"
-    echo -e "  5) 退出"
-    echo ""
-    echo -e "  输入数字后回车进行选择。"
-
-    read -r -p "  > " choice < /dev/tty 2>/dev/null || read -r choice
-
-    case "${choice:-5}" in
-        1)
-            REPAIR_MODE=true
-            log_info "继续/修复安装：将保留现有面板身份和配置"
-            ;;
-        2)
+elif $INSTALL_TRACES || $INSTALL_COMPLETE; then
+    installed_maintenance_menu
+    case "$INSTALL_MENU_ACTION" in
+        repair) REPAIR_MODE=true ;;
+        reinstall)
+            confirm_ordinary_uninstall || { log_info "已取消重新安装"; exit 0; }
             do_uninstall
             log_info "开始重新安装..."
             ;;
-        3)
+        uninstall)
+            confirm_ordinary_uninstall || { log_info "已取消普通卸载"; exit 0; }
             do_uninstall
             exit 0
             ;;
-        4)
-            do_purge
-            exit 0
+        purge) do_purge; exit 0 ;;
+        menu)
+            # Release the installer lock before handing over to commands that may update.
+            flock -u 9
+            /usr/local/bin/o menu < /dev/tty
+            exit $?
             ;;
-        *)
-            echo -e "${GREEN}已取消，面板保持现有状态${NC}"
-            exit 0
-            ;;
+        *) log_info "已退出，未执行安装或卸载"; exit 0 ;;
     esac
-elif $INSTALL_TRACES; then
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  检测到 OLS WPanel 上次安装未完成或存在残留${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if [[ -f "$CONFIG_FILE" ]]; then
-        echo -e "  1) 继续/修复安装（${GREEN}保留面板配置、凭据和TLS身份${NC}）"
-        echo -e "  2) 清理面板残留后重新安装（${YELLOW}重建面板身份和状态${NC}）"
-        echo -e "  3) 仅卸载面板残留（${GREEN}删除面板状态；保留站点数据/数据库/软件${NC}）"
-        echo -e "  4) 彻底清空（${RED}高风险：删除站点目录/配置并卸载共享软件${NC}）"
-        echo -e "  5) 退出"
-        echo ""
-        echo -e "  直接回车将继续/修复安装。"
-    else
-        echo -e "${RED}  检测到面板状态但缺少config.json，无法安全repair。${NC}"
-        echo -e "  1) 清理面板残留后重新安装（${YELLOW}重建面板身份和状态${NC}）"
-        echo -e "  2) 仅卸载面板残留（${GREEN}删除面板状态；保留站点数据/数据库/软件${NC}）"
-        echo -e "  3) 彻底清空（${RED}高风险：删除站点目录/配置并卸载共享软件${NC}）"
-        echo -e "  4) 退出"
-    fi
-
-    read -r -p "  > " choice < /dev/tty 2>/dev/null || read -r choice
-
-    if [[ -f "$CONFIG_FILE" ]]; then
-        case "${choice:-1}" in
-            1) REPAIR_MODE=true; log_info "继续/修复安装：将保留现有面板身份和配置" ;;
-            2) do_uninstall; log_info "开始重新安装..." ;;
-            3) do_uninstall; exit 0 ;;
-            4) do_purge; exit 0 ;;
-            *) echo -e "${GREEN}已取消，系统保持现有状态${NC}"; exit 0 ;;
-        esac
-    else
-        case "${choice:-4}" in
-            1) do_uninstall; log_info "开始重新安装..." ;;
-            2) do_uninstall; exit 0 ;;
-            3) do_purge; exit 0 ;;
-            *) echo -e "${GREEN}已取消，系统保持现有状态${NC}"; exit 0 ;;
-        esac
-    fi
 fi
 
 assert_panel_command_paths_available

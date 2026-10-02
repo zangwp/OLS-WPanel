@@ -103,8 +103,8 @@ func ProbeDNSPreset(ctx context.Context, presetID string) (DNSStatus, error) {
 	if status.IPv6Available {
 		status.IPv6ProbeOK = probeDNSFamily(ctx, "udp6", preset.IPv6)
 	}
-	if !status.IPv4ProbeOK {
-		return status, errors.New("IPv4 DNS 检测失败，未修改系统配置")
+	if !status.IPv4ProbeOK && !status.IPv6ProbeOK {
+		return status, errors.New("IPv4 与 IPv6 均无可用 DNS，未修改系统配置")
 	}
 	return status, nil
 }
@@ -133,7 +133,7 @@ func ApplyDNSPreset(ctx context.Context, presetID string) (DNSStatus, error) {
 		return status, errors.New("拒绝覆盖非 OLS WPanel 管理的 DNS 配置")
 	}
 	includeIPv6 := status.IPv6Available && status.IPv6ProbeOK
-	data := renderResolvedDNSConfig(preset, includeIPv6)
+	data := renderResolvedDNSFamilies(preset, status.IPv4ProbeOK, includeIPv6)
 	if err := os.MkdirAll(filepath.Dir(dnsDropInPath), 0755); err != nil {
 		return status, err
 	}
@@ -145,9 +145,11 @@ func ApplyDNSPreset(ctx context.Context, presetID string) (DNSStatus, error) {
 		recordOperationLog("dns_apply_preset", presetID, "failed", err.Error())
 		return GetDNSStatus(), err
 	}
-	if !containsAnyDNS(activeDNSAddresses(), preset.IPv4) {
+	active := activeDNSAddresses()
+	if (status.IPv4ProbeOK && !containsAnyDNS(active, preset.IPv4)) ||
+		(includeIPv6 && !containsAnyDNS(active, preset.IPv6)) {
 		restoreDNSConfig(ctx, oldData, oldExists)
-		err = errors.New("systemd-resolved 未加载新的 IPv4 DNS，已自动恢复原配置")
+		err = errors.New("systemd-resolved 未加载已选择的 DNS，已自动恢复原配置")
 		recordOperationLog("dns_apply_preset", presetID, "failed", err.Error())
 		return GetDNSStatus(), err
 	}
@@ -204,7 +206,14 @@ func findDNSPreset(id string) (DNSPreset, bool) {
 }
 
 func renderResolvedDNSConfig(preset DNSPreset, includeIPv6 bool) string {
-	servers := append([]string{}, preset.IPv4...)
+	return renderResolvedDNSFamilies(preset, true, includeIPv6)
+}
+
+func renderResolvedDNSFamilies(preset DNSPreset, includeIPv4, includeIPv6 bool) string {
+	servers := []string{}
+	if includeIPv4 {
+		servers = append(servers, preset.IPv4...)
+	}
 	if includeIPv6 {
 		servers = append(servers, preset.IPv6...)
 	}
@@ -212,10 +221,17 @@ func renderResolvedDNSConfig(preset DNSPreset, includeIPv6 bool) string {
 }
 
 func presetFromConfig(config string) string {
+	var addresses []string
+	for _, line := range strings.Split(config, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "DNS=") {
+			addresses = parseIPAddresses(strings.TrimPrefix(strings.TrimSpace(line), "DNS="))
+		}
+	}
 	for _, preset := range DNSPresets() {
-		match := true
-		for _, address := range preset.IPv4 {
-			if !strings.Contains(config, address) {
+		match := len(addresses) > 0
+		allowed := append(append([]string{}, preset.IPv4...), preset.IPv6...)
+		for _, address := range addresses {
+			if !containsAnyDNS(allowed, []string{address}) {
 				match = false
 			}
 		}

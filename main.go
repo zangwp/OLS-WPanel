@@ -23,6 +23,7 @@ import (
 	"github.com/zangwp/OLS-WPanel/config"
 	"github.com/zangwp/OLS-WPanel/database"
 	"github.com/zangwp/OLS-WPanel/executor"
+	"github.com/zangwp/OLS-WPanel/handlers"
 	"github.com/zangwp/OLS-WPanel/middleware"
 	"github.com/zangwp/OLS-WPanel/router"
 
@@ -161,6 +162,29 @@ func main() {
 		return
 	}
 	if *vpsTool != "" {
+		if *vpsTool == "dns-status" || *vpsTool == "dns-test" {
+			status := executor.GetDNSStatus()
+			var probeErr error
+			if *vpsTool == "dns-test" {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				status, probeErr = executor.ProbeDNSPreset(ctx, *vpsValue)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
+				log.Fatal(err)
+			}
+			if probeErr != nil {
+				log.Fatal(probeErr)
+			}
+			return
+		}
+		if *vpsTool == "time-sync" {
+			if err := handlers.StartSystemTimeSync(); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("自动校时已启动；是否已同步请查看当前状态。")
+			return
+		}
 		if *vpsTool == "system-update" {
 			status, err := executor.StartSystemPackageUpdate(cfg)
 			if err != nil {
@@ -170,8 +194,10 @@ func main() {
 			return
 		}
 		if *vpsTool == "system-update-status" {
-			status := executor.ReadSystemPackageUpdateStatus(cfg)
-			fmt.Printf("%s / %s\n%s\n", status.Status, status.Stage, status.Detail)
+			status := executor.ReconcileSystemPackageUpdateStatus(cfg)
+			if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
+				log.Fatal(err)
+			}
 			return
 		}
 		if *vpsTool == "dns" {

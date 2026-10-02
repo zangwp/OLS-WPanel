@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.16.0 — 2026-10-02
+
+- Replaces repeated-install prompts with version-aware maintenance navigation, nests destructive actions, requires confirmation before reinstall and prevents Enter from triggering residual-install repair.
+
+- Makes performance status read-only by default, including sampled CPU usage; moves explicitly confirmed queue changes into advanced settings and removes misleading optimization profile labels.
+
+- Rebuilds SSH navigation with eight compact home entries, dedicated status pages, consistent back actions, terminal redraws and pauses after results; retains existing shortcuts.
+- Shows dual-stack DNS presets, resolver ownership and probe results; disables unsupported DNS mutations and permits verified IPv6-only resolvers.
+- Adds network connectivity checks, time synchronization and timezone pages; displays package update tasks and measured cleanup results.
+- Unifies queue ownership: fresh installs retain system defaults; explicit presets migrate legacy installer queue entries, verify live values and persist restored values across reboot.
+- Removes duplicate diagnostics/detail menu entries, clarifies cached package-index refresh, and separates current SSH locale from the system default.
+
 ## v1.15.1 — 2026-10-02
 
 - Simplifies installation completion and the o/O home screen into a compact Chinese summary and vertically grouped VPS/panel menus; moves details and complete uninstall into explicit help/advanced entries.
