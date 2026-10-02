@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.15.0 — 2026-10-02
 
 - Adds a compact VPS maintenance menu to o/O while retaining panel information and existing shortcuts; keeps domain login as the main entry and IP as fallback.
 - Adds VPS information, system-update status, bounded cache/journal cleanup, managed DNS, reversible IP preference and connection queue presets, and server locale selection.
