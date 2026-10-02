@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -49,7 +51,7 @@ func TestInstallerPreservesExistingFirewallOwnership(t *testing.T) {
 		`repair模式保留现有防火墙规则和默认策略`,
 		`ufw status 2>/dev/null | grep -F "Status: active" >/dev/null`,
 		`未覆盖其余规则或默认策略`,
-		`nft list ruleset 2>/dev/null | grep -F "hook input" >/dev/null`,
+		`if has_existing_nft_input_policy; then`,
 		`检测到自定义 nftables 入站链`,
 	} {
 		if !strings.Contains(script, required) {
@@ -61,5 +63,50 @@ func TestInstallerPreservesExistingFirewallOwnership(t *testing.T) {
 	mariaDB := requiredIndex(t, script, "# MariaDB 安全加固")
 	if call >= mariaDB {
 		t.Fatalf("firewall baseline must be configured before MariaDB setup: firewall=%d mariadb=%d", call, mariaDB)
+	}
+}
+
+func TestInstallerDistinguishesFail2banFromFirewallPolicy(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	script := readInstallScript(t, installScriptPath)
+	helper := extractShellFunction(t, script, "has_existing_nft_input_policy", "configure_fresh_firewall")
+	for _, tc := range []struct {
+		name, rules      string
+		active, existing bool
+	}{
+		{"empty", "", true, false},
+		{"managed fail2ban", "table inet f2b-table {\n type filter hook input priority -1; policy accept;\n}", true, false},
+		{"custom policy", "table inet filter {\n type filter hook input priority filter; policy drop;\n}", true, true},
+		{"custom fail2ban drop", "table inet f2b-table {\n type filter hook input priority -1; policy drop;\n}", true, true},
+		{"unmanaged fail2ban", "table inet f2b-table {\n type filter hook input priority -1; policy accept;\n}", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := "1"
+			if tc.active {
+				state = "0"
+			}
+			fixture := `nft() { printf '%s\n' "$RULES"; }; fail2ban-client() { :; }; systemctl() { return ` + state + `; }; log_error() { exit 99; };` + "\n" + helper + "\nhas_existing_nft_input_policy"
+			cmd := exec.Command(bash, "-c", fixture)
+			cmd.Env = append(os.Environ(), "RULES="+tc.rules)
+			output, runErr := cmd.CombinedOutput()
+			code := 0
+			if runErr != nil {
+				if exit, ok := runErr.(*exec.ExitError); ok {
+					code = exit.ExitCode()
+				} else {
+					t.Fatal(runErr)
+				}
+			}
+			want := 1
+			if tc.existing {
+				want = 0
+			}
+			if code != want {
+				t.Fatalf("exit=%d, want=%d: %s", code, want, output)
+			}
+		})
 	}
 }

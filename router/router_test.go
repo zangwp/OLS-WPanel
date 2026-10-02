@@ -1722,51 +1722,25 @@ func TestSidebarNavigationOrder(t *testing.T) {
 	}
 }
 
-func TestBaseProvidesPersistentLightDarkThemeToggle(t *testing.T) {
+func TestPanelKeepsDarkAppearance(t *testing.T) {
 	source, err := os.ReadFile("../templates/base.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range [][]byte{
-		[]byte(`/css/theme.css`),
-		[]byte(`localStorage.getItem('ols-wpanel-theme')`),
-		[]byte(`localStorage.setItem('ols-wpanel-theme'`),
-		[]byte(`ols-wpanel-theme-change`),
-		[]byte(`@click="toggleTheme()"`),
-		[]byte(`class="panel-page-shell"`),
-		[]byte(`class="sidebar-footer`),
-		[]byte(`nav.group_sites`),
-		[]byte(`nav.group_operations`),
-	} {
-		if !bytes.Contains(source, required) {
-			t.Fatalf("base theme support is missing %q", required)
+	if !bytes.Contains(source, []byte(`data-theme="dark"`)) {
+		t.Fatal("dark appearance is missing")
+	}
+	for _, forbidden := range []string{"toggleTheme", "ols-wpanel-theme", "theme.label"} {
+		if bytes.Contains(source, []byte(forbidden)) {
+			t.Fatalf("removed appearance control remains: %s", forbidden)
 		}
 	}
-	if bytes.Contains(source, []byte(`href="/{{$.RandomSuffix}}/extensions"`)) {
-		t.Fatal("removed extension configuration still appears in the sidebar")
-	}
-}
-
-func TestLightThemeOverridesCompiledComponentColors(t *testing.T) {
-	source, err := os.ReadFile("../static/css/theme.css")
+	css, err := os.ReadFile("../static/css/theme.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range [][]byte{
-		[]byte(`html[data-theme="light"] .table-cell`),
-		[]byte(`html[data-theme="light"] .table-header`),
-		[]byte(`html[data-theme="light"] .label`),
-		[]byte(`html[data-theme="light"] .input-field::placeholder`),
-		[]byte(`--panel-muted: #334155`),
-		[]byte(`--panel-subtle: #475569`),
-		[]byte(`.panel-page-shell`),
-		[]byte(`.sidebar-section-label`),
-		[]byte(`html[data-theme="light"] .runtime-version`),
-		[]byte(`color: #166534 !important`),
-	} {
-		if !bytes.Contains(source, required) {
-			t.Fatalf("light theme contrast override is missing %q", required)
-		}
+	if bytes.Contains(css, []byte(`data-theme="light"`)) {
+		t.Fatal("removed light styles remain")
 	}
 }
 

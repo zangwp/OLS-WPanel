@@ -6,16 +6,6 @@
     <meta name="csrf-token" content="{{.CSRFToken}}">
     <link rel="icon" type="image/png" sizes="180x180" href="{{.AssetPrefix}}/logo.png">
     <title>{{if .Title}}{{.Title}} - {{end}}{{.PanelTitle}}</title>
-    <script>
-        (() => {
-            const saved = localStorage.getItem('ols-wpanel-theme');
-            const theme = saved === 'light' || saved === 'dark'
-                ? saved
-                : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-            document.documentElement.dataset.theme = theme;
-            document.documentElement.classList.toggle('dark', theme === 'dark');
-        })();
-    </script>
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/main.css?v={{.AssetVersion}}">
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/theme.css?v={{.AssetVersion}}">
     <script defer src="{{.AssetPrefix}}/js/alpine.min.js?v={{.AssetVersion}}"></script>
@@ -31,14 +21,6 @@
 <body class="bg-gray-900 text-gray-100 min-h-screen" data-panel-prefix="/{{.RandomSuffix}}" data-lang="{{.Lang}}">
     <div x-data="{
              sidebarOpen: window.innerWidth >= 1024,
-             theme: document.documentElement.dataset.theme || 'dark',
-             toggleTheme() {
-                 this.theme = this.theme === 'dark' ? 'light' : 'dark';
-                 document.documentElement.dataset.theme = this.theme;
-                 document.documentElement.classList.toggle('dark', this.theme === 'dark');
-                 localStorage.setItem('ols-wpanel-theme', this.theme);
-                 window.dispatchEvent(new CustomEvent('ols-wpanel-theme-change', { detail: { theme: this.theme } }));
-             },
              async logout() {
                  try { await api('/auth/logout', { method: 'POST' }); } catch(e) {}
                  window.location.href = '/' + document.body.dataset.panelPrefix.replace('/', '') + '/login';
@@ -189,18 +171,6 @@
                                 <span>/</span>
                                 <a href="?lang=en-US" class="{{if eq .Lang "en-US"}}text-blue-400{{else}}text-gray-400{{end}}">{{t .Lang "language.english"}}</a>
                             </div>
-                        </div>
-                        <div class="px-3 pb-2 text-xs text-gray-500">
-                            <div class="mb-2">{{t .Lang "theme.label"}}</div>
-                            <button type="button" @click="toggleTheme()" class="theme-toggle" :aria-label="theme === 'dark' ? '{{t .Lang "theme.switch_light"}}' : '{{t .Lang "theme.switch_dark"}}'">
-                                <svg x-show="theme === 'dark'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364-.707-.707M6.343 6.343l-.707-.707m12.728 0-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
-                                </svg>
-                                <svg x-show="theme === 'light'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 1012 21a9.003 9.003 0 008.354-5.646z"/>
-                                </svg>
-                                <span x-text="theme === 'dark' ? '{{t .Lang "theme.light"}}' : '{{t .Lang "theme.dark"}}'"></span>
-                            </button>
                         </div>
                         <a href="#" @click.prevent="logout()"
                            class="sidebar-link text-red-400 hover:text-red-300 hover:bg-red-900/20">

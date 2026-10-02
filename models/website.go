@@ -27,6 +27,7 @@ type Website struct {
 	DBName                      string           `json:"db_name"`
 	DBUser                      string           `json:"db_user"`
 	TablePrefix                 string           `json:"table_prefix"`
+	WordPressAdminURL           string           `json:"wordpress_admin_url,omitempty"`
 	LSPHPSocketPath             string           `json:"lsphp_socket_path"`
 	PHPVersion                  string           `json:"php_version"`
 	OLSVHostConfigPath          string           `json:"ols_vhost_config_path"`

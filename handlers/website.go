@@ -433,14 +433,41 @@ func (h *WebsiteHandler) Get(c *gin.Context) {
 		return
 	}
 	if w.SiteType == "wordpress" {
-		if prefix, err := executor.ReadWPTablePrefix(w.WebRoot); err == nil {
-			w.TablePrefix = prefix
-		}
+		refreshWordPressTablePrefix(w)
 		w.WPDebugDisplay = executor.WPDebugDisplayEnabled(w.WebRoot)
+		w.WordPressAdminURL = wordPressAdminURL(w, "")
+		if config.AppConfig != nil {
+			if siteURL, _, err := executor.ReadWPSiteURLs(w.DBName, w.TablePrefix, config.AppConfig); err == nil {
+				w.WordPressAdminURL = wordPressAdminURL(w, siteURL)
+			}
+		}
 	}
 	executor.LoadWebsiteCDNRealIPGroups(w)
 
 	c.JSON(http.StatusOK, models.SuccessResponse(w))
+}
+
+func refreshWordPressTablePrefix(site *models.Website) {
+	if prefix, err := executor.ReadWPTablePrefix(site.WebRoot); err == nil {
+		site.TablePrefix = prefix
+	}
+}
+
+func wordPressAdminURL(site *models.Website, siteURL string) string {
+	if site == nil || site.SiteType != "wordpress" {
+		return ""
+	}
+	scheme := "http"
+	if site.SSLEnabled {
+		scheme = "https"
+	}
+	admin := url.URL{Scheme: scheme, Host: site.Domain, Path: "/wp-admin/"}
+	// Use the configured installation path while keeping the managed domain.
+	if parsed, err := url.Parse(siteURL); err == nil && parsed.Host != "" && parsed.User == nil &&
+		(parsed.Scheme == "http" || parsed.Scheme == "https") {
+		admin.Path = strings.TrimRight(parsed.Path, "/") + "/wp-admin/"
+	}
+	return admin.String()
 }
 
 func isAliasConflicting(alias string, excludeID int) (bool, string) {
@@ -1208,11 +1235,7 @@ func (h *WebsiteHandler) UpdateDomains(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.sync_wp_urls_domain_unchanged")))
 			return
 		}
-		if site.TablePrefix == "" {
-			if prefix, readErr := executor.ReadWPTablePrefix(site.WebRoot); readErr == nil {
-				site.TablePrefix = prefix
-			}
-		}
+		refreshWordPressTablePrefix(site)
 		if site.TablePrefix == "" {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.sync_wp_urls_prefix_required")))
 			return
@@ -1440,11 +1463,7 @@ func (h *WebsiteHandler) GetWPSiteURLs(c *gin.Context) {
 		return
 	}
 
-	if site.TablePrefix == "" {
-		if prefix, err := executor.ReadWPTablePrefix(site.WebRoot); err == nil {
-			site.TablePrefix = prefix
-		}
-	}
+	refreshWordPressTablePrefix(site)
 	if site.TablePrefix == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("未检测到表前缀，请先同步数据库信息"))
 		return
@@ -1505,11 +1524,7 @@ func (h *WebsiteHandler) UpdateWPSiteURLs(c *gin.Context) {
 		return
 	}
 
-	if site.TablePrefix == "" {
-		if prefix, err := executor.ReadWPTablePrefix(site.WebRoot); err == nil {
-			site.TablePrefix = prefix
-		}
-	}
+	refreshWordPressTablePrefix(site)
 	if site.TablePrefix == "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("未检测到表前缀，请先同步数据库信息"))
 		return
@@ -1580,11 +1595,7 @@ func (h *WebsiteHandler) UpdateWPSiteURLs(c *gin.Context) {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("网站不存在"))
 		return
 	}
-	if site.TablePrefix == "" {
-		if prefix, prefixErr := executor.ReadWPTablePrefix(site.WebRoot); prefixErr == nil {
-			site.TablePrefix = prefix
-		}
-	}
+	refreshWordPressTablePrefix(site)
 	if !executor.IsValidWPTablePrefix(site.TablePrefix) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("未检测到表前缀，请先同步数据库信息"))
 		return
@@ -1650,11 +1661,7 @@ func prepareWPAdministratorSite(c *gin.Context) *models.Website {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.wp_admin_wordpress_only")))
 		return nil
 	}
-	if site.TablePrefix == "" {
-		if prefix, err := executor.ReadWPTablePrefix(site.WebRoot); err == nil {
-			site.TablePrefix = prefix
-		}
-	}
+	refreshWordPressTablePrefix(site)
 	if !executor.IsValidWPTablePrefix(site.TablePrefix) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.wp_admin_prefix_required")))
 		return nil
