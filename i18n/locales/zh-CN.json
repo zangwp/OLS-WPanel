@@ -547,13 +547,6 @@
     "chinese": "中文",
     "english": "英文"
   },
-  "theme": {
-    "label": "外观",
-    "light": "切换到白天模式",
-    "dark": "切换到黑夜模式",
-    "switch_light": "切换到白天模式",
-    "switch_dark": "切换到黑夜模式"
-  },
   "dashboard": {
     "vps_management": "VPS 管理",
     "update_available": "发现新版本 {{version}}",
@@ -2054,6 +2047,8 @@
     "change_db_password": "修改数据库密码",
     "database_label": "数据库",
     "user_label": "用户",
+    "open_wp_admin": "登录 WordPress 后台",
+    "companion_role_help": "OLS WPanel 配套插件提供面板连接、文件保护与临时维护、异常监控等集成功能。LiteSpeed Cache 负责页面和对象缓存，可独立运行。删除配套插件后，对应的面板集成功能将无法使用。",
     "new_password_label": "新密码（留空则随机生成）",
     "new_password_placeholder": "留空自动生成24位随机密码",
     "reading": "（读取中...）",
@@ -2790,6 +2785,10 @@
     "confirm_delete_local_wp_package": "确认删除本地 WordPress 安装包？删除后建站时将自动在线下载。",
     "deleted": "已删除",
     "zip_only": "仅支持 .zip 格式",
+    "ntp_waiting": "自动校时已启用，等待同步",
+    "time_help": "时区决定日志和计划任务使用的本地时间。自动校时让服务器时钟保持准确，避免影响证书校验、登录和任务执行。",
+    "time_service_missing": "未检测到时间同步服务。点击同步将安装并启用 systemd-timesyncd；已有校时服务会保留。",
+    "ntp_starting": "正在启动校时…",
     "upload_success": "上传成功",
     "upload_failed": "上传失败",
     "wp_package_busy": "安装包正在处理中，请稍后重试",
@@ -2804,7 +2803,7 @@
     "passwords_not_match": "两次密码不一致",
     "new_password_min_length": "新密码至少8位",
     "no_changes": "无修改内容",
-    "time_sync_triggered": "时间同步已触发",
+    "time_sync_triggered": "自动校时已启用；同步完成后状态会更新。若持续等待，请检查 NTP 网络连通性。",
     "auto_update_saved": "自动更新设置已保存",
     "proxy_required": "请先填写反代地址",
     "connection_ok_with_latency": "连接成功，延迟 {{latency}}ms",

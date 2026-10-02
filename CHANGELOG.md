@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Keeps the panel in dark mode and removes the appearance switch and light styles.
+- Enables persistent nftables rules on fresh installations without mistaking managed Fail2ban ban chains for an existing firewall policy; boot activation saves the current rules without reloading them.
+- Installs a missing time-sync service, preserves existing providers, and distinguishes enabled NTP from confirmed synchronization.
+- Reads the actual WordPress table prefix from wp-config.php for domain operations, prefers the MariaDB client, and reports database errors inline.
+- Adds a WordPress admin link with support for installation subdirectories and clarifies the companion plugin’s role alongside LiteSpeed Cache.
+
 ## v1.13.1 — 2026-10-01
 
 - Fixes fresh Debian installs where OpenLiteSpeed's package registers only a SysV `lsws` service: installs the package-provided native `lshttpd` unit and a compatible `lsws` alias before applying process supervision. Preserves existing native units and repair mode, and rejects conflicting custom services.

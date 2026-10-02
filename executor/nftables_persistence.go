@@ -27,6 +27,11 @@ func EnableNftablesBoot() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// Persist the active rules before enabling boot loading. The packaged file
+	// can still contain an empty/default ruleset while the panel rules are live.
+	if err := persistCurrentNftablesRules(ctx); err != nil {
+		return err
+	}
 	if output, checkErr := nftablesPersistenceCommand(ctx, "nft", "--check", "--file", configPath).CombinedOutput(); checkErr != nil {
 		return fmt.Errorf("nftables 配置验证失败: %s", strings.TrimSpace(string(output)))
 	}

@@ -547,13 +547,6 @@
     "chinese": "Chinese",
     "english": "English"
   },
-  "theme": {
-    "label": "Appearance",
-    "light": "Switch to light mode",
-    "dark": "Switch to dark mode",
-    "switch_light": "Switch to light mode",
-    "switch_dark": "Switch to dark mode"
-  },
   "dashboard": {
     "vps_management": "VPS Management",
     "update_available": "New version {{version}}",
@@ -2503,7 +2496,9 @@
     "update_failed": "Update failed",
     "update_failed_with_error": "Update failed: {{error}}",
     "updated": "Updated",
-    "user_label": "User"
+    "user_label": "User",
+    "open_wp_admin": "Log in to WordPress admin",
+    "companion_role_help": "The OLS WPanel companion provides the panel connection, file protection and temporary maintenance, anomaly monitoring, and related integration. LiteSpeed Cache handles page and object caching and works without the companion. Removing the companion disables these panel integration features."
   },
   "help": {
     "intro": "Running into a problem or have a suggestion? Please use GitHub Issues.",
@@ -2810,7 +2805,7 @@
     "test_connection": "Test connection",
     "test_failed": "Test failed",
     "testing": "Testing...",
-    "time_sync_triggered": "NTP sync triggered",
+    "time_sync_triggered": "Automatic time sync is enabled. The status updates after synchronization; check NTP connectivity if it keeps waiting.",
     "total_records": "Total {{count}} records",
     "unknown_error": "Unknown error",
     "up_to_date_message": "Already up to date",
@@ -2832,7 +2827,11 @@
     "wp_package_invalid": "The file is not a valid full WordPress package.",
     "wp_package_publish_failed": "Package persistence could not be fully confirmed. Refresh its status before retrying.",
     "wp_package_too_large": "The file exceeds the 100 MB limit.",
-    "zip_only": "Only .zip format is supported"
+    "zip_only": "Only .zip format is supported",
+    "ntp_waiting": "Automatic time sync enabled; waiting for synchronization",
+    "time_help": "The timezone controls local times in logs and scheduled tasks. Automatic time sync keeps the server clock accurate for certificate checks, logins, and task timing.",
+    "time_service_missing": "No time-sync service is installed. Sync will install and enable systemd-timesyncd; an existing provider is preserved.",
+    "ntp_starting": "Starting time sync…"
   },
   "2006-01-02": "2006-01-02",
   "20060102": "20060102",

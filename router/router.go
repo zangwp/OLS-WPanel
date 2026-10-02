@@ -22,6 +22,12 @@ import (
 var panelVersion string
 
 var i18nKeys = []string{
+	"settings.sync",
+	"settings.ntp_starting",
+	"settings.ntp_waiting",
+	"website.litespeed_plugin_missing",
+	"website.litespeed_plugin_inactive",
+	"website.litespeed_plugin_active",
 	"anomaly.disabled", "anomaly.pending", "anomaly.last_success", "anomaly.post_count", "anomaly.application_password_count", "anomaly.application_password_pending", "anomaly.database_object_count", "anomaly.database_object_pending",
 	"anomaly.plugin_required", "anomaly.multisite_unsupported", "anomaly.site_busy", "anomaly.site_unavailable",
 	"anomaly.sample_malformed", "anomaly.sample_too_large",

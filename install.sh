@@ -175,6 +175,28 @@ detect_installer_ssh_port() {
     printf '%s\n' "$ssh_port"
 }
 
+has_existing_nft_input_policy() {
+    local ruleset="" line="" table="" managed_fail2ban=false
+    ruleset=$(nft list ruleset 2>/dev/null) || log_error "无法读取当前 nftables 规则，拒绝更改防火墙"
+    if command -v fail2ban-client >/dev/null 2>&1 && systemctl is-active --quiet fail2ban; then
+        managed_fail2ban=true
+    fi
+    while IFS= read -r line; do
+        if [[ "$line" == table\ * ]]; then
+            table="$line"
+        fi
+        if [[ "$line" == *"hook input"* ]]; then
+            # Debian starts Fail2ban during package installation. Its ban-only
+            # table is not the host's baseline firewall policy.
+            if $managed_fail2ban && [[ "$table" == "table inet f2b-table {" && "$line" == *"policy accept;"* ]]; then
+                continue
+            fi
+            return 0
+        fi
+    done <<< "$ruleset"
+    return 1
+}
+
 configure_fresh_firewall() {
     local ssh_port=""
     local nft_stage=""
@@ -196,7 +218,7 @@ configure_fresh_firewall() {
     command -v nft >/dev/null 2>&1 || \
         log_error "缺少 nft 命令，无法配置本机防火墙"
 
-    if nft list ruleset 2>/dev/null | grep -F "hook input" >/dev/null; then
+    if has_existing_nft_input_policy; then
         if nft add rule inet filter input tcp dport 8443 counter accept comment "ols-wpanel-panel" 2>/dev/null || \
            nft add rule ip filter input tcp dport 8443 counter accept comment "ols-wpanel-panel" 2>/dev/null; then
             log_info "检测到现有 nftables 入站策略：仅放行 8443/TCP，未覆盖默认策略"
@@ -2592,6 +2614,20 @@ apt-get install -y \
     lsphp85-imagick
 
 validate_lsphp_wordpress_modules
+
+# Minimal Debian images may omit all time-sync providers. Preserve an existing
+# provider rather than installing a competing daemon or replacing its policy.
+TIME_SYNC_UNIT=""
+for candidate in chrony.service systemd-timesyncd.service ntpsec.service ntp.service; do
+    if systemctl list-unit-files "$candidate" --no-legend 2>/dev/null | grep -q "^${candidate} "; then
+        TIME_SYNC_UNIT="$candidate"
+        break
+    fi
+done
+if [[ -z "$TIME_SYNC_UNIT" ]]; then
+    apt-get install -y --no-install-recommends systemd-timesyncd
+    systemctl enable --now systemd-timesyncd.service || log_error "时间同步服务启动失败"
+fi
 
 log_info "基础组件安装完成"
 else

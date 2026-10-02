@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -65,16 +66,7 @@ var (
 	setSystemHostname = func(hostname string) error {
 		return exec.Command("hostnamectl", "set-hostname", hostname).Run()
 	}
-	enableSystemNTP = func() error {
-		if err := exec.Command("timedatectl", "set-ntp", "true").Run(); err != nil {
-			return err
-		}
-		unit := ntpTimeSyncUnit()
-		if unit == "" {
-			return nil
-		}
-		return exec.Command("systemctl", "restart", unit).Run()
-	}
+	enableSystemNTP    = startSystemTimeSync
 	ntpTimeSyncUnit    = detectNTPTimeSyncUnit
 	readSystemTimezone = getTimezone
 	readSystemHostname = getHostname
@@ -126,6 +118,8 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 		"timezone":          timezone,
 		"hostname":          hostname,
 		"ntp_synced":        ntpSynced,
+		"ntp_enabled":       getNTPEnabled(),
+		"ntp_service":       ntpTimeSyncUnit(),
 		"ntp_server":        ntpServer,
 		"server_time":       time.Now().UnixMilli(),
 		"panel_auto_update": autoUpdate,
@@ -290,7 +284,7 @@ func (h *SettingsHandler) UpdateSettings(c *gin.Context) {
 	if req.NtpSync != nil && *req.NtpSync {
 		if err := enableSystemNTP(); err != nil {
 			log.Printf("启用系统时间同步失败: %v", err)
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse("时间同步启动失败，请检查系统时间服务"))
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("时间同步启动失败: "+err.Error()))
 			return
 		}
 		if !readSystemNTP() {
@@ -550,10 +544,45 @@ func readConfigValue(configPath, section, key string) string {
 }
 
 func getNTPSyncStatus() (bool, string) {
-	out, _ := exec.Command("bash", "-c", "timedatectl show --property=NTP --value 2>/dev/null").CombinedOutput()
+	out, _ := exec.Command("timedatectl", "show", "--property=NTPSynchronized", "--value").Output()
 	synced := strings.TrimSpace(string(out)) == "yes"
-	server := "pool.ntp.org"
+	server := ""
 	return synced, server
+}
+
+var timeSyncCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+func startSystemTimeSync() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	unit := ntpTimeSyncUnit()
+	if unit == "" {
+		// Do not silently replace a deliberately masked or unsupported provider.
+		for _, candidate := range []string{"chrony.service", "systemd-timesyncd.service", "ntpsec.service", "ntp.service"} {
+			out, err := timeSyncCommand(ctx, "systemctl", "show", candidate, "--property=LoadState", "--value")
+			if err == nil && strings.TrimSpace(string(out)) == "masked" {
+				return fmt.Errorf("%s 已被管理员屏蔽，请先检查服务策略", candidate)
+			}
+		}
+		out, err := timeSyncCommand(ctx, "apt-get", "install", "-y", "--no-install-recommends", "systemd-timesyncd")
+		if err != nil {
+			log.Printf("安装时间同步服务失败: %s", out)
+			return fmt.Errorf("缺少时间同步服务，安装 systemd-timesyncd 失败；请检查 APT 与网络")
+		}
+		unit = "systemd-timesyncd.service"
+	}
+	if out, err := timeSyncCommand(ctx, "systemctl", "enable", "--now", unit); err != nil {
+		return fmt.Errorf("启动 %s 失败: %s", unit, strings.TrimSpace(string(out)))
+	}
+	if out, err := timeSyncCommand(ctx, "timedatectl", "set-ntp", "true"); err != nil {
+		return fmt.Errorf("启用自动校时失败: %s", strings.TrimSpace(string(out)))
+	}
+	if out, err := timeSyncCommand(ctx, "systemctl", "restart", unit); err != nil {
+		return fmt.Errorf("重启 %s 失败: %s", unit, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func getNTPEnabled() bool {
@@ -566,7 +595,7 @@ func getNTPEnabled() bool {
 // timedatectl set-ntp 本身对两者都有效，但重启动作必须作用于真实存在的
 // 单元，否则 systemctl restart 会因为单元不存在直接报错。
 func detectNTPTimeSyncUnit() string {
-	for _, unit := range []string{"chrony.service", "systemd-timesyncd.service"} {
+	for _, unit := range []string{"chrony.service", "systemd-timesyncd.service", "ntpsec.service", "ntp.service"} {
 		if systemdUnitExists(unit) {
 			return unit
 		}
@@ -582,7 +611,7 @@ func systemdUnitExists(unit string) bool {
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == unit && fields[1] != "masked" {
+		if len(fields) >= 2 && fields[0] == unit && fields[1] != "masked" && fields[1] != "masked-runtime" {
 			return true
 		}
 	}

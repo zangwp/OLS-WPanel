@@ -19,6 +19,13 @@ import (
 
 var mysqlIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
+func mariaDBClient() string {
+	if path, err := exec.LookPath("mariadb"); err == nil {
+		return path
+	}
+	return "mysql"
+}
+
 func isValidMySQLIdentifier(name string) bool {
 	return name != "" && len(name) <= 64 && mysqlIdentifierPattern.MatchString(name)
 }
@@ -36,7 +43,7 @@ func wpOptionsTableName(tablePrefix string) (string, error) {
 }
 
 func runMySQL(rootPassword string, args ...string) error {
-	cmd := exec.Command("mysql", args...)
+	cmd := exec.Command(mariaDBClient(), args...)
 	cmd.Env = append(os.Environ(), "MYSQL_PWD="+rootPassword)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -47,7 +54,7 @@ func runMySQL(rootPassword string, args ...string) error {
 }
 
 func runMySQLInput(rootPassword, input string, args ...string) error {
-	cmd := exec.Command("mysql", args...)
+	cmd := exec.Command(mariaDBClient(), args...)
 	cmd.Env = append(os.Environ(), "MYSQL_PWD="+rootPassword)
 	cmd.Stdin = strings.NewReader(input)
 	var stderr bytes.Buffer
@@ -76,7 +83,7 @@ func GetMariaDBDatabaseSizes(cfg *config.Config) (map[string]int64, error) {
 		FROM INFORMATION_SCHEMA.TABLES
 		WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
 		GROUP BY TABLE_SCHEMA`
-	cmd := exec.Command("mysql", "-u", cfg.MariaDB.RootUser, "-B", "-N", "-e", query)
+	cmd := exec.Command(mariaDBClient(), "-u", cfg.MariaDB.RootUser, "-B", "-N", "-e", query)
 	cmd.Env = append(os.Environ(), "MYSQL_PWD="+cfg.MariaDB.RootPassword)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -228,7 +235,7 @@ func DetectDBTablePrefix(dbName string, cfg *config.Config) (string, []string, e
 	if !isValidMySQLIdentifier(dbName) {
 		return "", nil, fmt.Errorf("invalid database name")
 	}
-	cmd := exec.Command("mysql", "-u", cfg.MariaDB.RootUser, "-N", "-e",
+	cmd := exec.Command(mariaDBClient(), "-u", cfg.MariaDB.RootUser, "-N", "-e",
 		fmt.Sprintf("SHOW TABLES FROM `%s` LIKE '%%options'", dbName))
 	cmd.Env = append(os.Environ(), "MYSQL_PWD="+cfg.MariaDB.RootPassword)
 	var stdout, stderr bytes.Buffer
@@ -277,6 +284,9 @@ func tablePrefixFromOptionsTable(tableName string) (string, bool) {
 
 // ReadWPSiteURLs 从 wp_options 读取 siteurl 和 home
 func ReadWPSiteURLs(dbName, tablePrefix string, cfg *config.Config) (siteURL, homeURL string, err error) {
+	if cfg == nil {
+		return "", "", fmt.Errorf("面板配置未初始化")
+	}
 	if !isValidMySQLIdentifier(dbName) {
 		return "", "", fmt.Errorf("invalid database name")
 	}
@@ -287,13 +297,17 @@ func ReadWPSiteURLs(dbName, tablePrefix string, cfg *config.Config) (siteURL, ho
 	query := fmt.Sprintf(
 		"SELECT option_name, option_value FROM `%s`.`%s` WHERE option_name IN ('siteurl','home')",
 		dbName, tableName)
-	cmd := exec.Command("mysql", "-u", cfg.MariaDB.RootUser, "-N", "-e", query)
+	cmd := exec.Command(mariaDBClient(), "-u", cfg.MariaDB.RootUser, "-N", "-e", query)
 	cmd.Env = append(os.Environ(), "MYSQL_PWD="+cfg.MariaDB.RootPassword)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", "", fmt.Errorf("查询失败: %s", strings.TrimSpace(stderr.String()))
+		log.Printf("读取 WordPress URL 失败: %s", strings.TrimSpace(stderr.String()))
+		if strings.Contains(stderr.String(), "ERROR 1146") {
+			return "", "", fmt.Errorf("WordPress options 表不存在，请检查数据库与 wp-config.php 中的表前缀；尚未安装 WordPress 的站点也会出现此状态")
+		}
+		return "", "", fmt.Errorf("无法读取 WordPress URL，请检查数据库连接；详细原因已写入面板日志")
 	}
 
 	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
@@ -329,7 +343,7 @@ func ReadWPDiagnosticOptions(dbName, tablePrefix string, cfg *config.Config) (ma
 	query := fmt.Sprintf(
 		"SELECT option_name, option_value FROM `%s`.`%s` WHERE option_name IN ('template','stylesheet','active_plugins')",
 		dbName, tableName)
-	cmd := exec.Command("mysql", "-u", cfg.MariaDB.RootUser, "-N", "-e", query)
+	cmd := exec.Command(mariaDBClient(), "-u", cfg.MariaDB.RootUser, "-N", "-e", query)
 	cmd.Env = append(os.Environ(), "MYSQL_PWD="+cfg.MariaDB.RootPassword)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
