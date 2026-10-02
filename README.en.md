@@ -14,7 +14,7 @@ Supports fresh **Debian 13 and Ubuntu 24.04 LTS / Ubuntu 26.04 LTS** servers on 
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The current stable release is `v1.16.0`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
+The current stable release is `v1.16.1`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
 
 On minimal images without curl, install the prerequisites first:
 
@@ -52,6 +52,13 @@ o uninstall       remove the panel, preserving websites, databases and shared so
 ```
 
 Ordinary uninstall requires the exact `UNINSTALL` confirmation. Updates use the signed published installation entry.
+
+## v1.16.1 changes
+
+- Groups terminal screens with consistent spacing, narrow-terminal wrapping and existing shortcuts.
+- Preserves resolver order and separates configured IPv4/IPv6 DNS from candidate presets.
+- Identifies queue profiles from live values, with parameter details and explicit change confirmation.
+- Separates historical update errors from current status and accepts case-insensitive ordinary confirmations.
 
 ## v1.16.0 changes
 
