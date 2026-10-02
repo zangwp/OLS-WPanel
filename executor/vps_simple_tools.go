@@ -39,6 +39,11 @@ func RunSimpleVPSTool(ctx context.Context, action, value string) (string, error)
 	}
 	defer unlock()
 	switch action {
+	case "timezone":
+		if value != "UTC" && value != "Asia/Shanghai" {
+			return "", fmt.Errorf("unsupported timezone")
+		}
+		return vpsToolCommand(ctx, "timedatectl", "set-timezone", value)
 	case "clean-preview":
 		apt, e := vpsToolCommand(ctx, "du", "-sh", "/var/cache/apt/archives")
 		if e != nil {
@@ -122,18 +127,40 @@ func setVPSIPPriority(mode string) (string, error) {
 	if err = writePanelTLSFile(path, []byte(next), 0644); err != nil {
 		return "", err
 	}
-	return "IP priority: " + mode + "; affects address selection for new outgoing connections", nil
+	return "地址优先级已更新：" + map[string]string{"ipv4": "IPv4 优先", "ipv6": "IPv6 优先", "default": "系统规则"}[mode] + "；对遵循系统规则的新连接生效", nil
 }
 
 var vpsTuningKeys = []string{"net.core.somaxconn", "net.ipv4.tcp_max_syn_backlog"}
 
+// Only migrate our installer-owned queue entries, preserving unrelated settings.
+func stripInstallerQueues(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return data, nil
+	}
+	if !strings.HasPrefix(string(data), "# OLS WPanel — 网络与内核优化") {
+		return nil, fmt.Errorf("安装配置由管理员管理，停止修改连接队列")
+	}
+	re := regexp.MustCompile(`(?m)^\s*net\.(?:core\.somaxconn|ipv4\.tcp_max_syn_backlog)\s*=.*\n?`)
+	return re.ReplaceAll(data, nil), nil
+}
+
 func setVPSTuning(ctx context.Context, mode string) (string, error) {
+	return setVPSTuningAt(ctx, mode, "/etc/sysctl.d/99-ols-wpanel-vps.conf", "/etc/sysctl.d/.ols-wpanel-vps-original.json", "/etc/sysctl.d/99-ols-wpanel.conf", vpsToolCommand)
+}
+
+func setVPSTuningAt(ctx context.Context, mode, path, baseline, installerPath string, runCommand func(context.Context, string, ...string) (string, error)) (string, error) {
 	if mode != "balanced" && mode != "website" && mode != "default" {
 		return "", fmt.Errorf("invalid tuning mode")
 	}
-	const path = "/etc/sysctl.d/99-ols-wpanel-vps.conf"
-	const baseline = "/etc/sysctl.d/.ols-wpanel-vps-original.json"
 	const marker = "# OLS WPanel VPS tuning\n"
+	installer, err := os.ReadFile(installerPath)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	cleanInstaller, err := stripInstallerQueues(installer)
+	if err != nil {
+		return "", err
+	}
 	old, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return "", err
@@ -152,7 +179,7 @@ func setVPSTuning(ctx context.Context, mode string) (string, error) {
 	}
 	current := map[string]string{}
 	for _, key := range vpsTuningKeys {
-		out, e := vpsToolCommand(ctx, "sysctl", "-n", key)
+		out, e := runCommand(ctx, "sysctl", "-n", key)
 		if e != nil {
 			return "", e
 		}
@@ -168,8 +195,8 @@ func setVPSTuning(ctx context.Context, mode string) (string, error) {
 			return "", err
 		}
 	}
-	if mode == "default" && len(old) == 0 {
-		return "Already using original settings", nil
+	if mode == "default" && len(original) == 0 {
+		return "当前没有可恢复的修改前记录", nil
 	}
 	values := map[string]string{"net.core.somaxconn": "4096", "net.ipv4.tcp_max_syn_backlog": "4096"}
 	if mode == "website" {
@@ -188,9 +215,28 @@ func setVPSTuning(ctx context.Context, mode string) (string, error) {
 	if err = writePanelTLSFile(path, []byte(next), 0644); err != nil {
 		return "", err
 	}
-	if _, err = vpsToolCommand(ctx, "sysctl", "-p", path); err != nil {
+	if string(cleanInstaller) != string(installer) {
+		err = writePanelTLSFile(installerPath, cleanInstaller, 0644)
+	}
+	if err == nil {
+		_, err = runCommand(ctx, "sysctl", "-p", path)
+	}
+	if err == nil {
 		for _, key := range vpsTuningKeys {
-			if _, restoreErr := vpsToolCommand(ctx, "sysctl", "-w", key+"="+current[key]); restoreErr != nil {
+			var out string
+			out, err = runCommand(ctx, "sysctl", "-n", key)
+			if err != nil {
+				break
+			}
+			if strings.TrimSpace(out) != values[key] {
+				err = fmt.Errorf("%s 实际值与目标值不一致", key)
+				break
+			}
+		}
+	}
+	if err != nil {
+		for _, key := range vpsTuningKeys {
+			if _, restoreErr := runCommand(ctx, "sysctl", "-w", key+"="+current[key]); restoreErr != nil {
 				err = fmt.Errorf("%w; restoration failed: %v", err, restoreErr)
 			}
 		}
@@ -203,17 +249,20 @@ func setVPSTuning(ctx context.Context, mode string) (string, error) {
 				err = fmt.Errorf("%w; file restoration failed: %v", err, restoreErr)
 			}
 		}
+		if string(cleanInstaller) != string(installer) {
+			if restoreErr := writePanelTLSFile(installerPath, installer, 0644); restoreErr != nil {
+				err = fmt.Errorf("%w; installer restoration failed: %v", err, restoreErr)
+			}
+		}
 		return "", err
 	}
 	if mode == "default" {
-		if err = os.Remove(path); err != nil {
-			return "", err
-		}
+		// Persist the restored values so reboot cannot reintroduce installer values.
 		if err = os.Remove(baseline); err != nil {
 			return "", err
 		}
 	}
-	return "Tuning: " + mode + "; only adjusts connection queues, without changing kernel, BBR, or memory settings", nil
+	return "连接队列配置已更新；未修改内核、BBR 或内存参数", nil
 }
 
 func SimpleVPSToolTimeout() time.Duration { return 2 * time.Minute }

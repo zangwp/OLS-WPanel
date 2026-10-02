@@ -55,6 +55,104 @@ func TestPanelCommandScriptHasValidBashSyntax(t *testing.T) {
 	}
 }
 
+func runPanelMenuFixture(t *testing.T, body string) string {
+	t.Helper()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	definitions, _, ok := strings.Cut(panelCommandScript, "\ncase \"${1:-}\" in")
+	if !ok {
+		t.Fatal("CLI dispatch not found")
+	}
+	fixture := definitions + `
+interactive() { return 0; }
+tput() { echo 80; }
+panel_summary() { echo FIXTURE_PANEL; }
+read_view() { echo "VIEW:$1"; }
+pause_page() { echo PAUSE; }
+need_root() { return 0; }
+confirm_vps() { return 0; }
+mutate() { echo "MUTATION:$*"; }
+BIN=mutate
+TERM=xterm
+index=0
+pick() {
+    [ "$index" -lt "${#choices[@]}" ] || return 1
+    choice="${choices[$index]}"
+    index=$((index+1))
+}
+` + body
+	path := filepath.Join(t.TempDir(), "menu-fixture.sh")
+	if err := os.WriteFile(path, []byte(fixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(bash, path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("menu fixture: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+func TestPanelMenuReturnsWithoutRepeatingResults(t *testing.T) {
+	out := runPanelMenuFixture(t, "choices=(1 4 1 0 0 0)\nvps_menu\n")
+	if strings.Count(out, "VIEW:info") != 1 || strings.Count(out, "VIEW:dns") != 1 || strings.Count(out, "PAUSE") != 1 {
+		t.Fatalf("result pause/navigation failed: %s", out)
+	}
+	if strings.Count(out, "\033[2J\033[H") < 5 {
+		t.Fatal("interactive screens were not redrawn")
+	}
+	if strings.Contains(out, "MUTATION:") {
+		t.Fatal("viewing or returning mutated the system")
+	}
+}
+
+func TestPanelDNSReturnAndRestoreAreSeparateActions(t *testing.T) {
+	back := runPanelMenuFixture(t, "choices=(0)\nsettings_page dns\n")
+	if strings.Contains(back, "MUTATION:") {
+		t.Fatal("zero must only return")
+	}
+	restore := runPanelMenuFixture(t, "choices=(3 0)\nsettings_page dns\n")
+	if strings.Count(restore, "MUTATION:--vps-tool dns --vps-value default") != 1 {
+		t.Fatalf("explicit restore did not dispatch once: %s", restore)
+	}
+}
+
+func TestPerformanceMenuDispatchAndSimplifiedNavigation(t *testing.T) {
+	out := runPanelMenuFixture(t, "choices=(1 2 3 0)\nsettings_page tuning\n")
+	for _, mode := range []string{"balanced", "website", "default"} {
+		if strings.Count(out, "MUTATION:--vps-tool tuning --vps-value "+mode) != 1 {
+			t.Fatalf("wrong tuning dispatch for %s: %s", mode, out)
+		}
+	}
+	ip := runPanelMenuFixture(t, "choices=(0)\nsettings_page ip\n")
+	if strings.Contains(ip, "4. 网络连通性检测") {
+		t.Fatal("duplicate network action")
+	}
+	advanced := runPanelMenuFixture(t, "choices=(0)\nadvanced_menu\n")
+	if strings.Contains(advanced, "安装路径与面板详情") {
+		t.Fatal("duplicate details action")
+	}
+}
+
+func TestPerformanceStatusRefreshDoesNotMutate(t *testing.T) {
+	out := runPanelMenuFixture(t, "choices=(1 0)\nperformance_menu\n")
+	if strings.Contains(out, "MUTATION:") || strings.Count(out, "VIEW:tuning") != 2 {
+		t.Fatalf("status/refresh must only read: %s", out)
+	}
+	if strings.Contains(out, "1. 设为") {
+		t.Fatal("queue changes exposed on status page")
+	}
+	advanced := runPanelMenuFixture(t, "choices=(2 0 0)\nperformance_menu\n")
+	if !strings.Contains(advanced, "高级设置 · 连接队列") || strings.Contains(advanced, "MUTATION:") {
+		t.Fatalf("opening/returning from advanced mutated state: %s", advanced)
+	}
+	canceled := runPanelMenuFixture(t, "confirm_vps() { return 1; }\nchoices=(2 1 0 0)\nperformance_menu\n")
+	if strings.Contains(canceled, "MUTATION:") || !strings.Contains(canceled, "已取消") {
+		t.Fatalf("canceled queue change was not safe: %s", canceled)
+	}
+}
+
 func TestEnsurePanelCommandsAt_RefusesUnrelatedCommandWithoutPartialWrite(t *testing.T) {
 	dir := t.TempDir()
 	occupied := filepath.Join(dir, "lowercase-o")

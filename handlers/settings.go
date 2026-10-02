@@ -554,6 +554,9 @@ var timeSyncCommand = func(ctx context.Context, name string, args ...string) ([]
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
+// StartSystemTimeSync shares the panel's provider-aware synchronization with the CLI.
+func StartSystemTimeSync() error { return startSystemTimeSync() }
+
 func startSystemTimeSync() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

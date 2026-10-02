@@ -46,6 +46,29 @@ func TestParseIPAddressesDeduplicatesResolverOutput(t *testing.T) {
 	}
 }
 
+func TestDNSConfigurationUsesOnlyReachableFamilies(t *testing.T) {
+	preset, _ := findDNSPreset("international")
+	for _, tc := range []struct {
+		name   string
+		v4, v6 bool
+	}{
+		{"IPv4 only", true, false}, {"IPv6 only", false, true}, {"dual stack", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderResolvedDNSFamilies(preset, tc.v4, tc.v6)
+			if strings.Contains(got, "1.1.1.1") != tc.v4 || strings.Contains(got, "2606:4700:4700::1111") != tc.v6 {
+				t.Fatalf("unreachable address family included: %s", got)
+			}
+			if presetFromConfig(got) != preset.ID {
+				t.Fatal("family-specific preset not recognized")
+			}
+		})
+	}
+	if presetFromConfig("DNS=1.1.1.1 8.8.8.8\n") != "custom" {
+		t.Fatal("mixed resolver configuration mistaken for a preset")
+	}
+}
+
 func TestPresetFromConfig(t *testing.T) {
 	preset, _ := findDNSPreset("mainland_china")
 	if got := presetFromConfig(renderResolvedDNSConfig(preset, true)); got != "mainland_china" {
