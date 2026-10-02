@@ -1,7 +1,7 @@
 {
   "anomaly": {
     "title": "Anomaly monitoring",
-    "help": "Requires OLS WPanel companion plugin 1.1.18 or later to be installed and active. Checks administrators, application passwords, database persistence objects, published content, and critical WordPress settings hourly or on demand. Alerts only; no automatic site changes.",
+    "help": "The panel samples administrator, application-password, database-object and content changes hourly using an isolated CLI runner. No Optimizer plugin is required; alerts never modify the website.",
     "enable": "Enable anomaly monitoring",
     "threshold": "Alert when published or modified posts/pages in 24 hours exceed",
     "check": "Check now",
@@ -2278,7 +2278,7 @@
     "cache_ttl_seconds": "Cache TTL (seconds)",
     "wp_optimization_advanced": "Advanced settings",
     "disable_wp_updates": "Stop WordPress Update Checks (not recommended)",
-    "disable_wp_updates_help": "WordPress core, plugin, and theme version and security update notices will no longer appear. Fully suppressing update checks requires the companion plugin and is intended only for sites whose versions are managed elsewhere.",
+    "disable_wp_updates_help": "The panel suppresses WordPress core, plugin and theme update checks using managed configuration. Maintain updates from WP Overview; suppressing notices does not eliminate vulnerabilities.",
     "disable_file_editing": "Disable the WordPress Dashboard Code Editor",
     "disable_file_editing_help": "Prevents administrators from editing plugin and theme code in WordPress admin. Posts, pages, and media management are unaffected.",
     "disable_file_editing_managed": "Already enforced by file protection at the server permission level; no separate setting is needed.",
@@ -2321,7 +2321,7 @@
     "companion_refresh": "Refresh plugin status",
     "companion_checking": "Checking…",
     "companion_unlock_install": "Unlock site files before installing the companion plugin.",
-    "file_lock_enabled_notice": "This site is locked. The panel can update its installed bundled companion while keeping it read-only. Unlock first for initial installation, identity repair, or optimizations that modify wp-config.php.",
+    "file_lock_enabled_notice": "File protection is enabled. Unlock files in the panel before migrating Optimizer or changing configuration.",
     "enable_lock": "Enable lock",
     "unlock": "Unlock",
     "litespeed_cache_how_it_works": "How LiteSpeed Cache Works",
@@ -2498,6 +2498,11 @@
     "updated": "Updated",
     "user_label": "User",
     "open_wp_admin": "Log in to WordPress admin",
+    "optimizer_retired_help": "Optimizer is no longer required. The panel manages configuration, protection and monitoring; LiteSpeed Cache manages caching. WordPress-only policies use a small panel-owned configuration block, with no panel API calls or scheduled plugin tasks.",
+    "optimizer_retire": "Migrate and remove old Optimizer",
+    "optimizer_not_needed": "No Optimizer plugin required",
+    "optimizer_retire_confirm": "Migrate settings to the panel and deactivate Optimizer? Its files will be archived outside the website; LiteSpeed Cache and its settings are preserved. Disable file protection first, then re-enable it after migration.",
+    "optimizer_retire_done": "Optimizer migrated and archived",
     "companion_role_help": "The OLS WPanel companion provides the panel connection, file protection and temporary maintenance, anomaly monitoring, and related integration. LiteSpeed Cache handles page and object caching and works without the companion. Removing the companion disables these panel integration features."
   },
   "help": {

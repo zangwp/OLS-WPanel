@@ -27,6 +27,7 @@ var i18nKeys = []string{
 	"settings.ntp_waiting",
 	"website.litespeed_plugin_missing",
 	"website.litespeed_plugin_inactive",
+	"website.optimizer_retire_confirm", "website.optimizer_retire_done",
 	"website.litespeed_plugin_active",
 	"anomaly.disabled", "anomaly.pending", "anomaly.last_success", "anomaly.post_count", "anomaly.application_password_count", "anomaly.application_password_pending", "anomaly.database_object_count", "anomaly.database_object_pending",
 	"anomaly.plugin_required", "anomaly.multisite_unsupported", "anomaly.site_busy", "anomaly.site_unavailable",
@@ -1673,7 +1674,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.PUT("/api/websites/:id/file-lock", websiteHandler.SetFileLock)
 	protected.GET("/api/websites/:id/file-lock/preview", websiteHandler.PreviewFileLock)
 	protected.PUT("/api/websites/:id/monitoring", websiteHandler.SaveMonitoring)
-	protected.POST("/api/websites/:id/install-plugin", websiteHandler.InstallPlugin)
+	protected.POST("/api/websites/:id/retire-optimizer", websiteHandler.RetireOptimizer)
 	protected.GET("/api/websites/:id/install-plugin/status", websiteHandler.InstallPluginStatus)
 	protected.POST("/api/websites/:id/reinstall-wp", websiteHandler.ReinstallWordPress)
 	aiDevelopmentHandler := &handlers.AIDevelopmentAccessHandler{}

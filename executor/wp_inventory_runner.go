@@ -237,20 +237,21 @@ type wpInventoryRunnerOptions struct {
 }
 
 type WPInventoryRunner struct {
-	anomalyQuery *wpAnomalyQuery // Only set on a fresh monitor-owned runner, never a shared inventory runner.
-	source       []byte
-	hash         string
-	runnerRoot   string
-	trustedRoot  string
-	phpPath      string
-	runuserPath  string
-	phpDir       string
-	runuserDir   string
-	requireRoot  bool
-	ownerUID     int
-	ownerGID     int
-	lookupUser   func(string) (*user.User, error)
-	now          func() time.Time
+	retireOptimizer bool            // Explicit owner-authorized migration, never inherited from parent environment.
+	anomalyQuery    *wpAnomalyQuery // Only set on a fresh monitor-owned runner, never a shared inventory runner.
+	source          []byte
+	hash            string
+	runnerRoot      string
+	trustedRoot     string
+	phpPath         string
+	runuserPath     string
+	phpDir          string
+	runuserDir      string
+	requireRoot     bool
+	ownerUID        int
+	ownerGID        int
+	lookupUser      func(string) (*user.User, error)
+	now             func() time.Time
 }
 
 func NewWPInventoryRunner() (*WPInventoryRunner, error) {
@@ -709,6 +710,9 @@ func (r *WPInventoryRunner) execute(ctx context.Context, input wpInventoryValida
 		forceEnv = "OLS_WPANEL_FORCE_UPDATE_CHECK=1"
 	}
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "HOME=" + input.user.HomeDir, "USER=" + input.user.Name, "LOGNAME=" + input.user.Name, "TMPDIR=/tmp", "OLS_WPANEL_RUNNER_TOKEN=" + token, forceEnv}
+	if r.retireOptimizer {
+		cmd.Env = append(cmd.Env, "OLS_WPANEL_RETIRE_OPTIMIZER=1")
+	}
 	if r.anomalyQuery != nil {
 		query, err := json.Marshal(r.anomalyQuery)
 		if err != nil {

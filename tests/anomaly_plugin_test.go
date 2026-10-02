@@ -14,3 +14,13 @@ func TestAnomalyPluginSampling(t *testing.T) {
 		t.Fatalf("PHP anomaly sampling checks: %v\n%s", err, out)
 	}
 }
+
+func TestOptimizerRetirementPreservesCacheAndOtherPlugins(t *testing.T) {
+	php, err := exec.LookPath("php")
+	if err != nil {
+		t.Skip("PHP CLI unavailable")
+	}
+	if out, err := exec.Command(php, "php/optimizer_retirement.php").CombinedOutput(); err != nil {
+		t.Fatalf("retirement checks: %v\n%s", err, out)
+	}
+}

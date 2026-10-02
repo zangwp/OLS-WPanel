@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## v1.14.0 — 2026-10-02
+
+- Retires the standalone OLS WPanel Optimizer: stops automatic upgrades and installation, moves anomaly sampling into the isolated panel CLI runner, and adds an explicit migration/deactivation/archive action that preserves LiteSpeed Cache and other plugins.
+- Manages application-password and update-check policies through a small wp-config.php hook block with no panel API calls or plugin background jobs. Existing password-reset MU rules remain panel-managed; locked sites must unlock before migration and re-lock afterwards.
 
 - Keeps the panel in dark mode and removes the appearance switch and light styles.
 - Enables persistent nftables rules on fresh installations without mistaking managed Fail2ban ban chains for an existing firewall policy; boot activation saves the current rules without reloading them.
 - Installs a missing time-sync service, preserves existing providers, and distinguishes enabled NTP from confirmed synchronization.
 - Reads the actual WordPress table prefix from wp-config.php for domain operations, prefers the MariaDB client, and reports database errors inline.
-- Adds a WordPress admin link with support for installation subdirectories and clarifies the companion plugin’s role alongside LiteSpeed Cache.
+- Adds a WordPress admin link with support for installation subdirectories and explains the panel-managed replacement for the companion plugin.
 
 ## v1.13.1 — 2026-10-01
 

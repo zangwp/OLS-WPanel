@@ -16,12 +16,13 @@ var validMemoryLimit = regexp.MustCompile(`^\d+[KMG]?$`)
 var errWPConfigChanged = errors.New("wp-config.php changed after optimization update")
 
 type WPOptimizations struct {
-	DisableUpdates     bool
-	DisableFileEditing bool
-	WPDebug            bool
-	WPDebugDisplay     bool
-	WPPostRevisions    int    // -1 = 不设置, >=0 = define 的值
-	WPMemoryLimit      string // 空 = 不设置, 如 "128M"
+	DisableApplicationPasswords bool
+	DisableUpdates              bool
+	DisableFileEditing          bool
+	WPDebug                     bool
+	WPDebugDisplay              bool
+	WPPostRevisions             int    // -1 = 不设置, >=0 = define 的值
+	WPMemoryLimit               string // 空 = 不设置, 如 "128M"
 }
 
 func ApplyWPOptimizations(webRoot string, opts WPOptimizations) error {
@@ -63,7 +64,7 @@ func renderWPOptimizations(content string, opts WPOptimizations) string {
 		content = removeConstant(content, "WP_MEMORY_LIMIT")
 	}
 
-	return content
+	return renderWPNativePolicy(content, opts.DisableUpdates, opts.DisableApplicationPasswords)
 }
 
 // ApplyWPOptimizationsReversible applies the wp-config.php change and returns
@@ -102,7 +103,8 @@ func SetWPFileEditingDisabled(webRoot string, disabled bool) error {
 // without rewriting unrelated optimization constants.
 func SetWPUpdatesDisabled(webRoot string, disabled bool) error {
 	_, _, err := updateWPConfig(webRoot, func(content string) string {
-		return applyBoolConstant(content, "AUTOMATIC_UPDATER_DISABLED", disabled)
+		appDisabled := strings.Contains(content, "wp_is_application_passwords_available") && strings.Contains(content, "OLS-WPANEL-POLICY-BEGIN")
+		return renderWPNativePolicy(applyBoolConstant(content, "AUTOMATIC_UPDATER_DISABLED", disabled), disabled, appDisabled)
 	})
 	return err
 }
