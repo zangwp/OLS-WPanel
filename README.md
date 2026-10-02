@@ -8,13 +8,13 @@
 
 ## 安装
 
-支持全新的 **Debian 13、Ubuntu 24.04 / 26.04 LTS**，架构为 **amd64 / arm64**。最低 1 核 CPU、1 GiB 内存。使用 root 执行：
+支持全新的 **Debian 13、Ubuntu 24.04 LTS、Ubuntu 26.04 LTS**，架构为 **amd64 / arm64**。最低 1 核 CPU、1 GiB 内存。使用 root 执行：
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前发布版为 **v1.14.0**。短链接固定到已发布版本，验证 Ed25519 签名与 SHA-256 后安装。源码中的下一版修改尚未发布为 Release，安装短链接仍获取当前发布版。
+当前稳定版：`v1.14.0`。短链接固定到已发布版本，验证 Ed25519 签名与 SHA-256 后安装。源码中的下一版修改尚未发布为 Release，安装短链接仍获取当前发布版。
 
 没有 curl 的精简系统先执行：
 

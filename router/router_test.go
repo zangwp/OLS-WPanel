@@ -239,8 +239,8 @@ func TestDashboardUpdateBadgesDeepLinkToSystemUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	deepLink := []byte(`href="/{{.RandomSuffix}}/settings#system-updates"`)
-	if count := bytes.Count(source, deepLink); count != 2 {
-		t.Fatalf("dashboard update badges deep-link count = %d, want 2", count)
+	if count := bytes.Count(source, deepLink); count != 3 {
+		t.Fatalf("dashboard update badges deep-link count = %d, want 3", count)
 	}
 }
 
@@ -1792,7 +1792,7 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 		[]byte(`confirm: this.swapConfirm`),
 		[]byte(`swapConfirm !== 'REMOVE SWAP'`),
 		[]byte(`command: 'o update'`),
-		[]byte(`command: 'o uninstall'`),
+		[]byte(`copy('o uninstall')`),
 		[]byte(`/firewall?tab=ports`),
 		[]byte(`/settings#system-updates`),
 		[]byte(`vps.destructive_note`),

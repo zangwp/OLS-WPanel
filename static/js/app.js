@@ -305,6 +305,7 @@ function alertModal(message) {
 }
 
 // Native details handles taps; opening on hover also exposes its closed content.
+if (typeof document !== 'undefined') {
 document.addEventListener('pointerover', event => {
     const tip = event.target.closest('.help-tip');
     if (tip && event.pointerType !== 'touch' && !tip.open) {
@@ -317,3 +318,4 @@ document.addEventListener('pointerout', event => {
         delete tip.dataset.hoverOpened; tip.open = false;
     }
 });
+}

@@ -8,13 +8,13 @@ A lightweight VPS and WordPress management panel for websites, databases, TLS ce
 
 ## Installation
 
-Supports fresh **Debian 13 and Ubuntu 24.04 / 26.04 LTS** servers on **amd64 / arm64**. Minimum: one CPU core and 1 GiB RAM. Run as root:
+Supports fresh **Debian 13 and Ubuntu 24.04 LTS / Ubuntu 26.04 LTS** servers on **amd64 / arm64**. Minimum: one CPU core and 1 GiB RAM. Run as root:
 
 ```bash
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The published version is **v1.14.0**. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes. The next-version source changes have not been released and are not available through this installation URL.
+The current stable release is `v1.14.0`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes. The next-version source changes have not been released and are not available through this installation URL.
 
 On minimal images without curl, install the prerequisites first:
 
