@@ -3,10 +3,13 @@ define('ABSPATH', '/fixture/');
 define('DAY_IN_SECONDS', 86400);
 define('ARRAY_A', 'ARRAY_A');
 define('DB_NAME', 'fixture_db');
-require __DIR__.'/../../ols-wpanel-optimizer/includes/trait-anomaly-monitor.php';
-class MonitorFixture { use OLSW_Optimizer_Anomaly_Monitor_Trait; }
+$runner = file_get_contents(__DIR__.'/../../executor/assets/wp-inventory-runner/inventory.php');
+$start = strpos($runner, 'function ols_wpanel_inventory_collect_anomaly(');
+$end = strpos($runner, "\n\$token =", $start);
+if ($start === false || $end === false) throw new Exception('missing native sampler');
+eval(substr($runner, $start, $end - $start));
 function verify($ok, $message) { if (!$ok) throw new Exception($message); }
-try { MonitorFixture::collect_anomaly_sample(0, 100, []); throw new Exception('missing CLI runner gate'); }
+try { ols_wpanel_inventory_collect_anomaly(0, 100, []); throw new Exception('missing CLI runner gate'); }
 catch (RuntimeException $e) { verify($e->getMessage()==='runner_required', 'runner gate'); }
 define('OLS_WPANEL_INVENTORY_RUNNER', true);
 $multisite=false;
@@ -61,14 +64,14 @@ $wpdb->database_rows=[
     'procedure'=>[['object_name'=>'publish_spam','target_name'=>'','object_action'=>'DEFINER','object_status'=>'','definition_body'=>'INSERT secret procedure','object_definition'=>'INSERT secret procedure']],
     'function'=>[['object_name'=>'spam_url','target_name'=>'','object_action'=>'INVOKER','object_status'=>'','definition_body'=>'RETURN secret function','object_definition'=>'RETURN secret function']],
 ];
-$sample=MonitorFixture::collect_anomaly_sample(0,$until,[1,2,3]);
+$sample=ols_wpanel_inventory_collect_anomaly(0,$until,[1,2,3]);
 verify($sample['version']===4 && $sample['post_count']===2, 'sample version, UTC rolling window and included content types');
 verify(array_column($sample['database_objects'],'kind')===['event','function','procedure','trigger'] && strlen($sample['database_objects'][0]['fingerprint'])===64, 'database object metadata, order and fingerprint');
 verify(strpos(json_encode($sample),'secret')===false && strpos(json_encode($sample),'SET NEW.post_content')===false, 'database object definitions not exposed');
 $original_database_rows=$wpdb->database_rows;
 $wpdb->database_rows['trigger'][0]['definition_body']=null;
-verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_malformed','database object missing definition body');
-$wpdb->database_rows=['trigger'=>[]];for($i=0;$i<100;$i++){$wpdb->database_rows['trigger'][]=['object_name'=>sprintf('trigger_%03d',$i),'target_name'=>'custom_posts','object_action'=>'BEFORE UPDATE','object_status'=>'','definition_body'=>'SET value '.$i,'object_definition'=>'SET value '.$i];}verify(count(MonitorFixture::collect_anomaly_sample(0,$until,[])['database_objects'])===100,'database object exact bound');$wpdb->database_rows['trigger'][]=['object_name'=>'trigger_100','target_name'=>'custom_posts','object_action'=>'BEFORE UPDATE','object_status'=>'','definition_body'=>'SET value 100','object_definition'=>'SET value 100'];verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_too_large','database object over limit');$wpdb->database_rows=$original_database_rows;
+verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_malformed','database object missing definition body');
+$wpdb->database_rows=['trigger'=>[]];for($i=0;$i<100;$i++){$wpdb->database_rows['trigger'][]=['object_name'=>sprintf('trigger_%03d',$i),'target_name'=>'custom_posts','object_action'=>'BEFORE UPDATE','object_status'=>'','definition_body'=>'SET value '.$i,'object_definition'=>'SET value '.$i];}verify(count(ols_wpanel_inventory_collect_anomaly(0,$until,[])['database_objects'])===100,'database object exact bound');$wpdb->database_rows['trigger'][]=['object_name'=>'trigger_100','target_name'=>'custom_posts','object_action'=>'BEFORE UPDATE','object_status'=>'','definition_body'=>'SET value 100','object_definition'=>'SET value 100'];verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_too_large','database object over limit');$wpdb->database_rows=$original_database_rows;
 verify($sample['removed']===[['id'=>2,'deleted'=>false],['id'=>3,'deleted'=>true]], 'demotion versus deletion');
 verify($sample['admins'][0]['roles']===['administrator','editor'], 'stable role order');
 verify($sample['admins'][0]['email_hash']===hash_hmac('sha256','owner@example.com',wp_salt('auth')), 'email hashed');
@@ -80,17 +83,17 @@ verify($sample['application_passwords'][0]['fingerprint']===hash_hmac('sha256','
 verify(strpos(json_encode($sample),'secret-uuid')===false && strpos(json_encode($sample),'$P$secret-hash')===false, 'no raw application password UUID or hash');
 verify($sample['content'][0]['id']===9 && strlen($sample['content'][0]['fingerprint'])===64, 'stable content fingerprint');
 verify($sample['options']['front_page_id']===9 && $sample['options']['users_can_register']===true, 'critical options');
-$sample=MonitorFixture::collect_anomaly_sample($until,$until,[]);
+$sample=ols_wpanel_inventory_collect_anomaly($until,$until,[]);
 verify($sample['post_count']===0, 'initial baseline excludes history');
-$wpdb->content_rows=[];for($i=1;$i<=5001;$i++){$wpdb->content_rows[]=['ID'=>(string)$i,'post_type'=>'post','post_status'=>'publish','post_title'=>'T','post_content'=>'C','post_excerpt'=>'','post_name'=>'p-'.$i];}verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_too_large','content bound');
+$wpdb->content_rows=[];for($i=1;$i<=5001;$i++){$wpdb->content_rows[]=['ID'=>(string)$i,'post_type'=>'post','post_status'=>'publish','post_title'=>'T','post_content'=>'C','post_excerpt'=>'','post_name'=>'p-'.$i];}verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_too_large','content bound');
 $wpdb->content_rows=[];
-$application_passwords=[1=>[['uuid'=>'broken','name'=>'Broken']]];verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_malformed','malformed application password');
-$application_passwords=[1=>array_fill(0,100,['uuid'=>'uuid','name'=>'Exact','created'=>1700000000])];verify(count(MonitorFixture::collect_anomaly_sample(0,$until,[])['application_passwords'])===100,'application password exact per-user bound');
-$application_passwords=[1=>array_fill(0,101,['uuid'=>'uuid','name'=>'Many','created'=>1700000000])];verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_too_large','application password per-user bound');
-$application_passwords=[];$users=[];for($i=1;$i<=10;$i++){$user=clone $base_user;$user->ID=$i;$users[]=$user;$application_passwords[$i]=array_fill(0,100,['uuid'=>'uuid-'.$i,'name'=>'Exact','created'=>1700000000]);}verify(count(MonitorFixture::collect_anomaly_sample(0,$until,[])['application_passwords'])===1000,'application password exact site bound');
-$user=clone $base_user;$user->ID=11;$users[]=$user;$application_passwords[11]=array_fill(0,100,['uuid'=>'uuid-11','name'=>'Many','created'=>1700000000]);verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_too_large','application password site bound');
+$application_passwords=[1=>[['uuid'=>'broken','name'=>'Broken']]];verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_malformed','malformed application password');
+$application_passwords=[1=>array_fill(0,100,['uuid'=>'uuid','name'=>'Exact','created'=>1700000000])];verify(count(ols_wpanel_inventory_collect_anomaly(0,$until,[])['application_passwords'])===100,'application password exact per-user bound');
+$application_passwords=[1=>array_fill(0,101,['uuid'=>'uuid','name'=>'Many','created'=>1700000000])];verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_too_large','application password per-user bound');
+$application_passwords=[];$users=[];for($i=1;$i<=10;$i++){$user=clone $base_user;$user->ID=$i;$users[]=$user;$application_passwords[$i]=array_fill(0,100,['uuid'=>'uuid-'.$i,'name'=>'Exact','created'=>1700000000]);}verify(count(ols_wpanel_inventory_collect_anomaly(0,$until,[])['application_passwords'])===1000,'application password exact site bound');
+$user=clone $base_user;$user->ID=11;$users[]=$user;$application_passwords[11]=array_fill(0,100,['uuid'=>'uuid-11','name'=>'Many','created'=>1700000000]);verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_too_large','application password site bound');
 $application_passwords=[];
 $wpdb->database_rows=[];
-$users=array_fill(0,101,$base_user);verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='sample_too_large','user bound');
-$multisite=true;verify(MonitorFixture::collect_anomaly_sample(0,$until,[])['error']==='multisite_unsupported','multisite gate');
+$users=array_fill(0,101,$base_user);verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='sample_too_large','user bound');
+$multisite=true;verify(ols_wpanel_inventory_collect_anomaly(0,$until,[])['error']==='multisite_unsupported','multisite gate');
 echo "anomaly PHP checks passed\n";

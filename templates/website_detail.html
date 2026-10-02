@@ -177,10 +177,6 @@
                     <button @click="sslMode='manual'; sslCert=''; sslKey=''; sslModalOpen=true" class="text-sm py-1.5 px-3 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.replace_cert"}}</button>
                     <button @click="removeSSL()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.delete_cert"}}</button>
                 </div>
-                <label class="mt-4 flex items-start space-x-2 cursor-pointer text-sm text-gray-300">
-                    <input type="checkbox" x-model="sslExportEnabled" @change="saveSSLExport()" :disabled="sslExportSaving" class="mt-0.5 w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500">
-                    <span>{{t .Lang "website.allow_plugin_read_ssl"}}</span>
-                </label>
             </div>
             <div x-show="!site.ssl_enabled">
                 <p class="text-gray-400 mb-4">{{t .Lang "website.ssl_not_enabled"}}</p>
@@ -312,18 +308,11 @@
                 <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_page_cache"}}</button>
                 <button x-show="site.site_type === 'wordpress' && cacheRuntime.redis_object_cache_configured" @click="clearRedisObjectCache()" :disabled="redisCacheClearing" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;" x-text="redisCacheClearing ? t('website.clearing_redis_cache') : t('website.clear_redis_cache')"></button>
             </div>
-            <div x-show="site.site_type === 'wordpress'" id="companion-plugin-controls" class="flex flex-wrap items-center gap-3 mb-3">
-                <button x-show="pluginStatus === 'not_installed'" @click="installPlugin()" :disabled="pluginInstalling || site.file_lock_enabled" class="btn-primary text-sm py-1.5" x-text="pluginInstalling ? t('website.installing') : t('website.install_companion_plugin')"></button>
-                <button x-show="pluginStatus === 'update_available'" @click="installPlugin()" :disabled="pluginInstalling || !!maintenance.window_id || fileLockApplyIncomplete()" class="text-sm py-1.5 px-3 rounded" style="background-color: #166534; color: #bbf7d0;" x-text="pluginInstalling ? t('website.updating') : t('website.update_companion_plugin')"></button>
-                <button x-show="pluginStatus === 'config_missing'" @click="rebuildPluginConfig()" :disabled="pluginInstalling || site.file_lock_enabled" class="text-sm py-1.5 px-3 rounded" style="background-color: #92400e; color: #fef3c7;" x-text="pluginInstalling ? t('website.rebuilding_plugin_config') : t('website.rebuild_plugin_config')"></button>
-                <span x-show="pluginStatus === 'installed'" class="text-xs text-green-400">{{t .Lang "website.companion_active"}}</span>
-                <span x-show="pluginStatus === 'inactive'" class="text-xs text-yellow-300">{{t .Lang "website.companion_inactive"}}</span>
-                <span x-show="pluginStatus === 'unknown' && !pluginStatusLoading" class="text-xs text-gray-400">{{t .Lang "website.companion_unknown"}}</span>
-                <button @click="fetchPluginStatus()" :disabled="pluginStatusLoading || pluginInstalling" class="btn-secondary text-sm py-1.5">{{t .Lang "website.companion_refresh"}}</button>
-                <span x-show="pluginStatusLoading" class="text-xs text-gray-400">{{t .Lang "website.companion_checking"}}</span>
-                <span x-show="pluginStatus === 'not_installed' && site.file_lock_enabled" class="text-xs text-yellow-300">{{t .Lang "website.companion_unlock_install"}}</span>
+            <div x-show="site.site_type === 'wordpress'" class="mb-4 space-y-2">
+                <p class="text-xs text-gray-400">{{t .Lang "website.optimizer_retired_help"}}</p>
+                <button x-show="['installed','inactive','update_available','config_missing'].includes(pluginStatus)" @click="retireOptimizer()" :disabled="pluginInstalling || site.file_lock_enabled || !!maintenance.window_id" class="btn-secondary text-sm">{{t .Lang "website.optimizer_retire"}}</button>
+                <span x-show="pluginStatus === 'not_installed'" class="text-xs text-green-400">{{t .Lang "website.optimizer_not_needed"}}</span>
             </div>
-            <p class="mt-2 mb-3 text-xs text-gray-400">{{t .Lang "website.companion_role_help"}}</p>
             <p x-show="site.file_lock_enabled" class="text-xs text-yellow-300 mb-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
 
             <details class="mt-3 p-3 rounded text-xs" style="background-color: #0f172a;">
@@ -334,7 +323,6 @@
                     <li x-show="site.site_type === 'wordpress'">{{t .Lang "website.litespeed_cache_point_wp_skip"}}</li>
                     <li x-show="site.site_type === 'php'">{{t .Lang "website.litespeed_cache_point_php_skip"}}</li>
                 </ul>
-                <p class="text-gray-500 mt-2" x-show="site.site_type === 'wordpress'">{{t .Lang "website.wp_optimizer_plugin_help"}}</p>
             </details>
             {{template "wp_anomaly_panel" .}}
         </div>
@@ -454,7 +442,7 @@
                 </div>
                 <button @click="savePasswordReset()" :disabled="passwordResetSaving" class="btn-secondary text-sm whitespace-nowrap" x-text="passwordResetSaving ? t('common.saving') : t('website.save_password_reset')"></button>
             </div>
-            <p x-show="pluginStatus === 'not_installed'" class="text-xs text-gray-500 mt-4">{{t .Lang "website.file_lock_plugin_optional"}}</p>
+
         </div>
     </div>
 
@@ -1505,18 +1493,15 @@ function websiteDetail() {
                 this.pluginStatusLoading = false;
             }
         },
-        async installPlugin() {
+        async retireOptimizer() {
+            if (!await confirmModal(t('website.optimizer_retire_confirm'))) return;
             this.pluginInstalling = true;
             try {
-                const r = await api('/websites/' + this.site.id + '/install-plugin', { method: 'POST' });
-                showToast(r.data?.message || t('website.installed'), 'success');
+                await api('/websites/' + this.site.id + '/retire-optimizer', {method:'POST', timeout:130000});
+                showToast(t('website.optimizer_retire_done'), 'success');
                 await this.fetchPluginStatus();
-            } catch(e) { showToast(e.message, 'error'); }
-            this.pluginInstalling = false;
-        },
-        async rebuildPluginConfig() {
-            if (!await confirmModal(t('website.rebuild_plugin_config_confirm'))) return;
-            await this.installPlugin();
+            } catch (e) { showToast(e.message, 'error'); }
+            finally { this.pluginInstalling = false; }
         },
         async fetchLiteSpeedCacheStatus() {
             if (!this.site || this.site.site_type !== 'wordpress' || this.cacheStatusLoading) return;

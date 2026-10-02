@@ -194,7 +194,7 @@ func main() {
 			log.Printf("维护窗口启动恢复未完成（相关网站将保持写操作门禁并自动重试）: %v", err)
 		}
 	}
-	executor.AutoDeployPluginUpdates(PluginFS)
+	// Optimizer is retired; existing installations are migrated explicitly from Website Details.
 	// 异步补装不应排在维护窗口启动恢复之前。
 	executor.GoSafe(executor.EnsurePHPExifExtension)
 	executor.GoSafe(executor.EnsureImageBatchBinaries)

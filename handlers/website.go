@@ -59,12 +59,13 @@ func wpOptimizationSiteLock(id int) *sync.Mutex {
 }
 
 type wpOptimizationConfig struct {
-	disableUpdates     bool
-	disableFileEditing bool
-	debugEnabled       bool
-	debugDisplay       *bool
-	postRevisions      int
-	memoryLimit        string
+	disableApplicationPasswords bool
+	disableUpdates              bool
+	disableFileEditing          bool
+	debugEnabled                bool
+	debugDisplay                *bool
+	postRevisions               int
+	memoryLimit                 string
 }
 
 func applyWPOptimizationConfig(site *models.Website, cfg wpOptimizationConfig) (bool, func() error, error) {
@@ -76,12 +77,13 @@ func applyWPOptimizationConfig(site *models.Website, cfg wpOptimizationConfig) (
 		debugDisplay = *cfg.debugDisplay
 	}
 	rollback, err := executor.ApplyWPOptimizationsReversible(site.WebRoot, executor.WPOptimizations{
-		DisableUpdates:     cfg.disableUpdates,
-		DisableFileEditing: cfg.disableFileEditing,
-		WPDebug:            cfg.debugEnabled,
-		WPDebugDisplay:     debugDisplay,
-		WPPostRevisions:    cfg.postRevisions,
-		WPMemoryLimit:      cfg.memoryLimit,
+		DisableApplicationPasswords: cfg.disableApplicationPasswords,
+		DisableUpdates:              cfg.disableUpdates,
+		DisableFileEditing:          cfg.disableFileEditing,
+		WPDebug:                     cfg.debugEnabled,
+		WPDebugDisplay:              debugDisplay,
+		WPPostRevisions:             cfg.postRevisions,
+		WPMemoryLimit:               cfg.memoryLimit,
 	})
 	return debugDisplay, rollback, err
 }
@@ -2605,12 +2607,13 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	}
 
 	wpDebugDisplay, rollbackWPConfig, err := applyWPOptimizationConfig(site, wpOptimizationConfig{
-		disableUpdates:     req.DisableWPUpdates,
-		disableFileEditing: req.DisableFileEditing,
-		debugEnabled:       req.WPDebugEnabled,
-		debugDisplay:       req.WPDebugDisplay,
-		postRevisions:      req.WPPostRevisions,
-		memoryLimit:        req.WPMemoryLimit,
+		disableApplicationPasswords: req.DisableApplicationPasswords,
+		disableUpdates:              req.DisableWPUpdates,
+		disableFileEditing:          req.DisableFileEditing,
+		debugEnabled:                req.WPDebugEnabled,
+		debugDisplay:                req.WPDebugDisplay,
+		postRevisions:               req.WPPostRevisions,
+		memoryLimit:                 req.WPMemoryLimit,
 	})
 	if err != nil {
 		recordHandlerOperationLog("wp_optimizations", domain, "failed", "写入 wp-config.php 失败: "+err.Error())
@@ -3429,12 +3432,13 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 	}
 
 	wpDebugDisplay, rollbackWPConfig, err := applyWPOptimizationConfig(site, wpOptimizationConfig{
-		disableUpdates:     req.DisableWPUpdates,
-		disableFileEditing: req.DisableFileEditing,
-		debugEnabled:       req.WPDebugEnabled,
-		debugDisplay:       req.WPDebugDisplay,
-		postRevisions:      req.WPPostRevisions,
-		memoryLimit:        req.WPMemoryLimit,
+		disableApplicationPasswords: site.DisableApplicationPasswords,
+		disableUpdates:              req.DisableWPUpdates,
+		disableFileEditing:          req.DisableFileEditing,
+		debugEnabled:                req.WPDebugEnabled,
+		debugDisplay:                req.WPDebugDisplay,
+		postRevisions:               req.WPPostRevisions,
+		memoryLimit:                 req.WPMemoryLimit,
 	})
 	if err != nil {
 		recordHandlerOperationLog("wp_optimizations", req.Domain, "failed", "写入 wp-config.php 失败: "+err.Error())

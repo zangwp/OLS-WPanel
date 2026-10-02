@@ -154,6 +154,7 @@ require_once ABSPATH . 'wp-settings.php';
 `, phpSingleQuoteEscape(dbName), phpSingleQuoteEscape(dbUser), phpSingleQuoteEscape(dbPassword), salts, phpSingleQuoteEscape(tablePrefix), phpSingleQuoteEscape(cacheSalt), phpSingleQuoteEscape(cacheSalt), phpSingleQuoteEscape(cacheSalt))
 
 	configPath := filepath.Join(webRoot, "wp-config.php")
+	config = renderWPNativePolicy(config, false, true)
 	return os.WriteFile(configPath, []byte(config), 0600)
 }
 
