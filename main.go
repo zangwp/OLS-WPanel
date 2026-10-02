@@ -312,6 +312,9 @@ func main() {
 	executor.EnsureOperationLogRetention()
 	executor.EnsureAllSiteLogrotateConfigs()
 	// WordPress safety baseline (idempotent, only writes if not present)
+	if err := executor.EnsureOpenLiteSpeedServiceRegistration(); err != nil {
+		log.Printf("OpenLiteSpeed service registration recovery failed: %v", err)
+	}
 	executor.EnsureWordPressBaseline()
 	// 升级后重建全部 OpenLiteSpeed 虚拟主机，确保新模板和 LSPHP 设置生效。
 	executor.GoSafe(func() {

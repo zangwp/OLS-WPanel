@@ -18,7 +18,18 @@ func EnsureWordPressBaseline() {
 func ensurePHPBaseline() {
 	changed, err := EnsurePHPRuntimeConfigFile()
 	if err == nil && changed {
-		exec.Command("systemctl", "restart", "lshttpd").Run()
+		// Do not start a service deliberately stopped by the administrator.
+		if exec.Command("systemctl", "is-active", "--quiet", "lshttpd").Run() != nil {
+			return
+		}
+		paths := currentOLSRuntimePaths()
+		if out, err := exec.Command(paths.binary, "-t").CombinedOutput(); err != nil {
+			log.Printf("[OLS-WPanel] PHP baseline changed; OLS validation failed, service left running: %v: %s", err, strings.TrimSpace(string(out)))
+			return
+		}
+		if out, err := exec.Command("systemctl", "restart", "lshttpd").CombinedOutput(); err != nil {
+			log.Printf("[OLS-WPanel] PHP baseline OLS restart failed: %v: %s", err, strings.TrimSpace(string(out)))
+		}
 	}
 }
 

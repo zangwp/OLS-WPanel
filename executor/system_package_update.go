@@ -172,8 +172,16 @@ func RunSystemPackageUpdatePlan(planPath string) error {
 	} {
 		writeStatus("running", step.stage, step.messageKey, "")
 		if err := systemPackageUpdateCommand(ctx, step.name, step.args...); err != nil {
+			if step.stage == "upgrade" {
+				if recoveryErr := EnsureOpenLiteSpeedServiceRegistration(); recoveryErr != nil {
+					err = fmt.Errorf("%w; OLS registration recovery failed: %v", err, recoveryErr)
+				}
+			}
 			return fail(step.stage, "settings.system_update_status_failed", err)
 		}
+	}
+	if err := EnsureOpenLiteSpeedServiceRegistration(); err != nil {
+		return fail("services", "settings.system_update_status_health_failed", err)
 	}
 	writeStatus("running", "services", "settings.system_update_status_checking_services", "")
 	if err := checkSystemPackageUpdateHealth(ctx); err != nil {
