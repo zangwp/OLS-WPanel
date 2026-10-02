@@ -37,10 +37,13 @@ func TestMaintenanceStartupPrecedesSiteWriters(t *testing.T) {
 	if start == token.NoPos || positions["RunUpgrades"] >= start {
 		t.Fatal("recovery must follow schema upgrades")
 	}
-	for _, name := range []string{"AutoDeployPluginUpdates", "ReconcilePending", "ResetStuckImageOptimizationJobs", "NewWPInventoryWorker", "NewWPInventoryScheduler", "StartRemoteBackupMaintenanceScheduler"} {
+	for _, name := range []string{"ReconcilePending", "ResetStuckImageOptimizationJobs", "NewWPInventoryWorker", "NewWPInventoryScheduler", "StartRemoteBackupMaintenanceScheduler"} {
 		if positions[name] == token.NoPos || positions[name] <= start {
 			t.Errorf("%s must follow synchronous maintenance recovery", name)
 		}
+	}
+	if positions["AutoDeployPluginUpdates"] != token.NoPos {
+		t.Fatal("retired Optimizer must not be automatically deployed on startup")
 	}
 	// Ensure the recovery is guarded out of administrative/backup CLI paths.
 	guarded := false
@@ -63,3 +66,4 @@ func TestMaintenanceStartupPrecedesSiteWriters(t *testing.T) {
 		t.Fatal("CLI tasks must not start restart recovery")
 	}
 }
+
