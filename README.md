@@ -17,7 +17,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.13.1`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
+当前稳定版：`v1.14.0`。短链接固定到已发布 Release，会先验证 Ed25519 签名和 SHA-256，并自动补齐 `curl`、`wget`、`ca-certificates` 和 `openssl` 等引导依赖。
 
 精简镜像如果连 `curl` 都没有，请先执行：
 
@@ -98,7 +98,7 @@ o uninstall       普通卸载面板（保留网站、数据库与共享软件�
 handlers/ collector/ database/ models/ router/  Go 应用模块
 executor/ security/ config/                    系统操作与安全边界
 templates/ static/ assets/                     前端模板、嵌入资产与品牌源文件
-ols-wpanel-optimizer/                          WordPress 配套插件
+ols-wpanel-optimizer/                          旧插件兼容源码（不再自动部署）
 deploy/cloudflare/ stats-worker/               独立部署组件
 scripts/ tests/ third_party/                   验证脚本、测试与第三方许可材料
 ```
@@ -106,3 +106,7 @@ scripts/ tests/ third_party/                   验证脚本、测试与第三方
 ## 许可证
 
 OLS WPanel 依据 GNU GPL v3.0 only（SPDX：`GPL-3.0-only`）发布，由 [zangwp](https://github.com/zangwp) 维护。详见 [LICENSE](LICENSE)、[NOTICE.md](NOTICE.md) 和 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## v1.14.0：移除 Optimizer
+
+升级后，在网站详情的缓存与性能页点击“迁移并移除旧 Optimizer”。先关闭文件保护，迁移完成后重新启用。旧插件会停用并归档到网站目录外，LiteSpeed Cache 及其设置保留。异常监控由面板 CLI 采样；WordPress 内部策略由面板维护的少量配置代码及已有密码找回规则执行。详见 [迁移说明](docs/optimizer-migration.md)。
