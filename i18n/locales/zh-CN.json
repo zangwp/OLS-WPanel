@@ -16,7 +16,7 @@
     "database_object_count": "数据库持久化对象：{{count}} 个",
     "database_object_pending": "数据库持久化对象：待面板完成首次检查",
     "baseline_help": "以下是最近成功采样的管理员清单，不代表已确认可信。成功采样还会比较应用程序密码、数据库持久化对象、已发布内容与关键设置；相同变化只提醒一次，数量回落到阈值内后才会重新触发提醒。轮换站点密钥会改变凭据和数据库对象指纹并触发聚合复核告警。",
-    "plugin_required": "无法检查：请安装并启用 OLS WPanel 配套插件 1.1.18 或更新版本。",
+    "plugin_required": "无法检查：面板采样组件版本不兼容，请升级或重启面板后重试，无需安装 Optimizer。",
     "multisite_unsupported": "暂不支持 WordPress 多站点网络。",
     "sample_malformed": "检查失败：发现格式异常的应用程序密码、数据库对象或采样数据，请人工核查 WordPress 站点记录。旧结果未更新。",
     "sample_too_large": "检查失败：网站库存或异常监控样本超过安全容量限制。旧结果未更新，请核查站点规模或异常数据后重试。",

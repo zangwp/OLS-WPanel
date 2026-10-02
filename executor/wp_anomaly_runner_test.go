@@ -73,6 +73,9 @@ func TestOptimizerRetirementDoesNotInheritParentPermission(t *testing.T) {
 	openBase := sitePHPRunnerOpenBaseDir(fixture.site.WebRoot, fixture.site.Domain, filepath.Join(runner.runnerRoot, runner.hash))
 	body := validSuccessEnvelopeBody(fixture.uid, fixture.gid, openBase)
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"$OLS_WPANEL_RETIRE_OPTIMIZER\" > %q\nprintf 'OLS_WPANEL_INVENTORY_BEGIN %%s\\n%%s\\nOLS_WPANEL_INVENTORY_END %%s\\n' \"$OLS_WPANEL_RUNNER_TOKEN\" %q \"$OLS_WPANEL_RUNNER_TOKEN\" >&3\n", fixture.auditPath, body)
+	if err := os.Chmod(runner.runuserPath, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(runner.runuserPath, []byte(script), 0555); err != nil {
 		t.Fatal(err)
 	}
