@@ -1,0 +1,1007 @@
+package executor
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/zangwp/OLS-WPanel/internal/database"
+)
+
+func TestValidateRemoteBackupSettingsRejectsUnsafeValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		host       string
+		port       int
+		username   string
+		authType   string
+		remotePath string
+	}{
+		{name: "host command chars", host: "example.com;reboot", port: 22, username: "root", authType: "password", remotePath: "/backup"},
+		{name: "bad port", host: "example.com", port: 70000, username: "root", authType: "password", remotePath: "/backup"},
+		{name: "bad username", host: "example.com", port: 22, username: "root;id", authType: "password", remotePath: "/backup"},
+		{name: "bad auth", host: "example.com", port: 22, username: "root", authType: "agent", remotePath: "/backup"},
+		{name: "bad path chars", host: "example.com", port: 22, username: "root", authType: "password", remotePath: "/backup;rm"},
+		{name: "path traversal", host: "example.com", port: 22, username: "root", authType: "password", remotePath: "/backup/../other"},
+		{name: "ipv6 unsupported", host: "2001:db8::1", port: 22, username: "root", authType: "password", remotePath: "/backup"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateRemoteBackupSettings(tt.host, tt.port, tt.username, tt.authType, tt.remotePath); err == nil {
+				t.Fatal("ValidateRemoteBackupSettings error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateRemoteBackupSettingsAcceptsSafeValues(t *testing.T) {
+	if err := ValidateRemoteBackupSettings("backup.example.com", 2222, "wp_backup", "key", "/srv/ols-wpanel/backups"); err != nil {
+		t.Fatalf("ValidateRemoteBackupSettings safe domain: %v", err)
+	}
+	if err := ValidateRemoteBackupSettings("192.0.2.10", 22, "root", "password", "~/backups"); err != nil {
+		t.Fatalf("ValidateRemoteBackupSettings safe IP: %v", err)
+	}
+}
+
+func TestLocalBackupRelPathRequiresBackupsRoot(t *testing.T) {
+	got, err := localBackupRelPath(backupsRoot + "/example.com/db/site.sql.gz")
+	if err != nil {
+		t.Fatalf("localBackupRelPath inside root: %v", err)
+	}
+	if got != "example.com/db/site.sql.gz" {
+		t.Fatalf("localBackupRelPath = %q", got)
+	}
+	if _, err := localBackupRelPath("/tmp/site.sql.gz"); err == nil {
+		t.Fatal("localBackupRelPath outside root error = nil, want error")
+	}
+}
+
+func TestValidateRemoteRelativePath(t *testing.T) {
+	if got, err := validateRemoteRelativePath("example.com/files/file_full_20260101.tar.gz"); err != nil || got != "example.com/files/file_full_20260101.tar.gz" {
+		t.Fatalf("safe path = %q, %v", got, err)
+	}
+	for _, unsafe := range []string{"", "/etc/passwd", "../file.tar.gz", "example.com/../file.tar.gz", "example.com/files/*.gz", "example.com/files/a b.tar.gz", "example.com//files/a.tar.gz"} {
+		if _, err := validateRemoteRelativePath(unsafe); err == nil {
+			t.Errorf("unsafe path %q accepted", unsafe)
+		}
+	}
+}
+
+func TestValidateS3BackupSettingsRejectsUnsafeValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		endpoint    string
+		bucket      string
+		region      string
+		accessKeyID string
+		secretKey   string
+		prefix      string
+	}{
+		{name: "plain http", endpoint: "http://example.com", bucket: "wp-backups", region: "auto", accessKeyID: "key123", secretKey: "secret"},
+		{name: "query", endpoint: "https://example.com?x=1", bucket: "wp-backups", region: "auto", accessKeyID: "key123", secretKey: "secret"},
+		{name: "bad bucket", endpoint: "https://example.com", bucket: "Bad_Bucket", region: "auto", accessKeyID: "key123", secretKey: "secret"},
+		{name: "bad region", endpoint: "https://example.com", bucket: "wp-backups", region: "auto;rm", accessKeyID: "key123", secretKey: "secret"},
+		{name: "bad access key", endpoint: "https://example.com", bucket: "wp-backups", region: "auto", accessKeyID: "key id", secretKey: "secret"},
+		{name: "empty secret", endpoint: "https://example.com", bucket: "wp-backups", region: "auto", accessKeyID: "key123", secretKey: ""},
+		{name: "prefix traversal", endpoint: "https://example.com", bucket: "wp-backups", region: "auto", accessKeyID: "key123", secretKey: "secret", prefix: "wp/../other"},
+		{name: "prefix command chars", endpoint: "https://example.com", bucket: "wp-backups", region: "auto", accessKeyID: "key123", secretKey: "secret", prefix: "wp;rm"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateS3BackupSettings(tt.endpoint, tt.bucket, tt.region, tt.accessKeyID, tt.secretKey, tt.prefix); err == nil {
+				t.Fatal("ValidateS3BackupSettings error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateS3BackupSettingsAcceptsR2StyleConfig(t *testing.T) {
+	if err := ValidateS3BackupSettings("https://abc123.r2.cloudflarestorage.com", "ols-wpanel-backups", "auto", "access-key_123", "secret/key+123", "ols-wpanel/server-1"); err != nil {
+		t.Fatalf("ValidateS3BackupSettings R2 config: %v", err)
+	}
+}
+
+func TestS3ObjectURLUsesPathStyleAndEscapesKey(t *testing.T) {
+	u, err := s3ObjectURL("https://abc123.r2.cloudflarestorage.com", "ols-wpanel-backups", "ols wpanel/example.com/db/site backup.sql.gz", "")
+	if err != nil {
+		t.Fatalf("s3ObjectURL() error = %v", err)
+	}
+	want := "https://abc123.r2.cloudflarestorage.com/ols-wpanel-backups/ols%20wpanel/example.com/db/site%20backup.sql.gz"
+	if got := u.String(); got != want {
+		t.Fatalf("s3ObjectURL = %q, want %q", got, want)
+	}
+}
+
+func TestS3ObjectKeyAddsPrefix(t *testing.T) {
+	if got := s3ObjectKey("/ols-wpanel/server-1/", "example.com/db/site.sql.gz"); got != "ols-wpanel/server-1/example.com/db/site.sql.gz" {
+		t.Fatalf("s3ObjectKey = %q", got)
+	}
+}
+
+func TestProbeS3BackupConnectionUploadsAndDeletesTestObject(t *testing.T) {
+	var mu sync.Mutex
+	requests := []string{}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		mu.Unlock()
+		if r.URL.Path != "/ols-wpanel-backups/ols-wpanel/.ols-wpanel-s3-test.txt" {
+			t.Errorf("unexpected path: %s", r.URL.String())
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+
+	if err := ProbeS3BackupConnection(server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel"); err != nil {
+		t.Fatalf("ProbeS3BackupConnection() error = %v", err)
+	}
+
+	got := strings.Join(requests, "\n")
+	if !strings.Contains(got, "PUT /ols-wpanel-backups/ols-wpanel/.ols-wpanel-s3-test.txt?") {
+		t.Fatalf("PUT test object request missing; got:\n%s", got)
+	}
+	if !strings.Contains(got, "DELETE /ols-wpanel-backups/ols-wpanel/.ols-wpanel-s3-test.txt?") {
+		t.Fatalf("DELETE test object request missing; got:\n%s", got)
+	}
+}
+
+func TestPutFileToS3UsesMultipartForLargeFiles(t *testing.T) {
+	var mu sync.Mutex
+	requests := []string{}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		mu.Unlock()
+		switch {
+		case r.Method == http.MethodPost && r.URL.RawQuery == "uploads=":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<InitiateMultipartUploadResult><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.RawQuery, "partNumber="):
+			w.Header().Set("ETag", `"etag-`+r.URL.Query().Get("partNumber")+`"`)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.RawQuery, "uploadId=upload-1"):
+			if got := r.Header.Get("Content-Type"); got != "application/xml" {
+				t.Errorf("complete content-type = %q, want application/xml", got)
+			}
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `<ETag>"etag-1"</ETag>`) {
+				t.Errorf("complete body does not preserve quoted ETag: %s", string(body))
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<CompleteMultipartUploadResult/>`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+	restore := withS3MultipartSettings(t, 1, 5*1024*1024)
+	defer restore()
+
+	path := seedS3TestFile(t, 6*1024*1024)
+	if err := putFileToS3(t.Context(), server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel/site.tar.gz", path); err != nil {
+		t.Fatalf("putFileToS3() error = %v", err)
+	}
+
+	got := strings.Join(requests, "\n")
+	for _, want := range []string{
+		"POST /ols-wpanel-backups/ols-wpanel/site.tar.gz?uploads=",
+		"PUT /ols-wpanel-backups/ols-wpanel/site.tar.gz?partNumber=1&uploadId=upload-1",
+		"PUT /ols-wpanel-backups/ols-wpanel/site.tar.gz?partNumber=2&uploadId=upload-1",
+		"POST /ols-wpanel-backups/ols-wpanel/site.tar.gz?uploadId=upload-1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("request %q missing; got:\n%s", want, got)
+		}
+	}
+}
+
+func TestPutFileToS3StopsHTTPAtCallerDeadline(t *testing.T) {
+	requestStarted := make(chan struct{}, 1)
+	releaseHandler := make(chan struct{})
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestStarted <- struct{}{}
+		select {
+		case <-r.Context().Done():
+		case <-releaseHandler:
+		}
+	}))
+	defer server.Close()
+	// An HTTP/1 server handler that performs no further reads or writes is not
+	// guaranteed to observe the peer disconnect immediately. Release it before
+	// httptest.Server.Close so a test failure cannot strand cleanup indefinitely.
+	defer close(releaseHandler)
+	withS3TestClient(t, server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := putFileToS3(ctx, server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel/site.tar.gz", seedS3TestFile(t, 1))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("putFileToS3 error = %v, want context deadline", err)
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("S3 upload did not reach the HTTP server")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("S3 HTTP upload ignored caller deadline: %s", elapsed)
+	}
+}
+
+func TestPutFileToS3AbortsMultipartOnPartFailure(t *testing.T) {
+	var mu sync.Mutex
+	requests := []string{}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		mu.Unlock()
+		switch {
+		case r.Method == http.MethodPost && r.URL.RawQuery == "uploads=":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<InitiateMultipartUploadResult><UploadId>upload-2</UploadId></InitiateMultipartUploadResult>`))
+		case r.Method == http.MethodPut && r.URL.Query().Get("partNumber") == "1":
+			w.Header().Set("ETag", `"etag-1"`)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPut && r.URL.Query().Get("partNumber") == "2":
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("part failed"))
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.RawQuery, "uploadId=upload-2"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+	restore := withS3MultipartSettings(t, 1, 5*1024*1024)
+	defer restore()
+
+	path := seedS3TestFile(t, 6*1024*1024)
+	if err := putFileToS3(t.Context(), server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel/site.tar.gz", path); err == nil {
+		t.Fatal("putFileToS3() error = nil, want error")
+	}
+
+	got := strings.Join(requests, "\n")
+	if !strings.Contains(got, "DELETE /ols-wpanel-backups/ols-wpanel/site.tar.gz?uploadId=upload-2") {
+		t.Fatalf("abort request missing; got:\n%s", got)
+	}
+}
+
+func TestPutFileToS3RejectsEmbeddedCompleteErrorAndAborts(t *testing.T) {
+	abortSeen := make(chan struct{}, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.RawQuery == "uploads=":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<InitiateMultipartUploadResult><UploadId>upload-embedded-error</UploadId></InitiateMultipartUploadResult>`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.RawQuery, "partNumber="):
+			w.Header().Set("ETag", `"etag-`+r.URL.Query().Get("partNumber")+`"`)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Query().Get("uploadId") == "upload-embedded-error":
+			// S3 may report completion failure in an XML Error document while
+			// retaining an HTTP 200 status.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<Error><Code>InternalError</Code><Message>commit failed</Message></Error>`))
+		case r.Method == http.MethodDelete && r.URL.Query().Get("uploadId") == "upload-embedded-error":
+			abortSeen <- struct{}{}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+	restore := withS3MultipartSettings(t, 1, 5*1024*1024)
+	defer restore()
+
+	err := putFileToS3(t.Context(), server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel/site.tar.gz", seedS3TestFile(t, 6*1024*1024))
+	if err == nil || !strings.Contains(err.Error(), "InternalError") {
+		t.Fatalf("putFileToS3 error = %v, want embedded completion error", err)
+	}
+	select {
+	case <-abortSeen:
+	default:
+		t.Fatal("embedded completion error did not abort multipart upload")
+	}
+}
+
+func TestPutFileToS3DeadlineStillAbortsMultipart(t *testing.T) {
+	abortContextLive := make(chan bool, 1)
+	releasePartHandler := make(chan struct{})
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.RawQuery == "uploads=":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<InitiateMultipartUploadResult><UploadId>upload-deadline</UploadId></InitiateMultipartUploadResult>`))
+		case r.Method == http.MethodPut && strings.Contains(r.URL.RawQuery, "partNumber="):
+			select {
+			case <-r.Context().Done():
+			case <-releasePartHandler:
+			}
+		case r.Method == http.MethodDelete && r.URL.Query().Get("uploadId") == "upload-deadline":
+			abortContextLive <- r.Context().Err() == nil
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	defer close(releasePartHandler)
+	withS3TestClient(t, server)
+	restore := withS3MultipartSettings(t, 1, 5*1024*1024)
+	defer restore()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	err := putFileToS3(ctx, server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel/site.tar.gz", seedS3TestFile(t, 6*1024*1024))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("putFileToS3 error = %v, want context deadline", err)
+	}
+	select {
+	case live := <-abortContextLive:
+		if !live {
+			t.Fatal("multipart abort inherited the expired upload context")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("multipart abort was not sent after upload deadline")
+	}
+}
+
+func TestCleanupSupersededFileBackupChainUsesFrozenRemoteTarget(t *testing.T) {
+	openTestDB(t)
+	insertMinimalWebsite(t, "frozen.example.com")
+	db := database.GetDB()
+	filename := "file_full_old.tar.gz"
+	if _, err := db.Exec(`INSERT INTO file_backups (site_id, filename, file_size, mode) VALUES (1, ?, 1, 'full')`, filename); err != nil {
+		t.Fatal(err)
+	}
+	backupDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(backupDir, filename), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var paths []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		if r.Method != http.MethodDelete {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+
+	target := remoteBackupTarget{
+		Enabled:       true,
+		backupType:    "s3",
+		s3Endpoint:    server.URL + "/target-a",
+		s3Bucket:      "ols-wpanel-backups",
+		s3Region:      "auto",
+		s3AccessKeyID: "access-key_123",
+		s3SecretKey:   "secret",
+		s3PathPrefix:  "archives",
+	}
+	// Simulate an administrator switching the singleton setting after this
+	// backup captured target A but before it starts old-chain cleanup.
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled=1, backup_type='s3',
+		s3_endpoint=?, s3_bucket='ols-wpanel-backups', s3_region='auto',
+		s3_access_key_id='access-key_123', s3_secret_key='secret', s3_path_prefix='archives'
+		WHERE id=1`, server.URL+"/target-b"); err != nil {
+		t.Fatal(err)
+	}
+
+	cleaned, err := cleanupSupersededFileBackupChainContext(t.Context(), target, 1, "frozen.example.com", backupDir, []string{filename})
+	if err != nil || cleaned != 1 {
+		t.Fatalf("cleanup = %d, %v", cleaned, err)
+	}
+	mu.Lock()
+	gotPaths := append([]string(nil), paths...)
+	mu.Unlock()
+	if len(gotPaths) != 1 || !strings.HasPrefix(gotPaths[0], "/target-a/") {
+		t.Fatalf("cleanup requests = %v, want only frozen target A", gotPaths)
+	}
+	if _, err := os.Stat(filepath.Join(backupDir, filename)); !os.IsNotExist(err) {
+		t.Fatalf("local old-chain file still exists: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM file_backups WHERE site_id=1 AND filename=?`, filename).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("old-chain database row count = %d, err=%v", count, err)
+	}
+}
+
+func withS3TestClient(t *testing.T, server *httptest.Server) {
+	t.Helper()
+	oldClient := http.DefaultClient
+	http.DefaultClient = server.Client()
+	t.Cleanup(func() {
+		http.DefaultClient = oldClient
+	})
+}
+
+func withS3MultipartSettings(t *testing.T, threshold, partSize int64) func() {
+	t.Helper()
+	oldThreshold := s3MultipartThreshold
+	oldPartSize := s3DefaultPartSize
+	s3MultipartThreshold = threshold
+	s3DefaultPartSize = partSize
+	return func() {
+		s3MultipartThreshold = oldThreshold
+		s3DefaultPartSize = oldPartSize
+	}
+}
+
+func seedS3TestFile(t *testing.T, size int64) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "backup.tar.gz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create test file: %v", err)
+	}
+	defer file.Close()
+	if err := file.Truncate(size); err != nil {
+		t.Fatalf("truncate test file: %v", err)
+	}
+	return path
+}
+
+// ------------------------------------------------------------------
+// 远程全量基线探测（RemoteHasFullFileBackup 及底层 remoteHasFullBackup/s3HasFullBackup）
+// ------------------------------------------------------------------
+
+func TestRemoteHasFullFileBackupContextStopsS3ProbeAtCallerDeadline(t *testing.T) {
+	openTestDB(t)
+	requestStarted := make(chan struct{}, 1)
+	releaseHandler := make(chan struct{})
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestStarted <- struct{}{}
+		select {
+		case <-r.Context().Done():
+		case <-releaseHandler:
+		}
+	}))
+	defer server.Close()
+	defer close(releaseHandler)
+	withS3TestClient(t, server)
+
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled=1, backup_type='s3',
+		s3_endpoint=?, s3_bucket='ols-wpanel-backups', s3_region='auto',
+		s3_access_key_id='access-key_123', s3_secret_key='secret', s3_path_prefix='ols-wpanel'
+		WHERE id=1`, server.URL); err != nil {
+		t.Fatalf("update remote backup settings: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := RemoteHasFullFileBackupContext(ctx, "example.com")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RemoteHasFullFileBackupContext error = %v, want context deadline", err)
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("S3 baseline probe did not reach the HTTP server")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("S3 baseline probe ignored caller deadline: %s", elapsed)
+	}
+}
+
+func TestRemoteHasFullFileBackupContextStopsRsyncProbeAtCallerDeadline(t *testing.T) {
+	openTestDB(t)
+	installSleepingCommand(t, "sshpass")
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled=1, backup_type='rsync',
+		host='backup.example.com', port=22, username='root', auth_type='password',
+		password='secret', remote_path='/backups' WHERE id=1`); err != nil {
+		t.Fatalf("update remote backup settings: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := RemoteHasFullFileBackupContext(ctx, "example.com")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RemoteHasFullFileBackupContext error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("rsync baseline probe ignored caller deadline: %s", elapsed)
+	}
+}
+
+func TestSyncBackupToRemoteContextStopsRsyncAtCallerDeadline(t *testing.T) {
+	openTestDB(t)
+	installSleepingCommand(t, "sshpass")
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled=1, backup_type='rsync',
+		host='backup.example.com', port=22, username='root', auth_type='password',
+		password='secret', remote_path='/backups', keep_local=1 WHERE id=1`); err != nil {
+		t.Fatalf("update remote backup settings: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	ok := SyncBackupToRemoteContext(ctx, backupsRoot+"/example.com/files/file_full_test.tar.gz", BackupSourceFile, 0, "")
+	if ok {
+		t.Fatal("SyncBackupToRemoteContext = true after caller deadline")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("rsync upload ignored caller deadline: %s", elapsed)
+	}
+}
+
+func TestSyncBackupToRemoteContextPassesCallerDeadlineToS3(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled=1, backup_type='s3',
+		s3_endpoint='https://s3.example.com', s3_bucket='ols-wpanel-backups', s3_region='auto',
+		s3_access_key_id='access-key_123', s3_secret_key='secret', s3_path_prefix='ols-wpanel',
+		keep_local=1 WHERE id=1`); err != nil {
+		t.Fatalf("update remote backup settings: %v", err)
+	}
+
+	oldPut := putFileToS3ForSync
+	t.Cleanup(func() { putFileToS3ForSync = oldPut })
+	called := false
+	putFileToS3ForSync = func(ctx context.Context, endpoint, bucket, region, accessKeyID, secretKey, objectKey, path string) error {
+		called = true
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("S3 upload context has no caller deadline")
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	ok := SyncBackupToRemoteContext(ctx, backupsRoot+"/example.com/files/file_full_test.tar.gz", BackupSourceFile, 0, "")
+	if ok || !called {
+		t.Fatalf("SyncBackupToRemoteContext = %t, S3 called = %t", ok, called)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("S3 upload ignored caller deadline: %s", elapsed)
+	}
+}
+
+func installSleepingCommand(t *testing.T, name string) {
+	t.Helper()
+	binDir := t.TempDir()
+	path := filepath.Join(binDir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec sleep 30\n"), 0755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestRemoteHasFullFileBackupDisabledReturnsTrue(t *testing.T) {
+	openTestDB(t)
+
+	hasFull, err := RemoteHasFullFileBackup("example.com")
+	if err != nil {
+		t.Fatalf("RemoteHasFullFileBackup error = %v, want nil when remote backup disabled", err)
+	}
+	if !hasFull {
+		t.Fatal("RemoteHasFullFileBackup = false, want true when remote backup disabled (no completeness constraint)")
+	}
+}
+
+func TestRemoteHasFullFileBackupRsyncMissingHostReturnsError(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled = 1, backup_type = 'rsync', host = '' WHERE id = 1`); err != nil {
+		t.Fatalf("update remote_backup_settings: %v", err)
+	}
+
+	// host 为空时应返回 error（未确认远程状态），调用方据此强制走全量备份，
+	// 而不是静默当作"远程已有全量基线"处理。
+	hasFull, err := RemoteHasFullFileBackup("example.com")
+	if err == nil {
+		t.Fatal("RemoteHasFullFileBackup error = nil, want error when remote enabled but host is empty")
+	}
+	if hasFull {
+		t.Fatal("RemoteHasFullFileBackup = true, want false alongside the error")
+	}
+}
+
+func TestRemoteHasFullFileBackupRejectsInvalidBackupType(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled = 1, backup_type = 'ftp', host = 'backup.example.com' WHERE id = 1`); err != nil {
+		t.Fatalf("update remote_backup_settings: %v", err)
+	}
+
+	// 无效 backup_type 不应静默落入 rsync 分支，应和 SyncBackupToRemote 一样拒绝并返回 error。
+	hasFull, err := RemoteHasFullFileBackup("example.com")
+	if err == nil {
+		t.Fatal("RemoteHasFullFileBackup error = nil, want error for invalid backup_type")
+	}
+	if hasFull {
+		t.Fatal("RemoteHasFullFileBackup = true, want false alongside the error")
+	}
+}
+
+func TestRemoteHasFullFileBackupS3InvalidSettingsReturnsError(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled = 1, backup_type = 's3', s3_endpoint = '', s3_bucket = '' WHERE id = 1`); err != nil {
+		t.Fatalf("update remote_backup_settings: %v", err)
+	}
+
+	hasFull, err := RemoteHasFullFileBackup("example.com")
+	if err == nil {
+		t.Fatal("RemoteHasFullFileBackup error = nil, want error for invalid S3 settings")
+	}
+	if hasFull {
+		t.Fatal("RemoteHasFullFileBackup = true, want false alongside the error")
+	}
+}
+
+func TestS3HasFullBackupParsesKeyCount(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.RawQuery, "prefix=ols-wpanel%2Fexample.com%2Ffiles%2Ffile_full_") {
+			t.Errorf("unexpected list query: %s", r.URL.RawQuery)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<ListBucketResult><KeyCount>1</KeyCount></ListBucketResult>`))
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+
+	hasFull, err := s3HasFullBackup(t.Context(), server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel", "example.com")
+	if err != nil {
+		t.Fatalf("s3HasFullBackup() error = %v", err)
+	}
+	if !hasFull {
+		t.Fatal("s3HasFullBackup() = false, want true when KeyCount > 0")
+	}
+}
+
+func TestS3HasFullBackupNoResultsReturnsFalse(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<ListBucketResult><KeyCount>0</KeyCount></ListBucketResult>`))
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+
+	hasFull, err := s3HasFullBackup(t.Context(), server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel", "example.com")
+	if err != nil {
+		t.Fatalf("s3HasFullBackup() error = %v", err)
+	}
+	if hasFull {
+		t.Fatal("s3HasFullBackup() = true, want false when bucket has no matching full-backup objects")
+	}
+}
+
+// ------------------------------------------------------------------
+// updateBackupTransportStatus 回写 db_backups / file_backups 的 transport_status
+// ------------------------------------------------------------------
+
+func insertMinimalWebsite(t *testing.T, domain string) {
+	t.Helper()
+	mustExec(t, database.GetDB(), `INSERT INTO websites (id, name, domain, system_user, web_root, log_dir, db_name, db_user, lsphp_socket_path, ols_vhost_config_path)
+		VALUES (1, 'site', '`+domain+`', 'u1', '/www/wwwroot/`+domain+`', '/www/wwwlogs/`+domain+`', 'db1', 'u1', '/p', '/n')`)
+}
+
+func TestUpdateBackupTransportStatusWritesDBBackups(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	insertMinimalWebsite(t, "db.example.com")
+	if _, err := db.Exec(`INSERT INTO db_backups (site_id, filename, file_size, db_name) VALUES (1, 'backup.sql.gz', 100, 'db1')`); err != nil {
+		t.Fatalf("insert db_backups: %v", err)
+	}
+
+	updateBackupTransportStatus(BackupSourceDB, 1, "backup.sql.gz", "synced", "")
+
+	var status, message string
+	if err := db.QueryRow(`SELECT transport_status, transport_message FROM db_backups WHERE site_id = 1 AND filename = 'backup.sql.gz'`).Scan(&status, &message); err != nil {
+		t.Fatalf("query db_backups: %v", err)
+	}
+	if status != "synced" {
+		t.Fatalf("transport_status = %q, want %q", status, "synced")
+	}
+	if message != "" {
+		t.Fatalf("transport_message = %q, want empty", message)
+	}
+}
+
+func TestUpdateBackupTransportStatusWritesFileBackups(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	insertMinimalWebsite(t, "file.example.com")
+	if _, err := db.Exec(`INSERT INTO file_backups (site_id, filename, file_size, mode) VALUES (1, 'file_full_20260101_000000.tar.gz', 200, 'full')`); err != nil {
+		t.Fatalf("insert file_backups: %v", err)
+	}
+
+	updateBackupTransportStatus(BackupSourceFile, 1, "file_full_20260101_000000.tar.gz", "failed", "连接超时")
+
+	var status, message string
+	if err := db.QueryRow(`SELECT transport_status, transport_message FROM file_backups WHERE site_id = 1 AND filename = 'file_full_20260101_000000.tar.gz'`).Scan(&status, &message); err != nil {
+		t.Fatalf("query file_backups: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("transport_status = %q, want %q", status, "failed")
+	}
+	if message != "连接超时" {
+		t.Fatalf("transport_message = %q, want %q", message, "连接超时")
+	}
+}
+
+func TestUpdateBackupTransportStatusIgnoresZeroSiteID(t *testing.T) {
+	openTestDB(t)
+	// 不应 panic：siteID 为 0（未落库的记录）时直接跳过写入。
+	updateBackupTransportStatus(BackupSourceDB, 0, "whatever.sql.gz", "synced", "")
+}
+
+// ------------------------------------------------------------------
+// 历史备份远程状态核对（ReconcileBackupTransportStatus 及其辅助函数）
+// ------------------------------------------------------------------
+
+func TestParseRemoteFileListStripsRemotePathPrefix(t *testing.T) {
+	output := []byte("/home/backup/example.com/db/a.sql.gz\n/home/backup/example.com/files/file_full_x.tar.gz\n\n")
+	files := parseRemoteFileList(output, "/home/backup")
+	if len(files) != 2 {
+		t.Fatalf("files = %+v, want 2 entries", files)
+	}
+	if !files["example.com/db/a.sql.gz"] || !files["example.com/files/file_full_x.tar.gz"] {
+		t.Fatalf("files = %+v, want both relative paths present", files)
+	}
+}
+
+func TestParseRemoteFileListSkipsLinesNotUnderRemotePath(t *testing.T) {
+	output := []byte("/tmp/unrelated.txt\n/home/backup/example.com/db/a.sql.gz\n")
+	files := parseRemoteFileList(output, "/home/backup")
+	if len(files) != 1 || !files["example.com/db/a.sql.gz"] {
+		t.Fatalf("files = %+v, want only the entry under remotePath", files)
+	}
+}
+
+func TestParseRemoteFileListRejectsSiblingDirectoryWithSamePrefix(t *testing.T) {
+	// /home/backup2/x 文本前缀和 /home/backup 相同，但不是它的子目录，不应该被误配进去。
+	output := []byte("/home/backup2/x.tar.gz\n/home/backup/example.com/db/a.sql.gz\n")
+	files := parseRemoteFileList(output, "/home/backup")
+	if len(files) != 1 || !files["example.com/db/a.sql.gz"] {
+		t.Fatalf("files = %+v, want only the true subdirectory entry, not the sibling /home/backup2", files)
+	}
+}
+
+func TestListS3ObjectKeysPaginatesUntilNotTruncated(t *testing.T) {
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.URL.RawQuery)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		if !strings.Contains(r.URL.RawQuery, "continuation-token=") {
+			w.Write([]byte(`<ListBucketResult><Contents><Key>ols-wpanel/a.tar.gz</Key></Contents><IsTruncated>true</IsTruncated><NextContinuationToken>token-1</NextContinuationToken></ListBucketResult>`))
+			return
+		}
+		w.Write([]byte(`<ListBucketResult><Contents><Key>ols-wpanel/b.tar.gz</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>`))
+	}))
+	defer server.Close()
+	withS3TestClient(t, server)
+
+	keys, err := listS3ObjectKeys(t.Context(), server.URL, "ols-wpanel-backups", "auto", "access-key_123", "secret", "ols-wpanel")
+	if err != nil {
+		t.Fatalf("listS3ObjectKeys() error = %v", err)
+	}
+	if len(keys) != 2 || !keys["ols-wpanel/a.tar.gz"] || !keys["ols-wpanel/b.tar.gz"] {
+		t.Fatalf("keys = %+v, want both pages' keys", keys)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2 (one per page)", len(requests))
+	}
+	if !strings.Contains(requests[1], "continuation-token=token-1") {
+		t.Fatalf("second request query = %q, want continuation-token=token-1", requests[1])
+	}
+}
+
+func TestApplyReconciledTransportStatusOnlyUpdatesMatchedLocalRows(t *testing.T) {
+	openTestDB(t)
+	insertMinimalWebsite(t, "reconcile.example.com")
+	db := database.GetDB()
+	if _, err := db.Exec(`INSERT INTO db_backups (id, site_id, filename, file_size, db_name, transport_status) VALUES (1, 1, 'a.sql.gz', 10, 'db1', 'local')`); err != nil {
+		t.Fatalf("insert db_backups a: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO db_backups (id, site_id, filename, file_size, db_name, transport_status) VALUES (2, 1, 'b.sql.gz', 10, 'db1', 'failed')`); err != nil {
+		t.Fatalf("insert db_backups b: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO file_backups (id, site_id, filename, file_size, mode, transport_status) VALUES (1, 1, 'file_full_c.tar.gz', 10, 'full', 'local')`); err != nil {
+		t.Fatalf("insert file_backups: %v", err)
+	}
+
+	pending := []pendingTransportStatusRow{
+		{table: "db_backups", id: 1, domain: "reconcile.example.com", filename: "a.sql.gz", subdir: "db", status: "local"},
+		{table: "file_backups", id: 1, domain: "reconcile.example.com", filename: "file_full_c.tar.gz", subdir: "files", status: "local"},
+	}
+	remoteKeys := map[string]bool{
+		"ols-wpanel/reconcile.example.com/db/a.sql.gz": true,
+		// file_full_c.tar.gz 故意不在远程 key 集合里，模拟"确实还没同步"的情况。
+	}
+
+	updated := applyReconciledTransportStatus(pending, remoteKeys, "s3", "ols-wpanel")
+	if updated != 1 {
+		t.Fatalf("applyReconciledTransportStatus() = %d, want 1 (only the matched db_backups row)", updated)
+	}
+
+	var dbStatus1, dbStatus2, fileStatus string
+	if err := db.QueryRow(`SELECT transport_status FROM db_backups WHERE id = 1`).Scan(&dbStatus1); err != nil {
+		t.Fatalf("query db_backups id=1: %v", err)
+	}
+	if err := db.QueryRow(`SELECT transport_status FROM db_backups WHERE id = 2`).Scan(&dbStatus2); err != nil {
+		t.Fatalf("query db_backups id=2: %v", err)
+	}
+	if err := db.QueryRow(`SELECT transport_status FROM file_backups WHERE id = 1`).Scan(&fileStatus); err != nil {
+		t.Fatalf("query file_backups id=1: %v", err)
+	}
+	if dbStatus1 != "synced" {
+		t.Fatalf("db_backups id=1 transport_status = %q, want synced (matched remote key)", dbStatus1)
+	}
+	if dbStatus2 != "failed" {
+		t.Fatalf("db_backups id=2 transport_status = %q, want unchanged failed (was never in the pending list)", dbStatus2)
+	}
+	if fileStatus != "local" {
+		t.Fatalf("file_backups id=1 transport_status = %q, want unchanged local (not found in remote key set)", fileStatus)
+	}
+}
+
+func TestLoadPendingTransportStatusRowsReturnsLocalAndSyncedRows(t *testing.T) {
+	openTestDB(t)
+	insertMinimalWebsite(t, "pending.example.com")
+	db := database.GetDB()
+	if _, err := db.Exec(`INSERT INTO db_backups (site_id, filename, file_size, db_name, transport_status) VALUES (1, 'a.sql.gz', 10, 'db1', 'local')`); err != nil {
+		t.Fatalf("insert db_backups a: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO db_backups (site_id, filename, file_size, db_name, transport_status) VALUES (1, 'b.sql.gz', 10, 'db1', 'synced')`); err != nil {
+		t.Fatalf("insert db_backups b: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO file_backups (site_id, filename, file_size, mode, transport_status) VALUES (1, 'file_full_c.tar.gz', 10, 'full', 'local')`); err != nil {
+		t.Fatalf("insert file_backups: %v", err)
+	}
+
+	pending, err := loadPendingTransportStatusRows()
+	if err != nil {
+		t.Fatalf("loadPendingTransportStatusRows() error = %v", err)
+	}
+	if len(pending) != 3 {
+		t.Fatalf("pending = %+v, want 3 local/synced rows", pending)
+	}
+	var sawLocalDB, sawSyncedDB, sawFile bool
+	for _, p := range pending {
+		if p.table == "db_backups" && p.filename == "a.sql.gz" && p.domain == "pending.example.com" && p.subdir == "db" && p.status == "local" {
+			sawLocalDB = true
+		}
+		if p.table == "db_backups" && p.filename == "b.sql.gz" && p.status == "synced" {
+			sawSyncedDB = true
+		}
+		if p.table == "file_backups" && p.filename == "file_full_c.tar.gz" && p.domain == "pending.example.com" && p.subdir == "files" && p.status == "local" {
+			sawFile = true
+		}
+	}
+	if !sawLocalDB || !sawSyncedDB || !sawFile {
+		t.Fatalf("pending = %+v, missing expected rows", pending)
+	}
+}
+
+func TestApplyReconciledTransportStatusClearsSyncedRowsForEmptyRemote(t *testing.T) {
+	openTestDB(t)
+	insertMinimalWebsite(t, "empty-remote.example.com")
+	db := database.GetDB()
+	if _, err := db.Exec(`INSERT INTO db_backups (id, site_id, filename, file_size, db_name, transport_status) VALUES (1, 1, 'old.sql.gz', 10, 'db1', 'synced')`); err != nil {
+		t.Fatal(err)
+	}
+	pending := []pendingTransportStatusRow{{table: "db_backups", id: 1, domain: "empty-remote.example.com", filename: "old.sql.gz", subdir: "db", status: "synced"}}
+	if updated := applyReconciledTransportStatus(pending, map[string]bool{}, "rsync", ""); updated != 1 {
+		t.Fatalf("updated = %d, want 1", updated)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT transport_status FROM db_backups WHERE id=1`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "local" {
+		t.Fatalf("transport_status = %q, want local", status)
+	}
+}
+
+func TestReconcileBackupTransportStatusErrorsWhenDisabled(t *testing.T) {
+	openTestDB(t)
+	// 现在是管理员显式点击"核对远程状态"按钮才会调用，远程备份没启用时应该明确报错，
+	// 而不是静默返回成功——按钮式的操作不应该让用户以为"核对过了"却其实什么都没做。
+	if _, err := ReconcileBackupTransportStatus(); err == nil {
+		t.Fatal("ReconcileBackupTransportStatus() error = nil, want error when remote backup is disabled")
+	}
+}
+
+func TestReconcileBackupTransportStatusSkipsRemoteCallWhenNothingPending(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled = 1, backup_type = 's3', s3_endpoint = 'https://invalid.example.invalid', s3_bucket = 'x', s3_access_key_id = 'k', s3_secret_key = 'secret' WHERE id = 1`); err != nil {
+		t.Fatalf("update remote_backup_settings: %v", err)
+	}
+	// 没有任何 transport_status 为 local/synced 的记录时，函数应该在发起任何远程请求之前就直接返回；
+	// 如果它真的尝试连了 https://invalid.example.invalid 就会报网络错误，err==nil 证明短路生效。
+	updated, err := ReconcileBackupTransportStatus()
+	if err != nil {
+		t.Fatalf("ReconcileBackupTransportStatus() error = %v, want nil (no remote call should be attempted)", err)
+	}
+	if updated != 0 {
+		t.Fatalf("ReconcileBackupTransportStatus() updated = %d, want 0", updated)
+	}
+}
+
+func TestLoadPendingTransportStatusRowsReturnsErrorWhenTableMissing(t *testing.T) {
+	openTestDB(t)
+	db := database.GetDB()
+	if _, err := db.Exec(`DROP TABLE db_backups`); err != nil {
+		t.Fatalf("drop db_backups: %v", err)
+	}
+	if _, err := loadPendingTransportStatusRows(); err == nil {
+		t.Fatal("loadPendingTransportStatusRows() error = nil, want error when db_backups is missing")
+	}
+}
+
+func TestApplyReconciledTransportStatusSkipsFailedUpdateWithoutCountingIt(t *testing.T) {
+	openTestDB(t)
+	insertMinimalWebsite(t, "update-fail.example.com")
+	db := database.GetDB()
+	if _, err := db.Exec(`INSERT INTO db_backups (id, site_id, filename, file_size, db_name, transport_status) VALUES (1, 1, 'a.sql.gz', 10, 'db1', 'local')`); err != nil {
+		t.Fatalf("insert db_backups: %v", err)
+	}
+
+	pending := []pendingTransportStatusRow{
+		// id=999 在 db_backups 里不存在，UPDATE 会成功执行但影响 0 行——这里改用一个真正会
+		// 报错的场景：table 名故意写错，触发 db.Exec 报错，验证不会被计入 updated。
+		{table: "db_backups", id: 1, domain: "update-fail.example.com", filename: "a.sql.gz", subdir: "db", status: "local"},
+	}
+	remoteKeys := map[string]bool{
+		"update-fail.example.com/db/a.sql.gz": true,
+	}
+
+	// 正常情况：这条应该成功回写并计入 updated=1。
+	updated := applyReconciledTransportStatus(pending, remoteKeys, "rsync", "")
+	if updated != 1 {
+		t.Fatalf("applyReconciledTransportStatus() = %d, want 1", updated)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT transport_status FROM db_backups WHERE id = 1`).Scan(&status); err != nil {
+		t.Fatalf("query db_backups: %v", err)
+	}
+	if status != "synced" {
+		t.Fatalf("transport_status = %q, want synced", status)
+	}
+
+	// 现在把表删掉，模拟回写失败：不应该 panic，也不应该把失败的记录计入 updated。
+	if _, err := db.Exec(`DROP TABLE db_backups`); err != nil {
+		t.Fatalf("drop db_backups: %v", err)
+	}
+	updatedAfterDrop := applyReconciledTransportStatus(pending, remoteKeys, "rsync", "")
+	if updatedAfterDrop != 0 {
+		t.Fatalf("applyReconciledTransportStatus() after dropping table = %d, want 0 (UPDATE should fail, not be counted)", updatedAfterDrop)
+	}
+}

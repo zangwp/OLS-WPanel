@@ -9,7 +9,7 @@ import (
 
 func TestMaintenanceStartupPrecedesSiteWriters(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "main.go", nil, 0)
+	file, err := parser.ParseFile(fset, "cmd/ols-wpanel/main.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,4 +66,3 @@ func TestMaintenanceStartupPrecedesSiteWriters(t *testing.T) {
 		t.Fatal("CLI tasks must not start restart recovery")
 	}
 }
-

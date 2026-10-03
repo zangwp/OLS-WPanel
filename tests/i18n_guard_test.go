@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	zhLocalePath = "../i18n/locales/zh-CN.json"
-	enLocalePath = "../i18n/locales/en-US.json"
+	zhLocalePath = "../internal/i18n/locales/zh-CN.json"
+	enLocalePath = "../internal/i18n/locales/en-US.json"
 )
 
 func TestLocalesHaveMatchingKeys(t *testing.T) {
@@ -182,15 +182,15 @@ func collectScriptTranslationKeys(t *testing.T) map[string][]string {
 	keys := map[string][]string{}
 	keyPattern := regexp.MustCompile(`(?:^|[^A-Za-z0-9_$])t\('([a-z][a-z0-9_.-]+)'`)
 
-	walkFiles(t, "../static/templates", func(path string, content []byte) {
+	walkFiles(t, "../web/templates", func(path string, content []byte) {
 		for _, match := range keyPattern.FindAllSubmatch(content, -1) {
 			keys[path] = appendUnique(keys[path], string(match[1]))
 		}
 	})
-	content, err := os.ReadFile("../static/js/app.js")
+	content, err := os.ReadFile("../web/js/app.js")
 	if err == nil {
 		for _, match := range keyPattern.FindAllSubmatch(content, -1) {
-			keys["../static/js/app.js"] = appendUnique(keys["../static/js/app.js"], string(match[1]))
+			keys["../web/js/app.js"] = appendUnique(keys["../web/js/app.js"], string(match[1]))
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func collectScriptTranslationKeys(t *testing.T) map[string][]string {
 
 func collectExposedKeys(t *testing.T) map[string]bool {
 	t.Helper()
-	content, err := os.ReadFile("../router/router.go")
+	content, err := os.ReadFile("../internal/router/router.go")
 	if err != nil {
 		t.Fatal(err)
 	}

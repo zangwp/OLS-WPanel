@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.17.1 — 2026-10-03
+
+- Shares APT update inventory parsing between the update page, alerts and completion checks, with a fixed command locale. Reuses tool version detection, rejects malformed address-priority ownership blocks, and avoids duplicate PHP runtime refreshes.
+
+- Organizes the command entry under cmd/ols-wpanel/, backend packages under internal/, templates and embedded assets under web/, and development utilities under deploy/tools/. Updates import paths, resource embedding, repository checks and release builds while preserving installation entry points, published asset names and server paths.
+- Runs frontend behavior regression checks in both CI architectures and before release signing, without downloading frontend dependencies or regenerating reviewed browser assets.
+
+- Makes terminal homepage labels consistent, distinguishes service-read errors from stopped services, wraps long login addresses, and reports remaining system packages instead of an unqualified success in terminal update records.
+- Adapts sidebar spacing to viewport height, keeps language controls on one line, and preserves independent navigation scrolling on shorter screens without requiring browser zoom changes.
+- Clarifies the firewall draft, preview, temporary application and verified-save steps; validates custom port additions and protects unsaved drafts from accidental refresh. Keeps WordPress task controls in site settings and removes duplicate panel tasks from the read-only system list.
+- Shows IPv4/IPv6 configuration ownership and existing address-selection rules before applying changes; external rules remain protected and unavailable actions are disabled.
+- Removes persistent suggested-value labels and loads configuration suggestions only on request without replacing edited values. Moves optional development tools into the runtime page and distinguishes missing tools from failed or incomplete detection.
+- Allows system package upgrades to install required new dependencies, including new kernel packages, while refusing package removals. Rechecks pending updates after completion and keeps an explicit warning with package names instead of reporting an unqualified success when updates remain.
+
 ## v1.17.0 — 2026-10-03
 
 - Adds staged SSH port migration for standard systemd SSH services, with inherited firewall sources, Fail2ban updates, verification from the new SSH session, and a five-minute rollback timer. Unsupported socket activation and custom configurations remain read-only.

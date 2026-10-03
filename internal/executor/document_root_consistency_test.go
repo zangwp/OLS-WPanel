@@ -1,0 +1,142 @@
+package executor
+
+import (
+	"database/sql"
+	"errors"
+	"path/filepath"
+	"testing"
+
+	"github.com/zangwp/OLS-WPanel/internal/config"
+	"github.com/zangwp/OLS-WPanel/internal/database"
+	"github.com/zangwp/OLS-WPanel/internal/models"
+	_ "modernc.org/sqlite"
+)
+
+func withDocumentRootStubs(t *testing.T) {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE websites (id INTEGER PRIMARY KEY, status TEXT NOT NULL, document_root_subdir TEXT NOT NULL, updated_at DATETIME);
+		CREATE TABLE website_ai_development_access (site_id INTEGER PRIMARY KEY);
+		CREATE TABLE site_migration_locks (domain TEXT NOT NULL, site_id INTEGER, migration_site_id TEXT NOT NULL, direction TEXT NOT NULL, status TEXT NOT NULL);
+		INSERT INTO websites(id,status,document_root_subdir) VALUES (1,'active','')`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	oldDB := database.DB
+	oldConfig := config.AppConfig
+	oldPersist, oldApply := persistDocumentRoot, applyDocumentRootOLSVHost
+	oldSetOwner := setEffectiveDocumentRootOwner
+	database.DB = db
+	config.AppConfig = &config.Config{
+		Panel: config.PanelConfig{BackupDir: t.TempDir()},
+		Paths: config.PathsConfig{OLSVHostsEnabled: t.TempDir(), LSPHPSocketDir: t.TempDir()},
+	}
+	setEffectiveDocumentRootOwner = func(string, string) error { return nil }
+	t.Cleanup(func() {
+		persistDocumentRoot, applyDocumentRootOLSVHost = oldPersist, oldApply
+		setEffectiveDocumentRootOwner = oldSetOwner
+		config.AppConfig = oldConfig
+		database.DB = oldDB
+		db.Close()
+	})
+}
+
+func documentRootTestSite(t *testing.T) *models.Website {
+	t.Helper()
+	root := t.TempDir()
+	return &models.Website{
+		ID: 1, Domain: "example.com", SiteType: "php", WebRoot: root,
+		SystemUser: "wp_example", LogDir: filepath.Join(root, "logs"),
+		LSPHPSocketPath:    filepath.Join(root, "lsphp.conf"),
+		OLSVHostConfigPath: filepath.Join(root, "example.com.conf"),
+	}
+}
+
+func runDocumentRootTask(site *models.Website) TaskResult {
+	return executeSetDocumentRoot(&Task{Payload: &SetDocumentRootPayload{
+		Site: site, DocumentRootSubdir: DocumentRootPublic,
+	}})
+}
+
+func TestSetDocumentRootDatabaseFailureDoesNotApplyOpenLiteSpeed(t *testing.T) {
+	withDocumentRootStubs(t)
+	openlitespeedCalled := false
+	persistDocumentRoot = func(int, string) error { return errors.New("database failed") }
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error {
+		openlitespeedCalled = true
+		return nil
+	}
+	result := runDocumentRootTask(documentRootTestSite(t))
+	if result.Success || openlitespeedCalled {
+		t.Fatalf("result=%+v openlitespeedCalled=%v", result, openlitespeedCalled)
+	}
+}
+
+func TestSetDocumentRootOpenLiteSpeedFailureRestoresDatabase(t *testing.T) {
+	withDocumentRootStubs(t)
+	var saved []string
+	persistDocumentRoot = func(_ int, subdir string) error {
+		saved = append(saved, subdir)
+		return nil
+	}
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error { return errors.New("openlitespeed failed") }
+	result := runDocumentRootTask(documentRootTestSite(t))
+	if result.Success || len(saved) != 2 || saved[0] != DocumentRootPublic || saved[1] != "" {
+		t.Fatalf("result=%+v saved=%v", result, saved)
+	}
+}
+
+func TestSetDocumentRootReportsDatabaseRecoveryFailure(t *testing.T) {
+	withDocumentRootStubs(t)
+	call := 0
+	persistDocumentRoot = func(int, string) error {
+		call++
+		if call == 2 {
+			return errors.New("restore failed")
+		}
+		return nil
+	}
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error { return errors.New("openlitespeed failed") }
+	result := runDocumentRootTask(documentRootTestSite(t))
+	if result.Success || result.Message != "应用 OpenLiteSpeed 虚拟主机配置失败，Web 入口目录状态恢复失败，请人工检查" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestSetDocumentRootSuccessPersistsAndApplies(t *testing.T) {
+	withDocumentRootStubs(t)
+	saved := ""
+	persistDocumentRoot = func(_ int, subdir string) error {
+		saved = subdir
+		return nil
+	}
+	openlitespeedCalled := false
+	applyDocumentRootOLSVHost = func(*TemplateEngine, string, string, string) error {
+		openlitespeedCalled = true
+		return nil
+	}
+	result := runDocumentRootTask(documentRootTestSite(t))
+	if !result.Success || saved != DocumentRootPublic || !openlitespeedCalled {
+		t.Fatalf("result=%+v saved=%q openlitespeedCalled=%v", result, saved, openlitespeedCalled)
+	}
+}
+
+func TestSaveDocumentRootChecksDatabaseResult(t *testing.T) {
+	withDocumentRootStubs(t)
+	if err := saveDocumentRoot(1, DocumentRootPublic); err != nil {
+		t.Fatal(err)
+	}
+	var subdir string
+	if err := database.GetDB().QueryRow("SELECT document_root_subdir FROM websites WHERE id=1").Scan(&subdir); err != nil {
+		t.Fatal(err)
+	}
+	if subdir != DocumentRootPublic {
+		t.Fatalf("subdir=%q", subdir)
+	}
+	if err := saveDocumentRoot(999, ""); err == nil {
+		t.Fatal("missing website unexpectedly reported success")
+	}
+}

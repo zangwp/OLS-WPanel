@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
-const source = fs.readFileSync(path.join(__dirname, '../../ols-wpanel-optimizer/assets/maintenance.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../web/plugins/ols-wpanel-optimizer/assets/maintenance.js'), 'utf8');
 
 async function scenario(failure, sameID) {
     class Element {

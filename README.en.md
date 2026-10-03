@@ -1,6 +1,6 @@
 # OLS WPanel
 
-<img src="static/logo.png" alt="OLS WPanel" width="88">
+<img src="web/logo.png" alt="OLS WPanel" width="88">
 
 A lightweight VPS and WordPress management panel for websites, databases, TLS certificates, caching, backups and server maintenance. Built around OpenLiteSpeed, LSPHP, MariaDB and Redis.
 
