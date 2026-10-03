@@ -239,8 +239,8 @@ func TestDashboardUpdateBadgesDeepLinkToSystemUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	deepLink := []byte(`href="/{{.RandomSuffix}}/settings#system-updates"`)
-	if count := bytes.Count(source, deepLink); count != 3 {
-		t.Fatalf("dashboard update badges deep-link count = %d, want 3", count)
+	if count := bytes.Count(source, deepLink); count != 2 {
+		t.Fatalf("dashboard update badges deep-link count = %d, want 2", count)
 	}
 }
 
@@ -1765,7 +1765,7 @@ func TestCronPageExplainsManagedAndAutomaticTasks(t *testing.T) {
 	}
 	for _, required := range [][]byte{
 		[]byte(`cron.system_jobs_help`),
-		[]byte(`cron.ssl_renewal_help`),
+		[]byte(`cron.overview_help`),
 		[]byte(`cron.task_type_wp_cron`),
 		[]byte(`this.form.cron_expression = '*/5 * * * *'`),
 	} {
@@ -1828,8 +1828,9 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 		[]byte(`firewall.scope_specific`),
 		[]byte(`firewall.scope_any`),
 		[]byte(`firewall.confirm_any_source`),
-		[]byte(`'/firewall/ports/protection'`),
-		[]byte(`'/firewall/ports/protection/confirm'`),
+		[]byte(`'/firewall/ports/access/preview'`),
+		[]byte(`'/firewall/ports/access/apply'`),
+		[]byte(`'/firewall/ports/access/confirm'`),
 		[]byte(`listener.address`),
 		[]byte(`rule.hit_packets`),
 		[]byte(`rule.created_at`),
