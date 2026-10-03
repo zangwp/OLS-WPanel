@@ -15,7 +15,7 @@ function wp_remote_request($url,$args) { $GLOBALS['calls'][]=[$url,$args];return
 function is_wp_error($v) { return false; }
 function wp_remote_retrieve_body($v) { return $v['body']; }
 function delete_transient($key) {}
-require __DIR__.'/../../ols-wpanel-optimizer/includes/trait-maintenance.php';
+require __DIR__.'/../../web/plugins/ols-wpanel-optimizer/includes/trait-maintenance.php';
 class Fixture {
     use OLSW_Optimizer_Maintenance_Trait;
     const FILE_LOCK_STATE_TRANSIENT='state';

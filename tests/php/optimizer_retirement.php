@@ -1,5 +1,5 @@
 <?php
-$source=file_get_contents(__DIR__.'/../../executor/assets/wp-inventory-runner/inventory.php');
+$source=file_get_contents(__DIR__.'/../../internal/executor/assets/wp-inventory-runner/inventory.php');
 $start=strpos($source,'function ols_wpanel_inventory_retire_optimizer(): void');
 $end=strpos($source,"\n\$token =",$start);
 if ($start===false || $end===false) throw new Exception('missing retirement operation');

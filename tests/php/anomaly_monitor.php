@@ -3,7 +3,7 @@ define('ABSPATH', '/fixture/');
 define('DAY_IN_SECONDS', 86400);
 define('ARRAY_A', 'ARRAY_A');
 define('DB_NAME', 'fixture_db');
-$runner = file_get_contents(__DIR__.'/../../executor/assets/wp-inventory-runner/inventory.php');
+$runner = file_get_contents(__DIR__.'/../../internal/executor/assets/wp-inventory-runner/inventory.php');
 $start = strpos($runner, 'function ols_wpanel_inventory_collect_anomaly(');
 $end = strpos($runner, "\n\$token =", $start);
 if ($start === false || $end === false) throw new Exception('missing native sampler');
