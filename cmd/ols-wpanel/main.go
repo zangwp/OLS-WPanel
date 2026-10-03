@@ -1,0 +1,676 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"math/big"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/zangwp/OLS-WPanel/internal/collector"
+	"github.com/zangwp/OLS-WPanel/internal/config"
+	"github.com/zangwp/OLS-WPanel/internal/database"
+	"github.com/zangwp/OLS-WPanel/internal/executor"
+	"github.com/zangwp/OLS-WPanel/internal/handlers"
+	"github.com/zangwp/OLS-WPanel/internal/middleware"
+	"github.com/zangwp/OLS-WPanel/internal/router"
+	"github.com/zangwp/OLS-WPanel/web"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
+const (
+	wpCoreUpdateWorkerShutdownTimeout = 30 * time.Second
+	panelHTTPShutdownTimeout          = 30 * time.Second
+	panelReadHeaderTimeout            = 10 * time.Second
+	panelIdleTimeout                  = 2 * time.Minute
+	panelMaxHeaderBytes               = 1 << 20
+)
+
+type wpCoreUpdateWorkerLifecycle interface {
+	Start() error
+	Stop(context.Context) error
+}
+
+type wpCoreUpdateWorkerFactory func(*config.Config) (wpCoreUpdateWorkerLifecycle, error)
+
+func main() {
+	configPath := flag.String("config", "/www/ols-wpanel/config.json", "配置文件路径")
+	resetAdmin := flag.Bool("reset-admin", false, "一键重置管理员账号密码")
+	refreshWhitelist := flag.Bool("refresh-whitelist", false, "手动触发白名单刷新")
+	unbanAll := flag.Bool("unban-all", false, "一键清空所有IP封禁记录")
+	recordFail2banIP := flag.String("record-fail2ban", "", "记录 Fail2ban 封禁 IP")
+	banJail := flag.String("ban-jail", "", "Fail2ban jail 名称")
+	banTime := flag.Int("ban-bantime", 0, "Fail2ban 本次封禁秒数")
+	banCount := flag.Int("ban-count", 0, "Fail2ban 累计封禁次数")
+	banRestored := flag.Bool("ban-restored", false, "Fail2ban 重启恢复事件")
+	unbanFail2banIP := flag.String("unban-fail2ban", "", "记录 Fail2ban 解封 IP")
+	fileBackup := flag.String("file-backup", "", "执行文件备份: siteID:mode")
+	runScheduledCron := flag.Int("run-scheduled-cron", 0, "内部使用：执行 "+config.ProductName+" 受管计划任务")
+	runAutoBackup := flag.Bool("run-auto-backup", false, "手动触发自动备份（测试用）")
+	vpsTool := flag.String("vps-tool", "", "VPS operation")
+	vpsValue := flag.String("vps-value", "", "VPS operation option")
+	showInfo := flag.Bool("info", false, "查看面板信息")
+	repairConfigCheck := flag.Bool("repair-config-check", false, "内部使用：只读校验 repair 配置")
+	updateWatchdog := flag.String("update-watchdog", "", "内部使用：面板更新健康检查守护")
+	panelDBRestorePlan := flag.String("panel-db-restore-plan", "", "内部使用：执行面板数据库恢复计划")
+	systemPackageUpdatePlan := flag.String("system-package-update-plan", "", "内部使用：执行系统软件包更新计划")
+	flag.Parse()
+
+	if *repairConfigCheck {
+		result, err := config.CheckRepairConfig(*configPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			fmt.Fprintln(os.Stderr, "repair_config_output_failed")
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *showInfo {
+		cfg, err := config.LoadConfig(*configPath)
+		if err != nil {
+			log.Fatalf("加载配置失败: %v", err)
+		}
+		fmt.Printf("%s 面板信息\n", config.ProductName)
+		fmt.Println("管理 VPS 与 WordPress 网站：网站、数据库、缓存、备份和服务器维护。")
+		fmt.Println("─────────────────")
+		if BuildTime != "" && BuildTime != "unknown" {
+			displayTime := BuildTime
+			if bt, err := time.Parse(time.RFC3339, BuildTime); err == nil {
+				tz := getSysTimezone()
+				if loc, err := time.LoadLocation(tz); err == nil {
+					displayTime = bt.In(loc).Format("2006-01-02 15:04:05")
+				} else {
+					displayTime = bt.Local().Format("2006-01-02 15:04:05")
+				}
+			}
+			fmt.Printf("版本: %s (构建: %s)\n", Version, displayTime)
+		} else {
+			fmt.Printf("版本: %s\n", Version)
+		}
+		fmt.Printf("HTTPS 端口: %d\n", cfg.Panel.TLSPort)
+		fmt.Printf("安全入口: /%s\n", cfg.Panel.RandomSuffix)
+		fmt.Printf("数据目录: %s\n", cfg.Panel.DataDir)
+		fmt.Printf("配置文件: %s\n", *configPath)
+		return
+	}
+
+	// Every state-changing daemon/CLI mode must prove both the config identity
+	// and the identities of the running executable and managed cron file first.
+	// The signed installer candidate's --info and --repair-config-check paths
+	// above are intentionally read-only exemptions. The update watchdog is the
+	// only non-canonical executable: it is anchored to the protected rollback
+	// plan and old-binary inode before the database or system is touched.
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+	if *updateWatchdog != "" {
+		if flag.NFlag() != 2 || flag.NArg() != 0 {
+			log.Fatal("更新守护模式只允许 --update-watchdog 与 --config")
+		}
+		if err := executor.ValidateUpdateWatchdogDistributionIdentity(cfg, *configPath, *updateWatchdog); err != nil {
+			log.Fatalf("OLS WPanel更新守护身份校验失败: %v", err)
+		}
+		if err := database.Open(cfg.SQLite.Path); err != nil {
+			log.Fatalf("打开数据库失败: %v", err)
+		}
+		defer database.Close()
+		if err := executor.SignalUpdateWatchdogReady(cfg, *configPath, *updateWatchdog); err != nil {
+			_ = database.Close()
+			log.Fatalf("更新守护就绪握手失败: %v", err)
+		}
+		executor.RunUpdateWatchdog(cfg, *configPath, *updateWatchdog)
+		return
+	}
+	if err := executor.ValidateRuntimeDistributionIdentity(cfg.Systemd.BinaryPath, cfg.Paths.CronFile); err != nil {
+		log.Fatalf("OLS WPanel运行身份校验失败: %v", err)
+	}
+
+	if *systemPackageUpdatePlan != "" {
+		if err := executor.RunSystemPackageUpdatePlan(*systemPackageUpdatePlan); err != nil {
+			log.Printf("系统软件包更新失败: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *panelDBRestorePlan != "" {
+		if err := executor.RunPanelDBRestorePlan(*panelDBRestorePlan); err != nil {
+			log.Printf("面板数据库恢复失败: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *vpsTool != "" {
+		if *vpsTool == "dns-status" || *vpsTool == "dns-test" {
+			status := executor.GetDNSStatus()
+			var probeErr error
+			if *vpsTool == "dns-test" {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				status, probeErr = executor.ProbeDNSPreset(ctx, *vpsValue)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
+				log.Fatal(err)
+			}
+			if probeErr != nil {
+				log.Fatal(probeErr)
+			}
+			return
+		}
+		if *vpsTool == "time-sync" {
+			if err := handlers.StartSystemTimeSync(); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("自动校时已启动；是否已同步请查看当前状态。")
+			return
+		}
+		if *vpsTool == "system-update" {
+			status, err := executor.StartSystemPackageUpdate(cfg)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("系统更新已启动: %s\n使用 o system-update-status 查看进度\n", status.ID)
+			return
+		}
+		if *vpsTool == "system-update-status" {
+			status := executor.ReconcileSystemPackageUpdateStatus(cfg)
+			if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
+		if *vpsTool == "dns" {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			var err error
+			if *vpsValue == "default" {
+				_, err = executor.RestoreAutomaticDNS(ctx)
+			} else {
+				_, err = executor.ApplyDNSPreset(ctx, *vpsValue)
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("DNS 已更新")
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), executor.SimpleVPSToolTimeout())
+		defer cancel()
+		out, err := executor.RunSimpleVPSTool(ctx, *vpsTool, *vpsValue)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(out)
+		return
+	}
+	if *recordFail2banIP != "" || *unbanFail2banIP != "" {
+		handleFail2banCLI(*configPath, *recordFail2banIP, *unbanFail2banIP, *banJail, *banTime, *banCount, *banRestored)
+		return
+	}
+
+	if err := database.Open(cfg.SQLite.Path); err != nil {
+		log.Fatalf("打开数据库失败: %v", err)
+	}
+	defer database.Close()
+
+	// 受管 Cron 的高频短路径：这里只能依赖既有稳定表结构，不能读取需要本次
+	// 主服务启动后才完成迁移的新列或新表，也不能触发迁移、插件部署或调度器。
+	if *runScheduledCron > 0 {
+		result := executor.RunScheduledCron(*runScheduledCron)
+		if !result.Success {
+			log.Print(result.Message)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if err := database.RunMigrations(); err != nil {
+		log.Fatalf("数据库迁移失败: %v", err)
+	}
+	// 先更新插件包，确保后续迁移复制的是最新版本
+	executor.EnsureCacheHelperPlugin(web.PluginFS)
+	if err := database.RunUpgrades(); err != nil {
+		log.Fatalf("数据库升级失败: %v", err)
+	}
+	// CLI 短任务不是服务重启，不能收回另一个主进程管理的维护窗口。
+	if !*resetAdmin && !*refreshWhitelist && !*unbanAll && *fileBackup == "" && !*runAutoBackup {
+		maintenanceCtx, stopMaintenance := context.WithCancel(context.Background())
+		defer stopMaintenance()
+		// Start 同步完成第一轮回锁，然后才启动周期检查；必须先于站点写入和 worker。
+		if err := executor.DefaultMaintenanceManager().Start(maintenanceCtx); err != nil {
+			log.Printf("维护窗口启动恢复未完成（相关网站将保持写操作门禁并自动重试）: %v", err)
+		}
+	}
+	// Optimizer is retired; existing installations are migrated explicitly from Website Details.
+	// 异步补装不应排在维护窗口启动恢复之前。
+	executor.GoSafe(executor.EnsurePHPExifExtension)
+	executor.GoSafe(executor.EnsureImageBatchBinaries)
+	aiDevelopmentService := executor.NewAIDevelopmentAccessService(database.GetDB())
+	if err := aiDevelopmentService.ReconcilePending(context.Background()); err != nil {
+		log.Printf("AI 开发授权中间状态恢复失败（相关网站将继续保持操作门禁）: %v", err)
+	}
+	executor.ResetStuckImageOptimizationJobs()
+	executor.FinalizePendingPanelUpdate(cfg, *configPath, Version)
+	executor.SetAIDevelopmentPanelVersion(Version)
+	if err := aiDevelopmentService.RefreshEnabledHandoffs(context.Background()); err != nil {
+		log.Printf("AI 开发服务器交接文档刷新失败: %v", err)
+	}
+
+	if *resetAdmin {
+		resetAllAdmin(cfg, *configPath)
+		return
+	}
+
+	if *refreshWhitelist {
+		executor.InitQueue(cfg)
+		log.Printf("白名单刷新结果: %s", executor.RunWhitelistRefresh())
+		return
+	}
+
+	if *unbanAll {
+		fmt.Println(executor.UnbanAllIPs())
+		return
+	}
+
+	if *fileBackup != "" {
+		parts := strings.SplitN(*fileBackup, ":", 3)
+		if len(parts) >= 2 {
+			siteID, _ := strconv.Atoi(parts[0])
+			keepCount := 3
+			if len(parts) >= 3 {
+				keepCount, _ = strconv.Atoi(parts[2])
+			}
+			if keepCount <= 0 {
+				keepCount = 3
+			}
+			msg, err := executor.ExecuteFileBackup(siteID, parts[1], keepCount)
+			if err != nil {
+				log.Printf("文件备份失败: %v", err)
+				os.Exit(1)
+			}
+			log.Println(msg)
+		}
+		return
+	}
+
+	if *runAutoBackup {
+		executor.RunAutoBackup()
+		return
+	}
+
+	seedAdminUser(cfg)
+
+	log.Println("数据库初始化完成")
+	if reconciled, err := executor.ReconcileInterruptedManualCronJobs(database.GetDB()); err != nil {
+		log.Printf("手动计划任务中断状态收敛失败: %v", err)
+	} else if reconciled > 0 {
+		log.Printf("已收敛 %d 个因面板重启中断的手动计划任务", reconciled)
+	}
+	if reconciled, err := executor.ReconcileInterruptedLogAnalysisJobs(database.GetDB()); err != nil {
+		log.Printf("日志分析中断状态收敛失败: %v", err)
+	} else if reconciled > 0 {
+		log.Printf("已收敛 %d 个因面板重启中断的日志分析任务", reconciled)
+	}
+	if reconciled, err := executor.ReconcileMigratedWebsiteStatuses(context.Background(), database.GetDB(), cfg); err != nil {
+		log.Printf("已搬家源站状态收敛跳过: %v", err)
+	} else if reconciled > 0 {
+		log.Printf("已收敛 %d 个历史搬家源站状态", reconciled)
+	}
+
+	executor.InitQueue(cfg)
+	log.Println("任务队列初始化完成")
+	var inventoryWorker *executor.WPInventoryWorker
+	var inventoryScheduler *executor.WPInventoryScheduler
+	var coreUpdateWorker wpCoreUpdateWorkerLifecycle
+	if candidate, err := executor.NewWPInventoryWorker(cfg); err != nil {
+		log.Println("WordPress 库存后台任务未启动")
+	} else if err := candidate.Start(); err != nil {
+		log.Println("WordPress 库存后台任务未启动")
+	} else {
+		inventoryWorker = candidate
+		log.Println("WordPress 库存后台任务已启动")
+		if scheduler, err := executor.NewWPInventoryScheduler(); err != nil {
+			log.Println("WordPress 库存自动刷新未启动")
+		} else if err := scheduler.Start(); err != nil {
+			log.Println("WordPress 库存自动刷新未启动")
+		} else {
+			inventoryScheduler = scheduler
+			log.Println("WordPress 库存自动刷新已启动")
+		}
+	}
+	if candidate, err := startWPCoreUpdateWorker(cfg, func(cfg *config.Config) (wpCoreUpdateWorkerLifecycle, error) {
+		return executor.NewWPCoreUpdateWorker(cfg)
+	}); err != nil {
+		log.Println("WordPress 更新后台任务未启动")
+	} else {
+		coreUpdateWorker = candidate
+		log.Println("WordPress 更新后台任务已启动")
+	}
+	// The OLS release line intentionally does not start the legacy site-migration worker.
+	// A future OLS-native migration protocol must be audited and tested
+	// before this feature is exposed again.
+	log.Println("网站搬家功能在当前 OpenLiteSpeed 版本中未启用")
+
+	collector.Start()
+
+	if err := executor.ApplyFail2banSettings(); err != nil {
+		log.Printf("Fail2ban 配置应用失败: %v", err)
+	}
+	executor.EnsureOperationLogRetention()
+	executor.EnsureAllSiteLogrotateConfigs()
+	// WordPress safety baseline (idempotent, only writes if not present)
+	if err := executor.EnsureOpenLiteSpeedServiceRegistration(); err != nil {
+		log.Printf("OpenLiteSpeed service registration recovery failed: %v", err)
+	}
+	if err := executor.EnsurePanelACMEContext(); err != nil {
+		log.Printf("Panel ACME routing migration failed: %v", err)
+	}
+	executor.EnsureWordPressBaseline()
+	// 升级后重建全部 OpenLiteSpeed 虚拟主机，确保新模板和 LSPHP 设置生效。
+	executor.GoSafe(func() {
+		if err := executor.RegenerateAllSitesOLSConfigs(); err != nil {
+			log.Printf("OpenLiteSpeed 虚拟主机批量重建部分失败: %v", err)
+		}
+	})
+	log.Println("OpenLiteSpeed + LSPHP + LiteSpeed Cache 运行环境已就绪")
+	log.Println("Fail2ban 配置初始化完成")
+	executor.EnsurePanelCommands()
+	// 远程备份密码认证依赖 sshpass；启动路径只提示，不自动修改服务器软件状态。
+	if _, err := exec.LookPath("sshpass"); err != nil {
+		log.Println("sshpass 未安装，远程备份密码认证功能不可用；请通过安装脚本或包管理器手动安装")
+	}
+	executor.StartProcessGuard()
+	executor.StartFirewallPortRuleManager()
+	executor.StartAlertMonitor(Version)
+	executor.DefaultWPAnomalyMonitor(cfg)
+	executor.StartOOMMonitor()
+	executor.StartTelemetry(Version)
+	executor.StartPanelAutoUpdateScheduler(Version, *configPath, cfg)
+	executor.StartWPPackageAutoUpdateScheduler(cfg)
+	log.Println("WordPress config baseline ensured")
+	log.Println("进程守护已启动")
+	log.Println("告警监控已启动")
+	log.Println("OOM 事故监控已启动")
+	executor.StartAutoBackupScheduler()
+	log.Println("自动备份调度器已启动")
+	executor.StartRemoteBackupMaintenanceScheduler()
+	log.Println("远程备份自动维护调度器已启动")
+	executor.StartDBBackupScheduler()
+	log.Println("面板数据库备份调度器已启动")
+	executor.StartSSLRenewalScheduler()
+	log.Println("SSL 自动续期调度器已启动")
+	executor.StartWPSecurityEventIngestor()
+	log.Println("WordPress 安全探测事件持久化调度器已启动")
+	executor.StartFail2banSyncScheduler()
+	log.Println("Fail2ban 封禁状态同步调度器已启动")
+	go func() {
+		for {
+			time.Sleep(30 * time.Minute)
+			middleware.GlobalSessionStore.CleanExpired()
+		}
+	}()
+
+	r := router.SetupRouter(cfg, web.TemplatesFS, web.StaticFS, Version, *configPath)
+	useTLS := cfg.Panel.TLSPort > 0 && cfg.Panel.TLSCertPath != "" && cfg.Panel.TLSKeyPath != ""
+	port := cfg.Panel.Port
+	if useTLS {
+		port = cfg.Panel.TLSPort
+	}
+	server := newPanelHTTPServer(fmt.Sprintf(":%d", port), r)
+	serverErr := make(chan error, 1)
+	go func() {
+		if useTLS {
+			if err := executor.InitializePanelCertificate(cfg.Panel.TLSCertPath, cfg.Panel.TLSKeyPath); err != nil {
+				serverErr <- err
+				return
+			}
+			server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: executor.GetPanelCertificate}
+			executor.StartPanelCertificateRenewal(cfg)
+			log.Printf("%s 启动于端口 %d (HTTPS)", config.ProductName, port)
+			serverErr <- server.ListenAndServeTLS("", "")
+			return
+		}
+		log.Printf("%s 启动于端口 %d（HTTP，未配置TLS）", config.ProductName, port)
+		serverErr <- server.ListenAndServe()
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(quit)
+	var serveErr error
+	select {
+	case <-quit:
+		log.Println("正在关闭面板...")
+		ctx, cancel := context.WithTimeout(context.Background(), panelHTTPShutdownTimeout)
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("HTTP 服务优雅关闭超时: %v", err)
+			_ = server.Close()
+		}
+		cancel()
+	case serveErr = <-serverErr:
+		if errors.Is(serveErr, http.ErrServerClosed) {
+			serveErr = nil
+		} else {
+			log.Printf("面板 HTTP 服务异常退出: %v", serveErr)
+		}
+	}
+	executor.GlobalAdminer.DisableAll()
+	executor.StopAllImageOptimizationJobsForShutdown(wpCoreUpdateWorkerShutdownTimeout)
+	if coreUpdateWorker != nil {
+		if err := stopWPCoreUpdateWorker(coreUpdateWorker, wpCoreUpdateWorkerShutdownTimeout); err != nil {
+			log.Println("WordPress 核心更新后台任务关闭超时")
+		}
+	}
+	if inventoryScheduler != nil {
+		if err := inventoryScheduler.Stop(context.Background()); err != nil {
+			log.Println("WordPress 库存自动刷新关闭失败")
+		}
+	}
+	if inventoryWorker != nil {
+		if err := inventoryWorker.Stop(context.Background()); err != nil {
+			log.Println("WordPress 库存后台任务关闭失败")
+		}
+	}
+	executor.StopWPSecurityEventIngestor()
+	if serveErr != nil {
+		log.Fatalf("面板服务启动失败: %v", serveErr)
+	}
+}
+
+func newPanelHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: panelReadHeaderTimeout,
+		IdleTimeout:       panelIdleTimeout,
+		MaxHeaderBytes:    panelMaxHeaderBytes,
+	}
+}
+
+func startWPCoreUpdateWorker(cfg *config.Config, factory wpCoreUpdateWorkerFactory) (wpCoreUpdateWorkerLifecycle, error) {
+	if cfg == nil || factory == nil {
+		return nil, fmt.Errorf("invalid core update worker startup")
+	}
+	worker, err := factory(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if worker == nil {
+		return nil, fmt.Errorf("core update worker unavailable")
+	}
+	if err := worker.Start(); err != nil {
+		return nil, err
+	}
+	return worker, nil
+}
+
+func stopWPCoreUpdateWorker(worker wpCoreUpdateWorkerLifecycle, timeout time.Duration) error {
+	if worker == nil || timeout <= 0 {
+		return fmt.Errorf("invalid core update worker shutdown")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return worker.Stop(ctx)
+}
+
+func handleFail2banCLI(configPath, recordIP, unbanRecordIP, jail string, banTime, banCount int, restored bool) {
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+	if err := database.Open(cfg.SQLite.Path); err != nil {
+		log.Fatalf("打开数据库失败: %v", err)
+	}
+	defer database.Close()
+	if err := database.RunMigrations(); err != nil {
+		log.Fatalf("数据库迁移失败: %v", err)
+	}
+	if recordIP != "" {
+		if err := executor.RecordFail2banBan(recordIP, jail, banTime, banCount, restored); err != nil {
+			log.Fatalf("Fail2ban 封禁记录失败: %v", err)
+		}
+	}
+	if unbanRecordIP != "" {
+		if err := executor.RecordFail2banUnban(unbanRecordIP, jail); err != nil {
+			log.Fatalf("Fail2ban 解封记录失败: %v", err)
+		}
+	}
+}
+
+func seedAdminUser(cfg *config.Config) {
+	db := database.GetDB()
+
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM admin_users").Scan(&count)
+	if count > 0 {
+		return
+	}
+
+	_, err := db.Exec(
+		"INSERT INTO admin_users (username, password_hash) VALUES (?, ?)",
+		cfg.Admin.Username, cfg.Admin.PasswordHash,
+	)
+	if err != nil {
+		log.Printf("创建管理员用户失败: %v", err)
+		return
+	}
+	log.Println("管理员用户已从 config.json 初始化")
+}
+
+func resetAllAdmin(cfg *config.Config, configPath string) {
+	username := "wpadmin"
+	webPass := randomString(16)
+	basicPass := randomString(16)
+
+	webHash, err := bcrypt.GenerateFromPassword([]byte(webPass), 12)
+	if err != nil {
+		fmt.Printf("错误: 密码加密失败: %v\n", err)
+		os.Exit(1)
+	}
+	basicHash, err := bcrypt.GenerateFromPassword([]byte(basicPass), 12)
+	if err != nil {
+		fmt.Printf("错误: 密码加密失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Update SQLite (Web login)
+	db := database.GetDB()
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM admin_users").Scan(&count)
+	if count == 0 {
+		_, err = db.Exec("INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", username, string(webHash))
+	} else {
+		_, err = db.Exec("UPDATE admin_users SET username = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+			username, string(webHash))
+	}
+	if err != nil {
+		fmt.Printf("错误: 更新数据库失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Update config.json (BasicAuth)
+	data, err := os.ReadFile(configPath)
+	if err == nil {
+		var cfgMap map[string]map[string]interface{}
+		if json.Unmarshal(data, &cfgMap) == nil {
+			if ba, ok := cfgMap["basic_auth"]; ok {
+				ba["username"] = username
+				ba["password_hash"] = string(basicHash)
+			}
+			if admin, ok := cfgMap["admin"]; ok {
+				admin["username"] = username
+				admin["password_hash"] = string(webHash)
+			}
+			if newData, err := json.MarshalIndent(cfgMap, "", "  "); err == nil {
+				if err := os.WriteFile(configPath, newData, 0600); err != nil {
+					fmt.Printf("错误: 写入配置文件失败: %v\n", err)
+					fmt.Println("BasicAuth 密码未更新，请检查配置文件权限")
+					os.Exit(1)
+				}
+			}
+		}
+	}
+
+	fmt.Println("")
+	fmt.Println("═══ 管理员账号已重置 ═══")
+	fmt.Println("")
+	fmt.Println("已将 BasicAuth 和面板 Web 登录的用户名统一修改为 wpadmin")
+	fmt.Println("")
+	fmt.Println("BasicAuth 认证（浏览器弹窗，随机入口第一层）：")
+	fmt.Printf("  密码: %s\n", basicPass)
+	fmt.Println("")
+	fmt.Println("面板 Web 登录（页面表单，BasicAuth 通过后）：")
+	fmt.Printf("  密码: %s\n", webPass)
+	fmt.Println("")
+	fmt.Println("⚠  登录后请在「面板设置」中修改密码")
+	fmt.Println("═══ ═══════════════════ ═══")
+	fmt.Println("")
+	fmt.Println("正在重启面板...")
+	exec.Command("systemctl", "restart", "ols-wpanel").Run()
+}
+
+func randomString(n int) string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, n)
+	for i := range result {
+		idx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		result[i] = chars[idx.Int64()]
+	}
+	return string(result)
+}
+
+func getSysTimezone() string {
+	out, _ := exec.Command("bash", "-c", "timedatectl show --property=Timezone --value 2>/dev/null").CombinedOutput()
+	tz := strings.TrimSpace(string(out))
+	if tz == "" {
+		if data, err := os.ReadFile("/etc/timezone"); err == nil {
+			tz = strings.TrimSpace(string(data))
+		}
+	}
+	if tz == "" {
+		return "UTC"
+	}
+	return tz
+}

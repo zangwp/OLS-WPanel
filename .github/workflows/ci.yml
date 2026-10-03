@@ -119,6 +119,17 @@ jobs:
           go mod download
           go mod verify
 
+      - name: Verify frontend behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          frontend_tests=(tests/js/*.cjs)
+          test "${#frontend_tests[@]}" -gt 0
+          for test_file in "${frontend_tests[@]}"; do
+            node "$test_file"
+          done
+
       - name: Test
         shell: bash
         run: |
@@ -153,4 +164,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o "$RUNNER_TEMP/ols-wpanel-${{ matrix.arch }}" ./
+          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o "$RUNNER_TEMP/ols-wpanel-${{ matrix.arch }}" ./cmd/ols-wpanel

@@ -1,0 +1,456 @@
+{{template "base" .}}
+{{define "vps_content"}}
+<div x-data="vpsPage()" x-init="load()">
+    <div class="flex flex-col md:flex-row md:items-start md:justify-between mb-6 gap-3">
+        <div>
+            <h2 class="text-xl font-bold text-white">{{t .Lang "vps.title"}}</h2>
+            <p class="text-sm text-gray-500 mt-1">{{t .Lang "vps.subtitle"}}</p>
+        </div>
+        <button type="button" class="btn-secondary text-sm" @click="load()" :disabled="loading">
+            <span x-text="loading ? '{{t .Lang "vps.refreshing"}}' : '{{t .Lang "vps.refresh"}}'"></span>
+        </button>
+    </div>
+
+    <nav class="vps-tabs mb-5" aria-label="VPS">
+        <button @click="tab='overview'" :class="tab==='overview' ? 'active' : ''">{{t .Lang "vps.overview_tab"}}</button>
+        <button @click="tab='maintenance'" :class="tab==='maintenance' ? 'active' : ''">{{t .Lang "vps.maintenance_tab"}}</button>
+    </nav>
+    <section class="card mb-5" x-show="tab==='maintenance'">
+      <div class="vps-actions">
+       <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary">{{t .Lang "vps.tool_updates"}}</a>
+       <button class="btn-secondary" @click="tab='overview'; $nextTick(()=>document.getElementById('vps-dns').scrollIntoView({behavior:'smooth'}))">{{t .Lang "vps.dns_settings"}}</button>
+       <button class="btn-secondary" @click="tool('clean-preview')">{{t .Lang "vps.preview"}}</button>
+       <button class="btn-secondary" @click="clean()" :disabled="toolBusy">{{t .Lang "vps.run_cleanup"}}</button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+<div class="vps-tool-tile">
+<label class="label">{{t .Lang "vps.ip_priority"}}</label>
+<p class="text-sm text-gray-300 mb-2" x-text="ipPriorityLabel()"></p>
+<p class="text-xs text-gray-400 mb-3">{{t .Lang "vps.ip_help"}}</p>
+<p x-show="overview.ip_priority?.source === 'external'" class="text-xs text-yellow-300 mb-3">{{t .Lang "vps.ip_external_help"}}</p>
+<p x-show="!overview.ip_priority || ['invalid','unavailable'].includes(overview.ip_priority?.source)" class="text-xs text-yellow-300 mb-3">{{t .Lang "vps.ip_unavailable_help"}}</p>
+<select class="input-field" x-model="ipMode" :disabled="!overview.ip_priority?.can_change && !overview.ip_priority?.can_restore">
+<option value="">{{t .Lang "vps.choose_setting"}}</option>
+<option value="ipv4" :disabled="!overview.ip_priority?.can_change">{{t .Lang "vps.ipv4"}}</option>
+<option value="ipv6" :disabled="!overview.ip_priority?.can_change">{{t .Lang "vps.ipv6"}}</option>
+<option value="default" :disabled="!overview.ip_priority?.can_restore">{{t .Lang "vps.ip_restore_managed"}}</option>
+</select>
+<button class="btn-secondary mt-3" @click="tool('ip-priority', ipMode)" :disabled="toolBusy || !canApplyIPPriority()">{{t .Lang "vps.apply_tool"}}</button>
+<details class="mt-3" x-show="overview.ip_priority?.rules?.length"><summary class="text-xs text-blue-300 cursor-pointer">{{t .Lang "vps.ip_view_rules"}}</summary><pre class="text-xs text-gray-400 mt-2 whitespace-pre-wrap break-words" x-text="(overview.ip_priority?.rules || []).join('\n')"></pre></details>
+</div><div class="vps-tool-tile"><label class="label">{{t .Lang "vps.website_tuning"}} <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.tuning_help"}}</span></details></label><select class="input-field" x-model="tuningMode"><option value="">{{t .Lang "vps.choose_setting"}}</option><option value="balanced">{{t .Lang "vps.balanced"}}</option><option value="website">{{t .Lang "vps.website_recommended"}}</option><option value="default">{{t .Lang "vps.default"}}</option></select><button class="btn-secondary mt-3" @click="tool('tuning', tuningMode)" :disabled="toolBusy || !tuningMode">{{t .Lang "vps.apply_tool"}}</button></div><div class="vps-tool-tile"><label class="label">{{t .Lang "vps.system_language"}} <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.locale_help"}}</span></details></label><select class="input-field" x-model="localeMode"><option value="">{{t .Lang "vps.choose_setting"}}</option><option value="en_US.UTF-8">English</option><option value="zh_CN.UTF-8">简体中文</option><option value="zh_TW.UTF-8">繁體中文</option></select><button class="btn-secondary mt-3" @click="tool('locale', localeMode)" :disabled="toolBusy || !localeMode">{{t .Lang "vps.apply_tool"}}</button></div>
+      </div>
+      <pre x-show="toolMessage" x-text="toolMessage" class="vps-tool-output mt-4" :class="toolError ? 'text-red-300' : 'text-green-300'"></pre>
+    </section>
+    <div x-show="error" x-cloak class="mb-5 rounded-lg border border-red-700 bg-red-900/20 p-4 text-sm text-red-300" x-text="error"></div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5" x-show="tab === 'overview'">
+        <section class="card">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.system_overview"}}</h3>
+                <span class="text-xs text-gray-500" x-text="overview.identity?.hostname || '--'"></span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">IP</p><p class="text-white mt-1 break-all" x-text="(overview.identity?.addresses || []).join(' · ') || '--'"></p></div>
+                <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.uptime"}}</p><p class="text-white mt-1" x-text="overview.identity?.uptime || '--'"></p></div>
+                <div class="rounded-lg border border-gray-700 p-3">
+                    <p class="text-xs text-gray-500">{{t .Lang "vps.operating_system"}}</p>
+                    <p class="text-white mt-1" x-text="overview.identity?.os || '--'"></p>
+                </div>
+                <div class="rounded-lg border border-gray-700 p-3">
+                    <p class="text-xs text-gray-500">{{t .Lang "vps.kernel_arch"}}</p>
+                    <p class="text-white mt-1 font-mono" x-text="(overview.identity?.kernel || '--') + ' / ' + (overview.identity?.architecture || '--')"></p>
+                </div>
+                <div class="rounded-lg border border-gray-700 p-3 md:col-span-2">
+                    <p class="text-xs text-gray-500">{{t .Lang "vps.processor"}}</p>
+                    <p class="text-white mt-1" x-text="(overview.identity?.cpu_model || '--') + ' · ' + (overview.identity?.cpu_cores || 0) + ' {{t .Lang "vps.cores"}}'"></p>
+                </div>
+                <div class="rounded-lg border border-gray-700 p-3">
+                    <p class="text-xs text-gray-500">{{t .Lang "vps.virtualization"}}</p>
+                    <p class="text-white mt-1" x-text="overview.identity?.virtualization || '--'"></p>
+                </div>
+                <div class="rounded-lg border border-gray-700 p-3">
+                    <p class="text-xs text-gray-500">{{t .Lang "vps.timezone_ntp"}}</p>
+                    <p class="text-white mt-1">
+                        <span x-text="overview.tuning?.timezone || '--'"></span>
+                        <span class="ml-2 text-xs" :class="overview.tuning?.ntp_synchronized ? 'text-green-400' : 'text-yellow-400'" x-text="overview.tuning?.ntp_synchronized ? '{{t .Lang "vps.ntp_synced"}}' : '{{t .Lang "vps.ntp_not_synced"}}'"></span>
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "vps.resource_snapshot"}}</h3>
+            <div class="space-y-4 text-sm">
+                <div>
+                    <div class="flex justify-between"><span class="text-gray-400">CPU</span><span class="text-white font-mono" x-text="number(overview.stats?.cpu_percent) + '%' "></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,Number(overview.stats?.cpu_percent || 0))) + '%'"></span></div>
+                </div>
+                <div>
+                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.memory"}}</span><span class="text-white font-mono" x-text="bytes(overview.stats?.memory_used_bytes) + ' / ' + bytes(overview.stats?.memory_total_bytes)"></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,ratio(overview.stats?.memory_used_bytes,overview.stats?.memory_total_bytes))) + '%'"></span></div>
+                </div>
+                <div>
+                    <div class="flex justify-between"><span class="text-gray-400">Swap</span><span class="text-white font-mono" x-text="bytes(overview.stats?.swap_used_bytes) + ' / ' + bytes(overview.stats?.swap_total_bytes)"></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,ratio(overview.stats?.swap_used_bytes,overview.stats?.swap_total_bytes))) + '%'"></span></div>
+                </div>
+                <div>
+                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.disk"}}</span><span class="text-white font-mono" x-text="bytes(overview.stats?.disk_used_bytes) + ' / ' + bytes(overview.stats?.disk_total_bytes)"></span></div><div class="vps-meter mt-2"><span :style="'width:' + Math.min(100,Math.max(0,ratio(overview.stats?.disk_used_bytes,overview.stats?.disk_total_bytes))) + '%'"></span></div>
+                </div>
+                <div>
+                    <div class="flex justify-between"><span class="text-gray-400">{{t .Lang "vps.load"}}</span><span class="text-white font-mono" x-text="number(overview.stats?.load_avg_1) + ' / ' + number(overview.stats?.load_avg_5) + ' / ' + number(overview.stats?.load_avg_15)"></span></div>
+                </div>
+                <div x-show="overview.tuning?.reboot_required" x-cloak class="rounded-lg border border-yellow-700 bg-yellow-900/20 p-3 text-yellow-300">
+                    {{t .Lang "vps.reboot_required"}}
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5" x-show="tab === 'overview'">
+        <section class="card">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.service_health"}}</h3>
+                    <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.service_health_help"}}</span></details>
+                </div>
+                <a href="/{{.RandomSuffix}}/software" class="text-sm text-blue-400 hover:text-blue-300">{{t .Lang "vps.open_software"}}</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="border-b border-gray-700 text-gray-400">
+                        <tr><th class="py-2 text-left">{{t .Lang "vps.service"}}</th><th class="py-2 text-left">{{t .Lang "vps.running"}}</th><th class="py-2 text-left">{{t .Lang "vps.boot"}}</th></tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="service in overview.services || []" :key="service.unit">
+                            <tr class="border-b border-gray-700/30">
+                                <td class="py-2 text-white" x-text="service.name"></td>
+                                <td class="py-2"><span class="text-xs" :class="service.active === 'active' ? 'text-green-400' : 'text-red-400'" x-text="stateLabel(service.active)"></span></td>
+                                <td class="py-2"><span class="text-xs" :class="service.enabled === 'enabled' ? 'text-green-400' : 'text-gray-400'" x-text="enabledLabel(service.enabled)"></span></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <div x-show="nftablesNeedsBootEnable()" x-cloak class="mt-4 rounded-lg border border-yellow-800 bg-yellow-900/10 p-3 text-sm">
+                <p class="text-yellow-200">{{t .Lang "vps.nftables_boot_warning"}}</p>
+                <button type="button" class="btn-secondary text-xs mt-3" @click="enableNftablesBoot()" :disabled="nftBusy" x-text="nftBusy ? '{{t .Lang "vps.swap_working"}}' : '{{t .Lang "vps.nftables_enable_boot"}}'"></button>
+            </div>
+            <div x-show="serviceMessage" x-cloak class="mt-4 rounded-lg border p-3 text-sm" :class="serviceMessageError ? 'border-red-700 bg-red-900/20 text-red-300' : 'border-green-700 bg-green-900/20 text-green-300'" x-text="serviceMessage"></div>
+        </section>
+
+        <section class="card">
+            <h3 id="vps-dns" class="text-lg font-semibold text-white mb-1">{{t .Lang "vps.network_tuning"}}</h3>
+            <details class="help-tip mb-4"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "vps.network_tuning_help"}}</span></details>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.congestion_control"}}</p><p class="text-white mt-1 font-mono" x-text="overview.tuning?.congestion_control || '--'"></p></div>
+                <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.default_qdisc"}}</p><p class="text-white mt-1 font-mono" x-text="overview.tuning?.default_qdisc || '--'"></p></div>
+                <div class="rounded-lg border border-gray-700 p-3 md:col-span-2">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                        <div><p class="text-xs text-gray-500">{{t .Lang "vps.dns_current"}}</p><p class="text-white mt-1 font-mono break-all" x-text="(overview.dns?.current || overview.tuning?.nameservers || []).join(', ') || '--'"></p></div>
+                        <div class="text-left md:text-right"><p class="text-xs text-gray-500">{{t .Lang "vps.dns_manager"}}</p><p class="text-gray-300 mt-1 font-mono" x-text="overview.dns?.manager || '--'"></p></div>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 rounded-lg border border-gray-700 p-4">
+                <p class="font-medium text-white">{{t .Lang "vps.dns_presets"}}</p>
+                <p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.dns_presets_help"}}</p>
+                <div x-show="dnsMessage" x-cloak class="mt-3 rounded border p-2 text-xs" :class="dnsMessageError ? 'border-red-700 text-red-300' : 'border-green-700 text-green-300'" x-text="dnsMessage"></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <template x-for="preset in overview.dns?.presets || []" :key="preset.id">
+                        <div class="rounded border p-3" :class="overview.dns?.active_preset === preset.id ? 'border-green-700 bg-green-900/10' : 'border-gray-700'">
+                            <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3">
+                                <div class="min-w-0">
+                                    <p class="text-sm text-white font-medium" x-text="dnsPresetLabel(preset.id)"></p>
+                                    <p class="text-xs text-gray-400 font-mono mt-2 break-all"><span class="text-gray-500">{{t .Lang "vps.dns_ipv4"}}:</span> <span x-text="(preset.ipv4 || []).join(', ')"></span></p>
+                                    <p class="text-xs text-gray-400 font-mono mt-1 break-all"><span class="text-gray-500">{{t .Lang "vps.dns_ipv6"}}:</span> <span x-text="(preset.ipv6 || []).join(', ')"></span></p>
+                                </div>
+                                <div class="flex gap-2 shrink-0">
+                                    <button type="button" class="btn-secondary text-xs" @click="testDNS(preset.id)" :disabled="dnsBusy" x-text="dnsBusy ? '{{t .Lang "vps.dns_testing"}}' : '{{t .Lang "vps.dns_test"}}'"></button>
+                                    <button type="button" class="btn-primary text-xs" @click="applyDNS(preset.id)" :disabled="dnsBusy || !overview.dns?.configurable" x-text="dnsBusy ? '{{t .Lang "vps.swap_working"}}' : '{{t .Lang "vps.dns_apply"}}'"></button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <p x-show="overview.dns && !overview.dns.ipv6_available" x-cloak class="text-xs text-yellow-300 mt-3">{{t .Lang "vps.dns_ipv6_unavailable"}}</p>
+                <p x-show="overview.dns?.reason" x-cloak class="text-xs text-yellow-300 mt-3" x-text="dnsReason()"></p>
+                <button x-show="overview.dns?.managed" x-cloak type="button" class="btn-secondary text-xs mt-3" @click="restoreDNS()" :disabled="dnsBusy">{{t .Lang "vps.dns_restore"}}</button>
+            </div>
+            <div class="mt-4 flex flex-wrap gap-2">
+                <a href="/{{.RandomSuffix}}/security#ports" class="btn-secondary text-sm">{{t .Lang "vps.manage_ports"}}</a>
+                <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "vps.system_updates"}}</a>
+                <a href="/{{.RandomSuffix}}/backups" class="btn-secondary text-sm">{{t .Lang "vps.backups"}}</a>
+            </div>
+        </section>
+    </div>
+
+    <section class="card mb-5" x-show="tab==='maintenance'">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 mb-4">
+            <div>
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.swap_title"}}</h3>
+                <p class="text-sm text-gray-500 mt-1">{{t .Lang "vps.swap_help"}}</p>
+            </div>
+            <span class="text-xs px-3 py-1 rounded-full border" :class="overview.swap?.recommendation_satisfied ? 'border-green-700 text-green-400' : 'border-yellow-700 text-yellow-300'" x-text="overview.swap?.recommendation_satisfied ? '{{t .Lang "vps.swap_satisfied"}}' : '{{t .Lang "vps.swap_action_needed"}}'"></span>
+        </div>
+
+        <div x-show="swapMessage" x-cloak class="mb-4 rounded-lg border p-3 text-sm" :class="swapMessageError ? 'border-red-700 bg-red-900/20 text-red-300' : 'border-green-700 bg-green-900/20 text-green-300'" x-text="swapMessage"></div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-3 mb-3 text-sm">
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_current"}}</p><p class="text-white font-mono mt-1" x-text="bytes(overview.swap?.used_bytes) + ' / ' + bytes(overview.swap?.total_bytes)"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_recommended"}}</p><p class="text-white font-mono mt-1" x-text="bytes(overview.swap?.recommended_bytes)"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">swappiness</p><p class="text-white font-mono mt-1" x-text="overview.swap?.swappiness >= 0 ? overview.swap.swappiness : '--'"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_recommended_swappiness"}}</p><p class="text-white font-mono mt-1" x-text="overview.swap?.recommended_swappiness ?? '--'"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_active_sites"}}</p><p class="text-white font-mono mt-1" x-text="overview.swap?.active_wordpress_sites ?? 0"></p></div>
+            <div class="rounded-lg border border-gray-700 p-3"><p class="text-xs text-gray-500">{{t .Lang "vps.swap_managed"}}</p><p class="text-white font-mono mt-1" x-text="overview.swap?.managed_file ? bytes(overview.swap?.managed_size_bytes) : '{{t .Lang "vps.swap_none"}}'"></p></div>
+        </div>
+        <p class="text-xs text-blue-300 mb-5" x-text="swapReason(overview.swap?.recommendation_reason)"></p>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-gray-700 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <div><p class="font-medium text-white">{{t .Lang "vps.swap_sources"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.swap_sources_help"}}</p></div>
+                    <button type="button" class="btn-primary text-sm" @click="applyRecommendedSwap()" :disabled="swapBusy || !overview.swap?.can_manage" x-text="swapBusy ? '{{t .Lang "vps.swap_working"}}' : '{{t .Lang "vps.swap_apply_recommended"}}'"></button>
+                </div>
+                <div x-show="!(overview.swap?.entries || []).length" class="text-sm text-gray-500 py-3">{{t .Lang "vps.swap_no_sources"}}</div>
+                <div class="space-y-2">
+                    <template x-for="entry in overview.swap?.entries || []" :key="entry.filename">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded border border-gray-700/70 px-3 py-2 text-sm">
+                            <div><span class="text-white font-mono" x-text="entry.filename"></span><span x-show="entry.managed" class="ml-2 text-xs text-blue-400">{{t .Lang "vps.swap_panel_managed"}}</span></div>
+                            <div class="text-gray-400"><span x-text="swapType(entry.type)"></span><span class="mx-2">·</span><span x-text="bytes(entry.used_bytes) + ' / ' + bytes(entry.size_bytes)"></span></div>
+                        </div>
+                    </template>
+                </div>
+                <p x-show="overview.swap?.manage_reason" x-cloak class="text-xs text-yellow-300 mt-3" x-text="overview.swap?.manage_reason"></p>
+            </div>
+
+            <div class="rounded-lg border border-gray-700 p-4">
+                <p class="font-medium text-white">{{t .Lang "vps.swap_custom_title"}}</p>
+                <p class="text-xs text-gray-500 mt-1 mb-4">{{t .Lang "vps.swap_custom_help"}}</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label class="text-sm text-gray-300"><span class="block mb-1">{{t .Lang "vps.swap_file_size"}}</span><select class="form-select w-full" x-model.number="swapSizeMB"><option value="512">512 MB</option><option value="1024">1 GB</option><option value="2048">2 GB</option><option value="4096">4 GB</option><option value="8192">8 GB</option></select></label>
+                    <label class="text-sm text-gray-300"><span class="block mb-1">swappiness</span><input class="form-input w-full" type="number" min="1" max="100" x-model.number="swappiness"></label>
+                </div>
+                <div class="flex flex-wrap gap-2 mt-4">
+                    <button type="button" class="btn-primary text-sm" @click="saveCustomSwap()" :disabled="swapBusy || !overview.swap?.can_manage">{{t .Lang "vps.swap_save_custom"}}</button>
+                    <button type="button" class="btn-secondary text-sm" @click="saveSwappiness()" :disabled="swapBusy">{{t .Lang "vps.swap_save_swappiness"}}</button>
+                </div>
+                <div x-show="overview.swap?.managed_file" x-cloak class="mt-5 pt-4 border-t border-red-900/60">
+                    <p class="text-sm font-medium text-red-300">{{t .Lang "vps.swap_remove_title"}}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.swap_remove_help"}}</p>
+                    <div class="flex flex-col md:flex-row gap-2 mt-3">
+                        <input class="form-input flex-1 font-mono" x-model="swapConfirm" placeholder="REMOVE SWAP" autocomplete="off">
+                        <button type="button" class="btn-danger text-sm" @click="removeManagedSwap()" :disabled="swapBusy || swapConfirm !== 'REMOVE SWAP'">{{t .Lang "vps.swap_remove"}}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p class="text-xs text-gray-500 mt-4">{{t .Lang "vps.swap_safety_note"}}</p>
+    </section>
+
+    <section class="card mb-5" x-show="tab==='maintenance'">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+            <div>
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "vps.lifecycle_title"}}</h3>
+                <p class="text-sm text-gray-500 mt-1">{{t .Lang "vps.lifecycle_help"}}</p>
+            </div>
+            <span class="text-xs px-3 py-1 rounded-full border border-green-700 text-green-400">{{t .Lang "vps.signed_updates"}}</span>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <template x-for="item in commands" :key="item.command">
+                <div class="rounded-lg border border-gray-700 p-4">
+                    <div class="flex items-center justify-between gap-3">
+                        <div><p class="text-white font-medium" x-text="item.title"></p><p class="text-xs text-gray-500 mt-1" x-text="item.help"></p></div>
+                        <button type="button" class="btn-secondary text-xs" @click="copy(item.command)" x-text="copied === item.command ? '{{t .Lang "vps.copied"}}' : '{{t .Lang "vps.copy"}}'"></button>
+                    </div>
+                    <code class="block mt-3 rounded bg-gray-900 px-3 py-2 text-blue-300 font-mono text-sm" x-text="item.command"></code>
+                </div>
+            </template>
+        </div>
+        <div class="mt-4 rounded-lg border border-yellow-800 bg-yellow-900/10 p-4 text-sm text-yellow-200">
+            {{t .Lang "vps.uninstall_scope"}}
+        </div>
+    </section>
+
+    <details class="card mb-5" x-show="tab==='maintenance'">
+      <summary class="cursor-pointer text-gray-400">{{t .Lang "vps.advanced_lifecycle"}}</summary>
+      <p class="text-sm text-gray-400 mt-4">{{t .Lang "vps.command_uninstall_help"}}</p>
+      <button class="btn-secondary mt-2" @click="copy('o uninstall')">{{t .Lang "vps.copy"}}: o uninstall</button>
+      <p class="text-sm text-red-300 mt-5">{{t .Lang "vps.full_uninstall_help"}}</p>
+      <pre class="vps-tool-output mt-3"># {{t .Lang "vps.full_uninstall_help"}}
+o uninstall --all</pre>
+      <button class="btn-secondary mt-2" @click="copy('o uninstall --all')">{{t .Lang "vps.copy"}}</button>
+    </details>
+    <section class="card" x-show="tab==='maintenance'">
+        <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "vps.safe_tools"}}</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <a href="/{{.RandomSuffix}}/settings#system-updates" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_updates"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_updates_help"}}</p></a>
+            <a href="/{{.RandomSuffix}}/security#ports" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_firewall"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_firewall_help"}}</p></a>
+            <a href="/{{.RandomSuffix}}/software" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_services"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_services_help"}}</p></a>
+            <a href="/{{.RandomSuffix}}/log-analysis" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_logs"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_logs_help"}}</p></a>
+        </div>
+        <p class="text-xs text-gray-500 mt-4">{{t .Lang "vps.destructive_note"}}</p>
+    </section>
+</div>
+
+<script>
+function vpsPage() {
+    return {
+        overview: { identity: {}, stats: {}, tuning: {}, services: [], swap: { entries: [], can_manage: false }, dns: { presets: [] } },
+        tab:'overview',toolBusy:false,toolMessage:'',toolError:false,ipMode:'',tuningMode:'',localeMode:'',
+loading: false,
+        error: '',
+        copied: '',
+        swapBusy: false,
+        swapMessage: '',
+        swapMessageError: false,
+        swapSizeMB: 1024,
+        swappiness: 10,
+        swapConfirm: '',
+        dnsBusy: false,
+        dnsMessage: '',
+        dnsMessageError: false,
+        nftBusy: false,
+        serviceMessage: '',
+        serviceMessageError: false,
+        commands: [
+            { title: '{{t .Lang "vps.command_update"}}', help: '{{t .Lang "vps.command_update_help"}}', command: 'o update' },
+            { title: '{{t .Lang "vps.command_status"}}', help: '{{t .Lang "vps.command_status_help"}}', command: 'o status' },
+            { title: '{{t .Lang "vps.command_check_update"}}', help: '', command: 'o check-update' },
+{ title: '{{t .Lang "vps.command_menu"}}', help: '', command: 'o menu' }
+        ],
+        canApplyIPPriority() { return this.ipMode === 'default' ? !!this.overview.ip_priority?.can_restore : ['ipv4','ipv6'].includes(this.ipMode) && !!this.overview.ip_priority?.can_change; },
+        ipPriorityLabel() {
+            const state = this.overview.ip_priority;
+            if (!state) return '{{t .Lang "vps.ip_state_unavailable"}}';
+            if (state.source === 'external') return '{{t .Lang "vps.ip_state_external"}}';
+            if (state.source === 'default') return '{{t .Lang "vps.ip_state_default"}}';
+            if (state.source === 'managed') return '{{t .Lang "vps.ip_state_managed"}}' + ' · ' + (state.mode === 'ipv4' ? '{{t .Lang "vps.ipv4"}}' : state.mode === 'ipv6' ? '{{t .Lang "vps.ipv6"}}' : '{{t .Lang "vps.ip_custom"}}');
+            return '{{t .Lang "vps.ip_state_unavailable"}}';
+        },
+        async tool(action,value='',confirmed=false) {
+            if(action === 'ip-priority' && !this.canApplyIPPriority()) return;
+            if(this.toolBusy)return;
+            if(action!=='clean-preview' && !confirmed && !await confirmModal(t('vps.confirm_tool')))return;
+            this.toolBusy=true;this.toolError=false;this.toolMessage='';
+            try {const r=await api('/vps/tools',{method:'POST',body:{action,value,confirm:action},timeout:150000});this.toolMessage=r.data?.message || '';}
+            catch(e){this.toolError=true;this.toolMessage=e.message;}finally{this.toolBusy=false;if(action === 'ip-priority') await this.load();}
+        },
+        async clean(){if(this.toolBusy)return;await this.tool('clean-preview');if(this.toolError)return;if(!await confirmModal(this.toolMessage+'\n'+t('vps.cleanup_help')))return;await this.tool('clean','',true);},
+        async load() {
+            this.loading = true;
+            this.error = '';
+            try {
+                const response = await api('/vps/overview');
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.load_failed"}}');
+                this.overview = response.data || this.overview;
+                this.ipMode = this.overview.ip_priority?.source === 'managed' && ['ipv4','ipv6'].includes(this.overview.ip_priority?.mode) ? this.overview.ip_priority.mode : '';
+                this.swapSizeMB = Math.max(512, Math.round(Number(this.overview.swap?.managed_size_bytes || this.overview.swap?.recommended_bytes || 1073741824) / 1048576));
+                this.swappiness = Number(this.overview.swap?.swappiness >= 0 ? this.overview.swap.swappiness : (this.overview.swap?.recommended_swappiness || 60));
+            } catch (error) {
+                this.error = error.message || '{{t .Lang "vps.load_failed"}}';
+            } finally {
+                this.loading = false;
+            }
+        },
+        ratio(used,total){return Number(total)>0 ? Number(used || 0)/Number(total)*100 : 0;},
+        bytes(value) { return formatBytes(Number(value || 0)); },
+        number(value) { return Number(value || 0).toFixed(1); },
+        stateLabel(value) { return value === 'active' ? '{{t .Lang "vps.state_active"}}' : (value === 'activating' ? '{{t .Lang "vps.state_activating"}}' : '{{t .Lang "vps.state_inactive"}}'); },
+        enabledLabel(value) { return value === 'enabled' ? '{{t .Lang "vps.state_enabled"}}' : (value === 'disabled' ? '{{t .Lang "vps.state_disabled"}}' : value || '{{t .Lang "vps.state_unknown"}}'); },
+        swapType(value) { return value === 'zram' ? 'zram' : (value === 'partition' ? '{{t .Lang "vps.swap_partition"}}' : '{{t .Lang "vps.swap_file"}}'); },
+        swapReason(value) {
+            const reasons = {
+                zram: '{{t .Lang "vps.swap_reason_zram"}}',
+                multiple_wordpress: '{{t .Lang "vps.swap_reason_multiple_wordpress"}}',
+                memory_pressure: '{{t .Lang "vps.swap_reason_memory_pressure"}}',
+                swap_pressure: '{{t .Lang "vps.swap_reason_swap_pressure"}}',
+                single_wordpress: '{{t .Lang "vps.swap_reason_single_wordpress"}}',
+                system_default: '{{t .Lang "vps.swap_reason_system_default"}}'
+            };
+            return reasons[value] || '';
+        },
+        dnsPresetLabel(value) { return value === 'mainland_china' ? '{{t .Lang "vps.dns_mainland"}}' : '{{t .Lang "vps.dns_international"}}'; },
+        dnsReason() {
+            const reasons = {
+                unsupported: '{{t .Lang "vps.dns_reason_unsupported"}}',
+                external_manager: '{{t .Lang "vps.dns_reason_external_manager"}}',
+                foreign_config: '{{t .Lang "vps.dns_reason_foreign_config"}}',
+                read_failed: '{{t .Lang "vps.dns_reason_read_failed"}}'
+            };
+            return reasons[this.overview.dns?.reason_code] || this.overview.dns?.reason || '';
+        },
+        nftablesService() { return (this.overview.services || []).find(item => item.unit === 'nftables') || {}; },
+        nftablesNeedsBootEnable() { const service = this.nftablesService(); return service.active === 'active' && service.enabled === 'disabled'; },
+        async swapRequest(path, options, successMessage) {
+            this.swapBusy = true;
+            this.swapMessage = '';
+            this.swapMessageError = false;
+            try {
+                const response = await api(path, { timeout: 120000, ...options });
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.swap_failed"}}');
+                this.overview.swap = response.data || this.overview.swap;
+                this.overview.stats.swap_total_bytes = this.overview.swap.total_bytes;
+                this.overview.stats.swap_used_bytes = this.overview.swap.used_bytes;
+                this.swapMessage = successMessage;
+                this.swapConfirm = '';
+            } catch (error) {
+                this.swapMessageError = true;
+                this.swapMessage = error.message || '{{t .Lang "vps.swap_failed"}}';
+            } finally {
+                this.swapBusy = false;
+            }
+        },
+        applyRecommendedSwap() { return this.swapRequest('/vps/swap/recommended', { method: 'POST' }, '{{t .Lang "vps.swap_recommended_applied"}}'); },
+        saveCustomSwap() { return this.swapRequest('/vps/swap', { method: 'PUT', body: { size_mb: Number(this.swapSizeMB), swappiness: Number(this.swappiness) } }, '{{t .Lang "vps.swap_custom_saved"}}'); },
+        saveSwappiness() { return this.swapRequest('/vps/swap/swappiness', { method: 'PUT', body: { swappiness: Number(this.swappiness) } }, '{{t .Lang "vps.swap_swappiness_saved"}}'); },
+        removeManagedSwap() { return this.swapRequest('/vps/swap', { method: 'DELETE', body: { confirm: this.swapConfirm } }, '{{t .Lang "vps.swap_removed"}}'); },
+        async testDNS(preset) {
+            this.dnsBusy = true; this.dnsMessage = ''; this.dnsMessageError = false;
+            try {
+                const response = await api('/vps/dns/test', { method: 'POST', timeout: 30000, body: { preset } });
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.load_failed"}}');
+                this.overview.dns = response.data || this.overview.dns;
+                this.dnsMessage = '{{t .Lang "vps.dns_test_ok"}}';
+            } catch (error) { this.dnsMessageError = true; this.dnsMessage = error.message || '{{t .Lang "vps.load_failed"}}'; }
+            finally { this.dnsBusy = false; }
+        },
+        async applyDNS(preset) {
+            if (!await confirmModal('{{t .Lang "vps.dns_confirm"}}')) return;
+            this.dnsBusy = true; this.dnsMessage = ''; this.dnsMessageError = false;
+            try {
+                const response = await api('/vps/dns', { method: 'PUT', timeout: 60000, body: { preset } });
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.load_failed"}}');
+                this.overview.dns = response.data || this.overview.dns;
+                this.dnsMessage = '{{t .Lang "vps.dns_applied"}}';
+            } catch (error) { this.dnsMessageError = true; this.dnsMessage = error.message || '{{t .Lang "vps.load_failed"}}'; }
+            finally { this.dnsBusy = false; }
+        },
+        async restoreDNS() {
+            this.dnsBusy = true; this.dnsMessage = ''; this.dnsMessageError = false;
+            try {
+                const response = await api('/vps/dns', { method: 'DELETE', timeout: 60000 });
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.load_failed"}}');
+                this.overview.dns = response.data || this.overview.dns;
+                this.dnsMessage = '{{t .Lang "vps.dns_restored"}}';
+            } catch (error) { this.dnsMessageError = true; this.dnsMessage = error.message || '{{t .Lang "vps.load_failed"}}'; }
+            finally { this.dnsBusy = false; }
+        },
+        async enableNftablesBoot() {
+            if (!await confirmModal('{{t .Lang "vps.nftables_enable_confirm"}}')) return;
+            this.nftBusy = true; this.serviceMessage = ''; this.serviceMessageError = false;
+            try {
+                const response = await api('/vps/nftables/enable-boot', { method: 'POST', timeout: 30000 });
+                if (!response.success) throw new Error(response.message || '{{t .Lang "vps.load_failed"}}');
+                await this.load();
+                this.serviceMessage = '{{t .Lang "vps.nftables_boot_enabled"}}';
+            } catch (error) { this.serviceMessageError = true; this.serviceMessage = error.message || '{{t .Lang "vps.load_failed"}}'; }
+            finally { this.nftBusy = false; }
+        },
+        async copy(command) {
+            try {
+                await navigator.clipboard.writeText(command);
+                this.copied = command;
+                setTimeout(() => { if (this.copied === command) this.copied = ''; }, 1500);
+            } catch (_) {}
+        }
+    }
+}
+</script>
+{{end}}

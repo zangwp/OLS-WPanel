@@ -1,5 +1,5 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-const code=fs.readFileSync('static/templates/ssh_port.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const code=fs.readFileSync('web/templates/ssh_port.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 const calls=[];let failConfirm=true;
 const ctx={t:x=>x,confirmModal:async()=>true,showToast:()=>{},clearTimeout:()=>{},setTimeout:()=>1,api:async(path,opts)=>{
  calls.push({path,opts});

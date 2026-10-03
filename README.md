@@ -1,6 +1,6 @@
 # OLS WPanel
 
-<img src="static/logo.png" alt="OLS WPanel" width="88">
+<img src="web/logo.png" alt="OLS WPanel" width="88">
 
 轻量的 VPS 与 WordPress 管理面板。集中管理网站、数据库、SSL 证书、缓存、备份和服务器维护，基于 OpenLiteSpeed、LSPHP、MariaDB 与 Redis。
 

@@ -1,6 +1,6 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
 process.chdir(path.resolve(__dirname,'../..'));
-function code(file){return [...fs.readFileSync('static/templates/'+file,'utf8').matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x=>x[1].replace(/{{[\s\S]*?}}/g,'null')).join('\n');}
+function code(file){return [...fs.readFileSync('web/templates/'+file,'utf8').matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x=>x[1].replace(/{{[\s\S]*?}}/g,'null')).join('\n');}
 const ctx={t:k=>k,showToast:()=>{},api:async()=>({success:true,data:{recommendations:{innodb_buffer_pool_size:'512M'}}})};vm.createContext(ctx);vm.runInContext(code('software.html'),ctx);
 (async()=>{
  const sw={name:'MariaDB',configs:[{key:'innodb_buffer_pool_size',value:'742M',_value:'600M'}]};await ctx.softwareManager().recommend(sw);assert.equal(sw.configs[0]._value,'600M');assert.equal(sw.configs[0]._recommended,'512M');assert.equal(sw.configs[0].value,'742M');

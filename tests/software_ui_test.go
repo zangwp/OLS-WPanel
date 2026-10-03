@@ -8,7 +8,7 @@ import (
 )
 
 func TestSoftwarePageKeepsOperationalStatusCompact(t *testing.T) {
-	source, err := os.ReadFile("../static/templates/software.html")
+	source, err := os.ReadFile("../web/templates/software.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,11 +23,11 @@ func TestSoftwarePageKeepsOperationalStatusCompact(t *testing.T) {
 		"software-tabs",
 		"software.tab_runtime",
 		"software.tab_tuning",
-		"software.tab_tools",
+		"software.development_tools",
 		"software.primary_runtime",
 		"configurableSoftware()",
 		"x-model=\"cfg._value\"",
-		"software.suggested_value",
+		"software.recommend_basis",
 		"cfg._recommended = recs[cfg.key]",
 		"software.confirm_stop_service",
 		"software.confirm_restart_service",
@@ -38,6 +38,9 @@ func TestSoftwarePageKeepsOperationalStatusCompact(t *testing.T) {
 	}
 
 	for _, removed := range []string{
+		"software.tab_tools",
+		"software.suggested_value",
+		"this.recommend(sw, true)",
 		"cfg._value = recs[cfg.key]",
 		"software.repository_current",
 		"software.process_guard\"}}</h3>",

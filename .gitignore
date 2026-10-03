@@ -1,13 +1,14 @@
 # 编译产物
 /ols-wpanel
 /ols-wpanel-*
-!/ols-wpanel-optimizer
 /bin/tailwindcss
 
 
 # Go
 .gocache/
 .cache/
+__pycache__/
+*.pyc
 
 # 临时/备份
 *~

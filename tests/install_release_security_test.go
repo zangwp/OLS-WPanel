@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zangwp/OLS-WPanel/config"
+	"github.com/zangwp/OLS-WPanel/internal/config"
 )
 
 func TestInstallerReleasePublicKeyMatchesApplication(t *testing.T) {

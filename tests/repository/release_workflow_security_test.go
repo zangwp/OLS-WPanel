@@ -23,7 +23,7 @@ func TestReleaseWorkflowSupplyChainBoundaries(t *testing.T) {
 		t.Fatal("go.mod must pin the reviewed Go 1.26.8 toolchain")
 	}
 
-	distributionBytes, err := os.ReadFile("config/distribution.go")
+	distributionBytes, err := os.ReadFile("internal/config/distribution.go")
 	if err != nil {
 		t.Fatalf("read distribution metadata: %v", err)
 	}
