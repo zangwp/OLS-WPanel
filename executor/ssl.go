@@ -634,6 +634,14 @@ func executeRenewSSL(task *Task) TaskResult {
 			continue
 		}
 
+		enabled, settingErr := database.SiteSSLRenewalEnabled(w.ID)
+		if settingErr != nil {
+			failed = append(failed, w.Domain+"(读取续期设置失败)")
+			continue
+		}
+		if !enabled {
+			continue
+		}
 		expiry, certErr := validateCertificate(w.SSLCertPath, w.Domain)
 		if certErr != nil {
 			log.Printf("SSL证书异常 domain=%s: %v", w.Domain, certErr)
@@ -651,6 +659,14 @@ func executeRenewSSL(task *Task) TaskResult {
 		}
 		if !TryAcquireSiteOpLock(w.ID, "ssl_renewal") {
 			failed = append(failed, w.Domain+"(网站正在执行其它维护操作)")
+			continue
+		}
+		renewalEnabled, preferenceErr := database.SiteSSLRenewalEnabled(w.ID)
+		if preferenceErr != nil || !renewalEnabled {
+			ReleaseSiteOpLock(w.ID)
+			if preferenceErr != nil {
+				failed = append(failed, w.Domain+"(读取续期设置失败)")
+			}
 			continue
 		}
 		locked, lockErr := SiteMigrationLocked(context.Background(), w.ID, w.Domain)
@@ -679,8 +695,17 @@ func executeRenewSSL(task *Task) TaskResult {
 			failed = append(failed, w.Domain+"(准备续期目录失败)")
 			continue
 		}
+		if err := database.RecordSiteSSLRenewal(w.ID, "started"); err != nil {
+			_ = os.RemoveAll(stageDir)
+			ReleaseSiteOpLock(w.ID)
+			failed = append(failed, w.Domain+"(保存续期记录失败)")
+			continue
+		}
 		newExpiry, renewErr := obtainLegoCert(w.Domain, w.Aliases, documentRoot, stageDir)
 		if renewErr != nil {
+			if err := database.RecordSiteSSLRenewal(w.ID, "failed"); err != nil {
+				log.Printf("SSL renewal history: %v", err)
+			}
 			_ = os.RemoveAll(stageDir)
 			ReleaseSiteOpLock(w.ID)
 			log.Printf("SSL续期失败 domain=%s: %v", w.Domain, renewErr)
@@ -697,11 +722,17 @@ func executeRenewSSL(task *Task) TaskResult {
 			ReleaseSiteOpLock(w.ID)
 			log.Printf("SSL续期发布失败 domain=%s: %v", w.Domain, renewErr)
 			_ = persistSSLRenewalError(w.ID, "SSL 续期发布失败")
+			if err := database.RecordSiteSSLRenewal(w.ID, "failed"); err != nil {
+				log.Printf("SSL renewal history: %v", err)
+			}
 			failed = append(failed, w.Domain+"(续期发布失败)")
 			continue
 		}
 		ReleaseSiteOpLock(w.ID)
 
+		if err := database.RecordSiteSSLRenewal(w.ID, "success"); err != nil {
+			log.Printf("SSL renewal history: %v", err)
+		}
 		renewed = append(renewed, w.Domain)
 	}
 	if err := rows.Err(); err != nil {

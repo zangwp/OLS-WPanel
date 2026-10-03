@@ -785,6 +785,7 @@ var upgrades = []Upgrade{
 			`UPDATE cdn_realip_groups SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE provider <> 'cloudflare' AND TRIM(ip_ranges) = ''`,
 		},
 	},
+	{Version: "1.0.73", Description: "网站独立证书续期设置", SQL: []string{siteSSLRenewalSchema}},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

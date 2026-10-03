@@ -4,7 +4,7 @@
 
 轻量的 VPS 与 WordPress 管理面板。集中管理网站、数据库、SSL 证书、缓存、备份和服务器维护，基于 OpenLiteSpeed、LSPHP、MariaDB 与 Redis。
 
-[English](README.en.md) · [使用文档](docs/operations-and-recovery.md) · [更新记录](CHANGELOG.md) · [问题反馈](https://github.com/zangwp/OLS-WPanel/issues)
+[English](README.en.md) · [使用文档](docs/operations-and-recovery.md) · [版本发布](https://github.com/zangwp/OLS-WPanel/releases) · [问题反馈](https://github.com/zangwp/OLS-WPanel/issues)
 
 ## 安装
 
@@ -14,7 +14,7 @@
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-当前稳定版：`v1.16.1`。短链接固定到已发布版本，验证 Ed25519 签名与 SHA-256 后安装。
+安装入口固定到已发布的稳定版本，验证 Ed25519 签名与 SHA-256 后安装。
 
 没有 curl 的精简系统先执行：
 
@@ -53,58 +53,15 @@ o uninstall       卸载面板，保留网站、数据库与共享软件
 
 普通卸载要求输入 `UNINSTALL` 确认。更新脚本使用已发布的签名安装入口。
 
-## v1.16.1 更新
-
-- 终端菜单分组、留白与窄屏换行统一，保留原有快捷指令。
-- DNS 按配置顺序分开展示 IPv4 / IPv6 地址，明确读取来源与候选方案。
-- 连接配置增加场景说明、实际模式识别和独立参数详情；操作前确认具体变更。
-- 更新历史与当前状态分开，普通确认支持大小写 y/yes；破坏性操作仍需专门确认。
-
-## v1.16.0 更新
-
-- 重做 SSH 管理菜单，每页展示当前状态，统一返回与操作确认。
-- DNS 展示 IPv4 / IPv6 地址、配置来源与检测结果；增加网络检测和时间同步。
-- 性能页默认只读，连接队列调整放在高级设置，支持验证与恢复。
-- 重复安装进入维护菜单，按版本区分更新与修复，卸载和重装移入二级菜单。
-
-## v1.15.1 更新
-
-- SSH 主界面采用简洁分组菜单；原有快捷指令保留。
-- 安装提示精简，详细说明通过 `o help` / `o info` 查看，完全卸载放入高级操作。
-- 修正网卡地址标签及 IPv6 登录链接格式。
-
-## v1.15.0 更新
-
-本版新增：
-
-- VPS 简单菜单及“服务器概况 / 常用维护”布局。
-- 自定义面板域名、证书申请与续期，保留 IP 备用入口。
-- PHP 配置批量保存，解除面板对 LiteSpeed Cache 设置的强制覆盖。
-- 首页项目更新检查；完全卸载入口与备份保留选项。
-
-新增命令与验证情况见 [开发与验证记录](docs/local-next-version.md)。完全卸载会删除网站文件、网站数据库和面板，需要单独确认；请勿将开发稿中的新命令用于旧发布版。
-
 ## 文档
 
 - [安装与验签](docs/verified-install.md)
 - [日常维护与恢复](docs/operations-and-recovery.md)
 - [升级兼容性](docs/upgrade-compatibility.md)
-- [旧 Optimizer 迁移](docs/optimizer-migration.md)：v1.14.0 已停止自动部署旧插件，现有网站可显式迁移并移除。
+- [旧 Optimizer 迁移](docs/optimizer-migration.md)：现有网站可显式迁移并移除旧插件。
 - [安装安全](docs/security/ols-wpanel-install-security.md) · [运行时安全](docs/security/ols-wpanel-runtime-security.md)
 - [仓库目录说明](docs/repository-layout.md)
 
-## 开发目录
+---
 
-应用代码按 Go 包划分；页面放在 templates/ 与 static/，构建源码在 assets/。文档统一在 docs/，独立 Worker 统一在 deploy/。旧插件源码保留用于兼容与迁移验证。
-
-```text
-config/ collector/ database/ models/       配置与数据
-handlers/ middleware/ router/ executor/   请求处理与系统操作
-i18n/ templates/ static/ assets/           界面、翻译与资源
-docs/ deploy/                             文档与独立部署组件
-scripts/ tests/ third_party/               验证工具、测试与许可材料
-```
-
-## 许可证
-
-[GPL-3.0-only](LICENSE)，由 [zangwp](https://github.com/zangwp) 维护。第三方许可见 [NOTICE.md](NOTICE.md) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[GPL-3.0-only](LICENSE) · [项目声明](third_party/NOTICE.md) · [第三方许可](third_party/THIRD_PARTY_NOTICES.md) · [zangwp](https://github.com/zangwp)

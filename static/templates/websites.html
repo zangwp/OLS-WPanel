@@ -8,6 +8,8 @@
 		</div>
     </div>
 
+    {{template "website_navigation" .}}
+
     <!-- 重装 WordPress 对话框 -->
     <div x-show="reinstallModal.show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="reinstallModal.show = false">
         <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">

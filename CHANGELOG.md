@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.17.0 — 2026-10-03
+
+- Adds staged SSH port migration for standard systemd SSH services, with inherited firewall sources, Fail2ban updates, verification from the new SSH session, and a five-minute rollback timer. Unsupported socket activation and custom configurations remain read-only.
+- Consolidates frontend sources and templates under static/, source-contract tests under tests/repository/, and license notices under third_party/. Keeps README evergreen and links release details through Releases.
+
+- Adds a previewable port access policy with IPv4/IPv6 source scopes, an independent nftables restriction, manual confirmation, timed rollback, and boot persistence. Default drafts expose HTTP, HTTPS, SSH and the panel; HTTP/3 and WebAdmin stay closed and database/cache access stays local. Existing policies are preserved.
+
+- Simplifies the dashboard, groups WordPress fleet maintenance under Websites, and moves ports and firewall settings into Security settings while preserving existing links.
+- Displays resource-based configuration suggestions separately from editable current values; refreshing suggestions never replaces unsaved input. Replaces isolated help icons with inline descriptions and aligns firewall controls.
+- Adds per-site WordPress scheduled-task controls and restores the panel-managed WP-Cron override when all tasks are disabled; existing jobs and records are retained.
+- Adds independent certificate renewal preferences and attempt records for auto-issued certificates, preserves existing defaults, and leaves uploaded certificates under manual management.
+
+- Creates ACME challenge directories before configuring the default OpenLiteSpeed host and repairs missing directories on existing installations, including when the context already exists; rejects unsafe paths without relaxing configuration-directory permissions.
+- Removes workload optimization claims from queue presets, preserves live values by default, and previews each current-to-target change before confirmation.
+- Separates update preflight failures from package installation, displays complete errors across the page width, and improves section spacing and home-screen balance.
+
 ## v1.16.1 — 2026-10-03
 
 - Groups terminal status output with aligned, width-aware fields; separates current DNS from candidate presets and historical update errors from live service status.

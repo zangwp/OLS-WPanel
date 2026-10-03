@@ -1,4 +1,4 @@
-package main
+package repository
 
 import (
 	"encoding/base64"
@@ -14,12 +14,12 @@ func TestReleaseWorkflowSupplyChainBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read release workflow: %v", err)
 	}
-	workflow := string(workflowBytes)
+	workflow := strings.ReplaceAll(string(workflowBytes), "\r\n", "\n")
 	goModBytes, err := os.ReadFile("go.mod")
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(goModBytes), "\ntoolchain go1.26.8\n") {
+	if !strings.Contains(strings.ReplaceAll(string(goModBytes), "\r\n", "\n"), "\ntoolchain go1.26.8\n") {
 		t.Fatal("go.mod must pin the reviewed Go 1.26.8 toolchain")
 	}
 
@@ -228,7 +228,7 @@ func TestCIWorkflowUsesExactPinnedGoToolchain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read CI workflow: %v", err)
 	}
-	workflow := string(workflowBytes)
+	workflow := strings.ReplaceAll(string(workflowBytes), "\r\n", "\n")
 	if strings.Contains(workflow, "go-version-file:") {
 		t.Fatal("CI workflow must not let setup-go ignore the go.mod toolchain directive")
 	}
@@ -255,7 +255,7 @@ func TestCIWorkflowUsesExactPinnedGoToolchain(t *testing.T) {
 }
 
 func TestThirdPartyBrowserNoticesAreComplete(t *testing.T) {
-	noticeBytes, err := os.ReadFile("THIRD_PARTY_NOTICES.md")
+	noticeBytes, err := os.ReadFile("third_party/THIRD_PARTY_NOTICES.md")
 	if err != nil {
 		t.Fatalf("read third-party notices: %v", err)
 	}

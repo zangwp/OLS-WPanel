@@ -547,3 +547,40 @@ func TestCronCreateInsertFailureLeavesNoRowOrRender(t *testing.T) {
 		t.Fatalf("render calls=%d after failed insert, want 0", got)
 	}
 }
+
+func TestDisabledWPCronRestoresManagedMarker(t *testing.T) {
+	setupBackupOverviewTestDB(t)
+	insertBackupPolicySite(t, 1, "cron.example.com")
+	path := setCronTestWPConfig(t, 1, "<?php\n"+managedWPCronLine+"\n/* That's all, stop editing! */\n")
+	if _, err := database.GetDB().Exec(`INSERT INTO cron_jobs(name,cron_expression,command,task_type,site_id,enabled) VALUES('off','*/5 * * * *','cron.example.com','wp_cron',1,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncWPCronSideEffects(database.GetDB(), 1); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || bytes.Contains(data, []byte(managedWPCronLine)) {
+		t.Fatalf("disabled task retained override: %s %v", data, err)
+	}
+	if _, err := database.GetDB().Exec(`UPDATE cron_jobs SET enabled=1 WHERE site_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncWPCronSideEffects(database.GetDB(), 1); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil || !bytes.Contains(data, []byte(managedWPCronLine)) {
+		t.Fatalf("reenabling failed: %s %v", data, err)
+	}
+}
+func TestSiteCronCreateRejectsDuplicate(t *testing.T) {
+	setupBackupOverviewTestDB(t)
+	insertBackupPolicySite(t, 1, "cron.example.com")
+	if _, err := database.GetDB().Exec(`INSERT INTO cron_jobs(name,cron_expression,command,task_type,site_id,enabled) VALUES('existing','*/5 * * * *','cron.example.com','wp_cron',1,0)`); err != nil {
+		t.Fatal(err)
+	}
+	result := cronJSONRequest(t, http.MethodPost, "/api/cron", `{"name":"duplicate","cron_expression":"*/5 * * * *","command":"cron.example.com","task_type":"wp_cron","site_id":1,"unique_per_site":true}`, nil)
+	if result.Code != http.StatusConflict {
+		t.Fatalf("got %d: %s", result.Code, result.Body.String())
+	}
+}

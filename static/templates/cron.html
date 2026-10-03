@@ -9,22 +9,7 @@
         </div>
     </div>
 
-    <div class="info-strip p-4 mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-                <p class="text-white font-semibold mb-1">{{t .Lang "cron.panel_jobs_title"}}</p>
-                <p class="text-gray-400 text-xs">{{t .Lang "cron.panel_jobs_help"}}</p>
-            </div>
-            <div>
-                <p class="text-white font-semibold mb-1">{{t .Lang "cron.wp_cron_replace_title"}}</p>
-                <p class="text-gray-400 text-xs">{{t .Lang "cron.wp_cron_summary"}}</p>
-            </div>
-            <div>
-                <p class="text-white font-semibold mb-1">{{t .Lang "cron.ssl_renewal_title"}}</p>
-                <p class="text-gray-400 text-xs">{{t .Lang "cron.ssl_renewal_help"}}</p>
-            </div>
-        </div>
-    </div>
+    <p class="text-sm text-gray-400 mb-6">{{t .Lang "cron.overview_help"}}</p>
 
     <div class="card">
         <div class="overflow-x-auto">
@@ -55,7 +40,8 @@
                             <td class="table-cell">
                                 <div class="flex flex-wrap gap-1">
                                     <button @click="runJob(job)" :disabled="job.running" class="btn-success text-xs py-1 px-2" :class="job.running ? 'opacity-50 cursor-not-allowed' : ''" x-text="job.running ? t('cron.job_running') : t('cron.run')"></button>
-                                    <button @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "cron.edit"}}</button>
+                                    <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
+                                    <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "cron.edit"}}</button>
                                     <button @click="deleteJob(job)" class="btn-danger text-xs py-1 px-2">{{t .Lang "cron.delete"}}</button>
                                 </div>
                             </td>
@@ -125,7 +111,7 @@
                     <select x-model="form.task_type" class="input-field" @change="onTaskTypeChange(true)">
                         <option value="command">{{t .Lang "cron.custom_command"}}</option>
                         <option value="file_backup">{{t .Lang "cron.backup_site_files"}}</option>
-                        <option value="wp_cron">{{t .Lang "cron.wp_cron_call"}}</option>
+
                     </select>
                 </div>
                 <div x-show="form.task_type === 'wp_cron'" class="p-3 rounded mb-3" style="background-color: #0f172a;">

@@ -122,18 +122,10 @@ func CheckPanelDomain(ctx context.Context, domain string) error {
 		return fmt.Errorf("managed OLS default webroot is unavailable")
 	}
 	challenge := filepath.Join(root, ".well-known", "acme-challenge")
-	for _, dir := range []string{filepath.Join(root, ".well-known"), challenge} {
-		if info, err := os.Lstat(dir); err == nil {
-			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("unsafe challenge directory")
-			}
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
+	if err := ensurePanelACMEChallengeDirectory(root); err != nil {
+		return err
 	}
+
 	token := make([]byte, 24)
 	if _, err := rand.Read(token); err != nil {
 		return err

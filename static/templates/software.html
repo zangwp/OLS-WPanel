@@ -135,12 +135,12 @@
                 <div class="software-config-grid" :class="{ 'software-config-grid-wide': sw.name === 'PHP' }">
                     <template x-for="cfg in sw.configs" :key="cfg.key">
                         <div>
-                            <div class="flex items-center justify-between mb-1">
-                                <label class="text-xs text-gray-400" x-text="cfg.label"></label>
-                                <span x-show="cfg.value !== undefined && cfg.value !== null && cfg.value !== ''" class="text-xs text-gray-600" x-text="t('software.current_value', { value: cfg.value })"></span>
+                            <div class="software-field-heading">
+                                <label :for="'config-' + sw.name + '-' + cfg.key" class="text-sm text-gray-300" x-text="cfg.label"></label>
+                                <span x-show="cfg._recommended" class="text-xs text-blue-300" x-text="t('software.suggested_value', { value: cfg._recommended })"></span>
                             </div>
-                            <input type="text" x-model="cfg._value" class="input-field w-full text-sm py-1.5">
-                            <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip" x-text="cfg.hint"></span></details>
+                            <input type="text" :id="'config-' + sw.name + '-' + cfg.key" x-model="cfg._value" class="input-field w-full text-sm py-1.5">
+                            <p class="text-xs text-gray-400 mt-2 leading-relaxed" x-text="cfg.hint"></p>
                         </div>
                     </template>
                 </div>
@@ -295,11 +295,12 @@ function softwareManager() {
                     this.software = (r.data || []).map(sw => {
                         sw._saving = false;
                         sw._recommending = false;
-                        (sw.configs || []).forEach(cfg => { cfg._value = cfg.value; });
+                        (sw.configs || []).forEach(cfg => { cfg._value = cfg.value; cfg._recommended = ''; });
                         return sw;
                     });
                 }
             } catch(e) {}
+            await Promise.allSettled(this.software.filter(sw => ['PHP', 'MariaDB', 'Redis'].includes(sw.name)).map(sw => this.recommend(sw, true)));
             await this.fetchPHPRuntimes();
             await this.fetchDevelopmentTools();
         },
@@ -380,18 +381,18 @@ function softwareManager() {
                 sw._saving = false;
             }
         },
-        async recommend(sw) {
+        async recommend(sw, silent = false) {
             sw._recommending = true;
             try {
                 const r = await api('/software/recommend?name=' + encodeURIComponent(sw.name));
                 if (r.success) {
                     const recs = r.data.recommendations || {};
                     for (const cfg of sw.configs) {
-                        if (recs[cfg.key] !== undefined) cfg._value = recs[cfg.key];
+                        if (recs[cfg.key] !== undefined) cfg._recommended = recs[cfg.key];
                     }
-                    showToast(r.data.reason, 'info');
+                    if (!silent) showToast(t('software.recommend_refreshed'), 'info');
                 }
-            } catch(e) { showToast(e.message, 'error'); }
+            } catch(e) { if (!silent) showToast(e.message, 'error'); }
             sw._recommending = false;
         },
         async clearOpcache() {

@@ -29,7 +29,7 @@ func TestDistributionLicenseAndNoticeAreComplete(t *testing.T) {
 		}
 	}
 
-	notice, err := os.ReadFile("NOTICE.md")
+	notice, err := os.ReadFile("third_party/NOTICE.md")
 	if err != nil {
 		t.Fatalf("read NOTICE.md: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestDistributionLicenseAndNoticeAreComplete(t *testing.T) {
 		}
 	}
 
-	thirdParty, err := os.ReadFile("THIRD_PARTY_NOTICES.md")
+	thirdParty, err := os.ReadFile("third_party/THIRD_PARTY_NOTICES.md")
 	if err != nil {
 		t.Fatalf("read THIRD_PARTY_NOTICES.md: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestInitialOLSDistributionBoundariesRemainExplicit(t *testing.T) {
 		"README.en.md": {
 			"OpenLiteSpeed",
 			"LSPHP 8.5",
-			"The current stable release is",
+			"The short entry pins a published release",
 		},
 		"docs/upgrade-compatibility.md": {
 			"v1.0.0",
@@ -166,6 +166,20 @@ func TestInitialOLSDistributionBoundariesRemainExplicit(t *testing.T) {
 				t.Errorf("%s is missing the initial distribution boundary %q", path, phrase)
 			}
 		}
+	}
+}
+
+func TestFrontendSourcesAreNotPublicAssets(t *testing.T) {
+	if _, err := fs.ReadFile(TemplatesFS, "static/templates/base.html"); err != nil {
+		t.Fatalf("consolidated templates are not embedded: %v", err)
+	}
+	for _, path := range []string{"static/templates/base.html", "static/source/frontend/input.css", "static/source/branding/ols-wpanel-logo-master.png"} {
+		if _, err := fs.ReadFile(StaticFS, path); err == nil {
+			t.Errorf("private source exposed in static assets: %s", path)
+		}
+	}
+	if _, err := fs.ReadFile(StaticFS, "static/logo.png"); err != nil {
+		t.Fatal(err)
 	}
 }
 

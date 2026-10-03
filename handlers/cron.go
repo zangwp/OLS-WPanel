@@ -82,7 +82,7 @@ func syncWPCronSideEffects(q cronQueryRower, siteIDs ...int) error {
 		}
 		seen[siteID] = struct{}{}
 		var count int
-		if err := q.QueryRow("SELECT COUNT(*) FROM cron_jobs WHERE task_type = 'wp_cron' AND site_id = ?", siteID).Scan(&count); err != nil {
+		if err := q.QueryRow("SELECT COUNT(*) FROM cron_jobs WHERE task_type = 'wp_cron' AND enabled = 1 AND site_id = ?", siteID).Scan(&count); err != nil {
 			return fmt.Errorf("count WordPress cron jobs for site %d: %w", siteID, err)
 		}
 		if count > 0 {
@@ -245,6 +245,17 @@ func (h *CronHandler) Create(c *gin.Context) {
 	if msg := validateCronInput(req.Name, req.CronExpression, req.Command, taskType, req.BackupMode, req.RunAsUser, req.SiteID); msg != "" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(msg))
 		return
+	}
+	if taskType == "wp_cron" && req.UniquePerSite && req.SiteID != nil {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM cron_jobs WHERE task_type='wp_cron' AND site_id=?", *req.SiteID).Scan(&count); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("Cannot read existing jobs"))
+			return
+		}
+		if count > 0 {
+			c.JSON(http.StatusConflict, models.ErrorResponse("A WordPress task already exists for this website"))
+			return
+		}
 	}
 	if taskType == "file_backup" && req.SiteID != nil {
 		exists, err := fileBackupTaskExists(db, *req.SiteID, req.BackupMode, 0)
@@ -525,7 +536,7 @@ func (h *CronHandler) Delete(c *gin.Context) {
 	wpCronRestored := false
 	if taskType == "wp_cron" && siteID > 0 {
 		var remaining int
-		if err := tx.QueryRow("SELECT COUNT(*) FROM cron_jobs WHERE task_type = 'wp_cron' AND site_id = ?", siteID).Scan(&remaining); err != nil {
+		if err := tx.QueryRow("SELECT COUNT(*) FROM cron_jobs WHERE task_type = 'wp_cron' AND enabled = 1 AND site_id = ?", siteID).Scan(&remaining); err != nil {
 			rollbackErr := rollbackCronMutation(db, tx, wpCronSites, err)
 			log.Printf("检查剩余 WordPress Cron 任务失败: %v", rollbackErr)
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("删除失败"))

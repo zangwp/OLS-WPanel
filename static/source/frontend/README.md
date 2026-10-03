@@ -7,8 +7,8 @@ The generated stylesheet used by the embedded panel remains under
 From the repository root, run the pinned/reviewed Tailwind binary explicitly:
 
 ```sh
-bin/tailwindcss -c assets/frontend/tailwind.config.js \
-  -i assets/frontend/input.css -o static/css/main.css --minify
+bin/tailwindcss -c static/source/frontend/tailwind.config.js \
+  -i static/source/frontend/input.css -o static/css/main.css --minify
 ```
 
 Review the generated `static/css/main.css` diff before committing it. Release

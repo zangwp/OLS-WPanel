@@ -2819,6 +2819,7 @@ if (( OLS_DEFAULT_UID < 11 || OLS_DEFAULT_GID < 10 )); then
     log_error "www-data 的 UID/GID 不符合 OpenLiteSpeed 最低安全要求"
 fi
 install -d -o www-data -g www-data -m 0755 "$OLS_DEFAULT_ROOT"
+install -d -o root -g root -m 0755 "$OLS_DEFAULT_ROOT/.well-known" "$OLS_DEFAULT_ROOT/.well-known/acme-challenge"
 
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout "$OLS_CONF_DIR/default.key" \

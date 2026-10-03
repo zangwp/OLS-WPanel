@@ -178,6 +178,18 @@
                     <button @click="removeSSL()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.delete_cert"}}</button>
                 </div>
             </div>
+
+            <div x-show="site.ssl_enabled" class="my-5 space-y-3">
+                <p class="text-sm text-gray-300" x-text="site.ssl_cert_source === 'auto' ? t('website.cert_auto') : t('website.cert_manual')"></p>
+                <label x-show="site.ssl_cert_source === 'auto'" class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" :checked="sslRenewal.enabled" @change="saveSSLRenewal($event.target.checked)" :disabled="sslRenewalBusy || !sslRenewalLoaded">
+                    <span>{{t .Lang "website.renewal_enabled"}}</span>
+                </label>
+                <p class="text-xs text-gray-400" x-text="site.ssl_cert_source === 'auto' ? t('website.renewal_help') : t('website.renewal_manual_help')"></p>
+                <p class="text-xs text-gray-400" x-text="t('website.scheduled_wp_last') + ': ' + (sslRenewal.last_attempt ? new Date(sslRenewal.last_attempt).toLocaleString(currentLocale()) : '—') + ' · ' + jobStatusLabel(sslRenewal.last_status)"></p>
+                <p x-show="sslRenewalError" class="text-sm text-red-300" x-text="sslRenewalError"></p>
+                <p x-show="site.ssl_last_error" class="text-sm text-yellow-300" x-text="site.ssl_last_error"></p>
+            </div>
             <div x-show="!site.ssl_enabled">
                 <p class="text-gray-400 mb-4">{{t .Lang "website.ssl_not_enabled"}}</p>
                 <button @click="sslMode='auto'; sslModalOpen=true" class="btn-primary">{{t .Lang "website.enable_ssl"}}</button>
@@ -222,7 +234,7 @@
                 <span x-show="site.file_lock_enabled" class="text-xs text-yellow-300">{{t .Lang "website.cache_unlock_to_configure"}}</span>
             </div>
 
-            <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "website.wordpress_cache_owner_notice"}}</span></details>
+            <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.wordpress_cache_owner_notice"}}</p>
 
             <div x-show="site.site_type === 'php'" class="rounded-lg border border-gray-700 bg-gray-900/30 p-3 mb-4">
                 <p class="text-sm font-medium text-white mb-2">{{t .Lang "website.server_page_cache"}}</p>
@@ -266,26 +278,26 @@
                     <span>{{t .Lang "website.post_revisions"}}</span>
                     <input type="number" :value="wpPostRevisions >= 0 ? wpPostRevisions : ''" @input="wpPostRevisions = $event.target.value === '' ? -1 : parseInt($event.target.value)" class="input-field w-24 text-sm py-1 ml-2" placeholder="{{t .Lang "website.default_placeholder"}}">
                 </label>
-                <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "website.post_revisions_help"}}</span></details>
+                <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.post_revisions_help"}}</p>
             </div>
             <div class="text-sm mb-3">
  <a :href="(document.body.dataset.panelPrefix || '') + '/software'" class="text-blue-400">{{t .Lang "website.manage_php_memory"}}</a>
  <span x-show="wpMemoryLimit" class="text-xs text-gray-400" x-text="wpMemoryLimit"></span>
  <button x-show="wpMemoryLimit" @click="wpMemoryLimit = ''" type="button" class="text-xs text-blue-400 ml-2">{{t .Lang "website.inherit_php_memory"}}</button>
 </div>
-            <div class="flex items-center space-x-3 mb-4" x-show="site.site_type === 'wordpress'">
+            <div class="mb-4 space-y-2" x-show="site.site_type === 'wordpress'">
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
                     <input type="checkbox" x-model="xmlrpcEnabled">
                     <span>{{t .Lang "website.allow_xmlrpc"}}</span>
                 </label>
-                <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "website.xmlrpc_help"}}</span></details>
+                <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.xmlrpc_help"}}</p>
             </div>
-            <div class="flex items-center space-x-3 mb-4" x-show="site.site_type === 'wordpress'">
+            <div class="mb-4 space-y-2" x-show="site.site_type === 'wordpress'">
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
                     <input type="checkbox" x-model="disableApplicationPasswords">
                     <span>{{t .Lang "website.disable_application_passwords"}}</span>
                 </label>
-                <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "website.disable_application_passwords_help"}}</span></details>
+                <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.disable_application_passwords_help"}}</p>
             </div>
             </details>
             <div class="flex items-center space-x-3 mb-3">
@@ -312,6 +324,29 @@
             {{template "wp_anomaly_panel" .}}
         </div>
 
+
+        <section x-show="detailTab === 'security' && site.site_type === 'wordpress'" class="card">
+            <h3 class="text-lg font-semibold text-white mb-2">{{t .Lang "website.scheduled_wp"}}</h3>
+            <p class="text-sm text-gray-400 mb-5">{{t .Lang "website.scheduled_wp_help"}}</p>
+            <p x-show="wpCronError" class="text-sm text-red-300 mb-3" x-text="wpCronError"></p>
+            <template x-for="job in wpCronJobs" :key="job.id">
+                <div class="mb-5 border-b border-gray-700 pb-5">
+                    <div class="flex flex-wrap items-center gap-3 mb-3">
+                        <label class="flex items-center gap-2 text-sm"><input type="checkbox" :checked="job.enabled" @change="saveWPCron(job, $event.target.checked)" :disabled="wpCronBusy"><span>{{t .Lang "website.scheduled_wp_enabled"}}</span></label>
+                        <span class="text-xs text-yellow-300" x-show="job.runtime_suspended">{{t .Lang "website.scheduled_wp_suspended"}}</span>
+                    </div>
+                    <label :for="'site-cron-' + job.id" class="label">{{t .Lang "cron.schedule"}}</label>
+                    <div class="flex flex-wrap gap-3">
+                        <input :id="'site-cron-' + job.id" type="text" x-model="job._schedule" class="input-field font-mono" style="max-width:18rem">
+                        <button @click="saveWPCron(job, job.enabled)" :disabled="wpCronBusy" class="btn-primary text-sm">{{t .Lang "common.save"}}</button>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">{{t .Lang "website.scheduled_wp_example"}}</p>
+                    <p class="text-xs text-gray-400 mt-3" x-text="t('website.scheduled_wp_last') + ': ' + (job.last_run_at ? new Date(job.last_run_at).toLocaleString(currentLocale()) : '—') + ' · ' + jobStatusLabel(job.last_status)"></p>
+                </div>
+            </template>
+            <button x-show="wpCronLoaded && !wpCronJobs.length" @click="createWPCron()" :disabled="wpCronBusy" class="btn-primary text-sm">{{t .Lang "website.scheduled_wp_enable"}}</button>
+            <a href="/{{.RandomSuffix}}/cron" class="text-sm text-blue-400 ml-3">{{t .Lang "cron.view_logs"}}</a>
+        </section>
         <div id="site-protection" x-show="detailTab === 'security' && site.site_type === 'wordpress'" class="card scroll-mt-4">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div>
@@ -738,6 +773,59 @@
 <script>
 function websiteDetail() {
     return {
+
+        jobStatusLabel(status) {
+            const key = { success: 'website.job_success', failed: 'website.job_failed', error: 'website.job_failed', started: 'website.job_started' }[status];
+            return key ? t(key) : (status || t('website.job_no_record'));
+        },
+        wpCronJobs: [], wpCronLoaded: false, wpCronBusy: false, wpCronError: '',
+        sslRenewal: { enabled: false }, sslRenewalLoaded: false, sslRenewalBusy: false, sslRenewalError: '',
+        async loadSiteJobs() {
+            try {
+                const r = await api('/cron');
+                if (!r.success) throw new Error(r.message || t('common.operation_failed'));
+                this.wpCronJobs = (r.data || []).filter(j => j.task_type === 'wp_cron' && Number(j.site_id) === Number(this.site.id)).map(j => ({ ...j, _schedule: j.cron_expression }));
+                this.wpCronLoaded = true; this.wpCronError = '';
+            } catch(e) { this.wpCronLoaded = false; this.wpCronError = e.message; }
+        },
+        async saveWPCron(job, enabled) {
+            if (this.wpCronBusy) return;
+            this.wpCronBusy = true;
+            try {
+                await api('/cron/' + job.id, { method: 'PUT', body: { name: job.name, cron_expression: job._schedule, command: this.site.domain, task_type: 'wp_cron', site_id: this.site.id, notify_fail: job.notify_fail, run_as_user: job.run_as_user, enabled } });
+                showToast(t('settings.saved'), 'success');
+            } catch(e) { showToast(e.message, 'error'); }
+            finally { await this.loadSiteJobs(); this.wpCronBusy = false; }
+        },
+        async createWPCron() {
+            if (this.wpCronBusy) return;
+            this.wpCronBusy = true;
+            try {
+                await this.loadSiteJobs();
+                if (!this.wpCronLoaded || this.wpCronJobs.length) return;
+                await api('/cron', { method: 'POST', body: { name: '[wp_cron] ' + this.site.domain, cron_expression: '*/5 * * * *', command: this.site.domain, task_type: 'wp_cron', site_id: this.site.id, unique_per_site: true } });
+                await this.loadSiteJobs();
+                showToast(t('settings.saved'), 'success');
+            } catch(e) { showToast(e.message, 'error'); }
+            finally { this.wpCronBusy = false; }
+        },
+        async loadSSLRenewal() {
+            try {
+                const r = await api('/websites/' + this.site.id + '/ssl/renewal');
+                if (!r.success) throw new Error(r.message || t('common.operation_failed'));
+                this.sslRenewal = r.data; this.sslRenewalLoaded = true; this.sslRenewalError = '';
+            } catch(e) { this.sslRenewalLoaded = false; this.sslRenewalError = e.message; }
+        },
+        async saveSSLRenewal(enabled) {
+            if (this.sslRenewalBusy) return;
+            this.sslRenewalBusy = true;
+            try {
+                const r = await api('/websites/' + this.site.id + '/ssl/renewal', { method: 'PUT', body: { enabled } });
+                this.sslRenewal = r.data;
+                showToast(t('settings.saved'), 'success');
+            } catch(e) { showToast(e.message, 'error'); }
+            finally { await this.loadSSLRenewal(); this.sslRenewalBusy = false; }
+        },
         detailTab: 'overview',
         site: null,
 		maintenance: { state: 'unknown', window_id: '' },
@@ -910,11 +998,13 @@ function websiteDetail() {
             if (tab === 'logs') this.loadLogs();
         },
         async fetchDetail() {
-            const id = window.location.pathname.split('/').pop();
+            const id = window.location.pathname.split('/').filter(Boolean).pop();
             try {
                 const r = await api('/websites/' + id);
                 if (r.success) {
                     this.site = r.data;
+                    this.loadSSLRenewal();
+                    if (this.site.site_type === 'wordpress') this.loadSiteJobs();
 					if (!this.maintenanceTimer && r.data.site_type === 'wordpress') {
 						this.loadMaintenance(true);
 						this.maintenanceTimer = setInterval(() => this.loadMaintenance(), 10000);

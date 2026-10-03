@@ -160,7 +160,7 @@
                 <button x-show="overview.dns?.managed" x-cloak type="button" class="btn-secondary text-xs mt-3" @click="restoreDNS()" :disabled="dnsBusy">{{t .Lang "vps.dns_restore"}}</button>
             </div>
             <div class="mt-4 flex flex-wrap gap-2">
-                <a href="/{{.RandomSuffix}}/firewall?tab=ports" class="btn-secondary text-sm">{{t .Lang "vps.manage_ports"}}</a>
+                <a href="/{{.RandomSuffix}}/security#ports" class="btn-secondary text-sm">{{t .Lang "vps.manage_ports"}}</a>
                 <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "vps.system_updates"}}</a>
                 <a href="/{{.RandomSuffix}}/backups" class="btn-secondary text-sm">{{t .Lang "vps.backups"}}</a>
             </div>
@@ -267,7 +267,7 @@ o uninstall --all</pre>
         <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "vps.safe_tools"}}</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <a href="/{{.RandomSuffix}}/settings#system-updates" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_updates"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_updates_help"}}</p></a>
-            <a href="/{{.RandomSuffix}}/firewall?tab=ports" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_firewall"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_firewall_help"}}</p></a>
+            <a href="/{{.RandomSuffix}}/security#ports" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_firewall"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_firewall_help"}}</p></a>
             <a href="/{{.RandomSuffix}}/software" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_services"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_services_help"}}</p></a>
             <a href="/{{.RandomSuffix}}/log-analysis" class="rounded-lg border border-gray-700 p-4 hover:border-blue-800 transition-colors"><p class="text-white font-medium">{{t .Lang "vps.tool_logs"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.tool_logs_help"}}</p></a>
         </div>

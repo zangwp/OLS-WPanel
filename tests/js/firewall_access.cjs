@@ -1,0 +1,20 @@
+const fs = require('fs'), vm = require('vm'), assert = require('assert');
+const source = fs.readFileSync('static/templates/firewall_controller.html', 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const calls = [];
+const ctx = {t:x=>x, showToast:()=>{}, confirmModal:async()=>true, setTimeout:()=>1, clearTimeout:()=>{}, api:async(path,opts)=>{calls.push(path);return {success:true,data:{confirmation_token:'test',deadline:'2030-01-01'}}}};
+vm.createContext(ctx);vm.runInContext(source,ctx);
+(async()=>{
+ const p=ctx.firewallManager('ports');
+ p.portStatus={ssh_port:2222,panel_port:9443,current_management_ip:'203.0.113.9',listeners:[],rules:[]};p.resetAccessRows();
+ const payload=p.accessPayload();assert.equal(payload.length,4);assert(payload.every(r=>r.source===''));
+ for(const port of [2222,9443,80,443])assert(payload.some(r=>r.protocol==='tcp'&&r.port===port));
+ for(const port of [3306,6379,7080])assert.equal(p.accessRows.find(r=>r.port===port).scope,'closed');
+ assert.equal(p.accessRows.find(r=>r.protocol==='udp'&&r.port===443).scope,'closed');
+ p.portStatus.access_enabled=true;p.portStatus.access_rules=[{protocol:'tcp',port:2222,source:'2001:db8::1/128'}];p.resetAccessRows();
+ assert.equal(p.accessPayload().length,1);assert.equal(p.accessPayload()[0].source,'2001:db8::1/128');
+ p.accessPreview={rules:payload,fingerprint:'snapshot'};p.fetchPortStatus=async()=>{};await p.applyAccess();
+ assert.equal(p.accessToken,'test');assert(!calls.some(x=>x.endsWith('/confirm')),'must not auto-confirm');
+ await p.confirmAccess();assert(!calls.some(x=>x.endsWith('/confirm')),'requires explicit connection verification');
+ p.accessChecked=true;await p.confirmAccess();assert(calls.some(x=>x.endsWith('/confirm')));assert.equal(p.accessToken,'');
+ console.log('Firewall defaults, saved-state preservation and manual confirmation passed');
+})().catch(e=>{console.error(e);process.exit(1)});

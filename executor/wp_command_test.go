@@ -189,6 +189,13 @@ func TestPerformanceStatusRefreshDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestQueuePreviewFailureDoesNotMutate(t *testing.T) {
+	out := runPanelMenuFixture(t, "read_view() { echo VIEW:$1; [ \"$1\" != queue-change ]; }\nchoices=(1 0)\nsettings_page tuning\n")
+	if strings.Contains(out, "MUTATION:") || !strings.Contains(out, "VIEW:queue-change") {
+		t.Fatalf("failed preview must cancel the change: %s", out)
+	}
+}
+
 func TestEnsurePanelCommandsAt_RefusesUnrelatedCommandWithoutPartialWrite(t *testing.T) {
 	dir := t.TempDir()
 	occupied := filepath.Join(dir, "lowercase-o")

@@ -253,3 +253,18 @@ table tbody tr:hover {
 
 .vps-meter {height:.35rem;background:#29374b;border-radius:999px;overflow:hidden;}
 .vps-meter > span {display:block;height:100%;background:linear-gradient(90deg,#2563eb,#22d3ee);border-radius:999px;transition:width .3s;}
+
+/* Consistent settings headings, helper text and responsive navigation. */
+.workspace-tabs { display:flex; flex-wrap:wrap; gap:8px; border-bottom:1px solid #334155; padding-bottom:8px; }
+.workspace-tabs a { padding:10px 16px; color:#94a3b8; border-radius:8px; }
+.workspace-tabs a.selected { color:#fff; background:#2563eb; }
+.software-field-heading { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:4px 12px; margin-bottom:8px; }
+.software-field-heading > span { flex-shrink:0; }
+.software-config-grid { gap:24px; }
+.port-access-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px; align-items:start; }
+@media(max-width:767px) { .port-access-grid { grid-template-columns:1fr; } .port-access-grid > div { grid-column:auto; } }
+
+/* Port policy editor: consistent field baselines and mobile stacking. */
+.access-rule{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,1fr) minmax(260px,2fr);gap:16px;align-items:center;padding:16px 0;border-bottom:1px solid #334155}.access-custom{display:flex;flex-wrap:wrap;gap:12px}.access-custom .input-field{width:140px}.access-code{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;padding:16px;background:#0b1220;margin-top:12px;font-size:12px}.access-preview-list{display:grid;gap:8px}.access-rule .label{margin-bottom:6px}@media(max-width:767px){.access-rule{grid-template-columns:1fr;gap:10px}.access-custom .input-field{width:100%}}
+
+@media(min-width:768px){.access-field-label{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.access-rule{min-height:76px;padding:14px 0}.access-rule-head{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,1fr) minmax(260px,2fr);gap:16px;padding:12px 0 4px}}@media(max-width:767px){.access-rule-head{display:none}}

@@ -1,0 +1,6 @@
+{{template "base" .}}
+{{define "wordpress_overview_content"}}
+<h2 class="text-xl font-bold text-white mb-6">{{t .Lang "nav.websites"}}</h2>
+{{template "website_navigation" .}}
+{{template "wp_fleet_overview" .}}
+{{end}}

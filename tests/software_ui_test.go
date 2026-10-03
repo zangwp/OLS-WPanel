@@ -8,7 +8,7 @@ import (
 )
 
 func TestSoftwarePageKeepsOperationalStatusCompact(t *testing.T) {
-	source, err := os.ReadFile("../templates/software.html")
+	source, err := os.ReadFile("../static/templates/software.html")
 	if err != nil {
 		t.Fatal(err)
 	}

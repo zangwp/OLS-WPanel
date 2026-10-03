@@ -4,7 +4,7 @@
 
 A lightweight VPS and WordPress management panel for websites, databases, TLS certificates, caching, backups and server maintenance. Built around OpenLiteSpeed, LSPHP, MariaDB and Redis.
 
-[中文](README.md) · [Operations guide](docs/operations-and-recovery.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/zangwp/OLS-WPanel/issues)
+[中文](README.md) · [Operations guide](docs/operations-and-recovery.md) · [Releases](https://github.com/zangwp/OLS-WPanel/releases) · [Issues](https://github.com/zangwp/OLS-WPanel/issues)
 
 ## Installation
 
@@ -14,7 +14,7 @@ Supports fresh **Debian 13 and Ubuntu 24.04 LTS / Ubuntu 26.04 LTS** servers on 
 curl -fsSL https://ols.zangyubin.top/install | bash
 ```
 
-The current stable release is `v1.16.1`. The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
+The short entry pins a published release and verifies Ed25519 signatures and SHA-256 hashes.
 
 On minimal images without curl, install the prerequisites first:
 
@@ -53,58 +53,15 @@ o uninstall       remove the panel, preserving websites, databases and shared so
 
 Ordinary uninstall requires the exact `UNINSTALL` confirmation. Updates use the signed published installation entry.
 
-## v1.16.1 changes
-
-- Groups terminal screens with consistent spacing, narrow-terminal wrapping and existing shortcuts.
-- Preserves resolver order and separates configured IPv4/IPv6 DNS from candidate presets.
-- Identifies queue profiles from live values, with parameter details and explicit change confirmation.
-- Separates historical update errors from current status and accepts case-insensitive ordinary confirmations.
-
-## v1.16.0 changes
-
-- Rebuilds SSH menus around current status, consistent navigation and explicit confirmations.
-- Shows dual-stack DNS ownership and probe results; adds connectivity and time synchronization tools.
-- Makes performance status read-only by default; advanced queue changes are verified and reversible.
-- Adds version-aware installation maintenance with nested reinstall and uninstall actions.
-
-## v1.15.1 changes
-
-- Compact grouped SSH menus retain existing commands.
-- Shorter installation summaries, explicit help/details and advanced uninstall access.
-- Accurate interface-address labels and valid IPv6 login URLs.
-
-## v1.15.0 changes
-
-New in this release:
-
-- A simple VPS menu and Overview / Maintenance page layout.
-- Custom panel domains, certificate issuance and renewal, with an IP fallback entry.
-- Batched PHP configuration saves and removal of forced LiteSpeed Cache overrides.
-- Dashboard update checks and a complete-uninstall entry with backup retention choices.
-
-See the [development and verification notes](docs/local-next-version.md) for new commands and verification limits. Complete uninstall deletes websites, their databases and the panel, and requires separate confirmation. These commands require v1.15.0 or newer.
-
 ## Documentation
 
 - [Installation and signature verification](docs/verified-install.md)
 - [Operations and recovery](docs/operations-and-recovery.md)
 - [Upgrade compatibility](docs/upgrade-compatibility.md)
-- [Optimizer migration](docs/optimizer-migration.md): v1.14.0 stopped automatic deployment; existing sites can explicitly migrate and remove it.
+- [Optimizer migration](docs/optimizer-migration.md): existing sites can explicitly migrate and remove the legacy plugin.
 - [Installer security](docs/security/ols-wpanel-install-security.md) · [Runtime security](docs/security/ols-wpanel-runtime-security.md)
 - [Repository layout](docs/repository-layout.md)
 
-## Development layout
+---
 
-Application code uses separate Go packages. Templates and runtime assets are under templates/ and static/; build sources are under assets/. Documentation lives in docs/ and independent Workers in deploy/. Legacy plugin sources remain for compatibility and migration validation.
-
-```text
-config/ collector/ database/ models/       configuration and data
-handlers/ middleware/ router/ executor/   request handling and system operations
-i18n/ templates/ static/ assets/           UI, translations and assets
-docs/ deploy/                             documentation and deployment components
-scripts/ tests/ third_party/               verification, tests and license material
-```
-
-## License
-
-[GPL-3.0-only](LICENSE), maintained by [zangwp](https://github.com/zangwp). Third-party terms are listed in [NOTICE.md](NOTICE.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[GPL-3.0-only](LICENSE) · [Project notice](third_party/NOTICE.md) · [Third-party licenses](third_party/THIRD_PARTY_NOTICES.md) · [zangwp](https://github.com/zangwp)

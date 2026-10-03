@@ -182,7 +182,7 @@ func collectScriptTranslationKeys(t *testing.T) map[string][]string {
 	keys := map[string][]string{}
 	keyPattern := regexp.MustCompile(`(?:^|[^A-Za-z0-9_$])t\('([a-z][a-z0-9_.-]+)'`)
 
-	walkFiles(t, "../templates", func(path string, content []byte) {
+	walkFiles(t, "../static/templates", func(path string, content []byte) {
 		for _, match := range keyPattern.FindAllSubmatch(content, -1) {
 			keys[path] = appendUnique(keys[path], string(match[1]))
 		}

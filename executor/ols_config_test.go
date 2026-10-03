@@ -182,6 +182,9 @@ func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
 	if info, err := os.Stat(defaultRoot); err != nil || !info.IsDir() {
 		t.Fatalf("default root was not created: info=%v err=%v", info, err)
 	}
+	if info, err := os.Stat(filepath.Join(defaultRoot, ".well-known", "acme-challenge")); err != nil || !info.IsDir() {
+		t.Fatalf("ACME context directory was not created: info=%v err=%v", info, err)
+	}
 	if chownPath != defaultRoot || chownUID != 33 || chownGID != 33 {
 		t.Fatalf("default root owner repair = (%q,%d,%d), want (%q,33,33)", chownPath, chownUID, chownGID, defaultRoot)
 	}

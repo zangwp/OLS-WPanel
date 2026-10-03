@@ -609,6 +609,9 @@ context / {
   addDefaultCharset      off
 }
 `, filepath.ToSlash(root), filepath.ToSlash(root))
+	if err := ensurePanelACMEChallengeDirectory(root); err != nil {
+		return err
+	}
 	content += panelACMEContext(root)
 	if err := writeOLSFileAtomic(configPath, []byte(content), 0640); err != nil {
 		return fmt.Errorf("写入 OpenLiteSpeed 默认虚拟主机配置失败: %w", err)

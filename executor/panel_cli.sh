@@ -186,7 +186,7 @@ def wrapped(s,width):
     return lines
 def note(s):
     for line in wrapped(s,WIDTH-4):print('  '+line)
-def section(title):print('\n  '+title+'\n  '+ '─'*min(WIDTH-4,52))
+def section(title):print('\n  '+title+'\n  '+ '─'*min(WIDTH-4,52)+'\n')
 def row(label,value):
     value=value if value is not None and value!='' else '未检测到'
     col=16 if WIDTH>=52 else 12
@@ -327,13 +327,7 @@ elif view in ['tuning','queues','queue-menu']:
         section('网络参数')
         row('拥塞控制',run('sysctl','-n','net.ipv4.tcp_congestion_control'));row('队列规则',run('sysctl','-n','net.core.default_qdisc'))
     else:section('当前连接配置')
-    if view=='queue-menu':
-        mode={('4096','4096'):'日常网站配置',('8192','8192'):'连接高峰配置'}.get(tuple(queue_values),'自定义 / 系统配置')
-        row('当前模式',mode if all(queue_values) else '未能读取')
-        row('两项队列上限',' / '.join(v or '未知' for v in queue_values))
-        note('按实际值识别模式；不代表已评估网站性能。')
-    else:
-        for label,value in zip(['待接收连接上限','半连接队列上限'],queue_values):row(label,value)
+    for label,value in zip(['待接收连接上限','半连接队列上限'],queue_values):row(label,value)
     if view in ['queues','queue-menu']:
         managed=text('/etc/sysctl.d/99-ols-wpanel-vps.conf');legacy=text('/etc/sysctl.d/99-ols-wpanel.conf')
         if view=='queues':
@@ -344,10 +338,29 @@ elif view in ['tuning','queues','queue-menu']:
             baseline=json.loads(text('/etc/sysctl.d/.ols-wpanel-vps-original.json'))
             can_restore=all(re.fullmatch(r'[0-9]+',str(baseline.get(k,''))) for k in ['net.core.somaxconn','net.ipv4.tcp_max_syn_backlog'])
         except (ValueError,AttributeError):can_restore=False
-        row('恢复记录','已保存有效原值' if can_restore else '无有效记录')
-        if view=='queues':note('只调整以上两项上限；数值不代表可接待的访客数量。')
-        note('没有连接排队问题时，建议保留当前值。预设低于当前值时会降低上限。')
+        if view=='queues':
+            row('恢复记录','已保存有效原值' if can_restore else '无有效记录')
+            print('');note('两项上限不代表在线人数，也不能判断网页快慢。')
+        print('');note('默认保留当前值。仅在明确需要调整连接排队时修改。')
         if not can_restore:sys.exit(2)
+elif view=='queue-change':
+    keys=['net.core.somaxconn','net.ipv4.tcp_max_syn_backlog']
+    if value=='default':
+        try:targets=json.loads(text('/etc/sysctl.d/.ols-wpanel-vps-original.json'))
+        except ValueError:note('无法读取恢复记录，已取消。');sys.exit(1)
+    else:targets=dict.fromkeys(keys,{'balanced':'4096','website':'8192'}.get(value,''))
+    if not isinstance(targets,dict) or not all(re.fullmatch(r'[0-9]+',str(targets.get(k,''))) for k in keys):
+        note('目标值无效，已取消。');sys.exit(1)
+    section('当前值 → 将修改为')
+    lowered=False
+    for label,key in zip(['待接收连接上限','半连接队列上限'],keys):
+        current=run('sysctl','-n',key)
+        if current is None or not current.isdigit():note('当前值读取失败，已取消。');sys.exit(1)
+        row(label,current+' → '+str(targets[key]))
+        lowered=lowered or int(targets[key])<int(current)
+    print('')
+    if lowered:note('注意：本次会降低现有队列上限。')
+    note('只修改这两项内核参数，不会自动加快网页加载。')
 elif view=='locale':
     section('语言环境')
     row('当前 SSH 会话语言',os.environ.get('LC_ALL') or os.environ.get('LANG'))
@@ -372,20 +385,30 @@ elif view in ['updates','update-status','update-details']:
         else:
             packages=[x for x in out.splitlines() if '/' in x and '[upgradable' in x]
             row('可更新软件包',len(packages));row('安全源更新',sum('-security' in x.split()[0] for x in packages))
-            print('  根据本机 APT 索引；执行更新时会刷新。')
-            note('包名与版本可在“查看详细记录”中查看。')
+            print('');note('根据本机 APT 索引；执行更新时会刷新。')
     out=run(binary,'--vps-tool','system-update-status','--config',cfg,timeout=15)
     try:
         if out is None:raise ValueError('任务读取失败')
         d=json.loads(out);status=d.get('status');section('正在执行的任务' if status=='running' else '最近一次更新记录（历史）');row('任务结果',{'idle':'尚无任务','running':'执行中','success':'成功','succeeded':'成功','failed':'失败','completed':'已完成'}.get(status,status))
         row('执行阶段',{'queued':'排队中','services_preflight':'更新前服务检查','refresh':'刷新软件包索引','upgrade':'安装软件包更新','services':'更新后服务检查','complete':'完成','interrupted':'任务中断'}.get(d.get('stage'),d.get('stage')))
-        if view=='update-details' and d.get('detail'):row('详细信息',d['detail'])
-        if d.get('updated_at'):row('最后更新',d['updated_at'])
+        if d.get('updated_at'):
+            try:when=datetime.datetime.fromisoformat(d['updated_at'].replace('Z','+00:00')).astimezone().strftime('%Y-%m-%d %H:%M:%S %z')
+            except (ValueError,TypeError):when=d['updated_at']
+            row('记录时间',when)
+        if status=='failed' and d.get('stage')=='services_preflight':
+            print('');note('软件包更新尚未开始：更新前检查未通过。')
+        if view=='update-details' and d.get('detail'):
+            section('错误原因')
+            if 'acme-challenge' in d['detail'] and 'not accessible' in d['detail']:
+                note('OpenLiteSpeed 无法访问证书验证目录。');print('')
+            note(d['detail'])
     except ValueError:row('更新任务','读取失败')
     if view=='update-details':
         section('软件包列表（本机索引）')
         note(run('apt','list','--upgradable',timeout=20) or '读取失败')
-    elif view=='updates':note('历史结果不代表当前服务状态；错误原文请查看详细记录。')
+    elif view=='updates':
+        print('');note('这是上次任务的记录。失败原因请选“查看详细记录”。')
+    print('')
     row('重启标记','需要重启' if os.path.exists('/var/run/reboot-required') else '系统未报告（不保证无需重启）')
 elif view=='clean':
     section('当前占用')
@@ -482,15 +505,13 @@ settings_page() {
             echo "  3. 移除面板规则（保留其他规则）"
             ;;
           tuning)
-            page "高级设置 · 连接队列" "查看当前值，按需调整。"
+            page "高级设置 · 连接队列" "手动调整内核参数，不会自动优化网站。"
             queue_ready=1
             read_view queue-menu || queue_ready=0
             echo ""
-            echo "  1. 日常网站配置 · 4096 / 4096"
-            echo "     博客、企业站的连接排队预设"
+            echo "  1. 两项上限设为 4096 / 4096"
             echo ""
-            echo "  2. 连接高峰配置 · 8192 / 8192"
-            echo "     用于连接集中到达时的排队评估"
+            echo "  2. 两项上限设为 8192 / 8192"
             echo ""
             echo "  3. 查看当前参数与恢复详情"
             if [ "$queue_ready" -eq 1 ]; then echo "  4. 恢复修改前的值"; fi
@@ -542,7 +563,7 @@ settings_page() {
         esac
         if [ "$kind" = tuning ]; then
             page "连接队列 · 确认变更"
-            read_view queues || true
+            if ! read_view queue-change "$value"; then pause_page; continue; fi
             echo ""
         fi
         if need_root && confirm_vps "$note"; then
@@ -694,8 +715,7 @@ advanced_menu() {
     done
 }
 panel_summary() {
-        echo ""
-        dim "  WordPress 建站与 VPS 日常维护"
+        echo "  WordPress 建站与 VPS 日常维护"
         $BIN --info --config "$CFG" 2>/dev/null | sed -n 's/^版本: \([^ ]*\).*/  版本      \1/p'
         echo ""
         if [ -f "$CFG" ]; then
