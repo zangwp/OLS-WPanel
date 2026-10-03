@@ -26,7 +26,9 @@ func TestSoftwarePageKeepsOperationalStatusCompact(t *testing.T) {
 		"software.tab_tools",
 		"software.primary_runtime",
 		"configurableSoftware()",
-		"cfg.value !== undefined",
+		"x-model=\"cfg._value\"",
+		"software.suggested_value",
+		"cfg._recommended = recs[cfg.key]",
 		"software.confirm_stop_service",
 		"software.confirm_restart_service",
 	} {
@@ -36,6 +38,7 @@ func TestSoftwarePageKeepsOperationalStatusCompact(t *testing.T) {
 	}
 
 	for _, removed := range []string{
+		"cfg._value = recs[cfg.key]",
 		"software.repository_current",
 		"software.process_guard\"}}</h3>",
 	} {
