@@ -126,6 +126,8 @@ func TestReleaseWorkflowSupplyChainBoundaries(t *testing.T) {
 		"bash install-cn.sh",
 		"bash bootstrap.sh",
 		"bash scripts/",
+		"bash deploy/tools/",
+		"bash ./deploy/tools/",
 	} {
 		if strings.Contains(signJob, forbidden) {
 			t.Errorf("isolated sign job may not execute repository code: found %q", forbidden)
@@ -134,7 +136,7 @@ func TestReleaseWorkflowSupplyChainBoundaries(t *testing.T) {
 			t.Errorf("isolated release job may not execute repository code: found %q", forbidden)
 		}
 	}
-	shellExecutionPattern := regexp.MustCompile(`(?m)^\s*sh\s+(?:\./)?(?:install(?:-cn)?\.sh|bootstrap\.sh|scripts/)`)
+	shellExecutionPattern := regexp.MustCompile(`(?m)^\s*(?:ba)?sh\s+(?:\./)?(?:install(?:-cn)?\.sh|bootstrap\.sh|scripts/|deploy/tools/)`)
 	for jobName, job := range map[string]string{"sign": signJob, "release": releaseJob} {
 		if shellExecutionPattern.MatchString(job) {
 			t.Errorf("isolated %s job may not execute repository shell scripts", jobName)
@@ -172,7 +174,7 @@ func TestReleaseWorkflowSupplyChainBoundaries(t *testing.T) {
 		"install-cn.sh.sha256.sig",
 		"bootstrap.sh.sha256.sig",
 		"ols-wpanel-third-party-licenses.tar.gz.sha256.sig",
-		`CGO_ENABLED=0 go list -deps -f '{{with .Module}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}' .`,
+		`CGO_ENABLED=0 go list -deps -f '{{with .Module}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}' ./cmd/ols-wpanel \`,
 		`required_go_version="$(awk '$1 == "toolchain" { print $2; exit }' go.mod)"`,
 		`test "$required_go_version" = 'go1.26.8'`,
 		`INSTALLER_RELEASE_VERSION=\"$version\"`,

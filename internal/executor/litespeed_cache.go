@@ -29,10 +29,8 @@ var regenerateSiteOLSForCache = RegenerateSiteOLSConfig
 
 var errCompanionRemovedBeforePublish = errors.New("installed companion was removed before publish")
 
-// cacheHelperPluginFS 保存面板启动时传入的插件内嵌文件系统（main.go 的
-// PluginFS），供 DeployPluginToSite/PluginNeedsUpdate 在处理单个站点的 HTTP
-// 请求时使用——handlers 包不能直接拿到 web 包的资源（会形成循环导入），
-// EnsureCacheHelperPlugin 是启动时唯一会调用一次的入口，顺带存一份即可。
+// cacheHelperPluginFS 保存程序入口在启动时传入的插件资源，供单个站点的
+// 部署和版本检查使用。EnsureCacheHelperPlugin 负责初始化这些资源。
 var cacheHelperPluginFS fs.FS
 
 // EnsureCacheHelperPlugin 把面板内嵌的配套插件目录同步到本地参照副本
@@ -269,6 +267,9 @@ func PluginNeedsUpdate(webRoot string) (installed bool, needsUpdate bool) {
 
 // readEmbeddedPluginFiles 把内嵌的 ols-wpanel-optimizer 目录展开为「相对路径 -> 文件内容」的映射。
 func readEmbeddedPluginFiles(pluginFS fs.FS) (map[string][]byte, error) {
+	if pluginFS == nil {
+		return nil, fs.ErrNotExist
+	}
 	const root = "ols-wpanel-optimizer"
 	files := make(map[string][]byte)
 	err := fs.WalkDir(pluginFS, root, func(path string, d fs.DirEntry, err error) error {
