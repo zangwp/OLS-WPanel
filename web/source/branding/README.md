@@ -1,7 +1,7 @@
 # OLS WPanel branding assets
 
 `ols-wpanel-logo-master.png` is the high-resolution generated master. The
-application uses the optimized 180×180 copy at `static/logo.png`.
+application uses the optimized 180×180 copy at `web/logo.png`.
 
 Design intent:
 

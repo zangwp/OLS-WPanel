@@ -2,10 +2,17 @@ package executor
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestEmbeddedPluginFilesWithoutInitializedAssetsReturnsError(t *testing.T) {
+	if _, err := readEmbeddedPluginFiles(nil); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("uninitialized plugin resources must return an error: %v", err)
+	}
+}
 
 func TestDeployPluginPermissionsPreparedBeforePublish(t *testing.T) {
 	plugins := t.TempDir()

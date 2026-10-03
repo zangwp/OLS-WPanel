@@ -31,7 +31,7 @@ import (
 // that are free to change between Adminer versions (and did: the 5.5.1 ->
 // 6.0.1 upgrade silently broke auto-login by adding a CSRF token check and
 // changing session setup). After changing this embed, you MUST run
-// `go test ./executor/... -run TestAdminerLauncherAutoLoginSurvivesRedirect`
+// `go test ./internal/executor/... -run TestAdminerLauncherAutoLoginSurvivesRedirect`
 // (it starts a real "php -S" instance and drives the actual login flow) and
 // fix the launcher if it fails before considering the upgrade done.
 //
