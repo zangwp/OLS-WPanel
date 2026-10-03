@@ -58,7 +58,7 @@ func TestLogAnalysisPageIncludesContent(t *testing.T) {
 }
 
 func TestLogAnalysisExplainsServerTrafficMetrics(t *testing.T) {
-	template, err := os.ReadFile("../templates/log_analysis.html")
+	template, err := os.ReadFile("../static/templates/log_analysis.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ for (const expected of ['"requests":20', '"ips":8', '"blocked":7', '"bots":14'])
 }
 
 func TestAlertWebhookUsesConfigurationAsEnablement(t *testing.T) {
-	page, err := os.ReadFile("../templates/alert.html")
+	page, err := os.ReadFile("../static/templates/alert.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestAlertWebhookUsesConfigurationAsEnablement(t *testing.T) {
 }
 
 func TestAlertLogKeepsMetadataColumnsReadable(t *testing.T) {
-	page, err := os.ReadFile("../templates/alert.html")
+	page, err := os.ReadFile("../static/templates/alert.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestAlertLogKeepsMetadataColumnsReadable(t *testing.T) {
 }
 
 func TestFeatureSettingsAreSeparatedFromPanelSettings(t *testing.T) {
-	settings, err := os.ReadFile("../templates/settings.html")
+	settings, err := os.ReadFile("../static/templates/settings.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestFeatureSettingsAreSeparatedFromPanelSettings(t *testing.T) {
 		}
 	}
 
-	aiPage, err := os.ReadFile("../templates/ai_diagnostics.html")
+	aiPage, err := os.ReadFile("../static/templates/ai_diagnostics.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestFeatureSettingsAreSeparatedFromPanelSettings(t *testing.T) {
 		}
 	}
 
-	backups, err := os.ReadFile("../templates/backups.html")
+	backups, err := os.ReadFile("../static/templates/backups.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestFeatureSettingsAreSeparatedFromPanelSettings(t *testing.T) {
 }
 
 func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
-	settings, err := os.ReadFile("../templates/settings.html")
+	settings, err := os.ReadFile("../static/templates/settings.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 }
 
 func TestDashboardUpdateBadgesDeepLinkToSystemUpdates(t *testing.T) {
-	source, err := os.ReadFile("../templates/dashboard.html")
+	source, err := os.ReadFile("../static/templates/dashboard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func TestLoginRouteUsesCSRFMiddleware(t *testing.T) {
 			t.Fatalf("login CSRF recovery is missing %q", required)
 		}
 	}
-	login, err := os.ReadFile("../templates/login.html")
+	login, err := os.ReadFile("../static/templates/login.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,15 +551,15 @@ func TestLoginRouteUsesCSRFMiddleware(t *testing.T) {
 }
 
 func TestWPFleetOverviewPanelIsIsolatedAndWired(t *testing.T) {
-	websites, err := os.ReadFile("../templates/websites.html")
+	websites, err := os.ReadFile("../static/templates/websites.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	panel, err := os.ReadFile("../templates/wp_fleet_overview.html")
+	panel, err := os.ReadFile("../static/templates/wp_fleet_overview.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	overviewPage, err := os.ReadFile("../templates/wordpress_overview.html")
+	overviewPage, err := os.ReadFile("../static/templates/wordpress_overview.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +625,7 @@ func TestWPFleetOverviewPanelIsIsolatedAndWired(t *testing.T) {
 }
 
 func TestWebsiteListShowsSeparateMonitoringColumns(t *testing.T) {
-	websites, err := os.ReadFile("../templates/websites.html")
+	websites, err := os.ReadFile("../static/templates/websites.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +648,7 @@ func TestWebsiteListShowsSeparateMonitoringColumns(t *testing.T) {
 }
 
 func TestWebsiteListShowsStatusTaskMessage(t *testing.T) {
-	websites, err := os.ReadFile("../templates/websites.html")
+	websites, err := os.ReadFile("../static/templates/websites.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +671,7 @@ func TestWebsiteListHoverStyleIsCompiled(t *testing.T) {
 }
 
 func TestWPFleetOverviewPanelAPIContract(t *testing.T) {
-	panel, err := os.ReadFile("../templates/wp_fleet_overview.html")
+	panel, err := os.ReadFile("../static/templates/wp_fleet_overview.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,15 +958,15 @@ func wpFleetOverviewPanelScript(t *testing.T) []byte {
 }
 
 func TestWPInventoryPanelIsIsolatedAndWired(t *testing.T) {
-	detail, err := os.ReadFile("../templates/website_detail.html")
+	detail, err := os.ReadFile("../static/templates/website_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	panel, err := os.ReadFile("../templates/wp_inventory_panel.html")
+	panel, err := os.ReadFile("../static/templates/wp_inventory_panel.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wordpressDetail, err := os.ReadFile("../templates/wordpress_site_detail.html")
+	wordpressDetail, err := os.ReadFile("../static/templates/wordpress_site_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1009,11 +1009,11 @@ func TestWPInventoryPanelIsIsolatedAndWired(t *testing.T) {
 }
 
 func TestWPCoreUpdatePanelIsWiredAndUsesFixedAPIContract(t *testing.T) {
-	panel, err := os.ReadFile("../templates/wp_core_update_panel.html")
+	panel, err := os.ReadFile("../static/templates/wp_core_update_panel.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := os.ReadFile("../templates/wordpress_site_detail.html")
+	detail, err := os.ReadFile("../static/templates/wordpress_site_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1299,7 +1299,7 @@ func TestLegacyLogDetailAIEndpointIsRemoved(t *testing.T) {
 }
 
 func TestLogAnalysisUsesManualAIEntryWithPersistentProgress(t *testing.T) {
-	template, err := os.ReadFile("../templates/log_analysis.html")
+	template, err := os.ReadFile("../static/templates/log_analysis.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1320,7 +1320,7 @@ func TestLogAnalysisUsesManualAIEntryWithPersistentProgress(t *testing.T) {
 }
 
 func TestWPInventoryPanelAPIContract(t *testing.T) {
-	panel, err := os.ReadFile("../templates/wp_inventory_panel.html")
+	panel, err := os.ReadFile("../static/templates/wp_inventory_panel.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1607,7 +1607,7 @@ func TestDatabaseManagementRoutesRegistered(t *testing.T) {
 }
 
 func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
-	source, err := os.ReadFile("../templates/website_detail.html")
+	source, err := os.ReadFile("../static/templates/website_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1645,7 +1645,7 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 }
 
 func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
-	createSource, err := os.ReadFile("../templates/website_new.html")
+	createSource, err := os.ReadFile("../static/templates/website_new.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1663,7 +1663,7 @@ func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
 		t.Fatal("website create still hides the entire alias handling control")
 	}
 
-	detailSource, err := os.ReadFile("../templates/website_detail.html")
+	detailSource, err := os.ReadFile("../static/templates/website_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1692,7 +1692,7 @@ func TestWebsiteCanonicalDomainAndDetailLayoutControls(t *testing.T) {
 }
 
 func TestSidebarNavigationOrder(t *testing.T) {
-	source, err := os.ReadFile("../templates/base.html")
+	source, err := os.ReadFile("../static/templates/base.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1723,7 +1723,7 @@ func TestSidebarNavigationOrder(t *testing.T) {
 }
 
 func TestPanelKeepsDarkAppearance(t *testing.T) {
-	source, err := os.ReadFile("../templates/base.html")
+	source, err := os.ReadFile("../static/templates/base.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1745,7 +1745,7 @@ func TestPanelKeepsDarkAppearance(t *testing.T) {
 }
 
 func TestWebsiteCreationOmitsExtensionCatalog(t *testing.T) {
-	for _, path := range []string{"../templates/website_new.html", "../templates/websites.html"} {
+	for _, path := range []string{"../static/templates/website_new.html", "../static/templates/websites.html"} {
 		source, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -1759,7 +1759,7 @@ func TestWebsiteCreationOmitsExtensionCatalog(t *testing.T) {
 }
 
 func TestCronPageExplainsManagedAndAutomaticTasks(t *testing.T) {
-	source, err := os.ReadFile("../templates/cron.html")
+	source, err := os.ReadFile("../static/templates/cron.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1776,7 +1776,7 @@ func TestCronPageExplainsManagedAndAutomaticTasks(t *testing.T) {
 }
 
 func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
-	source, err := os.ReadFile("../templates/vps.html")
+	source, err := os.ReadFile("../static/templates/vps.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1793,7 +1793,7 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 		[]byte(`swapConfirm !== 'REMOVE SWAP'`),
 		[]byte(`command: 'o update'`),
 		[]byte(`copy('o uninstall')`),
-		[]byte(`/firewall?tab=ports`),
+		[]byte(`/security#ports`),
 		[]byte(`/settings#system-updates`),
 		[]byte(`vps.destructive_note`),
 	} {
@@ -1805,10 +1805,19 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 		t.Fatal("VPS management page must not expose arbitrary command execution")
 	}
 
-	firewall, err := os.ReadFile("../templates/firewall.html")
+	firewall, err := os.ReadFile("../static/templates/firewall.html")
 	if err != nil {
 		t.Fatal(err)
 	}
+	controller, err := os.ReadFile("../static/templates/firewall_controller.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports, err := os.ReadFile("../static/templates/firewall_ports.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firewall = append(append(firewall, controller...), ports...)
 	if !bytes.Contains(firewall, []byte(`new URLSearchParams(window.location.search).get('tab')`)) {
 		t.Fatal("firewall page does not honor the VPS management ports deep link")
 	}
@@ -1833,7 +1842,7 @@ func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
 }
 
 func TestDatabaseDetailShowsFiveRecentBackupsByDefault(t *testing.T) {
-	source, err := os.ReadFile("../templates/database_detail.html")
+	source, err := os.ReadFile("../static/templates/database_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1843,7 +1852,7 @@ func TestDatabaseDetailShowsFiveRecentBackupsByDefault(t *testing.T) {
 }
 
 func TestDatabaseRestoreShowsLongRunningStatusAndBlocksConflictingActions(t *testing.T) {
-	source, err := os.ReadFile("../templates/database_detail.html")
+	source, err := os.ReadFile("../static/templates/database_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1863,7 +1872,7 @@ func TestDatabaseRestoreShowsLongRunningStatusAndBlocksConflictingActions(t *tes
 }
 
 func TestDatabaseDetailProvidesWordPressAdministratorEditor(t *testing.T) {
-	templateSource, err := os.ReadFile("../templates/database_detail.html")
+	templateSource, err := os.ReadFile("../static/templates/database_detail.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1894,7 +1903,7 @@ func TestDatabaseDetailProvidesWordPressAdministratorEditor(t *testing.T) {
 }
 
 func TestFileManagerStartsWithDirectoryList(t *testing.T) {
-	source, err := os.ReadFile("../templates/files.html")
+	source, err := os.ReadFile("../static/templates/files.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1947,7 +1956,7 @@ func TestFileSearchRouteAndInterfaceAreRegistered(t *testing.T) {
 	if !bytes.Contains(routerSource, []byte(`protected.GET("/api/files/search", fileHandler.Search)`)) {
 		t.Fatal("file search route is not registered")
 	}
-	templateSource, err := os.ReadFile("../templates/files.html")
+	templateSource, err := os.ReadFile("../static/templates/files.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2006,5 +2015,5 @@ func testPageData(content string) map[string]any {
 
 func parseTemplates(t *testing.T) *template.Template {
 	t.Helper()
-	return template.Must(template.New("").Funcs(i18n.FuncMap()).ParseFS(os.DirFS(".."), "templates/*.html"))
+	return template.Must(template.New("").Funcs(i18n.FuncMap()).ParseFS(os.DirFS(".."), "static/templates/*.html"))
 }

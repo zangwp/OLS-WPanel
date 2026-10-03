@@ -26,6 +26,7 @@ type CronJob struct {
 }
 
 type CreateCronRequest struct {
+	UniquePerSite  bool   `json:"unique_per_site"`
 	Name           string `json:"name" binding:"required"`
 	CronExpression string `json:"cron_expression" binding:"required"`
 	Command        string `json:"command"`

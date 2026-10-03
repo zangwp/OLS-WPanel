@@ -12,7 +12,7 @@ SOURCE = pathlib.Path(__file__).with_name('panel_cli.sh').read_text(encoding='ut
 CODE = SOURCE.split("<<'PYVIEW'\n", 1)[1].split('\nPYVIEW', 1)[0]
 
 
-def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False):
+def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None):
     presets = [
         dict(id='international', ipv4=['1.1.1.1', '1.0.0.1'], ipv6=['2606:4700:4700::1111', '2606:4700:4700::1001']),
         dict(id='mainland_china', ipv4=['223.5.5.5', '223.6.6.6'], ipv6=['2400:3200::1', '2400:3200:baba::1']),
@@ -45,7 +45,7 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         output = ''
         if '--vps-tool' in args:
             if args[args.index('--vps-tool')+1] in ['dns-status','dns-test']: output=json.dumps(dns)
-            else: output=json.dumps(dict(status='failed',stage='services',detail='service lshttpd did not become active: systemctl failed: exit status 4',updated_at='2026-10-02T08:54:54Z'))
+            else: output=json.dumps(dict(status='failed',stage=stage,detail=detail or 'service lshttpd did not become active: systemctl failed: exit status 4',updated_at='2026-10-02T08:54:54Z'))
         elif args[0]=='ip':
             family=6 if '-6' in args else 4
             output=json.dumps([{'addr_info':[{'local':'2001:db8::10' if family==6 else '192.0.2.10'}]}]) if '-j' in args else 'default via gateway'
@@ -109,18 +109,37 @@ class RendererTest(unittest.TestCase):
 
     def test_widths(self):
         for width in [48,72]:
-            for view in ['info','dns','dns-preset','dns-test','ip','network','tuning','queues','queue-menu','updates','update-details','time','locale','clean']:
+            for view in ['info','dns','dns-preset','dns-test','ip','network','tuning','queues','queue-menu','queue-change','updates','update-details','time','locale','clean']:
                 text,_,ns=render(view,width)
                 for line in text.splitlines():
                     self.assertLessEqual(ns['cells'](line),width,(view,width,line))
 
-    def test_queue_menu_identifies_actual_values(self):
+    def test_queue_menu_shows_parameters_without_claiming_optimization(self):
         text,status,_=render('queue-menu')
         self.assertEqual(status,2)
-        self.assertIn('自定义 / 系统配置',text)
-        self.assertIn('65535 / 8192',text)
+        self.assertIn('65535',text)
+        self.assertIn('8192',text)
+        self.assertNotIn('当前模式',text)
+        self.assertNotIn('日常网站',SOURCE)
+        self.assertNotIn('连接高峰配置',SOURCE)
         self.assertNotIn('安装器',text)
         self.assertNotIn('CPU',text)
+
+    def test_queue_confirmation_explains_reduction(self):
+        text,status,_=render('queue-change',preset='balanced')
+        self.assertEqual(status,0)
+        self.assertIn('65535 → 4096',text)
+        self.assertIn('8192 → 4096',text)
+        self.assertIn('降低',text)
+        self.assertNotEqual(render('queue-change',preset='default')[1],0)
+
+    def test_preflight_failure_explains_no_package_update_and_uses_full_width(self):
+        error='/usr/local/lsws/bin/openlitespeed failed: .well-known/acme-challenge/ path is not accessible'
+        text,_,_=render('update-details',stage='services_preflight',detail=error)
+        self.assertIn('软件包更新尚未开始',text)
+        self.assertIn('OpenLiteSpeed 无法访问证书验证目录',text)
+        self.assertIn('\n  /usr/local/lsws/bin/openlitespeed',text)
+        self.assertNotIn('详细信息',text)
 
 
 if __name__=='__main__':unittest.main()

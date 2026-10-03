@@ -113,8 +113,8 @@ jobs:
           test -s static/js/chart.min.js
           test -s static/js/app.js
           test -s LICENSE
-          test -s NOTICE.md
-          test -s THIRD_PARTY_NOTICES.md
+          test -s third_party/NOTICE.md
+          test -s third_party/THIRD_PARTY_NOTICES.md
           test -s third_party/adminer-6.0.1/LICENSE-APACHE-2.0.txt
           test -s third_party/adminer-6.0.1/NOTICE.txt
           grep -Fq '* @copyright 2007 Jakub Vrana' executor/assets/adminer-6.0.1-mysql.php
@@ -235,8 +235,8 @@ jobs:
           module_list="$RUNNER_TEMP/ols-wpanel-release-modules"
           install -d -m 0755 "$license_root"
           install -m 0644 LICENSE "$license_root/LICENSE"
-          install -m 0644 NOTICE.md "$license_root/NOTICE.md"
-          install -m 0644 THIRD_PARTY_NOTICES.md "$license_root/THIRD_PARTY_NOTICES.md"
+          install -m 0644 third_party/NOTICE.md "$license_root/NOTICE.md"
+          install -m 0644 third_party/THIRD_PARTY_NOTICES.md "$license_root/THIRD_PARTY_NOTICES.md"
           printf '%s\n' "$version" > "$license_root/RELEASE_VERSION"
 
           # The released binary is statically linked with this exact Go toolchain.

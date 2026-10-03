@@ -8,23 +8,10 @@
             <span class="version-pill text-xs px-2 py-0.5">{{.PanelVersion}}</span>
             <a x-show="hasUpdate" href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs bg-yellow-600 text-yellow-100 px-2 py-0.5 rounded hover:bg-yellow-500" x-text="t('dashboard.update_available', { version: latestVersion })"></a>
             <a x-show="sysCount > 0" href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs bg-red-700 text-red-100 px-2 py-0.5 rounded hover:bg-red-600" x-text="t('dashboard.system_updates', { count: sysCount })"></a>
-            <button @click="check()" :disabled="checking" class="btn-secondary text-xs">{{t .Lang "dashboard.check_project"}}</button>
-            <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-primary text-xs">{{t .Lang "dashboard.manage_update"}}</a>
             <span x-show="checkError" x-text="checkError" class="text-xs text-red-300"></span>
-            <span x-show="checked && !checking && !checkError && !hasUpdate" class="text-xs text-green-400">{{t .Lang "dashboard.project_current"}}</span>
-            <span x-show="checking" class="text-xs text-gray-600">{{t .Lang "dashboard.checking_updates"}}</span>
         </div>
         <a href="/{{.RandomSuffix}}/vps" class="btn-secondary text-xs py-1.5 px-3">{{t .Lang "dashboard.vps_management"}}</a>
     </div>
-    <details class="card mb-5">
-        <summary class="cursor-pointer text-sm text-gray-400">{{t .Lang "vps.advanced_lifecycle"}}</summary>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-            <div><p class="text-sm text-gray-300">{{t .Lang "vps.command_update"}}</p><code class="block mt-2 text-blue-300">o update</code></div>
-            <div><p class="text-sm text-gray-300">{{t .Lang "vps.command_uninstall"}}</p><p class="text-xs text-gray-500 mt-1">{{t .Lang "vps.command_uninstall_help"}}</p><code class="block mt-2 text-blue-300">o uninstall</code></div>
-            <div><p class="text-sm text-red-300">{{t .Lang "vps.full_uninstall"}}</p><p class="text-xs text-gray-400 mt-1">{{t .Lang "vps.full_uninstall_help"}}</p><pre class="vps-tool-output mt-2"># {{t .Lang "vps.full_uninstall_help"}}
-o uninstall --all</pre></div>
-        </div>
-    </details>
     <div x-data="announcement()" x-init="fetch()" class="mb-4" x-show="visible">
         <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 text-blue-200 text-sm leading-relaxed prose-a:text-blue-300 prose-a:underline prose-a:hover:text-blue-100 flex items-start">
             <svg class="w-5 h-5 mr-3 flex-shrink-0 mt-0.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

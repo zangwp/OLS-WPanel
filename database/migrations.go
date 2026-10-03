@@ -2,6 +2,7 @@ package database
 
 var migrations = append([]string{
 	wpAnomalySchema,
+	siteSSLRenewalSchema,
 	// ============================================================
 	// admin_users
 	// ============================================================

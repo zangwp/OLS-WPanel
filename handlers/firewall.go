@@ -17,6 +17,83 @@ import (
 
 type FirewallHandler struct{}
 
+func (h *FirewallHandler) SSHPortStatus(c *gin.Context) {
+	c.JSON(200, models.SuccessResponse(executor.GetSSHPortStatus()))
+}
+func (h *FirewallHandler) ChangeSSHPort(c *gin.Context) {
+	var req struct {
+		Port    int  `json:"port"`
+		Confirm bool `json:"confirm"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
+		c.JSON(400, models.ErrorResponse("请确认新端口已在云安全组放行，并保留当前 SSH 会话"))
+		return
+	}
+	result, err := executor.BeginSSHPortChange(req.Port, c.ClientIP())
+	if err != nil {
+		c.JSON(400, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(200, models.SuccessResponse(result))
+}
+func (h *FirewallHandler) ConfirmSSHPort(c *gin.Context) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, models.ErrorResponse("确认格式无效"))
+		return
+	}
+	if err := executor.ConfirmSSHPortChange(req.Token); err != nil {
+		c.JSON(400, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(200, models.SuccessResponse(gin.H{"confirmed": true}))
+}
+
+func (h *FirewallHandler) PreviewAccess(c *gin.Context) {
+	var req executor.FirewallAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, models.ErrorResponse("规则格式无效"))
+		return
+	}
+	result, err := executor.PreviewFirewallAccess(req, c.ClientIP())
+	if err != nil {
+		c.JSON(400, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(200, models.SuccessResponse(result))
+}
+
+func (h *FirewallHandler) ApplyAccess(c *gin.Context) {
+	var req executor.FirewallAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, models.ErrorResponse("规则格式无效"))
+		return
+	}
+	result, err := executor.ApplyFirewallAccess(req, c.ClientIP())
+	if err != nil {
+		c.JSON(400, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(200, models.SuccessResponse(result))
+}
+
+func (h *FirewallHandler) ConfirmAccess(c *gin.Context) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, models.ErrorResponse("确认格式无效"))
+		return
+	}
+	if err := executor.ConfirmFirewallAccess(req.Token); err != nil {
+		c.JSON(400, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(200, models.SuccessResponse(gin.H{"confirmed": true}))
+}
+
 func (h *FirewallHandler) PortStatus(c *gin.Context) {
 	status, err := executor.GetFirewallPortStatus()
 	if err != nil {

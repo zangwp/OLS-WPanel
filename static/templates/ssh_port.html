@@ -1,0 +1,61 @@
+{{define "ssh_port"}}
+<details class="card" x-data="sshPortManager()" @toggle="if ($el.open && !loaded) refresh()">
+    <summary class="text-white font-semibold cursor-pointer">{{t .Lang "ssh_port.title"}}</summary>
+    <p class="text-sm text-gray-400 mt-4">{{t .Lang "ssh_port.help"}}</p>
+    <div class="flex flex-wrap items-center gap-4 my-4"><span class="text-sm text-gray-300">{{t .Lang "ssh_port.current"}} <strong x-text="status.port || '—'"></strong>/TCP</span><button class="btn-secondary text-xs" @click="refresh()" :disabled="busy">{{t .Lang "firewall.refresh"}}</button></div>
+    <p x-show="error" class="text-sm text-red-300 my-3" x-text="error" role="alert"></p>
+    <p x-show="status.reason" class="text-sm text-yellow-300 my-3" x-text="status.reason"></p>
+    <div x-show="!change" class="space-y-4">
+        <div class="access-custom"><label class="label" for="ssh-new-port">{{t .Lang "ssh_port.new"}}</label><input id="ssh-new-port" class="input-field" type="number" min="1" max="65535" x-model.number="port" placeholder="2222" :disabled="busy || !status.available"></div>
+        <p class="text-sm text-gray-400">{{t .Lang "ssh_port.scope"}}</p>
+        <label class="flex items-start gap-2 text-sm text-gray-300"><input type="checkbox" x-model="cloudReady" :disabled="busy"><span>{{t .Lang "ssh_port.cloud"}}</span></label>
+        <button class="btn-primary" @click="begin()" :disabled="busy || !status.available || !cloudReady || !port" x-text="busy ? t('common.loading') : t('ssh_port.apply')"></button>
+    </div>
+    <div x-show="change" class="space-y-4">
+        <p class="text-sm text-green-300" x-text="change ? t('ssh_port.transition') + change.old_port + ' → ' + change.new_port : ''"></p>
+        <p class="text-sm text-gray-300">{{t .Lang "ssh_port.verify_help"}}</p>
+        <code class="block text-sm text-blue-300" x-text="change ? 'ssh -p ' + change.new_port + ' USER@SERVER_IP' : ''"></code>
+        <label for="ssh-verification-command" class="label">{{t .Lang "ssh_port.command"}}</label>
+        <textarea id="ssh-verification-command" class="input-field text-xs" style="min-height:100px;overflow-wrap:anywhere" readonly :value="change?.verify_command || ''"></textarea>
+        <p class="text-sm text-yellow-300" x-text="change ? t('ssh_port.deadline') + new Date(change.deadline).toLocaleString() : ''"></p>
+        <button class="btn-primary" @click="confirm()" :disabled="busy" x-text="busy ? t('common.loading') : t('ssh_port.confirm')"></button>
+    </div>
+</details>
+<script>
+function sshPortManager() {
+    return {
+        status: {}, loaded: false, busy: false, error: '', port: '', cloudReady: false, change: null, timer: null,
+        destroy() { clearTimeout(this.timer); },
+        async refresh() {
+            this.busy = true; this.error = '';
+            try { const r = await api('/firewall/ssh-port'); if (!r.success) throw Error(t('common.operation_failed')); this.status = r.data || {}; this.loaded = true; }
+            catch(e) { this.status.available = false; this.error = e.message; }
+            finally { this.busy = false; }
+        },
+        async begin() {
+            if (!this.cloudReady || !this.status.available || !Number.isInteger(Number(this.port)) || Number(this.port)<1 || Number(this.port)>65535) return;
+            if (!await confirmModal(t('ssh_port.confirm_begin'))) return;
+            this.busy = true; this.error = '';
+            try {
+                const r = await api('/firewall/ssh-port', { method:'POST', body:{port:Number(this.port),confirm:true}, timeout:50000 });
+                if (!r.success || !r.data?.token) throw Error(t('common.operation_failed'));
+                this.change = r.data; this.status.available = false;
+                clearTimeout(this.timer); this.timer = setTimeout(async()=>{ this.change=null; await this.refresh(); this.$dispatch('ssh-port-changed'); },310000);
+            } catch(e) { this.error = e.message; }
+            finally { this.busy = false; }
+        },
+        async confirm() {
+            if (!this.change?.token) return;
+            this.busy = true; this.error = '';
+            try {
+                const r = await api('/firewall/ssh-port/confirm', {method:'POST',body:{token:this.change.token},timeout:40000});
+                if (!r.success) throw Error(t('common.operation_failed'));
+                clearTimeout(this.timer); this.change=null; this.cloudReady=false; this.port='';
+                await this.refresh(); this.$dispatch('ssh-port-changed'); showToast(t('ssh_port.saved'),'success');
+            } catch(e) { this.error=e.message; }
+            finally { this.busy=false; }
+        }
+    };
+}
+</script>
+{{end}}

@@ -22,6 +22,71 @@ import (
 var panelVersion string
 
 var i18nKeys = []string{
+	"ssh_port.title",
+	"ssh_port.help",
+	"ssh_port.current",
+	"ssh_port.new",
+	"ssh_port.scope",
+	"ssh_port.cloud",
+	"ssh_port.apply",
+	"ssh_port.confirm_begin",
+	"ssh_port.transition",
+	"ssh_port.verify_help",
+	"ssh_port.command",
+	"ssh_port.deadline",
+	"ssh_port.confirm",
+	"ssh_port.saved",
+
+	"firewall.access_everyone",
+	"firewall.access_local",
+	"firewall.access_public",
+	"firewall.access_loopback",
+	"firewall.scope_any",
+	"firewall.access_title",
+	"firewall.access_active",
+	"firewall.access_draft",
+	"firewall.access_help",
+	"firewall.access_listening",
+	"firewall.access_not_listening",
+	"firewall.access_closed",
+	"firewall.access_sources_hint",
+	"firewall.access_add",
+	"firewall.access_preserve",
+	"firewall.access_preview",
+	"firewall.access_unavailable",
+	"firewall.access_conflicts",
+	"firewall.access_existing",
+	"firewall.access_apply",
+	"firewall.access_apply_confirm",
+	"firewall.access_verify",
+	"firewall.access_deadline",
+	"firewall.access_verified",
+	"firewall.access_confirm",
+	"firewall.access_saved",
+	"firewall.access_legacy",
+
+	"website.job_success",
+	"website.job_failed",
+	"website.job_started",
+	"website.job_no_record",
+
+	"website.cert_auto",
+	"website.cert_manual",
+	"website.renewal_enabled",
+	"website.renewal_help",
+	"website.renewal_manual_help",
+	"website.scheduled_wp",
+	"website.scheduled_wp_help",
+	"website.scheduled_wp_enabled",
+	"website.scheduled_wp_suspended",
+	"website.scheduled_wp_example",
+	"website.scheduled_wp_last",
+	"website.scheduled_wp_enable",
+	"cron.overview_help",
+	"cron.site_settings",
+
+	"software.suggested_value",
+	"software.recommend_refreshed",
 	"settings.sync",
 	"settings.ntp_starting",
 	"settings.ntp_waiting",
@@ -1660,6 +1725,8 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.POST("/api/websites/:id/ssl", websiteHandler.EnableSSL)
 	protected.GET("/api/websites/:id/ssl/download", websiteHandler.DownloadSSLPackage)
 	protected.PUT("/api/websites/:id/ssl/export", websiteHandler.SetSSLExport)
+	protected.GET("/api/websites/:id/ssl/renewal", websiteHandler.SSLRenewal)
+	protected.PUT("/api/websites/:id/ssl/renewal", websiteHandler.SSLRenewal)
 	protected.DELETE("/api/websites/:id/ssl", websiteHandler.RemoveSSL)
 	protected.PUT("/api/websites/:id/db-password", websiteHandler.ChangeDBPassword)
 	protected.POST("/api/websites/:id/fix-wp-config", websiteHandler.FixWPConfig)
@@ -1739,6 +1806,12 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/api/firewall/ports", firewallHandler.PortStatus)
 	protected.POST("/api/firewall/ports", firewallHandler.AddPortRule)
 	protected.POST("/api/firewall/ports/protection", firewallHandler.EnablePortProtection)
+	protected.POST("/api/firewall/ports/access/preview", firewallHandler.PreviewAccess)
+	protected.POST("/api/firewall/ports/access/apply", firewallHandler.ApplyAccess)
+	protected.POST("/api/firewall/ports/access/confirm", firewallHandler.ConfirmAccess)
+	protected.GET("/api/firewall/ssh-port", firewallHandler.SSHPortStatus)
+	protected.POST("/api/firewall/ssh-port", firewallHandler.ChangeSSHPort)
+	protected.POST("/api/firewall/ssh-port/confirm", firewallHandler.ConfirmSSHPort)
 	protected.POST("/api/firewall/ports/protection/confirm", firewallHandler.ConfirmPortProtection)
 	protected.DELETE("/api/firewall/ports/:id", firewallHandler.DeletePortRule)
 
@@ -1923,7 +1996,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	protected.GET("/api/system/updates/status", sysUpdateHandler.Status)
 	protected.POST("/api/system/updates/do", sysUpdateHandler.Update)
 
-	tmpl := template.Must(template.New("").Funcs(i18n.FuncMap()).ParseFS(tmplFS, "templates/*.html"))
+	tmpl := template.Must(template.New("").Funcs(i18n.FuncMap()).ParseFS(tmplFS, "static/templates/*.html"))
 	r.SetHTMLTemplate(tmpl)
 
 	return r

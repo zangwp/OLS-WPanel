@@ -14,7 +14,10 @@ func panelACMEContext(root string) string {
 // Existing managed default hosts deny all requests. Add only the ACME path,
 // leaving the catch-all blocked. This runs before the panel accepts requests.
 func EnsurePanelACMEContext() error {
-	paths := currentOLSRuntimePaths()
+	return ensurePanelACMEContextAt(currentOLSRuntimePaths())
+}
+
+func ensurePanelACMEContextAt(paths olsRuntimePaths) error {
 	root, path := olsDefaultVHostPaths(paths)
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -31,11 +34,16 @@ func EnsurePanelACMEContext() error {
 		return err
 	}
 	content := string(data)
-	if strings.Contains(content, "context /.well-known/acme-challenge/") {
-		return nil
-	}
 	if !strings.Contains(content, "vhDomain                ols-wpanel.invalid") || !strings.Contains(content, filepath.ToSlash(root)) {
 		return fmt.Errorf("custom default virtual-host configuration requires manual ACME routing")
+	}
+	// Repair existing installations too: an already-written context does not
+	// imply its directory exists (older installers only created the webroot).
+	if err := ensurePanelACMEChallengeDirectory(root); err != nil {
+		return err
+	}
+	if strings.Contains(content, "context /.well-known/acme-challenge/") {
+		return nil
 	}
 	if err = writeOLSFileAtomic(path, []byte(content+panelACMEContext(root)), info.Mode().Perm()); err != nil {
 		return err

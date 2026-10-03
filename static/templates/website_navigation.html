@@ -1,0 +1,6 @@
+{{define "website_navigation"}}
+<nav class="workspace-tabs mb-6" aria-label="{{t .Lang "nav.websites"}}">
+    <a href="/{{.RandomSuffix}}/websites" class="{{if eq .Active "websites"}}selected{{end}}">{{t .Lang "website.list_tab"}}</a>
+    <a href="/{{.RandomSuffix}}/wordpress-overview" class="{{if eq .Active "wordpress_overview"}}selected{{end}}">{{t .Lang "website.maintenance_tab"}}</a>
+</nav>
+{{end}}

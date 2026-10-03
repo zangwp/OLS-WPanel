@@ -1,5 +1,12 @@
 {{template "base" .}}
 {{define "security_content"}}
+<div x-data="{ securityTab: location.hash === '#ports' ? 'ports' : 'settings' }" @hashchange.window="securityTab = location.hash === '#ports' ? 'ports' : 'settings'">
+<nav class="workspace-tabs mb-6">
+    <a href="#settings" :class="securityTab === 'settings' ? 'selected' : ''">{{t .Lang "nav.security"}}</a>
+    <a href="#ports" :class="securityTab === 'ports' ? 'selected' : ''">{{t .Lang "firewall.ports_title"}}</a>
+</nav>
+<section x-show="securityTab === 'ports'" x-cloak>{{template "firewall_ports" .}}</section>
+<section x-show="securityTab === 'settings'">
 <div x-data="securitySettings()" x-init="init()">
     <div class="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div>
@@ -153,6 +160,9 @@
     </div>
 </div>
 
+</section>
+</div>
+{{template "firewall_controller" .}}
 <script>
 function securitySettings() {
     return {

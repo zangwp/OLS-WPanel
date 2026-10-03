@@ -56,25 +56,28 @@ type FirewallListener struct {
 }
 
 type FirewallPortStatus struct {
-	Backend                string             `json:"backend"`
-	Writable               bool               `json:"writable"`
-	Warning                string             `json:"warning"`
-	InputPolicy            string             `json:"input_policy"`
-	RecommendedPolicy      string             `json:"recommended_policy"`
-	SSHPort                int                `json:"ssh_port"`
-	PanelPort              int                `json:"panel_port"`
-	CurrentManagementIP    string             `json:"current_management_ip,omitempty"`
-	ManagedRuleCount       int                `json:"managed_rule_count"`
-	AnomalyCount           int                `json:"anomaly_count"`
-	ListenerCount          int                `json:"listener_count"`
-	NetworkListenerCount   int                `json:"network_listener_count"`
-	LocalListenerCount     int                `json:"local_listener_count"`
-	DangerousListenerCount int                `json:"dangerous_listener_count"`
-	CanEnableProtection    bool               `json:"can_enable_protection"`
-	ProtectionPending      bool               `json:"protection_pending"`
-	ProtectionDeadline     *time.Time         `json:"protection_deadline,omitempty"`
-	Listeners              []FirewallListener `json:"listeners"`
-	Rules                  []FirewallPortRule `json:"rules"`
+	AccessEnabled          bool                 `json:"access_enabled"`
+	AccessRules            []FirewallAccessRule `json:"access_rules"`
+	AccessAvailable        bool                 `json:"access_available"`
+	Backend                string               `json:"backend"`
+	Writable               bool                 `json:"writable"`
+	Warning                string               `json:"warning"`
+	InputPolicy            string               `json:"input_policy"`
+	RecommendedPolicy      string               `json:"recommended_policy"`
+	SSHPort                int                  `json:"ssh_port"`
+	PanelPort              int                  `json:"panel_port"`
+	CurrentManagementIP    string               `json:"current_management_ip,omitempty"`
+	ManagedRuleCount       int                  `json:"managed_rule_count"`
+	AnomalyCount           int                  `json:"anomaly_count"`
+	ListenerCount          int                  `json:"listener_count"`
+	NetworkListenerCount   int                  `json:"network_listener_count"`
+	LocalListenerCount     int                  `json:"local_listener_count"`
+	DangerousListenerCount int                  `json:"dangerous_listener_count"`
+	CanEnableProtection    bool                 `json:"can_enable_protection"`
+	ProtectionPending      bool                 `json:"protection_pending"`
+	ProtectionDeadline     *time.Time           `json:"protection_deadline,omitempty"`
+	Listeners              []FirewallListener   `json:"listeners"`
+	Rules                  []FirewallPortRule   `json:"rules"`
 }
 
 type FirewallPortRuleRequest struct {
@@ -437,8 +440,17 @@ func GetFirewallPortStatus() (FirewallPortStatus, error) {
 		panelPort = config.AppConfig.Panel.TLSPort
 	}
 	pending, deadline := firewallProtectionPending()
+	accessEnabled, accessRules, accessErr := readAccessState(ctx)
+	if accessEnabled {
+		for i := range listeners {
+			if listeners[i].BindScope != "local" {
+				listeners[i].HostExposure = "rule_dependent"
+			}
+		}
+	}
 	canProtect := runtime.GOOS == "linux" && writable && policy == "accept" && systemdRunAvailable()
 	return FirewallPortStatus{
+		AccessEnabled: accessEnabled, AccessRules: accessRules, AccessAvailable: writable && accessErr == nil && systemdRunAvailable(),
 		Backend: "nftables", Writable: writable, Warning: warning, InputPolicy: policy, RecommendedPolicy: "drop",
 		SSHPort: detectSSHPort(ctx, listeners), PanelPort: panelPort,
 		ManagedRuleCount: len(rules), AnomalyCount: anomalies,
@@ -457,6 +469,12 @@ func AddFirewallPortRule(req FirewallPortRuleRequest) (FirewallPortRule, error) 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if sshMoveActive(ctx) {
+		return FirewallPortRule{}, errors.New("SSH 端口变更尚未完成")
+	}
+	if enabled, _, e := readAccessState(ctx); e != nil || enabled {
+		return FirewallPortRule{}, errors.New("请在端口访问策略中选择端口并预览应用；原有放行入口不能覆盖访问限制")
+	}
 	family, table, chain, _, warning, writable := firewallPortTarget(ctx)
 	if !writable {
 		return FirewallPortRule{}, errors.New(warning)
@@ -514,6 +532,9 @@ func DeleteFirewallPortRule(id int64) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if sshMoveActive(ctx) {
+		return errors.New("SSH 端口变更尚未完成，请先确认或等待恢复")
+	}
 	family, table, chain, _, warning, writable := firewallPortTarget(ctx)
 	if !writable {
 		return errors.New(warning)
@@ -655,6 +676,14 @@ func randomConfirmationToken() (string, error) {
 func EnableFirewallProtection(managementIP string) (FirewallProtectionResult, error) {
 	portRulesMu.Lock()
 	defer portRulesMu.Unlock()
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer checkCancel()
+	if _, err := portCommand(checkCtx, "systemctl", "is-active", "--quiet", accessRollbackUnit+".timer"); err == nil {
+		return FirewallProtectionResult{}, errors.New("已有端口访问策略等待确认，请先完成或等待回退")
+	}
+	if enabled, _, err := readAccessState(checkCtx); err != nil || enabled {
+		return FirewallProtectionResult{}, errors.New("请使用端口访问策略预览和应用功能")
+	}
 	if !systemdRunAvailable() {
 		return FirewallProtectionResult{}, errors.New("当前系统缺少 nftables 或 systemd-run，无法启用带自动回退的保护模式")
 	}
@@ -668,6 +697,9 @@ func EnableFirewallProtection(managementIP string) (FirewallProtectionResult, er
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	if sshMoveActive(ctx) {
+		return FirewallProtectionResult{}, errors.New("SSH 端口变更尚未完成，请先确认或等待恢复")
+	}
 	family, table, chain, policy, warning, writable := firewallPortTarget(ctx)
 	if !writable {
 		return FirewallProtectionResult{}, errors.New(warning)
@@ -795,6 +827,9 @@ func ConfirmFirewallProtection(token string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	if sshMoveActive(ctx) {
+		return errors.New("SSH 端口变更尚未完成，请先确认或等待恢复")
+	}
 	if err := persistCurrentNftablesRules(ctx); err != nil {
 		return err
 	}
@@ -829,6 +864,9 @@ func ReconcileFirewallPortRules() error {
 	expiredRows.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
+	if sshMoveActive(ctx) {
+		return nil
+	}
 	family, table, chain, _, warning, writable := firewallPortTarget(ctx)
 	if !writable {
 		return errors.New(warning)

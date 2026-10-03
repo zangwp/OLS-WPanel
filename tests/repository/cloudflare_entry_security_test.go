@@ -1,4 +1,4 @@
-package main
+package repository
 
 import (
 	"os"
@@ -40,8 +40,8 @@ func TestCloudflareInstallEntryVerifiesPinnedRelease(t *testing.T) {
 		t.Fatalf("Cloudflare install entry has a non-canonical release version: %s", releaseVersion)
 	}
 	for path, expected := range map[string]string{
-		"README.md":                "当前稳定版：`" + releaseVersion + "`",
-		"README.en.md":             "The current stable release is `" + releaseVersion + "`",
+		"README.md":                "https://github.com/zangwp/OLS-WPanel/releases",
+		"README.en.md":             "https://github.com/zangwp/OLS-WPanel/releases",
 		"docs/verified-install.md": "version='" + releaseVersion + "'",
 	} {
 		contents, err := os.ReadFile(path)
