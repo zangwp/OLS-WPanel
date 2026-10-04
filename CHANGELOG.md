@@ -1,11 +1,12 @@
 # Changelog
 
-## v1.17.2 — 2026-10-04
+## v1.17.2 — 2026-10-05
 
 - Uses Y/y confirmation after displaying the ordinary or complete uninstall scope; Enter cancels. Keeps inventory ownership checks and the separate backup-deletion confirmation.
 - Exits the active terminal menu when its own o/O command file has been removed, preserves uninstall failure exit codes, and explains the expected absence of commands after reconnecting.
 - Reports uninstall failure stages and preserves APT/dpkg diagnostics. A failed reload of unrelated sysctl settings no longer interrupts subsequent cleanup; package removal failures still stop the operation.
 - Refuses ordinary-uninstall file deletion while the panel service is still active, and documents read-only checks for remaining services, files and packages.
+- Ignores generated release assets so both architecture builds retain clean source revision metadata.
 
 ## v1.17.1 — 2026-10-03
 
