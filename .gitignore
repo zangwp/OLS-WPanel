@@ -2,6 +2,7 @@
 /ols-wpanel
 /ols-wpanel-*
 /bin/tailwindcss
+/dist/
 
 
 # Go
