@@ -698,6 +698,23 @@ panel_help() {
     dim "项目: https://github.com/zangwp/OLS-WPanel"
     dim "访问排查: 放行面板端口；运行 o status 或 o log"
 }
+uninstall_panel() {
+    local status=0
+    run_lifecycle "$1"
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        red "卸载未完成（退出码 $status）。请保存上方日志并核对残留；不要直接重复完全卸载。"
+    fi
+    # The current Bash process retains its menu functions even after its file
+    # is removed. Do not return to that stale menu after self-uninstallation.
+    if [ ! -f "$0" ]; then
+        echo "o / O 命令已移除，退出当前管理菜单。重新连接后无法再打开，属于卸载后的正常结果。"
+        echo "若当前 SSH 提示旧命令路径不存在，可执行 hash -r 清除命令缓存。"
+        exit "$status"
+    fi
+    return "$status"
+}
+
 advanced_menu() {
     local choice=""
     while true; do
@@ -713,7 +730,7 @@ advanced_menu() {
         pick || return 0
         case "$choice" in
           0) return 0;; 1) page "命令帮助"; panel_help;;
-          2) "$0" uninstall; return;; 3) "$0" uninstall --all; return;; *) echo "无效选项";;
+          2) uninstall_panel --uninstall; return;; 3) uninstall_panel --purge; return;; *) echo "无效选项";;
         esac
         pause_page
     done
@@ -895,10 +912,10 @@ case "${1:-}" in
         if [ "${2:-}" = "--all" ]; then
             # 完全卸载将删除网站文件、网站数据库与 OLS 面板；备份另行选择。
             red "完全卸载：删除网站、数据库与面板，并移除运行环境。"
-            run_lifecycle --purge
+            uninstall_panel --purge
         elif [ -z "${2:-}" ]; then
             echo "普通卸载会保留网站、数据库、站点证书和共享软件。"
-            run_lifecycle --uninstall
+            uninstall_panel --uninstall
         else
             red "用法: o uninstall [--all]"; exit 1
         fi
