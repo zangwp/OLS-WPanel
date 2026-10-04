@@ -23,7 +23,7 @@
 - 输入 o/O 保留面板信息，并在交互终端显示编号菜单。脚本管道不会等待菜单输入。
 - 新增 o vps、o menu、o check-update、o system-update、o system-update-status、o clean、o dns、o ip、o tuning、o language。
 - 网页分为服务器概况与常用维护，展示 IP、运行时间及资源进度条。
-- 普通卸载仍为 o uninstall；完全卸载为 o uninstall --all，需中文确认和 PURGE 二次确认。
+- 普通卸载为 o uninstall；完全卸载为 o uninstall --all，展示删除范围后输入 Y（或 y）确认，回车取消；备份默认保留，删除备份仍单独确认。
 - 完全卸载先检查网站目录和数据库归属，删除面板网站数据库；备份默认移出面板目录，删除备份需单独输入 DELETE BACKUPS。Redis 和 Fail2ban 保留，避免影响共享用途。
 - 发布时必须同步更新签名发布包和 Cloudflare 入口版本，现有线上 v1.14.0 不支持新的 --purge 参数。本轮没有修改线上入口。
 - VPS 配置修改、APT 更新、语言生成、完全卸载均未在真实服务器执行；发布前需在隔离 Debian/Ubuntu 环境验证。

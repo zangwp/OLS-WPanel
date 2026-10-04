@@ -64,6 +64,8 @@ VALIDATED_TLS_PORT=""
 ATOMIC_STAGE_PATH=""
 INSTALL_FAILURE_STATUS=""
 INSTALL_FAILURE_LINE=""
+UNINSTALL_MODE=false
+UNINSTALL_STAGE=""
 # The signed bootstrap validates this marker before it delegates execution.
 # shellcheck disable=SC2034
 RELEASE_PUBLIC_KEY_HEX="e6b66d84c67c8247821d2ab16b6d8e9584a962d4c8458d1f06b52d9cbbd65bd6"
@@ -355,16 +357,26 @@ installer_exit() {
     cleanup_install_workdir
     if [[ $exit_code -ne 0 ]]; then
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${RED}  安装未完成 / Installation incomplete${NC}"
+        if ${UNINSTALL_MODE:-false}; then
+            echo -e "${RED}  卸载未完成 / Uninstallation incomplete${NC}"
+            echo "  中断阶段: ${UNINSTALL_STAGE:-检查删除范围}（退出码 $exit_code）"
+            echo "  已完成的删除不会自动恢复；请保存输出并核对残留，不要直接重复完全卸载。"
+        else
+            echo -e "${RED}  安装未完成 / Installation incomplete${NC}"
+        fi
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         if [[ -n "$INSTALL_FAILURE_STATUS" ]] && [[ -n "$INSTALL_FAILURE_LINE" ]]; then
             echo -e "  ${RED}失败状态:${NC} exit ${INSTALL_FAILURE_STATUS}，安装脚本第 ${INSTALL_FAILURE_LINE} 行。"
             echo -e "  ${RED}Failure:${NC} exit ${INSTALL_FAILURE_STATUS} at installer line ${INSTALL_FAILURE_LINE}."
         fi
         echo -e "  请先保存本次终端完整输出，不要在未定位原因前直接重装系统。"
-        echo -e "  优先检查：网络/DNS 与系统时间、APT 错误、发行包哈希/签名、受支持平台检测，以及现有服务冲突。"
-        echo -e "  可结合 ${BOLD}journalctl -u ols-wpanel -n 100 --no-pager${NC} 和 APT 输出排查，再携带已脱敏日志提交 GitHub Issue。"
-        echo -e "  Save the complete terminal output first. Check networking/DNS, system time, APT, release hash/signature, platform validation, and existing service conflicts before considering an OS reinstall."
+        if ${UNINSTALL_MODE:-false}; then
+            echo "  请结合上方 APT/dpkg 输出、/var/log/apt/term.log 和服务状态核对已删除与保留的内容。"
+        else
+            echo -e "  优先检查：网络/DNS 与系统时间、APT 错误、发行包哈希/签名、受支持平台检测，以及现有服务冲突。"
+            echo -e "  可结合 ${BOLD}journalctl -u ols-wpanel -n 100 --no-pager${NC} 和 APT 输出排查，再携带已脱敏日志提交 GitHub Issue。"
+            echo -e "  Save the complete terminal output first. Check networking/DNS, system time, APT, release hash/signature, platform validation, and existing service conflicts before considering an OS reinstall."
+        fi
         echo ""
         echo -e "  GitHub: https://github.com/zangwp/OLS-WPanel/issues"
         echo ""
@@ -1939,8 +1951,8 @@ restore_managed_apt_sources() {
 # 卸载函数（定义在前，兼容管道执行）
 # ============================================================
 
-is_exact_purge_confirmation() {
-    [[ "${1:-}" == "PURGE" ]]
+is_uninstall_confirmation() {
+    [[ "${1:-}" == "Y" || "${1:-}" == "y" ]]
 }
 
 cleanup_ols_runtime_integrations() {
@@ -2021,14 +2033,16 @@ confirm_ordinary_uninstall() {
     echo -e "${YELLOW}  即将普通卸载 OLS WPanel${NC}"
     echo -e "  将删除面板配置、面板数据库、面板 TLS 身份和面板本地备份。"
     echo -e "${GREEN}  网站文件、网站日志、站点证书、OLS 站点配置、MariaDB 数据库和共享软件会保留。${NC}"
-    echo -e "  请输入精确的 ${BOLD}UNINSTALL${NC} 继续，其他输入都会取消。"
+    echo -e "  输入 ${BOLD}Y${NC} 确认卸载（兼容 y）；回车或其他输入取消。"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     local uninstall_confirmation=""
-    read -r -p "  > " uninstall_confirmation < /dev/tty 2>/dev/null || uninstall_confirmation=""
-    [[ "$uninstall_confirmation" == "UNINSTALL" ]]
+    read -r -p "确认卸载 [y/N]: " uninstall_confirmation < /dev/tty 2>/dev/null || uninstall_confirmation=""
+    is_uninstall_confirmation "$uninstall_confirmation"
 }
 
 do_uninstall() {
+    UNINSTALL_MODE=true
+    UNINSTALL_STAGE="停止面板服务"
     echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}  普通卸载将永久删除 /www/ols-wpanel 全部内容，包括：${NC}"
@@ -2042,11 +2056,15 @@ do_uninstall() {
 
     echo -e "  → 停止面板服务..."
     systemctl stop ols-wpanel 2>/dev/null || true
+    if systemctl is-active --quiet ols-wpanel; then
+        log_error "面板服务仍在运行，停止删除文件；请检查 systemd 日志"
+    fi
     systemctl disable ols-wpanel 2>/dev/null || true
     cleanup_ols_runtime_integrations
     echo -e "  ${GREEN}✓${NC} 面板服务已停止"
 
     echo -e "  → 删除面板文件..."
+    UNINSTALL_STAGE="删除面板文件"
     rm -f "$BIN_PATH"
     remove_managed_panel_command /usr/local/bin/o '# OLS WPanel CLI — o'
     remove_managed_panel_command /usr/local/bin/O '# OLS WPanel CLI — o'
@@ -2124,21 +2142,23 @@ do_purge() {
     echo -e "${RED}  此操作不可逆。${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  这是选择“彻底清空”后的第二次确认。"
-    echo -e "  请输入精确的 ${BOLD}PURGE${NC} 继续，其他任何输入（含直接回车）都会取消。"
+    echo -e "  请核对以上删除范围，输入 ${BOLD}Y${NC} 确认完全卸载（兼容 y）；回车或其他输入取消。"
 
     local purge_confirmation=""
-    read -r -p "  > " purge_confirmation < /dev/tty 2>/dev/null || purge_confirmation=""
-    if ! is_exact_purge_confirmation "$purge_confirmation"; then
-        log_info "未输入精确的 PURGE，已取消彻底清空"
+    read -r -p "确认完全卸载 [y/N]: " purge_confirmation < /dev/tty 2>/dev/null || purge_confirmation=""
+    if ! is_uninstall_confirmation "$purge_confirmation"; then
+        log_info "已取消完全卸载"
         return 0
     fi
 
     echo ""
+    UNINSTALL_MODE=true
+    UNINSTALL_STAGE="检查删除范围"
     purge_inventory_preflight || { log_warn "无法确认专用环境，已取消；可使用普通卸载保留共享环境"; return 1; }
     local backup_choice="" backup_destination=""
     echo "备份默认保留到 /www/ols-wpanel-preserved-backups；输入 DELETE BACKUPS 才删除备份。"
     read -r -p "备份选择（回车保留）: " backup_choice < /dev/tty || backup_choice=""
+    UNINSTALL_STAGE="停止面板服务与保留备份"
     systemctl stop ols-wpanel || log_error "无法停止面板，取消完全卸载"
     if [[ "$backup_choice" != "DELETE BACKUPS" ]] && [[ -d "$INSTALL_DIR/backups" ]]; then
         [[ ! -L "$INSTALL_DIR/backups" ]] || log_error "备份目录是链接，拒绝移动"
@@ -2153,6 +2173,7 @@ do_purge() {
     echo -e "${BOLD}正在清空，请耐心等待...${NC}"
 
     echo -e "  → 停止所有服务..."
+    UNINSTALL_STAGE="删除网站数据库与停止运行环境"
     systemctl stop ols-wpanel 2>/dev/null || true
     systemctl stop lshttpd 2>/dev/null || true
     local purge_client=""
@@ -2163,25 +2184,30 @@ do_purge() {
     echo -e "  ${GREEN}✓${NC} 服务已停止"
 
     echo -e "  → 清理 OLS 定时任务、systemd、Fail2ban 和 logrotate 集成..."
+    UNINSTALL_STAGE="清理面板运行时集成"
     cleanup_ols_runtime_integrations
     echo -e "  ${GREEN}✓${NC} OLS 运行时集成已清理"
 
     echo -e "  → 清理 OpenLiteSpeed 和 LSPHP 站点配置..."
+    UNINSTALL_STAGE="删除站点配置"
     rm -rf /usr/local/lsws/conf/ols-wpanel
     echo -e "  ${GREEN}✓${NC} 配置已清理"
 
     echo -e "  → 卸载软件包（可能需要 1-2 分钟）..."
-    DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' 'lsphp84*' 'lsphp85*' mariadb-server mariadb-common 2>/dev/null || log_error "软件包卸载失败，请检查 APT 日志"
+    UNINSTALL_STAGE="卸载 OpenLiteSpeed、LSPHP 与 MariaDB 软件包"
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' 'lsphp84*' 'lsphp85*' mariadb-server mariadb-common < /dev/null || log_error "软件包卸载失败，请检查上方 APT/dpkg 输出"
     # 不自动 autoremove，避免连带移除其他应用的依赖。
     echo -e "  ${GREEN}✓${NC} 软件包已卸载"
 
     echo -e "  → 移除 OLS 系统调优配置..."
+    UNINSTALL_STAGE="移除面板系统调优"
     rm -f /etc/sysctl.d/99-ols-wpanel.conf /etc/sysctl.d/99-ols-wpanel-vps.conf /etc/sysctl.d/.ols-wpanel-vps-original.json
-    sysctl --system >/dev/null 2>&1
+    sysctl --system >/dev/null 2>&1 || log_warn "系统其余 sysctl 配置重载失败；面板调优文件已移除，继续清理"
     sed -i '/nofile 65535/d' /etc/security/limits.conf 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} OLS 系统调优配置已移除"
 
     echo -e "  → 删除面板文件..."
+    UNINSTALL_STAGE="删除面板文件与恢复软件源"
     rm -f "$BIN_PATH"
     remove_managed_panel_command /usr/local/bin/o '# OLS WPanel CLI — o'
     remove_managed_panel_command /usr/local/bin/O '# OLS WPanel CLI — o'
@@ -2191,6 +2217,7 @@ do_purge() {
     echo -e "  ${GREEN}✓${NC} 面板文件已删除"
 
     echo -e "  → 删除网站数据..."
+    UNINSTALL_STAGE="删除网站文件、日志与证书"
     rm -rf /www/wwwroot /www/wwwlogs /www/server/certificates
     rm -f /etc/apt/sources.list.d/ols-wpanel-litespeed.sources
     rm -f /usr/share/keyrings/litespeed-archive-keyring.gpg
@@ -2198,6 +2225,7 @@ do_purge() {
 
     if awk '$0 == "# OLS WPanel managed swap" {getline; if ($0 == "/swapfile none swap sw 0 0") found=1} END {exit !found}' /etc/fstab 2>/dev/null; then
         echo -e "  → 清理 Swap 文件..."
+        UNINSTALL_STAGE="清理面板创建的 Swap"
         swapoff /swapfile 2>/dev/null || true
         rm -f /swapfile
         sed -i '/^# OLS WPanel managed swap$/ {N; /\/swapfile none swap sw 0 0/d;}' /etc/fstab
@@ -2207,6 +2235,7 @@ do_purge() {
 
     echo ""
     log_info "彻底清理流程已完成；仅执行了上方明确列出的删除和卸载，不承诺恢复其他系统变更。"
+    log_info "Redis、Fail2ban 和共享目录中的剩余文件已保留；o / O 命令已移除，不再提供管理菜单。"
 }
 
 # ============================================================
@@ -2525,15 +2554,12 @@ elif [[ "$REQUESTED_ACTION" == "uninstall" ]]; then
         exit 0
     fi
     if ! confirm_ordinary_uninstall; then
-        log_info "未输入精确的 UNINSTALL，已取消普通卸载"
+        log_info "已取消普通卸载"
         exit 0
     fi
     do_uninstall
     exit 0
 elif [[ "$REQUESTED_ACTION" == "purge" ]]; then
-    echo "完全卸载会删除网站、网站数据库、OLS 面板及其运行环境。"
-    read -r -p "请输入 完全卸载 继续: " full_confirmation < /dev/tty || full_confirmation=""
-    [[ "$full_confirmation" == "完全卸载" ]] || { log_info "已取消"; exit 0; }
     do_purge
     exit 0
 elif $INSTALL_TRACES || $INSTALL_COMPLETE; then

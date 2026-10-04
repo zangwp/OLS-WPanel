@@ -56,3 +56,19 @@ journalctl -u ols-wpanel -n 100 --no-pager
 ```
 
 数据库、网站文件、证书和异地备份是不同的恢复对象。生产环境应定期下载或同步备份，并在独立服务器上演练恢复。
+
+## 卸载后的检查
+
+卸载会移除 `o` / `O` 和面板服务。旧菜单退出后无法重新打开属于预期结果，不能仅凭命令消失判断完全清理是否成功。当前 SSH 若仍缓存旧命令路径，可运行 `hash -r`。
+
+以下命令只查看状态，不执行删除：
+
+```bash
+systemctl status ols-wpanel --no-pager
+ls -ld /usr/local/bin/ols-wpanel /usr/local/bin/o /usr/local/bin/O /www/ols-wpanel
+dpkg --audit
+dpkg-query -W -f='${binary:Package}\t${db:Status-Abbrev}\n' 'openlitespeed*' 'lsphp*' 'mariadb*'
+tail -n 100 /var/log/apt/term.log
+```
+
+已移除的服务和文件提示不存在是正常结果。普通卸载保留网站、数据库和运行环境；完全卸载仍保留 Redis、Fail2ban 及可能共享的目录残留。出现软件包权限错误或“卸载未完成”时，先核对完整日志，避免盲目删除共享目录或重复完全卸载。

@@ -60,7 +60,7 @@ func TestOrdinaryUninstallDisclosesDeletedAndPreservedDataBeforeMutation(t *test
 	}
 }
 
-func TestPurgeRequiresExactSecondConfirmationBeforeMutation(t *testing.T) {
+func TestPurgeRequiresYConfirmationAfterScopeBeforeMutation(t *testing.T) {
 	script := readUninstallSafetyScript(t)
 	purge := extractUninstallSafetyFunction(t, script, "do_purge", "# ============================================================\n# 权限、平台与发布包安全预检")
 
@@ -70,17 +70,16 @@ func TestPurgeRequiresExactSecondConfirmationBeforeMutation(t *testing.T) {
 		"面板状态、凭据、备份和共享安装包缓存",
 		"卸载软件：OpenLiteSpeed、LSPHP 8.3/8.4/8.5、MariaDB；保留 Redis、Fail2ban",
 		"可能同时被非 OLS 工作负载使用",
-		"选择“彻底清空”后的第二次确认",
-		"请输入精确的 ${BOLD}PURGE${NC}",
-		`read -r -p "  > " purge_confirmation < /dev/tty 2>/dev/null || purge_confirmation=""`,
-		`if ! is_exact_purge_confirmation "$purge_confirmation"; then`,
+		"请核对以上删除范围，输入 ${BOLD}Y${NC}",
+		`read -r -p "确认完全卸载 [y/N]: " purge_confirmation < /dev/tty 2>/dev/null || purge_confirmation=""`,
+		`if ! is_uninstall_confirmation "$purge_confirmation"; then`,
 	} {
 		if !strings.Contains(purge, required) {
 			t.Errorf("purge is missing destructive-scope control %q", required)
 		}
 	}
 
-	guard := strings.Index(purge, `if ! is_exact_purge_confirmation "$purge_confirmation"; then`)
+	guard := strings.Index(purge, `if ! is_uninstall_confirmation "$purge_confirmation"; then`)
 	firstMutation := strings.Index(purge, "systemctl stop ols-wpanel")
 	if guard < 0 || firstMutation < 0 || guard >= firstMutation {
 		t.Fatalf("purge confirmation guard offset=%d must precede first mutation offset=%d", guard, firstMutation)
@@ -100,9 +99,9 @@ func TestExplicitLifecycleFlagsAreSafeAndUnambiguous(t *testing.T) {
 		`--uninstall)`,
 		`REQUESTED_ACTION="uninstall"`,
 		`confirm_ordinary_uninstall() {`,
-		`请输入精确的 ${BOLD}UNINSTALL${NC}`,
-		`read -r -p "  > " uninstall_confirmation < /dev/tty`,
-		`[[ "$uninstall_confirmation" == "UNINSTALL" ]]`,
+		`输入 ${BOLD}Y${NC} 确认卸载`,
+		`read -r -p "确认卸载 [y/N]: " uninstall_confirmation < /dev/tty`,
+		`is_uninstall_confirmation "$uninstall_confirmation"`,
 		`if ! confirm_ordinary_uninstall; then`,
 		`$INSTALL_COMPLETE || log_error`,
 	} {
@@ -213,18 +212,19 @@ func TestPanelCommandMigrationProtectsUnrelatedOneCharacterCommands(t *testing.T
 	}
 }
 
-func TestExactPurgeConfirmationRejectsNearMisses(t *testing.T) {
+func TestUninstallYConfirmationRejectsOtherInput(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash is unavailable")
 	}
 	script := readUninstallSafetyScript(t)
-	confirmation := extractUninstallSafetyFunction(t, script, "is_exact_purge_confirmation", "cleanup_ols_runtime_integrations() {")
+	confirmation := extractUninstallSafetyFunction(t, script, "is_uninstall_confirmation", "cleanup_ols_runtime_integrations() {")
 	fixture := `set -euo pipefail
 ` + confirmation + `
-is_exact_purge_confirmation PURGE
-for candidate in '' yes purge Purge ' PURGE' 'PURGE '; do
-    if is_exact_purge_confirmation "$candidate"; then
+is_uninstall_confirmation Y
+is_uninstall_confirmation y
+for candidate in '' yes YES PURGE UNINSTALL N no ' Y' 'Y ' yesterday; do
+    if is_uninstall_confirmation "$candidate"; then
         echo "unexpected acceptance: [$candidate]" >&2
         exit 1
     fi
@@ -327,5 +327,75 @@ func TestCompleteUninstallHasInventoryAndSeparateBackupChoice(t *testing.T) {
 	purge := script[start:]
 	if strings.Index(purge, "purge_inventory_preflight ||") > strings.Index(purge, "systemctl stop ols-wpanel") {
 		t.Fatal("inventory checked after stopping service")
+	}
+}
+
+func TestPurgePackageFailureStopsAndSysctlFailureContinues(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	script := readUninstallSafetyScript(t)
+	purge := extractUninstallSafetyFunction(t, script, "do_purge", "# ============================================================\n# 权限、平台与发布包安全预检")
+	// Replace only the interactive input source in the fixture. All destructive
+	// commands below are shell stubs; no services, packages or host files change.
+	purge = strings.ReplaceAll(purge, "< /dev/tty 2>/dev/null", "")
+	purge = strings.ReplaceAll(purge, "< /dev/tty", "")
+	confirmation := extractUninstallSafetyFunction(t, script, "is_uninstall_confirmation", "cleanup_ols_runtime_integrations() {")
+	for _, test := range []struct {
+		name, aptStatus, sysctlStatus string
+		wantCode                      int
+	}{
+		{"package-failure", "42", "0", 1},
+		{"unrelated-sysctl-failure", "0", "7", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "purge-databases.sql"), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			fixture := `set -eE -o pipefail
+RED='' GREEN='' YELLOW='' BOLD='' NC=''
+INSTALL_DIR=./absent-panel BIN_PATH=./absent-binary LICENSE_DOC_DIR=./absent-license INSTALL_WORKDIR=.
+read_count=0
+read() { local target="${!#}"; read_count=$((read_count+1)); if [ "$read_count" = 1 ]; then printf -v "$target" '%s' Y; else printf -v "$target" '%s' ''; fi; }
+log_info() { echo "INFO:$1"; }
+log_warn() { echo "WARN:$1"; }
+log_error() { echo "ERROR:$UNINSTALL_STAGE:$1"; exit 1; }
+purge_inventory_preflight() { return 0; }
+systemctl() { return 0; }
+cat() { echo true; }
+cleanup_ols_runtime_integrations() { return 0; }
+rm() { echo "DELETE:$*"; }
+remove_managed_panel_command() { echo "COMMAND_DELETE:$1"; }
+restore_managed_apt_sources() { return 0; }
+sed() { return 0; }
+awk() { return 1; }
+apt-get() { echo APT_DIAGNOSTIC >&2; return ` + test.aptStatus + `; }
+sysctl() { return ` + test.sysctlStatus + `; }
+` + confirmation + "\n" + purge + "\ndo_purge\n"
+			cmd := exec.Command(bash, "-c", fixture)
+			cmd.Dir = dir
+			out, err := cmd.CombinedOutput()
+			code := 0
+			if err != nil {
+				if exit, ok := err.(*exec.ExitError); ok {
+					code = exit.ExitCode()
+				} else {
+					t.Fatal(err)
+				}
+			}
+			text := string(out)
+			if code != test.wantCode || !strings.Contains(text, "APT_DIAGNOSTIC") {
+				t.Fatalf("wrong status or hidden APT diagnostics: code=%d\n%s", code, out)
+			}
+			if test.wantCode != 0 {
+				if strings.Contains(text, "COMMAND_DELETE:") || strings.Contains(text, "彻底清理流程已完成") || !strings.Contains(text, "ERROR:卸载 OpenLiteSpeed、LSPHP 与 MariaDB 软件包:") {
+					t.Fatalf("package failure continued or lost stage: %s", out)
+				}
+			} else if !strings.Contains(text, "系统其余 sysctl 配置重载失败") || !strings.Contains(text, "COMMAND_DELETE:") || !strings.Contains(text, "彻底清理流程已完成") {
+				t.Fatalf("sysctl failure interrupted panel removal: %s", out)
+			}
+		})
 	}
 }

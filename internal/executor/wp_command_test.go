@@ -34,7 +34,7 @@ func TestEnsurePanelCommandsAt_WritesLowerAndUpperAliases(t *testing.T) {
 	if strings.Contains(panelCommandScript, "olsw status") {
 		t.Fatal("panel command script still advertises the removed command")
 	}
-	for _, expected := range []string{"o update", "o uninstall", "run_lifecycle --repair", "run_lifecycle --uninstall", "ENTRY_URL=https://ols.zangyubin.top/install"} {
+	for _, expected := range []string{"o update", "o uninstall", "run_lifecycle --repair", "uninstall_panel --uninstall", "ENTRY_URL=https://ols.zangyubin.top/install"} {
 		if !strings.Contains(panelCommandScript, expected) {
 			t.Fatalf("panel command script is missing lifecycle command %q", expected)
 		}
@@ -104,6 +104,71 @@ func TestPanelMenuReturnsWithoutRepeatingResults(t *testing.T) {
 	}
 	if strings.Contains(out, "MUTATION:") {
 		t.Fatal("viewing or returning mutated the system")
+	}
+}
+
+func TestUninstallFromMenuExitsAfterCommandRemoval(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	definitions, _, ok := strings.Cut(panelCommandScript, "\ncase \"${1:-}\" in")
+	if !ok {
+		t.Fatal("CLI dispatch not found")
+	}
+	for _, test := range []struct {
+		name, choice, status string
+		wantCode             int
+	}{
+		{"ordinary", "2", "0", 0},
+		{"complete", "3", "0", 0},
+		{"partial-failure", "3", "42", 42},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Delete only this temporary fixture to simulate removal of o itself.
+			fixture := definitions + `
+panel_summary() { echo FIXTURE_PANEL; }
+tput() { echo 80; }
+page() { :; }
+text_block() { :; }
+index=0
+choices=(8 ` + test.choice + ` 0)
+pick() { choice="${choices[$index]}"; index=$((index+1)); }
+run_lifecycle() { echo "LIFECYCLE:$1"; rm -f -- "$0"; return ` + test.status + `; }
+vps_menu
+echo STALE_MENU_RETURNED
+`
+			path := filepath.Join(t.TempDir(), "uninstall-fixture.sh")
+			if err := os.WriteFile(path, []byte(fixture), 0600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command(bash, path).CombinedOutput()
+			gotCode := 0
+			if err != nil {
+				if exit, ok := err.(*exec.ExitError); ok {
+					gotCode = exit.ExitCode()
+				} else {
+					t.Fatal(err)
+				}
+			}
+			text := string(out)
+			if gotCode != test.wantCode || strings.Count(text, "FIXTURE_PANEL") != 1 || strings.Contains(text, "STALE_MENU_RETURNED") {
+				t.Fatalf("stale menu or lost exit code: code=%d\n%s", gotCode, out)
+			}
+			if !strings.Contains(text, "o / O 命令已移除") || !strings.Contains(text, "hash -r") {
+				t.Fatalf("missing uninstall exit guidance: %s", out)
+			}
+			if test.wantCode != 0 && !strings.Contains(text, "卸载未完成（退出码 42）") {
+				t.Fatalf("partial failure hidden: %s", out)
+			}
+		})
+	}
+}
+
+func TestCanceledUninstallReturnsToInstalledMenu(t *testing.T) {
+	out := runPanelMenuFixture(t, "run_lifecycle() { echo CANCELED; return 0; }\nchoices=(8 3 0)\nvps_menu\n")
+	if strings.Count(out, "FIXTURE_PANEL") != 2 || !strings.Contains(out, "CANCELED") || strings.Contains(out, "命令已移除") {
+		t.Fatalf("cancellation must retain the installed menu: %s", out)
 	}
 }
 
