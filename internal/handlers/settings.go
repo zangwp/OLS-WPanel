@@ -588,15 +588,11 @@ func StartSystemTimeSync() error { return startSystemTimeSync() }
 func startSystemTimeSync() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	unit := ntpTimeSyncUnit()
+	unit, err := selectNTPTimeSyncUnit(ctx)
+	if err != nil {
+		return err
+	}
 	if unit == "" {
-		// Do not silently replace a deliberately masked or unsupported provider.
-		for _, candidate := range []string{"chrony.service", "systemd-timesyncd.service", "ntpsec.service", "ntp.service"} {
-			out, err := timeSyncCommand(ctx, "systemctl", "show", candidate, "--property=LoadState", "--value")
-			if err == nil && strings.TrimSpace(string(out)) == "masked" {
-				return fmt.Errorf("%s 已被管理员屏蔽，请先检查服务策略", candidate)
-			}
-		}
 		out, err := timeSyncCommand(ctx, "apt-get", "install", "-y", "--no-install-recommends", "systemd-timesyncd")
 		if err != nil {
 			log.Printf("安装时间同步服务失败: %s", out)
@@ -607,11 +603,13 @@ func startSystemTimeSync() error {
 	if out, err := timeSyncCommand(ctx, "systemctl", "enable", "--now", unit); err != nil {
 		return fmt.Errorf("启动 %s 失败: %s", unit, strings.TrimSpace(string(out)))
 	}
-	if out, err := timeSyncCommand(ctx, "timedatectl", "set-ntp", "true"); err != nil {
-		return fmt.Errorf("启用自动校时失败: %s", strings.TrimSpace(string(out)))
-	}
+	// Do not ask timedated to choose an NTP provider again: it could select a
+	// different installed service and undo the active-provider decision above.
 	if out, err := timeSyncCommand(ctx, "systemctl", "restart", unit); err != nil {
 		return fmt.Errorf("重启 %s 失败: %s", unit, strings.TrimSpace(string(out)))
+	}
+	if out, err := timeSyncCommand(ctx, "systemctl", "is-active", "--quiet", unit); err != nil {
+		return fmt.Errorf("%s 启动后未处于运行状态: %s", unit, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -621,17 +619,76 @@ func getNTPEnabled() bool {
 	return err == nil && strings.TrimSpace(string(out)) == "yes"
 }
 
-// detectNTPTimeSyncUnit 返回受支持系统上实际安装的时间同步 systemd 单元。
-// 云服务商镜像常预装 chrony，也可能不提供 systemd-timesyncd 单元；
-// timedatectl set-ntp 本身对两者都有效，但重启动作必须作用于真实存在的
-// 单元，否则 systemctl restart 会因为单元不存在直接报错。
+// Prefer the running provider, rather than the first installed package. A
+// conflicting pair of active providers must be handled explicitly by the admin.
 func detectNTPTimeSyncUnit() string {
-	for _, unit := range []string{"chrony.service", "systemd-timesyncd.service", "ntpsec.service", "ntp.service"} {
-		if systemdUnitExists(unit) {
-			return unit
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	unit, _ := selectNTPTimeSyncUnit(ctx)
+	return unit
+}
+
+func selectNTPTimeSyncUnit(ctx context.Context) (string, error) {
+	var active, installed, masked []string
+	activeIDs := map[string]bool{}
+	for _, unit := range []string{"chrony.service", "systemd-timesyncd.service", "ntpsec.service", "ntp.service", "openntpd.service"} {
+		output, err := timeSyncCommand(ctx, "systemctl", "show", unit, "--property=Id", "--property=LoadState", "--property=ActiveState", "--no-pager")
+		properties := map[string]string{}
+		for _, line := range strings.Split(string(output), "\n") {
+			if key, value, ok := strings.Cut(line, "="); ok {
+				properties[strings.TrimSpace(key)] = strings.TrimSpace(value)
+			}
+		}
+		if err != nil && properties["LoadState"] != "not-found" {
+			return "", fmt.Errorf("无法确认 %s 的运行状态，停止修改时间同步服务", unit)
+		}
+		switch properties["LoadState"] {
+		case "masked":
+			// A running unit can be masked without being stopped. Ignoring it
+			// would allow starting another provider alongside the original daemon.
+			switch properties["ActiveState"] {
+			case "inactive", "failed", "maintenance":
+			default:
+				return "", fmt.Errorf("%s 已被屏蔽且仍在运行或活动状态未知，请先检查现有时间同步服务", unit)
+			}
+			masked = append(masked, unit)
+		case "loaded":
+			state := properties["ActiveState"]
+			switch state {
+			case "active", "activating", "reloading", "deactivating", "inactive", "failed", "maintenance":
+			default:
+				return "", fmt.Errorf("%s 的活动状态未知，停止修改时间同步服务", unit)
+			}
+			installed = append(installed, unit)
+			if state == "active" || state == "activating" || state == "reloading" || state == "deactivating" {
+				id := properties["Id"]
+				if id == "" {
+					id = unit
+				}
+				if !activeIDs[id] {
+					active = append(active, unit)
+					activeIDs[id] = true
+				}
+			}
+		case "not-found":
+			continue
+		default:
+			return "", fmt.Errorf("%s 的服务状态未知，停止修改时间同步服务", unit)
 		}
 	}
-	return ""
+	if len(active) > 1 {
+		return "", fmt.Errorf("检测到多个时间同步服务正在运行（%s）；请保留一套后重试", strings.Join(active, ", "))
+	}
+	if len(active) == 1 {
+		return active[0], nil
+	}
+	if len(installed) > 0 {
+		return installed[0], nil
+	}
+	if len(masked) > 0 {
+		return "", fmt.Errorf("时间同步服务已被管理员屏蔽（%s），请先检查服务策略", strings.Join(masked, ", "))
+	}
+	return "", nil
 }
 
 // systemdUnitExists 判断 unit 是否存在且未被 mask（masked 单元 restart 必然失败）。

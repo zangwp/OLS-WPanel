@@ -20,10 +20,20 @@
             <p x-show="mfaAction === 'regenerate'" class="security-feedback security-feedback-warning">{{t .Lang "account_security.regenerate_warning"}}</p>
             <div x-show="setupData" class="security-enrollment">
                 <p class="security-enrollment-step">{{t .Lang "account_security.add_authenticator"}}</p>
-                <label class="label" for="mfa-secret">{{t .Lang "account_security.setup_key"}}</label>
-                <input id="mfa-secret" class="input-field font-mono" readonly :value="setupData?.secret || ''" autocomplete="off" spellcheck="false">
-                <p class="security-muted">{{t .Lang "account_security.setup_key_help"}}</p>
-                <a class="security-text-link" :href="authenticatorURL()" x-show="authenticatorURL()">{{t .Lang "account_security.open_authenticator"}}</a>
+                <div class="security-enrollment-grid" :class="{ 'has-qr': !!authenticatorQRCode() && !mfaQRFailed }">
+                    <template x-if="authenticatorQRCode() && !mfaQRFailed">
+                        <figure class="security-enrollment-qr">
+                            <img :src="authenticatorQRCode()" width="256" height="256" alt="{{t .Lang "account_security.qr_code_alt"}}" @error="mfaQRFailed = true">
+                            <figcaption>{{t .Lang "account_security.scan_qr_help"}}</figcaption>
+                        </figure>
+                    </template>
+                    <div class="security-enrollment-manual">
+                        <label class="label" for="mfa-secret">{{t .Lang "account_security.setup_key"}}</label>
+                        <input id="mfa-secret" class="input-field font-mono" readonly :value="setupData?.secret || ''" autocomplete="off" spellcheck="false">
+                        <p class="security-muted">{{t .Lang "account_security.setup_key_help"}}</p>
+                        <a class="security-text-link" :href="authenticatorURL()" x-show="authenticatorURL()">{{t .Lang "account_security.open_authenticator"}}</a>
+                    </div>
+                </div>
                 <p class="security-muted" x-text="t('account_security.setup_expires', { time: formatDate(setupData?.expires_at) })"></p>
             </div>
             <div class="security-credential-fields">
@@ -80,7 +90,7 @@
 function accountSecurity() {
     return {
         mfa: { enabled: false, recovery_codes_remaining: 0 }, mfaLoaded: false, mfaLoading: false, mfaError: '',
-        mfaBusy: false, mfaAction: '', mfaPassword: '', mfaCode: '', mfaActionError: '', mfaNotice: '', setupData: null,
+        mfaBusy: false, mfaAction: '', mfaPassword: '', mfaCode: '', mfaActionError: '', mfaNotice: '', setupData: null, mfaQRFailed: false,
         recoveryCodes: [], recoverySaved: false, leaveHandler: null,
         sessions: [], sessionsLoaded: false, sessionsLoading: false, sessionsError: '', sessionBusy: false, sessionNotice: '', sessionsRequest: 0,
         auditEvents: [], auditLoaded: false, auditLoading: false, auditError: '', auditPage: 1, auditRequestedPage: 1, auditPageSize: 20, auditTotal: 0, auditRequest: 0,
@@ -90,7 +100,7 @@ function accountSecurity() {
             window.addEventListener('beforeunload', this.leaveHandler);
             await Promise.all([this.fetchMFA(), this.fetchSessions(), this.fetchAudit(1), this.fetchNotifications()]);
         },
-        destroy() { window.removeEventListener('beforeunload', this.leaveHandler); this.mfaPassword = ''; this.mfaCode = ''; this.setupData = null; this.recoveryCodes = []; },
+        destroy() { window.removeEventListener('beforeunload', this.leaveHandler); this.mfaPassword = ''; this.mfaCode = ''; this.setupData = null; this.mfaQRFailed = false; this.recoveryCodes = []; },
         responseData(response) { if (!response?.success) throw new Error(response?.message || t('security_center.request_failed')); return response.data; },
         formatDate(value) { if (!value) return '—'; const date = new Date(typeof value === 'number' && value < 1000000000000 ? value * 1000 : value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(document.body.dataset.lang || 'zh-CN'); },
         deviceLabel(value) { return value || t('account_security.unknown_device'); },
@@ -109,9 +119,13 @@ function accountSecurity() {
             if ((action === 'setup') === this.mfa.enabled || !['setup','disable','regenerate'].includes(action)) return;
             this.cancelMFA(false); this.mfaAction = action; this.mfaNotice = ''; this.focusMFAElement('mfa-current-password');
         },
-        cancelMFA(restoreFocus = true) { if (this.mfaBusy) return; this.mfaAction = ''; this.mfaPassword = ''; this.mfaCode = ''; this.mfaActionError = ''; this.setupData = null; if (restoreFocus) this.focusMFAElement('mfa-heading'); },
+        cancelMFA(restoreFocus = true) { if (this.mfaBusy) return; this.mfaAction = ''; this.mfaPassword = ''; this.mfaCode = ''; this.mfaActionError = ''; this.setupData = null; this.mfaQRFailed = false; if (restoreFocus) this.focusMFAElement('mfa-heading'); },
         focusMFAElement(id) { if (typeof this.$nextTick !== 'function') return; this.$nextTick(() => requestAnimationFrame(() => { const field = document.getElementById(id); if (field?.getClientRects().length) field.focus(); })); },
         authenticatorURL() { const value = this.setupData?.otpauth_url || ''; return value.startsWith('otpauth://totp/') ? value : ''; },
+        authenticatorQRCode() {
+            const value = this.setupData?.qr_code_data_url;
+            return typeof value === 'string' && value.length <= 65536 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : '';
+        },
         mfaSubmitLabel() { return t(this.mfaAction === 'setup' ? (this.setupData ? 'account_security.verify_enable' : 'account_security.create_setup') : this.mfaAction === 'disable' ? 'account_security.disable' : 'account_security.regenerate'); },
         async submitMFA() {
             if (!this.mfaLoaded || this.mfaLoading || this.mfaBusy || this.recoveryCodes.length || !this.mfaAction) return;
@@ -125,9 +139,9 @@ function accountSecurity() {
                 const data = this.responseData(await api('/auth/mfa/' + path, { method: 'POST', body, suppressToast: true, allowAuthFailure: true }));
                 if (isSetup) {
                     if (!data?.secret || !data?.otpauth_url) throw new Error(t('security_center.request_failed'));
-                    this.setupData = { secret: data.secret, otpauth_url: data.otpauth_url, expires_at: data.expires_at }; this.mfaCode = '';
+                    this.setupData = { secret: data.secret, otpauth_url: data.otpauth_url, qr_code_data_url: data.qr_code_data_url, expires_at: data.expires_at }; this.mfaQRFailed = false; this.mfaCode = '';
                 } else {
-                    this.mfaPassword = ''; this.mfaCode = ''; this.setupData = null; this.mfaAction = '';
+                    this.mfaPassword = ''; this.mfaCode = ''; this.setupData = null; this.mfaQRFailed = false; this.mfaAction = '';
                     if (action !== 'disable') {
                         this.recoveryCodes = Array.isArray(data?.recovery_codes) ? data.recovery_codes.slice() : [];
                         this.recoverySaved = false;
@@ -148,7 +162,7 @@ function accountSecurity() {
                     mfa_unavailable: t('account_security.mfa_unavailable')
                 };
                 this.mfaActionError = Object.prototype.hasOwnProperty.call(errors, code) ? errors[code] : e.message || t('security_center.request_failed');
-                if (code === 'mfa_setup_expired') this.setupData = null;
+                if (code === 'mfa_setup_expired') { this.setupData = null; this.mfaQRFailed = false; }
                 if (code === 'mfa_invalid_password') this.mfaPassword = '';
             }
             finally {

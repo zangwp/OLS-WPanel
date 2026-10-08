@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -52,9 +54,10 @@ type MFAStatus struct {
 }
 
 type MFASetup struct {
-	Secret     string `json:"secret"`
-	OTPAuthURL string `json:"otpauth_url"`
-	ExpiresAt  int64  `json:"expires_at"`
+	Secret        string `json:"secret"`
+	OTPAuthURL    string `json:"otpauth_url"`
+	QRCodeDataURL string `json:"qr_code_data_url"`
+	ExpiresAt     int64  `json:"expires_at"`
 }
 
 func InitMFASchema(db *sql.DB) error {
@@ -327,6 +330,13 @@ func (s *MFAService) Setup(ctx context.Context, id int64, session, username stri
 	result.ExpiresAt = s.now().Add(10 * time.Minute).Unix()
 	query := url.Values{"secret": {result.Secret}, "issuer": {"OLS WPanel"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}
 	result.OTPAuthURL = "otpauth://totp/" + url.PathEscape("OLS WPanel:"+username) + "?" + query.Encode()
+	// Keep enrollment credentials inside the authenticated, no-store response.
+	// Encode locally with the standard white quiet zone; never use a remote QR service.
+	png, err := qrcode.Encode(result.OTPAuthURL, qrcode.Medium, 256)
+	if err != nil {
+		return MFASetup{}, fmt.Errorf("generate MFA enrollment QR code: %w", err)
+	}
+	result.QRCodeDataURL = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 	_, err = tx.ExecContext(ctx, `INSERT INTO account_mfa(admin_id,pending_secret,pending_session_hash,pending_expires) VALUES(?,?,?,?) ON CONFLICT(admin_id) DO UPDATE SET pending_secret=excluded.pending_secret,pending_session_hash=excluded.pending_session_hash,pending_expires=excluded.pending_expires`, id, encrypted, sessionHash(session), result.ExpiresAt)
 	if err != nil {
 		return MFASetup{}, err

@@ -31,7 +31,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 | 网站与 WordPress | 创建 WordPress / PHP 网站，管理域名、PHP 版本、文件、数据库及 WordPress 更新 |
 | 证书与缓存 | 网站证书申请与续签；使用官方 LiteSpeed Cache 管理页面及 Redis 对象缓存 |
 | 备份与恢复 | 网站、数据库和面板备份，支持 SFTP / S3 异地保存 |
-| VPS 维护 | 查看资源与服务状态，管理系统更新、DNS、Swap、时间同步和开放端口 |
+| VPS 维护 | 网页查看资源、服务器信息与服务状态；通过 SSH `o` 菜单设置 DNS、Swap 和系统参数；开放端口在安全中心管理 |
 | 账户安全 | 可选 TOTP 双因素认证、一次性恢复码、在线会话管理、持久登录审计及异常登录通知 |
 | 防护与告警 | 文件保护、Fail2ban、nftables、邮件 / Webhook 通知和日志分析 |
 
@@ -44,7 +44,16 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 `o` 与大写 `O` 等价，面板信息会显示版本、端口和安全入口。
 
 ```text
-o                 查看面板信息
+o                 打开管理菜单
+o dns             DNS 查看、预设 / 自定义地址检测与设置
+o swap            Swap 容量与 swappiness 管理
+o ports           本机监听、进程与入站规则诊断
+o services        核心服务状态与最近日志
+o bbr             当前拥塞控制、内核支持与持久配置
+o disk            磁盘空间与 inode 检查
+o apt-check       APT / dpkg 只读健康检查
+o history         最近 200 条终端维护记录
+o ssh             SSH 双端口过渡，超时自动恢复
 o status          诊断面板运行状态
 o log [N]         查看最近 N 条面板日志
 o restart         重启面板
@@ -53,6 +62,12 @@ o unban           清空面板管理的 IP 封禁
 o update          更新 / 修复面板
 o uninstall       卸载面板，保留网站、数据库与共享软件
 ```
+
+Swap 入口为 `o → 5. 系统设置 → 3. Swap 管理`，只管理 OLS WPanel 标记的 `/swapfile`，保留已有分区、zram 和外部文件。调整容量会检查临时新文件的完整磁盘占用，并核验运行状态；失败时恢复原文件与配置。删除受管文件保留当前系统 swappiness。
+
+DNS 入口为 `o → 4. 网络设置 → 1. DNS 设置与检测`，支持运行中的 `systemd-resolved` 和普通 `/etc/resolv.conf` 文件。普通文件首次应用前需确认接管，保存原内容、权限和锁定状态；保留 search/options，支持恢复接管前配置。自定义地址需全部通过检测，普通文件最多 3 个，resolved 最多 4 个。DHCP、cloud-init、NetworkManager、resolvconf 和未识别的符号链接保持只读，页面显示具体原因。
+
+时区菜单支持系统可用的 IANA 时区；系统语言工具缺失时可确认安装 locales。SSH 端口变更保留旧端口，要求通过新端口另开 SSH 连接执行返回的 `o ssh-confirm` 命令；独立守护任务在未确认时自动恢复。`o check-update` 分别显示 GitHub 最新发布与短入口实际目标版本，`o update` 不会降级到落后的入口版本。
 
 卸载前会列出删除范围，输入 `Y`（或 `y`）确认，回车取消。卸载后退出管理菜单并移除 `o` / `O` 命令。更新脚本使用已发布的签名安装入口。
 

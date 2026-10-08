@@ -23,7 +23,6 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/database"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
-	"github.com/zangwp/OLS-WPanel/internal/handlers"
 	"github.com/zangwp/OLS-WPanel/internal/middleware"
 	"github.com/zangwp/OLS-WPanel/internal/router"
 	"github.com/zangwp/OLS-WPanel/web"
@@ -163,66 +162,9 @@ func main() {
 		return
 	}
 	if *vpsTool != "" {
-		if *vpsTool == "dns-status" || *vpsTool == "dns-test" {
-			status := executor.GetDNSStatus()
-			var probeErr error
-			if *vpsTool == "dns-test" {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-				defer cancel()
-				status, probeErr = executor.ProbeDNSPreset(ctx, *vpsValue)
-			}
-			if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
-				log.Fatal(err)
-			}
-			if probeErr != nil {
-				log.Fatal(probeErr)
-			}
-			return
-		}
-		if *vpsTool == "time-sync" {
-			if err := handlers.StartSystemTimeSync(); err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println("自动校时已启动；是否已同步请查看当前状态。")
-			return
-		}
-		if *vpsTool == "system-update" {
-			status, err := executor.StartSystemPackageUpdate(cfg)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Printf("系统更新已启动: %s\n使用 o system-update-status 查看进度\n", status.ID)
-			return
-		}
-		if *vpsTool == "system-update-status" {
-			status := executor.ReconcileSystemPackageUpdateStatus(cfg)
-			if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {
-				log.Fatal(err)
-			}
-			return
-		}
-		if *vpsTool == "dns" {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-			var err error
-			if *vpsValue == "default" {
-				_, err = executor.RestoreAutomaticDNS(ctx)
-			} else {
-				_, err = executor.ApplyDNSPreset(ctx, *vpsValue)
-			}
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println("DNS 已更新")
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), executor.SimpleVPSToolTimeout())
-		defer cancel()
-		out, err := executor.RunSimpleVPSTool(ctx, *vpsTool, *vpsValue)
-		if err != nil {
+		if err := runVPSCLI(cfg, *vpsTool, *vpsValue); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(out)
 		return
 	}
 	if *recordFail2banIP != "" || *unbanFail2banIP != "" {
