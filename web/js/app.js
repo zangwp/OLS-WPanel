@@ -80,7 +80,7 @@ function renderSafeMarkdown(value) {
 function api(path, options = {}) {
     const prefix = document.body.dataset.panelPrefix || '';
     const url = prefix + '/api' + path;
-    const { silent = false, suppressToast = false, timeout = 0, ...fetchOptions } = options;
+    const { silent = false, suppressToast = false, allowAuthFailure = false, timeout = 0, ...fetchOptions } = options;
     let timeoutID = null;
     let externalAbortHandler = null;
     let timedOut = false;
@@ -114,18 +114,22 @@ function api(path, options = {}) {
 
     return fetch(url, { ...fetchOptions, headers })
         .then(async (resp) => {
-            if (resp.status === 401 && path !== '/auth/login') {
+            const contentType = resp.headers.get('content-type') || '';
+            const data = contentType.includes('application/json') ? await resp.json() : null;
+            // A wrong step-up credential is recoverable in the current form.
+            // Missing/expired sessions still redirect even when opted in.
+            const stepUpFailure = allowAuthFailure && ['mfa_invalid_code', 'mfa_invalid_password'].includes(data?.error_code);
+            if (resp.status === 401 && path !== '/auth/login' && !stepUpFailure) {
                 window.location.href = prefix + '/login';
                 const err = new Error(t('auth.session_expired'));
                 err.status = resp.status;
                 throw err;
             }
-            if (resp.status === 503) {
+            if (resp.status === 503 && !data?.error_code) {
                 const err = new Error(t('common.service_busy'));
                 err.status = resp.status;
                 throw err;
             }
-            const contentType = resp.headers.get('content-type') || '';
             if (!contentType.includes('application/json')) {
                 const text = await resp.text();
                 console.error('Non-JSON response:', resp.status, text.substring(0, 200));
@@ -133,16 +137,17 @@ function api(path, options = {}) {
                 err.status = resp.status;
                 throw err;
             }
-            const data = await resp.json();
             if (!resp.ok) {
                 console.error('API error:', resp.status, data);
                 const err = new Error(data.message || 'Request failed (' + resp.status + ')');
                 err.status = resp.status;
+                if (data.error_code) err.code = data.error_code;
                 if (data.conflicts) err.conflicts = data.conflicts;
                 throw err;
             }
             if (!data.success) {
                 const err = new Error(data.message || t('common.operation_failed'));
+                if (data.error_code) err.code = data.error_code;
                 if (data.conflicts) err.conflicts = data.conflicts;
                 throw err;
             }
@@ -152,9 +157,12 @@ function api(path, options = {}) {
             if (timedOut) {
                 err = new Error(t('common.request_timeout'));
             }
-            const message = friendlyAPIError(err);
+            const securityKey = err.code ? 'account_security.' + err.code : '';
+            const localizedSecurityError = securityKey ? t(securityKey) : '';
+            const message = localizedSecurityError && localizedSecurityError !== securityKey ? localizedSecurityError : friendlyAPIError(err);
             const displayErr = message === err.message ? err : new Error(message);
             if (err.conflicts) displayErr.conflicts = err.conflicts;
+            if (err.code) displayErr.code = err.code;
             if (Number.isInteger(err.status)) displayErr.status = err.status;
             if (message !== t('auth.session_expired') && !displayErr.conflicts && !silent && !suppressToast) {
                 console.error('Fetch failed:', err.message, 'URL:', url);
@@ -249,13 +257,16 @@ function formatUptime(seconds) {
 
 function showToast(message, type = 'info') {
     const colors = {
-        success: 'background:#065f46;border-color:#059669;color:#a7f3d0;',
-        error: 'background:#991b1b;border-color:#dc2626;color:#fecaca;',
-        warning: 'background:#78350f;border-color:#d97706;color:#fde68a;',
-        info: 'background:#1e3a5f;border-color:#2563eb;color:#bfdbfe;',
+        success: 'background:var(--panel-success-soft);border-color:var(--panel-success-border);color:var(--panel-success);',
+        error: 'background:var(--panel-danger-soft);border-color:var(--panel-danger-border);color:var(--panel-danger);',
+        warning: 'background:var(--panel-warning-soft);border-color:var(--panel-warning-border);color:var(--panel-warning);',
+        info: 'background:var(--panel-accent-soft);border-color:var(--panel-accent-border);color:var(--panel-accent);',
     };
     const toast = document.createElement('div');
-    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9998;padding:12px 24px;border:1px solid;transition:opacity 0.3s;max-width:min(760px,calc(100vw - 32px));max-height:45vh;overflow:auto;white-space:pre-wrap;word-break:break-word;' + (colors[type] || colors.info);
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+    toast.setAttribute('aria-atomic', 'true');
+    toast.style.cssText = 'position:fixed;bottom:32px;left:50%;transform:translateX(-50%);z-index:9998;padding:14px 20px;border:1px solid;border-radius:10px;box-shadow:var(--panel-shadow);font-size:14px;transition:opacity 0.3s;max-width:min(760px,calc(100vw - 32px));max-height:45vh;overflow:auto;white-space:pre-wrap;word-break:break-word;' + (colors[type] || colors.info);
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => {
@@ -264,44 +275,83 @@ function showToast(message, type = 'info') {
     }, 5000);
 }
 
-function confirmModal(message) {
+let panelDialogSequence = 0;
+
+function showPanelDialog(message, needsConfirmation) {
     return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;';
-        overlay.innerHTML = `
-            <div style="background:#1f2937;border:1px solid #374151;padding:24px;max-width:32rem;width:100%;margin:0 16px;max-height:80vh;display:flex;flex-direction:column;">
-                <p id="modal-message" style="color:#e5e7eb;margin-bottom:16px;white-space:pre-wrap;overflow-y:auto;flex:1;min-height:0;"></p>
-                <div style="display:flex;justify-content:flex-end;gap:12px;flex-shrink:0;">
-                    <button id="modal-cancel" style="background:#4b5563;color:#fff;border:none;padding:8px 16px;cursor:pointer;font-size:14px;">${t('common.cancel')}</button>
-                    <button id="modal-confirm" style="background:#dc2626;color:#fff;border:none;padding:8px 16px;cursor:pointer;font-size:14px;">${t('common.confirm')}</button>
-                </div>
-            </div>
-        `;
-        overlay.querySelector('#modal-message').textContent = message;
-        document.body.appendChild(overlay);
-        overlay.querySelector('#modal-cancel').onclick = () => { overlay.remove(); resolve(false); };
-        overlay.querySelector('#modal-confirm').onclick = () => { overlay.remove(); resolve(true); };
-        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } };
+        const dialog = document.createElement('dialog');
+        // Native modal dialogs make the background inert and contain keyboard
+        // focus. Older browsers retain those guarantees through native prompts.
+        if (typeof dialog.showModal !== 'function') {
+            if (needsConfirmation) resolve(window.confirm(message));
+            else { window.alert(message); resolve(false); }
+            return;
+        }
+        const previousFocus = document.activeElement;
+        const messageID = 'panel-dialog-message-' + (++panelDialogSequence);
+        dialog.className = 'panel-dialog';
+        dialog.setAttribute('aria-labelledby', messageID);
+        dialog.setAttribute('aria-modal', 'true');
+        const content = document.createElement('div');
+        content.className = 'panel-dialog-content';
+        const description = document.createElement('p');
+        description.id = messageID;
+        description.className = 'panel-dialog-message';
+        description.textContent = String(message ?? '');
+        const actions = document.createElement('div');
+        actions.className = 'panel-dialog-actions';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn-secondary';
+        cancel.textContent = t(needsConfirmation ? 'common.cancel' : 'dashboard.close');
+        actions.appendChild(cancel);
+        content.appendChild(description);
+        content.appendChild(actions);
+        dialog.appendChild(content);
+        let settled = false;
+        const finish = (confirmed) => {
+            if (settled) return;
+            settled = true;
+            if (dialog.open) dialog.close();
+            dialog.remove();
+            if (previousFocus?.isConnected && typeof previousFocus.focus === 'function') {
+                previousFocus.focus({ preventScroll: true });
+            }
+            resolve(confirmed);
+        };
+        cancel.addEventListener('click', () => finish(false));
+        if (needsConfirmation) {
+            const confirm = document.createElement('button');
+            confirm.type = 'button';
+            confirm.className = 'btn-danger';
+            confirm.textContent = t('common.confirm');
+            confirm.addEventListener('click', () => finish(true));
+            actions.appendChild(confirm);
+        }
+        dialog.addEventListener('cancel', (event) => {
+            event.preventDefault();
+            finish(false);
+        });
+        dialog.addEventListener('close', () => finish(false));
+        dialog.addEventListener('click', (event) => {
+            if (event.target !== dialog) return;
+            const bounds = dialog.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right ||
+                event.clientY < bounds.top || event.clientY > bounds.bottom) finish(false);
+        });
+        document.body.appendChild(dialog);
+        dialog.showModal();
+        // Default to the non-destructive action when opened from the keyboard.
+        cancel.focus({ preventScroll: true });
     });
 }
 
+function confirmModal(message) {
+    return showPanelDialog(message, true);
+}
+
 function alertModal(message) {
-    return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;';
-        overlay.innerHTML = `
-            <div style="background:#1f2937;border:1px solid #374151;padding:24px;max-width:32rem;width:100%;margin:0 16px;max-height:80vh;display:flex;flex-direction:column;">
-                <p id="modal-message" style="color:#e5e7eb;margin-bottom:16px;white-space:pre-wrap;overflow-y:auto;flex:1;min-height:0;"></p>
-                <div style="display:flex;justify-content:flex-end;gap:12px;flex-shrink:0;">
-                    <button id="modal-close" style="background:#4b5563;color:#fff;border:none;padding:8px 16px;cursor:pointer;font-size:14px;">${t('dashboard.close')}</button>
-                </div>
-            </div>
-        `;
-        overlay.querySelector('#modal-message').textContent = message;
-        document.body.appendChild(overlay);
-        overlay.querySelector('#modal-close').onclick = () => { overlay.remove(); resolve(); };
-        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(); } };
-    });
+    return showPanelDialog(message, false).then(() => undefined);
 }
 
 // Native details handles taps; opening on hover also exposes its closed content.

@@ -61,7 +61,7 @@ func TestUpdateSettingsRequiresCurrentPasswordBeforeUsernameChange(t *testing.T)
 func TestUpdateSettingsDoesNotPartiallyChangeUsernameWhenPasswordIsWrong(t *testing.T) {
 	first, second := setupSettingsSessionTest(t)
 	recorder := updateSystemSetting(t, `{"username":"renamed-admin","old_password":"wrong-password","new_password":"new-password"}`)
-	if recorder.Code != http.StatusBadRequest {
+	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	var username string
@@ -120,7 +120,7 @@ func TestUpdateSettingsKeepsSessionsWhenPasswordIsUnchanged(t *testing.T) {
 func TestUpdateSettingsKeepsSessionsWhenPasswordUpdateFails(t *testing.T) {
 	first, second := setupSettingsSessionTest(t)
 	recorder := updateSystemSetting(t, `{"old_password":"wrong-password","new_password":"new-password"}`)
-	if recorder.Code != http.StatusBadRequest {
+	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	requireSessions(t, []string{first, second}, true)

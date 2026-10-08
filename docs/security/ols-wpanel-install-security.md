@@ -21,11 +21,12 @@ OLS WPanel 要安装和管理 OpenLiteSpeed、LSPHP、MariaDB、Redis、Fail2ban
 e6b66d84c67c8247821d2ab16b6d8e9584a962d4c8458d1f06b52d9cbbd65bd6
 ```
 
-Release 签名只覆盖以下四组资产及各自的校验清单：
+Release 签名只覆盖以下五组资产及各自的校验清单（共 6 个资产、18 个文件）：
 
 - `ols-wpanel-linux-amd64` / `ols-wpanel-linux-arm64` 及对应 `.sha256`、`.sha256.sig`
 - `install.sh`、`install.sh.sha256`、`install.sh.sha256.sig`
 - `install-cn.sh`、`install-cn.sh.sha256`、`install-cn.sh.sha256.sig`
+- `bootstrap.sh`、`bootstrap.sh.sha256`、`bootstrap.sh.sha256.sig`
 - `ols-wpanel-third-party-licenses.tar.gz`、对应 `.sha256` 与 `.sha256.sig`
 
 它不覆盖分支文件或 GitHub 自动生成的源码压缩包。有效签名只证明资产与这把密钥一致，不证明软件无漏洞、构建可复现、一定是最新版本或一定适合你的服务器；第三方反代仍可能返回较旧但签名有效的资产，因此还应核对 Release 版本。正式发布的安装器会把自身固定版本与下载路径、面板版本和许可归档绑定；最低版本门槛仍只是额外的回放下限，不能替代版本核对。
@@ -131,8 +132,9 @@ repair 预检会：
 - 拒绝重复 JSON 键、缺失关键身份、异常绝对路径和不匹配的分发身份；
 - 要求现有 systemd unit 是 root 安全持有、无硬链接、内容与本发行版生成版本完全一致，并拒绝 service drop-in；
 - 只读检查 SQLite 完整性；
+- 对全部更新和 repair 入口比较已安装版本与候选版本；读取版本失败或候选版本更旧时拒绝继续；
 - 验证现有 TLS 配对并保留有效或已过期身份，不会静默替换自定义证书；
-- 在修改前备份关键文件和 SQLite，并记录 SHA-256。
+- 在修改前备份关键文件和 SQLite，并记录 SHA-256；已有 `account-mfa.key` 时一并保存到私有 repair 快照，并保持仅 root 可读。
 
 失败时安装器会尝试恢复已备份的二进制、unit、数据库和 TLS 文件，但回滚也可能失败，而且不是整机快照。它不保证恢复面板目录外的所有 OpenLiteSpeed、PHP、Fail2ban、WordPress 插件或站点数据库副作用。repair 前仍应创建主机和业务数据备份。
 
@@ -140,7 +142,9 @@ repair 预检会：
 
 普通卸载会永久删除 `/www/ols-wpanel`，包括面板数据库、`config.json`、面板 TLS 身份、本地面板/站点备份和远程备份凭据。所需文件必须先复制到该目录之外。
 
-普通卸载的目标是保留 `/www/wwwroot`、`/www/wwwlogs`、站点证书、MariaDB 数据和已安装软件，同时清理已知的 OLS WPanel 服务/任务入口。安装器会删除带有 OLS 所有权标记的专用 APT 源，并恢复它曾禁用且未发生路径冲突的系统源；后来由管理员创建的同名文件不会被覆盖。它不承诺把主机精确恢复到安装前状态，也不替代卸载后审计。
+普通卸载的目标是保留 `/www/wwwroot`、`/www/wwwlogs`、站点证书、MariaDB 数据和已安装软件，同时清理已知的 OLS WPanel 服务/任务入口。运行环境保留时，对应 LiteSpeed / MariaDB APT 源与签名密钥也保留，以便继续获取软件更新；仅在彻底清理对应软件后移除带有 OLS 所有权标记的专用源，并恢复它曾禁用且未发生路径冲突的系统源。后来由管理员创建的同名文件不会被覆盖。它不承诺把主机精确恢复到安装前状态，也不替代卸载后审计。
+
+检测到遗留网站时，fresh install 和 reinstall 会拒绝覆盖安装；删除面板并不表示服务器已恢复为干净环境。应保留网站和数据库备份，按[升级兼容性说明](../upgrade-compatibility.md)恢复匹配的面板状态。
 
 “完全卸载”面向专用主机，会删除面板记录的网站数据库、OpenLiteSpeed 站点配置以及指定目录中的网站、日志和证书，卸载 OpenLiteSpeed、LSPHP 和 MariaDB。Redis、Fail2ban 等可能共享的软件保留，只清理面板自身集成。它不是安全擦除，软件包未移除的共享目录、部分用户、防火墙和自定义配置仍可能残留，不等于恢复一台全新 VPS。
 

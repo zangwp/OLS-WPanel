@@ -3,7 +3,7 @@
 <div x-data="databaseDetail()" x-init="init()">
     <div class="flex items-center justify-between mb-6">
         <div>
-            <h2 class="text-xl font-bold text-white">{{t .Lang "database.detail_title"}}</h2>
+            <h1 class="page-title">{{t .Lang "database.detail_title"}}</h1>
             <p x-show="site" class="text-sm text-gray-500 mt-1" x-text="site?.domain || ''"></p>
         </div>
         <a href="/{{.RandomSuffix}}/databases" class="btn-secondary">{{t .Lang "database.back_to_list"}}</a>
@@ -105,14 +105,23 @@
 
             <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4 p-3 rounded bg-gray-900/60">
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
-                    <input type="checkbox" x-model="backupEnabled" @change="saveBackupSettings()">
+                    <input type="checkbox" x-model="backupEnabled" @change="saveBackupSettings()" :disabled="!backupSettingsLoaded || backupSettingsLoading || backupSettingsSaving">
                     <span>{{t .Lang "website.auto_backup"}}</span>
                 </label>
                 <label class="flex items-center gap-2 text-sm text-gray-300">
                     <span>{{t .Lang "website.keep"}}</span>
-                    <input type="number" x-model.number="backupKeepCount" @change="saveBackupSettings()" class="input-field w-16 text-sm py-0.5 text-center" min="1" max="30">
+                    <input type="number" x-model.number="backupKeepCount" @change="saveBackupSettings()" :disabled="!backupSettingsLoaded || backupSettingsLoading || backupSettingsSaving" class="input-field w-16 text-sm py-0.5 text-center" min="1" max="30">
                     <span>{{t .Lang "website.copies"}}</span>
                 </label>
+            </div>
+
+            <div class="mb-4 text-sm" role="status" aria-live="polite">
+                <span x-show="backupSettingsLoading" x-text="t('common.loading')"></span>
+                <span x-show="backupSettingsSaving" x-text="t('common.saving')"></span>
+                <div x-show="backupSettingsError" class="text-red-400">
+                    <span x-text="backupSettingsError"></span>
+                    <button @click="fetchBackupSettings()" :disabled="backupSettingsLoading || backupSettingsSaving" class="btn-secondary text-xs ml-2">{{t .Lang "common.retry"}}</button>
+                </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -190,7 +199,7 @@
                 <div><label class="label">{{t .Lang "website.new_home"}}</label><input type="text" x-model="newHomeURL" class="input-field font-mono" placeholder="https://example.com"></div>
                 <button @click="autoFillSiteURL()" type="button" class="btn-secondary text-xs">{{t .Lang "website.auto_fill_panel_domain"}}</button>
             </div>
-            <div x-show="siteURLDomainCandidate()" class="mb-4 p-3 rounded" style="background-color: #0f172a; border: 1px solid #334155;">
+            <div x-show="siteURLDomainCandidate()" class="mb-4 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <label class="flex items-start gap-2 text-sm text-gray-200">
                     <input type="checkbox" x-model="syncPanelDomain" class="mt-1">
                     <span>{{t .Lang "database.sync_panel_domain"}}</span>
@@ -280,6 +289,10 @@ function databaseDetail() {
         backupSubmitting: false,
         backupEnabled: false,
         backupKeepCount: 7,
+        backupSettingsLoaded: false,
+        backupSettingsLoading: false,
+        backupSettingsSaving: false,
+        backupSettingsError: '',
         restoringId: null,
         restoreUploading: false,
         restorePhase: '',
@@ -518,14 +531,40 @@ function databaseDetail() {
             if (r.success) this.backups = r.data || [];
         },
         async fetchBackupSettings() {
-            const r = await api('/websites/' + this.site.id + '/backups/settings');
-            if (r.success) { this.backupEnabled = r.data.enabled; this.backupKeepCount = r.data.keep_count; }
+            if (!this.site || this.backupSettingsLoading || this.backupSettingsSaving) return;
+            this.backupSettingsLoaded = false;
+            this.backupSettingsLoading = true;
+            this.backupSettingsError = '';
+            try {
+                const r = await api('/websites/' + this.site.id + '/backups/settings');
+                if (!r.success || typeof r.data?.enabled !== 'boolean' || !Number.isInteger(r.data.keep_count) || r.data.keep_count < 1 || r.data.keep_count > 30) {
+                    throw new Error(r.message || t('common.request_failed'));
+                }
+                this.backupEnabled = r.data.enabled;
+                this.backupKeepCount = r.data.keep_count;
+                this.backupSettingsLoaded = true;
+            } catch (e) {
+                this.backupSettingsError = t('website.load_failed_with_error', { error: e.message });
+            } finally { this.backupSettingsLoading = false; }
         },
         async saveBackupSettings() {
+            if (!this.backupSettingsLoaded || this.backupSettingsLoading || this.backupSettingsSaving) return;
+            this.backupSettingsSaving = true;
+            this.backupSettingsError = '';
             try {
-                await api('/websites/' + this.site.id + '/backups/settings', { method: 'PUT', body: { enabled: this.backupEnabled, keep_count: parseInt(this.backupKeepCount) || 7 } });
+                let body;
+                do {
+                    body = { enabled: this.backupEnabled, keep_count: Number(this.backupKeepCount) };
+                    if (!Number.isInteger(body.keep_count) || body.keep_count < 1 || body.keep_count > 30) throw new Error(t('common.invalid_params'));
+                    const r = await api('/websites/' + this.site.id + '/backups/settings', { method: 'PUT', body });
+                    if (!r.success) throw new Error(r.message || t('common.request_failed'));
+                } while (body.enabled !== this.backupEnabled || body.keep_count !== Number(this.backupKeepCount));
                 showToast(t('website.backup_settings_saved'), 'success');
-            } catch (e) { showToast(e.message, 'error'); }
+            } catch (e) {
+                this.backupSettingsLoaded = false;
+                this.backupSettingsError = e.message;
+                showToast(e.message, 'error');
+            } finally { this.backupSettingsSaving = false; }
         },
         async createBackup() {
             this.backupSubmitting = true;

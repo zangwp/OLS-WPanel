@@ -290,6 +290,10 @@ func legacyEnableSiteRestoresMigratedMaintenanceLink(t *testing.T) {
 
 func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 	openTestDB(t)
+	oldDeleteUser, oldDeleteDatabase := deleteSiteUser, deleteSiteDatabase
+	deleteSiteUser = func(string) error { return nil }
+	deleteSiteDatabase = func(string, string, *config.Config) error { return nil }
+	t.Cleanup(func() { deleteSiteUser, deleteSiteDatabase = oldDeleteUser, oldDeleteDatabase })
 	db := database.GetDB()
 	root := t.TempDir()
 	cfg := &config.Config{

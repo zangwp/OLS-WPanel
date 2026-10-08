@@ -19,8 +19,13 @@ import (
 type AlertHandler struct{}
 
 func (h *AlertHandler) GetSettings(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	db := database.GetDB()
-	rows, err := db.Query("SELECT id, skey, svalue, description, updated_at FROM security_settings WHERE skey LIKE 'alert_%' OR skey LIKE 'smtp_%' OR skey = 'admin_email' OR skey LIKE 'webhook_%'")
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
+		return
+	}
+	rows, err := db.QueryContext(c.Request.Context(), "SELECT id, skey, svalue, description, updated_at FROM security_settings WHERE skey LIKE 'alert_%' OR skey LIKE 'smtp_%' OR skey = 'admin_email' OR skey LIKE 'webhook_%'")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
 		return
@@ -31,8 +36,15 @@ func (h *AlertHandler) GetSettings(c *gin.Context) {
 	for rows.Next() {
 		var id int
 		var key, val, desc, updated string
-		rows.Scan(&id, &key, &val, &desc, &updated)
+		if err := rows.Scan(&id, &key, &val, &desc, &updated); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
+			return
+		}
 		settings[key] = val
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
+		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(settings))
 }

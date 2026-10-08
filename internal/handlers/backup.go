@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -374,12 +376,18 @@ func (h *BackupHandler) RestoreStatus(c *gin.Context) {
 }
 
 func (h *BackupHandler) GetSettings(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	id, _ := strconv.Atoi(c.Param("id"))
 	db := database.GetDB()
 	var enabled, keepCount int
 	err := db.QueryRow("SELECT enabled, keep_count FROM backup_settings WHERE site_id = ?", id).Scan(&enabled, &keepCount)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusOK, models.SuccessResponse(models.BackupSettings{Enabled: false, KeepCount: 7}))
+		return
+	}
+	if err != nil {
+		log.Printf("读取网站备份设置失败 site=%d: %v", id, err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("备份设置读取失败"))
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(models.BackupSettings{Enabled: enabled == 1, KeepCount: keepCount}))

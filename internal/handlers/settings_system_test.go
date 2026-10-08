@@ -5,9 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zangwp/OLS-WPanel/internal/accountsecurity"
+	"github.com/zangwp/OLS-WPanel/internal/database"
+	"github.com/zangwp/OLS-WPanel/internal/middleware"
 )
 
 func withSystemSettingStubs(t *testing.T) {
@@ -30,6 +34,24 @@ func updateSystemSettingWithHandler(t *testing.T, handler *SettingsHandler, body
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
+	if db := database.GetDB(); db != nil {
+		var username string
+		if db.QueryRow("SELECT username FROM admin_users LIMIT 1").Scan(&username) == nil {
+			ctx.Set("session_username", username)
+			session := middleware.GlobalSessionStore.Create(username)
+			ctx.Request.AddCookie(&http.Cookie{Name: "wp_session", Value: session.Token})
+			t.Cleanup(func() { middleware.GlobalSessionStore.Delete(session.Token) })
+			if handler.Auth == nil {
+				mfa, err := accountsecurity.NewMFAService(db, filepath.Join(t.TempDir(), "account-mfa.key"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				audit := accountsecurity.NewAuditService(db)
+				t.Cleanup(audit.Close)
+				handler.Auth = &AuthHandler{DB: db, MFA: mfa, Audit: audit}
+			}
+		}
+	}
 	handler.UpdateSettings(ctx)
 	return recorder
 }

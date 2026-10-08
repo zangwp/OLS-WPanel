@@ -4,10 +4,10 @@
 
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
-            <h2 class="text-xl font-bold text-white">
+            <h1 class="page-title">
                 {{t .Lang "website.detail_title"}}
                 <span x-show="site" class="ml-2 text-base font-medium text-blue-300" x-text="site?.domain || ''"></span>
-            </h2>
+            </h1>
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "website.detail_subtitle"}}</p>
             <div x-show="site" class="flex flex-wrap items-center gap-2 mt-2">
                 <span :class="site?.status === 'active' ? 'badge-success' : 'badge-warning'" x-text="site?.status === 'active' ? t('website.status_running') : (site?.status === 'migrated' ? t('website.status_migrated') : (site?.status === 'deleting' ? t('website.status_deleting') : t('website.status_paused')))"></span>
@@ -48,11 +48,11 @@
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.https_policy"}}</dt><dd class="text-white" x-text="site.ssl_enabled ? t('website.https_forced') : t('website.https_requires_ssl')"></dd></div>
                 <div class="pt-2 flex flex-wrap gap-2">
                     <a x-show="site.site_type === 'wordpress' && wordpressAdminURL()" :href="wordpressAdminURL()" target="_blank" rel="noopener noreferrer" class="btn-primary text-sm">{{t .Lang "website.open_wp_admin"}}</a>
-                    <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.edit_domain"}}</button>
-                    <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.files"}}</a>
-                    <a :href="(document.body.dataset.panelPrefix || '') + '/databases/' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "nav.databases"}}</a>
-                    <a :href="(document.body.dataset.panelPrefix || '') + '/ai-diagnostics?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: #14532d; color: #86efac;">{{t .Lang "nav.ai_diagnostics"}}</a>
-                    <button @click="aiDevelopmentModalOpen = true; fetchAIDevelopment()" class="text-sm py-1.5 px-3 rounded" style="background-color: #581c87; color: #e9d5ff;">{{t .Lang "ai_development.title"}}</button>
+                    <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "website.edit_domain"}}</button>
+                    <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "nav.files"}}</a>
+                    <a :href="(document.body.dataset.panelPrefix || '') + '/databases/' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "nav.databases"}}</a>
+                    <a :href="(document.body.dataset.panelPrefix || '') + '/ai-diagnostics?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-success-soft); color: var(--panel-success);">{{t .Lang "nav.ai_diagnostics"}}</a>
+                    <button @click="aiDevelopmentModalOpen = true; fetchAIDevelopment()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-purple-soft); color: var(--panel-purple);">{{t .Lang "ai_development.title"}}</button>
                 </div>
                 <div>
                     <dt class="text-sm text-gray-400">{{t .Lang "website.status"}}</dt>
@@ -118,7 +118,7 @@
                     </div>
                 </div>
                 <div class="pt-1" x-show="!editingExpiry">
-                    <button @click="editingExpiry = true; expiresAtInput = site.expires_at ? site.expires_at.substring(0, 10) : ''" class="text-xs py-1 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.edit_expiry_time"}}</button>
+                    <button @click="editingExpiry = true; expiresAtInput = site.expires_at ? site.expires_at.substring(0, 10) : ''" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "website.edit_expiry_time"}}</button>
                 </div>
             </dl>
         </div>
@@ -172,10 +172,10 @@
                     <div><dt class="text-sm text-gray-400">{{t .Lang "website.expiry_time"}}</dt><dd class="text-white" x-text="site.ssl_expires_at ? new Date(site.ssl_expires_at).toLocaleDateString(currentLocale()) : t('website.unknown')"></dd></div>
                 </dl>
                 <div class="flex flex-wrap gap-3">
-                    <button @click="downloadSSLPackage()" class="text-sm py-1.5 px-3 rounded" style="background-color: #374151; color: #e5e7eb;">{{t .Lang "website.download_cert_package"}}</button>
-                    <button @click="sslMode='auto'; sslModalOpen=true" class="text-sm py-1.5 px-3 rounded" style="background-color: #166534; color: #bbf7d0;">{{t .Lang "website.reissue"}}</button>
-                    <button @click="sslMode='manual'; sslCert=''; sslKey=''; sslModalOpen=true" class="text-sm py-1.5 px-3 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "website.replace_cert"}}</button>
-                    <button @click="removeSSL()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.delete_cert"}}</button>
+                    <button @click="downloadSSLPackage()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-surface-soft); color: var(--panel-text);">{{t .Lang "website.download_cert_package"}}</button>
+                    <button @click="sslMode='auto'; sslModalOpen=true" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-success-soft); color: var(--panel-success);">{{t .Lang "website.reissue"}}</button>
+                    <button @click="sslMode='manual'; sslCert=''; sslKey=''; sslModalOpen=true" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "website.replace_cert"}}</button>
+                    <button @click="removeSSL()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">{{t .Lang "website.delete_cert"}}</button>
                 </div>
             </div>
 
@@ -302,8 +302,8 @@
             </details>
             <div class="flex items-center space-x-3 mb-3">
                 <button @click="saveWPOptimizations()" :disabled="optimizationSaving || site.file_lock_enabled" class="btn-primary text-sm" x-text="optimizationSaving ? t('common.saving') : t('website.save_settings')"></button>
-                <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear_page_cache"}}</button>
-                <button x-show="site.site_type === 'wordpress' && cacheRuntime.redis_object_cache_configured" @click="clearRedisObjectCache()" :disabled="redisCacheClearing" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;" x-text="redisCacheClearing ? t('website.clearing_redis_cache') : t('website.clear_redis_cache')"></button>
+                <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">{{t .Lang "website.clear_page_cache"}}</button>
+                <button x-show="site.site_type === 'wordpress' && cacheRuntime.redis_object_cache_configured" @click="clearRedisObjectCache()" :disabled="redisCacheClearing" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);" x-text="redisCacheClearing ? t('website.clearing_redis_cache') : t('website.clear_redis_cache')"></button>
             </div>
             <div x-show="site.site_type === 'wordpress'" class="mb-4 space-y-2">
 
@@ -312,7 +312,7 @@
             </div>
             <p x-show="site.file_lock_enabled" class="text-xs text-yellow-300 mb-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
 
-            <details class="mt-3 p-3 rounded text-xs" style="background-color: #0f172a;">
+            <details class="mt-3 p-3 rounded text-xs" style="background-color: var(--panel-surface-muted);">
                 <summary class="cursor-pointer text-gray-300 font-medium">{{t .Lang "website.litespeed_cache_how_it_works"}}</summary>
                 <ul class="text-gray-400 space-y-1 list-disc list-inside mt-2">
                     <li>{{t .Lang "website.litespeed_cache_point_static"}}</li>
@@ -476,11 +476,11 @@
                 <button @click="selectLogType('access')" :class="logType === 'access' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.access_log"}}</button>
                 <button @click="selectLogType('error')" :class="logType === 'error' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.error_log"}}</button>
                 <button x-show="site.site_type === 'wordpress'" @click="selectLogType('security')" :class="logType === 'security' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.security_log"}}</button>
-                <button @click="fetchLogs()" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: #1e293b; border: 1px solid #334155;">{{t .Lang "website.refresh"}}</button>
-                <button @click="clearLogs()" class="text-sm py-1 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">{{t .Lang "website.clear"}}</button>
-                <button @click="logFullscreen = true" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: #1e293b; border: 1px solid #334155;">{{t .Lang "website.fullscreen"}}</button>
-                <button @click="downloadLogFile(currentLogFilename())" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: #1e293b; border: 1px solid #334155;">{{t .Lang "website.download_current_full_log"}}</button>
-				<a :href="(document.body.dataset.panelPrefix || '') + '/log-analysis?site_id=' + site.id" class="text-sm py-1 px-3 rounded inline-block" style="background-color: #14532d; color: #86efac;">{{t .Lang "website.analyze_logs"}}</a>
+                <button @click="fetchLogs()" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.refresh"}}</button>
+                <button @click="clearLogs()" class="text-sm py-1 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">{{t .Lang "website.clear"}}</button>
+                <button @click="logFullscreen = true" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.fullscreen"}}</button>
+                <button @click="downloadLogFile(currentLogFilename())" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.download_current_full_log"}}</button>
+				<a :href="(document.body.dataset.panelPrefix || '') + '/log-analysis?site_id=' + site.id" class="text-sm py-1 px-3 rounded inline-block" style="background-color: var(--panel-success-soft); color: var(--panel-success);">{{t .Lang "website.analyze_logs"}}</a>
                 <select @change="setAccessLogMode($event.target.value)" x-model="accessLogMode" x-show="logType === 'access'" class="input-field w-28 text-sm py-1">
                     <option value="off">{{t .Lang "website.access_log_off"}}</option>
                     <option value="error_only">{{t .Lang "website.access_log_error_only"}}</option>
@@ -498,11 +498,11 @@
                 </div>
             </div>
             <p class="text-xs text-gray-500 mb-3">{{t .Lang "website.log_preview_help"}}</p>
-            <pre x-text="logContent" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: #0f172a; border: 1px solid #334155; color: #94a3b8; max-height: 400px; white-space: pre-wrap; word-break: break-all;"></pre>
+            <pre x-text="logContent" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-muted); max-height: 400px; white-space: pre-wrap; word-break: break-all;"></pre>
             <div class="mt-4">
                 <div class="flex items-center justify-between mb-2">
                     <h4 class="text-sm font-medium text-white">{{t .Lang "website.history_log_download"}}</h4>
-                    <button @click="fetchLogFiles()" class="text-xs py-1 px-2 rounded text-gray-400 hover:text-white" style="background-color: #1e293b; border: 1px solid #334155;">{{t .Lang "website.refresh_list"}}</button>
+                    <button @click="fetchLogFiles()" class="text-xs py-1 px-2 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.refresh_list"}}</button>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -548,17 +548,17 @@
                 <button @click="selectLogType('access')" :class="logType === 'access' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.log_type_access"}}</button>
                 <button @click="selectLogType('error')" :class="logType === 'error' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.log_type_error"}}</button>
                 <button x-show="site.site_type === 'wordpress'" @click="selectLogType('security')" :class="logType === 'security' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.log_type_security"}}</button>
-                <button @click="fetchLogs()" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: #1e293b; border: 1px solid #334155;">{{t .Lang "website.refresh"}}</button>
+                <button @click="fetchLogs()" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.refresh"}}</button>
                 <select x-model.number="logLineLimit" @change="fetchLogs()" class="input-field w-28 text-sm py-1">
                     <option value="200">{{t .Lang "website.log_last_200"}}</option>
                     <option value="1000">{{t .Lang "website.log_last_1000"}}</option>
                     <option value="5000">{{t .Lang "website.log_last_5000"}}</option>
                 </select>
-                <button @click="downloadLogFile(currentLogFilename())" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: #1e293b; border: 1px solid #334155;">{{t .Lang "website.download_current_log"}}</button>
+                <button @click="downloadLogFile(currentLogFilename())" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.download_current_log"}}</button>
             </div>
             <button @click="logFullscreen = false" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
         </div>
-        <pre x-text="logContent" class="flex-1 w-full p-6 text-xs font-mono overflow-auto" style="background-color: #0a0e14; color: #94a3b8; white-space: pre-wrap; word-break: break-all;"></pre>
+        <pre x-text="logContent" class="flex-1 w-full p-6 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-soft); color: var(--panel-muted); white-space: pre-wrap; word-break: break-all;"></pre>
     </div>
 
     <!-- ============================================================ -->
@@ -567,7 +567,7 @@
 
     <!-- AI 开发访问 -->
     <div x-show="aiDevelopmentModalOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="if (!aiAccess.busy) aiDevelopmentModalOpen = false">
-        <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[80vh] overflow-y-auto" style="border: 1px solid #581c87;">
+        <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[80vh] overflow-y-auto" style="border: 1px solid var(--panel-purple-soft);">
             <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
                 <div>
                     <h3 class="text-lg font-semibold text-white">{{t .Lang "ai_development.title"}}</h3>
@@ -640,7 +640,7 @@
                         <li>{{t .Lang "ai_development.usage_step_open"}}</li>
                     </ol>
                     <label class="block text-xs text-gray-400 mt-4 mb-1">{{t .Lang "ai_development.first_prompt_label"}}</label>
-                    <textarea readonly :value="t('ai_development.first_prompt')" rows="5" class="w-full rounded p-3 text-xs font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;"></textarea>
+                    <textarea readonly :value="t('ai_development.first_prompt')" rows="5" class="w-full rounded p-3 text-xs font-mono" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-text); resize: vertical;"></textarea>
                     <div class="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <p class="text-xs text-yellow-300">{{t .Lang "ai_development.credential_once_warning"}}</p>
                         <div class="flex flex-wrap gap-2">
@@ -659,21 +659,21 @@
 
     <!-- 编辑域名 -->
     <div x-show="domainModalOpen" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" @click.self="domainModalOpen = false">
-        <div class="rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" style="background-color: #1e293b; border: 1px solid #334155;">
+        <div class="rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "website.edit_domain"}}</h3>
                 <button @click="domainModalOpen = false" class="text-gray-400 hover:text-white text-xl">&times;</button>
             </div>
             <div class="mb-3">
                 <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.main_domain"}}</label>
-                <input type="text" x-model="editDomain" class="w-full rounded p-2 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0;">
+                <input type="text" x-model="editDomain" class="w-full rounded p-2 text-sm font-mono" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-text);">
             </div>
             <div class="mb-3">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
                     <label class="block text-sm text-gray-300">{{t .Lang "website.aliases_one_per_line"}}</label>
                     <button type="button" @click="addEditedWWWRedirect()" :disabled="!editedWWWAliasCandidate()" class="btn-secondary text-xs py-1 disabled:opacity-50 disabled:cursor-not-allowed">{{t .Lang "website.add_www_redirect"}}</button>
                 </div>
-                <textarea x-model="editAliasesStr" rows="4" class="w-full rounded p-2 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;" placeholder="{{t .Lang "website.alias_placeholder"}}"></textarea>
+                <textarea x-model="editAliasesStr" rows="4" class="w-full rounded p-2 text-sm font-mono" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-text); resize: vertical;" placeholder="{{t .Lang "website.alias_placeholder"}}"></textarea>
                 <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.add_www_redirect_help"}}</p>
             </div>
             <div class="mb-3" :class="editAliasesStr.trim() ? '' : 'opacity-60'">
@@ -686,7 +686,7 @@
                 <p x-show="!editAliasesStr.trim()" class="text-xs text-gray-400 mt-1">{{t .Lang "website.alias_empty_hint"}}</p>
                 <p x-show="editAliasesStr.trim()" class="text-xs text-gray-400 mt-1">{{t .Lang "website.alias_redirect_help"}}</p>
             </div>
-            <div x-show="firstEditedAlias()" class="mb-3 p-3 rounded text-xs font-mono break-all" style="background-color: #0f172a; border: 1px solid #334155;">
+            <div x-show="firstEditedAlias()" class="mb-3 p-3 rounded text-xs font-mono break-all" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <div class="text-gray-400 mb-1">{{t .Lang "website.redirect_preview"}}</div>
                 <div><span class="text-gray-300" x-text="redirectPreviewSource()"></span> <span class="text-gray-500">→</span> <span class="text-green-300" x-text="redirectPreviewTarget()"></span></div>
             </div>
@@ -694,11 +694,11 @@
                 <button type="button" @click="checkDomainDNS()" :disabled="domainDNSChecking" class="btn-secondary text-sm" x-text="domainDNSChecking ? t('website.dns_checking') : t('website.check_dns')"></button>
                 <span x-show="domainDNSResult" class="text-xs" :class="domainDNSResult && domainDNSResult.ok ? 'text-green-300' : 'text-yellow-300'" x-text="domainDNSStatusText()"></span>
             </div>
-            <div x-show="domainDNSResult && ((domainDNSResult.hard_warnings || []).length || (domainDNSResult.warnings || []).length)" class="mb-3 p-3 rounded text-xs text-yellow-200 whitespace-pre-line" style="background-color: #422006; border: 1px solid #78350f;" x-text="domainDNSWarnings()"></div>
-            <div x-show="editDomain !== site.domain" class="mb-3 p-3 rounded text-sm" style="background-color: #422006; border: 1px solid #78350f; color: #fbbf24;">
+            <div x-show="domainDNSResult && ((domainDNSResult.hard_warnings || []).length || (domainDNSResult.warnings || []).length)" class="mb-3 p-3 rounded text-xs text-yellow-200 whitespace-pre-line" style="background-color: var(--panel-warning-soft); border: 1px solid var(--panel-warning-border);" x-text="domainDNSWarnings()"></div>
+            <div x-show="editDomain !== site.domain" class="mb-3 p-3 rounded text-sm" style="background-color: var(--panel-warning-soft); border: 1px solid var(--panel-warning-border); color: var(--panel-warning);">
                 <span x-text="t('website.domain_change_resources_warning', { user: site.system_user })"></span>
             </div>
-            <div x-show="site.site_type === 'wordpress'" class="mb-3 p-3 rounded" style="background-color: #0f172a; border: 1px solid #334155;">
+            <div x-show="site.site_type === 'wordpress'" class="mb-3 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <label class="flex items-start gap-2 text-sm text-gray-200">
                     <input type="checkbox" x-model="syncWPSiteURLs" :disabled="wpURLsLoading || !editDomain.trim() || editDomain.trim().toLowerCase() === site.domain.toLowerCase() || !canSyncWPSiteURLs()" class="mt-1">
                     <span>{{t .Lang "website.sync_wp_site_urls"}}</span>
@@ -712,7 +712,7 @@
                 </div>
                 <p x-show="!wpURLsLoading && wpURLsError" class="text-xs text-yellow-300 mt-2" x-text="wpURLsError"></p>
             </div>
-            <div x-show="site.ssl_enabled" class="mb-3 p-3 rounded" style="background-color: #0f172a; border: 1px solid #334155;">
+            <div x-show="site.ssl_enabled" class="mb-3 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <label class="flex items-start gap-2 text-sm text-gray-200">
                     <input type="checkbox" x-model="reissueSSL" :disabled="site.ssl_cert_source !== 'auto'" class="mt-1">
                     <span>{{t .Lang "website.reissue_ssl_domains"}}</span>
@@ -728,7 +728,7 @@
 
     <!-- SSL 证书 -->
     <div x-show="sslModalOpen" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" @click.self="sslModalOpen = false">
-        <div class="rounded-lg shadow-xl w-full max-w-2xl p-6" style="background-color: #1e293b; border: 1px solid #334155;">
+        <div class="rounded-lg shadow-xl w-full max-w-2xl p-6" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">
                     <span x-show="!site.ssl_enabled">{{t .Lang "website.enable_ssl_for"}} <span x-text="site.domain"></span></span>
@@ -750,11 +750,11 @@
             <div x-show="sslMode === 'manual'">
                 <div class="mb-4">
                     <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.ssl_cert_content"}}</label>
-                    <textarea x-model="sslCert" rows="6" class="w-full rounded p-3 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+                    <textarea x-model="sslCert" rows="6" class="w-full rounded p-3 text-sm font-mono" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-text); resize: vertical;" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
                 </div>
                 <div class="mb-4">
                     <label class="block text-sm text-gray-300 mb-1">{{t .Lang "website.ssl_key_content"}}</label>
-                    <textarea x-model="sslKey" rows="6" class="w-full rounded p-3 text-sm font-mono" style="background-color: #0f172a; border: 1px solid #334155; color: #e2e8f0; resize: vertical;" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
+                    <textarea x-model="sslKey" rows="6" class="w-full rounded p-3 text-sm font-mono" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-text); resize: vertical;" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
                 </div>
             </div>
 
