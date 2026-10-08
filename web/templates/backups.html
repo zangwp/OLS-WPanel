@@ -2,7 +2,7 @@
 {{define "backups_content"}}
 <div x-data="backupsOverview()" x-init="fetchOverview()">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-        <h2 class="text-xl font-bold text-white">{{t .Lang "nav.backups"}}</h2>
+        <h1 class="page-title">{{t .Lang "nav.backups"}}</h1>
         <div class="flex flex-wrap gap-3">
             <button @click="openPolicy()" class="btn-primary text-xs py-1 px-3">{{t .Lang "backups.batch_settings"}}</button>
             <a href="/{{.RandomSuffix}}/backups/remote-settings" class="btn-secondary text-xs py-1 px-3">{{t .Lang "backups.remote_settings"}}</a>

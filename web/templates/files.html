@@ -3,7 +3,7 @@
 <div x-data="fileManager()" x-init="initSites()">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
-            <h2 class="text-xl font-bold text-white">{{t .Lang "nav.files"}}</h2>
+            <h1 class="page-title">{{t .Lang "nav.files"}}</h1>
             <p x-show="!hasSelectedRoot()" class="text-sm text-gray-500 mt-1">{{t .Lang "files.directory_list_help"}}</p>
             <p x-show="hasSelectedRoot()" class="text-sm text-gray-500 mt-1">
                 <span>{{t .Lang "files.current_root"}}</span>
@@ -13,6 +13,9 @@
         </div>
         <button x-show="hasSelectedRoot()" @click="showRootList()" :disabled="uploading || archiveBusy || remoteImporting" class="btn-secondary text-sm self-start sm:self-auto">{{t .Lang "files.back_to_directory_list"}}</button>
     </div>
+
+    <div x-show="loadError" x-cloak class="mb-4 text-sm text-red-300" role="alert" x-text="loadError"></div>
+    <div x-show="loadingFiles && !hasSelectedRoot()" class="mb-4 text-sm text-gray-400" role="status">{{t .Lang "files.refreshing"}}</div>
 
     <div x-show="!hasSelectedRoot()" x-cloak class="card">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -110,7 +113,7 @@
     <template x-if="clipboard">
     <div class="flex flex-wrap items-center gap-2 mb-3 p-3 bg-green-900/30 rounded border border-green-800">
         <span class="text-sm text-gray-300" x-text="t('files.clipboard_label', { count: clipboard.names.length, action: clipboard.action === 'cut' ? t('files.clipboard_cut') : t('files.clipboard_copy') })"></span>
-        <button @click="pasteItems()" class="btn-primary text-sm py-1">{{t .Lang "files.paste"}}</button>
+        <button @click="pasteItems()" :disabled="loadingFiles" class="btn-primary text-sm py-1">{{t .Lang "files.paste"}}</button>
         <button @click="clipboard = null" class="text-sm text-gray-400 hover:text-white py-1">{{t .Lang "files.clear"}}</button>
     </div>
     </template>
@@ -164,8 +167,8 @@
                 <template x-for="(seg, idx) in breadcrumbs()" :key="idx">
                     <span>
                         <span class="text-gray-500" x-show="idx > 0"> / </span>
-                        <span class="cursor-pointer hover:text-blue-400" :class="idx === breadcrumbs().length - 1 ? 'text-white' : 'text-gray-400'"
-                              @click="goToBreadcrumb(idx)" x-text="seg.label"></span>
+                        <button type="button" class="hover:text-blue-400" :class="idx === breadcrumbs().length - 1 ? 'text-white' : 'text-gray-400'"
+                              :aria-current="idx === breadcrumbs().length - 1 ? 'location' : null" @click="goToBreadcrumb(idx)" x-text="seg.label"></button>
                     </span>
                 </template>
             </div>
@@ -183,15 +186,15 @@
                     <span x-show="loadingFiles">{{t .Lang "files.refreshing"}}</span>
                     <span x-show="!loadingFiles">{{t .Lang "files.refresh"}}</span>
                 </button>
-                <button @click="showMkdir = true" :disabled="!selectedSite" class="btn-secondary text-sm">{{t .Lang "files.new_directory"}}</button>
+                <button @click="showMkdir = true" :disabled="!selectedSite || loadingFiles" class="btn-secondary text-sm">{{t .Lang "files.new_directory"}}</button>
                 <button @click="fixPermissions()" :disabled="!selectedSite || selectedSite == '0' || fixingPerms" class="btn-secondary text-sm">
                     <span x-show="fixingPerms">{{t .Lang "files.fixing_permissions"}}</span>
                     <span x-show="!fixingPerms">{{t .Lang "files.fix_permissions"}}</span>
                 </button>
-                <button @click="openRemoteImport()" :disabled="!hasSelectedRoot() || remoteImporting" class="btn-secondary text-sm">{{t .Lang "files.remote_import"}}</button>
+                <button @click="openRemoteImport()" :disabled="!hasSelectedRoot() || remoteImporting || loadingFiles" class="btn-secondary text-sm">{{t .Lang "files.remote_import"}}</button>
                 <form @submit.prevent="uploadFile" class="flex items-center gap-2">
                     <input type="file" @change="fileSelected($event)" :disabled="!hasSelectedRoot() || uploading" class="input-field w-32 sm:w-48 md:w-64 text-sm">
-                    <button type="submit" class="btn-primary text-sm" :disabled="!hasSelectedRoot() || !uploadTarget || uploading" x-text="uploading ? t('files.uploading', { progress: uploadProgress }) : t('files.upload')"></button>
+                    <button type="submit" class="btn-primary text-sm" :disabled="!hasSelectedRoot() || !uploadTarget || uploading || loadingFiles" x-text="uploading ? t('files.uploading', { progress: uploadProgress }) : t('files.upload')"></button>
                 </form>
             </div>
         </div>
@@ -218,17 +221,18 @@
                 <thead class="border-b border-gray-700">
                     <tr>
                         <th class="table-header w-10"><input type="checkbox" @change="selectAll($event.target.checked)" :disabled="search.active || visibleFiles.length === 0"></th>
-                        <th class="table-header cursor-pointer hover:text-white select-none" @click="setSort('name')">{{t .Lang "files.name"}}<span class="ml-1 text-xs" x-text="sortMark('name')"></span></th>
-                        <th class="table-header cursor-pointer hover:text-white select-none" @click="setSort('type')">{{t .Lang "files.type"}}<span class="ml-1 text-xs" x-text="sortMark('type')"></span></th>
-                        <th class="table-header cursor-pointer hover:text-white select-none" @click="setSort('size')">{{t .Lang "files.size"}}<span class="ml-1 text-xs" x-text="sortMark('size')"></span></th>
+                        <th class="table-header" :aria-sort="sortBy === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"><button type="button" class="hover:text-white" @click="setSort('name')">{{t .Lang "files.name"}}<span aria-hidden="true" class="ml-1 text-xs" x-text="sortMark('name')"></span></button></th>
+                        <th class="table-header" :aria-sort="sortBy === 'type' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"><button type="button" class="hover:text-white" @click="setSort('type')">{{t .Lang "files.type"}}<span aria-hidden="true" class="ml-1 text-xs" x-text="sortMark('type')"></span></button></th>
+                        <th class="table-header" :aria-sort="sortBy === 'size' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"><button type="button" class="hover:text-white" @click="setSort('size')">{{t .Lang "files.size"}}<span aria-hidden="true" class="ml-1 text-xs" x-text="sortMark('size')"></span></button></th>
                         <th class="table-header">{{t .Lang "files.permissions"}}</th>
-                        <th class="table-header cursor-pointer hover:text-white select-none" @click="setSort('time')">{{t .Lang "files.modified_at"}}<span class="ml-1 text-xs" x-text="sortMark('time')"></span></th>
+                        <th class="table-header" :aria-sort="sortBy === 'time' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"><button type="button" class="hover:text-white" @click="setSort('time')">{{t .Lang "files.modified_at"}}<span aria-hidden="true" class="ml-1 text-xs" x-text="sortMark('time')"></span></button></th>
                         <th class="table-header">{{t .Lang "files.actions"}}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr x-show="currentPath !== '/'" class="border-b border-gray-700/50 cursor-pointer hover:bg-gray-800/50" @click="goUp()">
-                        <td class="table-cell text-gray-400" colspan="7">📂 ..</td>
+                    <tr x-show="loadingFiles"><td colspan="7" class="table-cell text-center text-gray-400 py-8" role="status">{{t .Lang "files.refreshing"}}</td></tr>
+                    <tr x-show="currentPath !== '/'" class="border-b border-gray-700/50 hover:bg-gray-800/50">
+                        <td class="table-cell text-gray-400" colspan="7"><button type="button" @click="goUp()" :aria-label="breadcrumbs().slice(-2, -1)[0]?.label || t('files.root_directory')">📂 ..</button></td>
                     </tr>
                     <template x-for="f in visibleFiles" :key="f.path || f.name">
                         <tr class="border-b border-gray-700/50" :class="isSelected(f.name) ? 'bg-blue-900/20' : ''">
@@ -236,7 +240,7 @@
                                 <input type="checkbox" x-show="!search.active" :checked="isSelected(f.name)" @click.stop @change="toggleSelect(f.name, $event.target.checked)">
                             </td>
                             <td class="table-cell">
-                                <span x-show="f.is_dir" class="cursor-pointer hover:text-blue-400" @click="search.active ? openSearchResult(f) : enterDir(f.name)" x-text="'📁 ' + f.name"></span>
+                                <button type="button" x-show="f.is_dir" class="hover:text-blue-400" @click="search.active ? openSearchResult(f) : enterDir(f.name)" x-text="'📁 ' + f.name"></button>
                                 <span x-show="!f.is_dir" x-text="'📄 ' + f.name"></span>
                                 <div x-show="search.active" class="mt-1 text-xs text-gray-500" x-text="t('files.search_result_path', { path: f.parent_path })"></div>
                             </td>
@@ -269,10 +273,10 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="!search.active && files.length === 0 && hasSelectedRoot()">
+                    <tr x-show="!loadingFiles && !loadError && !search.active && files.length === 0 && hasSelectedRoot()">
                         <td colspan="7" class="table-cell text-center text-gray-500 py-8">{{t .Lang "files.empty_directory"}}</td>
                     </tr>
-                    <tr x-show="search.active && search.results.length === 0">
+                    <tr x-show="!loadingFiles && !loadError && search.active && search.results.length === 0">
                         <td colspan="7" class="table-cell text-center text-gray-500 py-8">{{t .Lang "files.search_no_results"}}</td>
                     </tr>
                     <tr x-show="!selectedSite">
@@ -326,6 +330,7 @@ function fileManager() {
             truncatedReason: ''
         },
         loadingFiles: false,
+        loadError: '',
         loadRequestID: 0,
         setSort(field) {
             if (this.sortBy === field) { this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc'; }
@@ -347,6 +352,7 @@ function fileManager() {
         mkdirName: '',
         showRename: false,
         renameTarget: '',
+        renameLocation: null,
         renameName: '',
         clipboard: null,
         showRemoteImport: false,
@@ -400,7 +406,16 @@ function fileManager() {
             return this.sites.filter(site => (site.domain || '').toLowerCase().includes(query) || (site.web_root || '').toLowerCase().includes(query));
         },
         get visibleFiles() {
+            if (this.loadingFiles) return [];
             return this.search.active ? this.search.results : this.files;
+        },
+        locationSnapshot() {
+            return { siteID: this.selectedSite, path: this.currentPath };
+        },
+        refreshLocation(target) {
+            if (!this.loadingFiles && String(this.selectedSite) === String(target.siteID) && this.currentPath === target.path) {
+                return this.loadEntries();
+            }
         },
         apiMessage(data, fallback) {
             return data?.message || data?.data?.message || fallback;
@@ -424,23 +439,17 @@ function fileManager() {
             }
         },
         openRoot(siteID, updateURL = true) {
-            this.selectedSite = String(siteID);
-            this.currentPath = '/';
-            this.page = 1;
             this.selected = [];
             this.showMkdir = false;
             this.showRename = false;
             this.uploadTarget = null;
             this.resetSearch();
-            if (updateURL) {
-                const url = new URL(window.location.href);
-                url.searchParams.set('site_id', this.selectedSite);
-                window.history.replaceState({}, '', url);
-            }
-            this.loadFiles();
+            return this.loadFiles({ siteID: String(siteID), path: '/', page: 1, updateURL });
         },
         showRootList() {
             this.loadRequestID++;
+            this.loadingFiles = false;
+            this.loadError = '';
             this.selectedSite = '';
             this.currentPath = '/';
             this.files = [];
@@ -469,10 +478,8 @@ function fileManager() {
         },
         goToBreadcrumb(idx) {
             const bc = this.breadcrumbs();
-            this.currentPath = bc[idx].path;
-            this.page = 1;
-            this.resetSearch();
-            this.loadFiles();
+            if (!bc[idx]) return;
+            return this.loadFiles({ path: bc[idx].path, page: 1 });
         },
         resetSearch(clearQuery = false) {
             this.search.active = false;
@@ -505,18 +512,20 @@ function fileManager() {
                 : t('files.search_truncated_scan_limit');
         },
         openSearchResult(file) {
-            this.currentPath = file.is_dir ? file.path : file.parent_path;
             this.resetSearch(true);
-            this.page = 1;
-            this.loadFiles();
+            return this.loadFiles({ path: file.is_dir ? file.path : file.parent_path, page: 1 });
         },
-        loadFiles() {
+        loadFiles(target = {}) {
             this.resetSearch();
-            return this.loadEntries();
+            return this.loadEntries(target);
         },
-        async loadEntries() {
+        async loadEntries(target = {}) {
             const requestID = ++this.loadRequestID;
-            if (!this.hasSelectedRoot()) {
+            const siteID = target.siteID ?? this.selectedSite;
+            const path = target.path ?? this.currentPath;
+            const page = target.page ?? this.page;
+            const searching = this.search.active;
+            if (siteID === '' || siteID === null || siteID === undefined) {
                 this.files = [];
                 this.total = 0;
                 this.totalPages = 1;
@@ -525,30 +534,38 @@ function fileManager() {
             }
             this.selected = [];
             this.loadingFiles = true;
+            this.loadError = '';
+            this.showRename = false;
+            this.showMkdir = false;
             try {
                 let url;
-                if (this.search.active) {
-                    url = '/files/search?site_id=' + encodeURIComponent(this.selectedSite)
-                        + '&path=' + encodeURIComponent(this.currentPath)
+                if (searching) {
+                    url = '/files/search?site_id=' + encodeURIComponent(siteID)
+                        + '&path=' + encodeURIComponent(path)
                         + '&q=' + encodeURIComponent(this.search.submittedQuery)
                         + '&scope=' + encodeURIComponent(this.search.scope)
-                        + '&page=' + this.page
+                        + '&page=' + page
                         + '&per_page=' + this.perPage
                         + '&sort_by=' + encodeURIComponent(this.sortBy)
                         + '&sort_dir=' + encodeURIComponent(this.sortDir);
                 } else {
-                    url = '/files/list?site_id=' + encodeURIComponent(this.selectedSite)
-                        + '&path=' + encodeURIComponent(this.currentPath)
-                        + '&page=' + this.page
+                    url = '/files/list?site_id=' + encodeURIComponent(siteID)
+                        + '&path=' + encodeURIComponent(path)
+                        + '&page=' + page
                         + '&per_page=' + this.perPage
                         + '&sort_by=' + encodeURIComponent(this.sortBy)
                         + '&sort_dir=' + encodeURIComponent(this.sortDir);
                 }
-                const r = await api(url);
+                const r = await api(url, { suppressToast: true });
                 if (requestID !== this.loadRequestID) return;
                 if (r.success) {
                     const entries = r.data.files || [];
-                    if (this.search.active) {
+                    // Commit the displayed location and its rows together. A pending
+                    // or failed navigation must never retarget the previous rows.
+                    this.selectedSite = String(siteID);
+                    this.currentPath = path;
+                    this.selected = [];
+                    if (searching) {
                         this.search.results = entries;
                         this.search.truncated = !!r.data.truncated;
                         this.search.truncatedReason = r.data.truncated_reason || '';
@@ -559,9 +576,14 @@ function fileManager() {
                     this.page = r.data.page || 1;
                     this.perPage = r.data.per_page || 50;
                     this.totalPages = r.data.total_pages || 1;
+                    if (target.updateURL) {
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('site_id', this.selectedSite);
+                        window.history.replaceState({}, '', url);
+                    }
                 }
             } catch(e) {
-                if (requestID === this.loadRequestID) showToast(e.message, 'error');
+                if (requestID === this.loadRequestID) this.loadError = e.message;
             } finally {
                 if (requestID === this.loadRequestID) this.loadingFiles = false;
             }
@@ -590,18 +612,14 @@ function fileManager() {
             this.selected = checked ? this.files.map(f => f.name) : [];
         },
         enterDir(name) {
-            this.currentPath = this.currentPath === '/' ? '/' + name : this.currentPath + '/' + name;
-            this.page = 1;
-            this.loadFiles();
+            if (this.loadingFiles) return;
+            return this.loadFiles({ path: this.pathFor(name), page: 1 });
         },
         goUp() {
             if (this.currentPath === '/') return;
             const parts = this.currentPath.split('/').filter(s => s);
             parts.pop();
-            this.currentPath = '/' + parts.join('/');
-            if (this.currentPath === '') this.currentPath = '/';
-            this.page = 1;
-            this.loadFiles();
+            return this.loadFiles({ path: '/' + parts.join('/'), page: 1 });
         },
         fileSelected(e) { this.uploadTarget = e.target.files[0]; },
         openRemoteImport() {
@@ -675,13 +693,14 @@ function fileManager() {
             this.remoteImportTimer = setTimeout(() => this.pollRemoteImport(id), 1000);
         },
         async uploadFile() {
-            if (!this.uploadTarget) return;
+            if (!this.uploadTarget || this.uploading || this.loadingFiles) return;
             if (!this.hasSelectedRoot()) {
                 showToast(t('files.select_website_first'), 'error');
                 return;
             }
             const file = this.uploadTarget;
             const name = file.name;
+            const target = this.locationSnapshot();
             const exists = this.files.some(f => !f.is_dir && f.name === name);
             if (exists && !await confirmModal(t('files.confirm_overwrite_existing', { name }))) return;
 
@@ -689,7 +708,7 @@ function fileManager() {
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
             const CHUNK_SIZE = 5 * 1024 * 1024;
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-            const siteID = Number(this.selectedSite);
+            const siteID = Number(target.siteID);
             if (!Number.isInteger(siteID)) {
                 showToast(t('files.select_website_first'), 'error');
                 return;
@@ -707,7 +726,7 @@ function fileManager() {
                         file_size: file.size,
                         total_chunks: totalChunks,
                         site_id: siteID,
-                        path: this.currentPath,
+                        path: target.path,
                         last_modified: file.lastModified || 0
                     })
                 });
@@ -761,13 +780,13 @@ function fileManager() {
                 const completeRes = await fetch(prefix + '/api/files/upload/complete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-                    body: JSON.stringify({ upload_id: uploadID, site_id: siteID, path: this.currentPath })
+                    body: JSON.stringify({ upload_id: uploadID, site_id: siteID, path: target.path })
                 });
                 const completeData = await completeRes.json();
                 if (completeData.success) {
                     this.uploadTarget = null;
                     document.querySelector('input[type="file"]').value = '';
-                    this.loadFiles();
+                    this.refreshLocation(target);
                     showToast(t('files.upload_completed'), 'success');
                 } else {
                     showToast(this.apiMessage(completeData, t('files.upload_merge_failed')), 'error');
@@ -778,10 +797,11 @@ function fileManager() {
             this.uploading = false;
         },
         async fixPermissions() {
+            const target = this.locationSnapshot();
             if (!await confirmModal(t('files.confirm_fix_permissions', { domain: this.sites.find(s => s.id == this.selectedSite)?.domain || '' }))) return;
             this.fixingPerms = true;
             try {
-                const r = await api('/files/fix-permissions?site_id=' + this.selectedSite, { method: 'POST' });
+                const r = await api('/files/fix-permissions?site_id=' + target.siteID, { method: 'POST' });
                 if (r.success) showToast(r.data?.message || t('files.permissions_fixed'), 'success');
                 else showToast(r.data?.message || t('common.operation_failed'), 'error');
             } catch(e) { showToast(e.message, 'error'); }
@@ -796,7 +816,9 @@ function fileManager() {
             window.open(prefix + '/api/files/download?site_id=' + encodeURIComponent(this.selectedSite) + '&path=' + encodeURIComponent(path));
         },
         startRename(name) {
+            if (this.loadingFiles) return;
             this.renameTarget = name;
+            this.renameLocation = this.locationSnapshot();
             this.renameName = name;
             this.showRename = true;
             this.$nextTick(() => {
@@ -805,48 +827,55 @@ function fileManager() {
             });
         },
         async doRename() {
+            if (this.loadingFiles || !this.renameLocation) return;
+            const target = this.renameLocation;
             const name = this.renameName.trim();
             if (!name || name === this.renameTarget) { this.showRename = false; return; }
-            const oldPath = this.currentPath === '/' ? '/' + this.renameTarget : this.currentPath + '/' + this.renameTarget;
+            const oldPath = this.pathFor(this.renameTarget, target.path);
             try {
                 await api('/files/rename', {
                     method: 'PUT',
-                    body: { site_id: parseInt(this.selectedSite), old_path: oldPath, new_name: name }
+                    body: { site_id: parseInt(target.siteID), old_path: oldPath, new_name: name }
                 });
                 this.showRename = false;
-                this.loadFiles();
+                this.refreshLocation(target);
                 showToast(t('files.rename_success'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
         },
         async createDir() {
+            if (this.loadingFiles) return;
+            const target = this.locationSnapshot();
             const name = this.mkdirName.trim();
             if (!name) return;
             try {
-                await api('/files/mkdir?site_id=' + this.selectedSite + '&path=' + encodeURIComponent(this.currentPath), {
+                await api('/files/mkdir?site_id=' + target.siteID + '&path=' + encodeURIComponent(target.path), {
                     method: 'POST', body: { name }
                 });
                 this.showMkdir = false;
                 this.mkdirName = '';
-                this.loadFiles();
+                this.refreshLocation(target);
                 showToast(t('files.mkdir_success'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
         },
-        pathFor(name) { return this.currentPath === '/' ? '/' + name : this.currentPath + '/' + name; },
+        pathFor(name, path = this.currentPath) { return path === '/' ? '/' + name : path + '/' + name; },
         isArchive(name) {
             const lower = name.toLowerCase();
             return lower.endsWith('.zip') || lower.endsWith('.tar') || lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2');
         },
         async deleteItems(names) {
+            if (this.loadingFiles || !this.hasSelectedRoot()) return;
+            const target = this.locationSnapshot();
+            names = [...names];
             const label = names.length === 1 ? names[0] : t('files.item_count', { count: names.length });
             if (!await confirmModal(t('files.confirm_delete_items', { label }))) return;
             for (let i = 0; i < names.length; i++) {
                 const name = names[i];
                 try {
-                    await api('/files/delete?site_id=' + this.selectedSite + '&path=' + encodeURIComponent(this.pathFor(name)), { method: 'DELETE' });
+                    await api('/files/delete?site_id=' + target.siteID + '&path=' + encodeURIComponent(this.pathFor(name, target.path)), { method: 'DELETE' });
                     if (names.length > 1) showToast(t('files.deleted_item', { name, current: i + 1, total: names.length }), 'info');
-                } catch(e) { showToast(t('files.delete_failed', { name, error: e.message }), 'error'); return; }
+                } catch(e) { this.refreshLocation(target); showToast(t('files.delete_failed', { name, error: e.message }), 'error'); return; }
             }
-            this.loadFiles(); showToast(t('files.delete_completed'), 'success');
+            this.refreshLocation(target); showToast(t('files.delete_completed'), 'success');
         },
         batchDelete() { this.deleteItems([...this.selected]); },
         cutItems() {
@@ -860,19 +889,21 @@ function fileManager() {
             this.selected = [];
         },
         async pasteItems() {
-            if (!this.clipboard) return;
+            if (!this.clipboard || this.loadingFiles) return;
             if (!this.hasSelectedRoot()) { showToast(t('files.paste_target_required'), 'error'); return; }
             const cb = this.clipboard;
+            const target = this.locationSnapshot();
+            const names = [...cb.names];
             const apiPath = cb.action === 'cut' ? '/files/move' : '/files/copy';
             const pasteRequest = async (conflictPolicy = '') => {
                 return await api(apiPath, {
                     method: 'POST',
                     body: {
                         site_id: parseInt(cb.site_id),
-                        dest_site_id: parseInt(this.selectedSite),
+                        dest_site_id: parseInt(target.siteID),
                         src_path: cb.src_path,
-                        dest_path: this.currentPath,
-                        names: cb.names,
+                        dest_path: target.path,
+                        names,
                         conflict_policy: conflictPolicy
                     }
                 });
@@ -880,8 +911,8 @@ function fileManager() {
             try {
                 const r = await pasteRequest();
                 showToast(r.data?.message || t('common.operation_success'), 'success');
-                this.clipboard = null;
-                this.loadFiles();
+                if (this.clipboard === cb) this.clipboard = null;
+                this.refreshLocation(target);
             } catch(e) {
                 if (e.conflicts) {
                     const msg = t('files.existing_items_conflict', { items: e.conflicts.join('\n') });
@@ -889,8 +920,8 @@ function fileManager() {
                         try {
                             const r = await pasteRequest('overwrite');
                             showToast(r.data?.message || t('common.operation_success'), 'success');
-                            this.clipboard = null;
-                            this.loadFiles();
+                            if (this.clipboard === cb) this.clipboard = null;
+                            this.refreshLocation(target);
                         } catch(e2) { showToast(e2.message, 'error'); }
                         return;
                     }
@@ -898,8 +929,8 @@ function fileManager() {
                         try {
                             const r = await pasteRequest('skip');
                             showToast(r.data?.message || t('common.operation_success'), 'success');
-                            this.clipboard = null;
-                            this.loadFiles();
+                            if (this.clipboard === cb) this.clipboard = null;
+                            this.refreshLocation(target);
                         } catch(e2) { showToast(e2.message, 'error'); }
                     }
                     return;
@@ -908,12 +939,14 @@ function fileManager() {
             }
         },
         async compressItems(names) {
+            if (this.loadingFiles || this.archiveBusy) return;
+            const target = this.locationSnapshot();
             if (names.length === 1) {
                 this.archiveBusy = true;
                 this.archiveBusyText = t('files.compression_busy');
                 try {
-                    const r = await api('/files/zip?site_id=' + this.selectedSite + '&path=' + encodeURIComponent(this.pathFor(names[0])), { method: 'POST' });
-                    if (r.success) { this.loadFiles(); showToast(r.data?.message || t('files.compress_completed'), 'success'); }
+                    const r = await api('/files/zip?site_id=' + target.siteID + '&path=' + encodeURIComponent(this.pathFor(names[0], target.path)), { method: 'POST' });
+                    if (r.success) { this.refreshLocation(target); showToast(r.data?.message || t('files.compress_completed'), 'success'); }
                 } catch(e) { showToast(e.message, 'error'); }
                 finally { this.archiveBusy = false; this.archiveBusyText = ''; }
             } else {
@@ -921,7 +954,9 @@ function fileManager() {
             }
         },
         async batchCompress() {
-            if (this.selected.length === 0) return;
+            if (this.selected.length === 0 || this.loadingFiles || this.archiveBusy) return;
+            const target = this.locationSnapshot();
+            const names = [...this.selected];
             const defaultName = 'archive_' + new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '') + '.zip';
             const archiveName = prompt(t('files.prompt_archive_name'), defaultName);
             if (!archiveName) return;
@@ -931,24 +966,26 @@ function fileManager() {
                 const r = await api('/files/batch-zip', {
                     method: 'POST',
                     body: {
-                        site_id: parseInt(this.selectedSite),
-                        path: this.currentPath,
-                        names: [...this.selected],
+                        site_id: parseInt(target.siteID),
+                        path: target.path,
+                        names,
                         archive_name: archiveName.trim()
                     }
                 });
-                if (r.success) { this.loadFiles(); showToast(r.data?.message || t('files.compress_completed'), 'success'); }
+                if (r.success) { this.refreshLocation(target); showToast(r.data?.message || t('files.compress_completed'), 'success'); }
             } catch(e) { showToast(e.message, 'error'); }
             finally { this.archiveBusy = false; this.archiveBusyText = ''; }
         },
         async decompressFile(name) {
+            if (this.loadingFiles || this.archiveBusy) return;
+            const target = this.locationSnapshot();
+            const path = this.pathFor(name, target.path);
             if (!await confirmModal(t('files.confirm_extract', { name }))) return;
-            const path = this.pathFor(name);
             this.archiveBusy = true;
             this.archiveBusyText = t('files.decompression_busy');
             try {
-                const r = await api('/files/unzip?site_id=' + this.selectedSite + '&path=' + encodeURIComponent(path), { method: 'POST' });
-                if (r.success) { this.loadFiles(); showToast(r.data?.message || t('files.extract_completed'), 'success'); }
+                const r = await api('/files/unzip?site_id=' + target.siteID + '&path=' + encodeURIComponent(path), { method: 'POST' });
+                if (r.success) { this.refreshLocation(target); showToast(r.data?.message || t('files.extract_completed'), 'success'); }
             } catch(e) {
                 if (e.conflicts) {
                     this.archiveBusy = false;
@@ -958,8 +995,8 @@ function fileManager() {
                         this.archiveBusy = true;
                         this.archiveBusyText = t('files.decompression_busy');
                         try {
-                            await api('/files/unzip?site_id=' + this.selectedSite + '&path=' + encodeURIComponent(path) + '&overwrite=1', { method: 'POST' });
-                            this.loadFiles(); showToast(t('files.extract_completed'), 'success');
+                            await api('/files/unzip?site_id=' + target.siteID + '&path=' + encodeURIComponent(path) + '&overwrite=1', { method: 'POST' });
+                            this.refreshLocation(target); showToast(t('files.extract_completed'), 'success');
                         } catch(e2) { showToast(e2.message, 'error'); }
                         finally { this.archiveBusy = false; this.archiveBusyText = ''; }
                     }

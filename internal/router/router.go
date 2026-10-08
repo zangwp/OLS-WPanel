@@ -8,7 +8,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 
+	"github.com/zangwp/OLS-WPanel/internal/accountsecurity"
 	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/database"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
@@ -22,6 +24,168 @@ import (
 var panelVersion string
 
 var i18nKeys = []string{
+	"auth.login",
+	"auth.workspace_login",
+	"auth.workspace_prompt",
+	"followup.invalid_config",
+	"followup.invalid_threshold",
+	"followup.load_failed",
+	"followup.loading_config",
+	"followup.loading_logs",
+	"followup.retry_load",
+	"followup.retry_save",
+	"followup.save_before_test",
+	"followup.saved_reload_failed",
+	"followup.smtp_save_first",
+	"followup.status_unknown",
+
+	"settings.mfa_backup_help",
+
+	"account_security.event_notifications_changed",
+
+	"account_security.actions",
+	"account_security.activity_help",
+	"account_security.add_authenticator",
+	"account_security.audit",
+	"account_security.audit_help",
+	"account_security.authenticator_code",
+	"account_security.change_password",
+	"account_security.code_or_recovery",
+	"account_security.codes_remaining",
+	"account_security.codes_saved_confirm",
+	"account_security.codes_stored",
+	"account_security.configure_channels",
+	"account_security.configured",
+	"account_security.confirm_revoke",
+	"account_security.confirm_revoke_others",
+	"account_security.copied",
+	"account_security.copy_codes",
+	"account_security.copy_failed",
+	"account_security.create_setup",
+	"account_security.credentials_required",
+	"account_security.current_password",
+	"account_security.current_session",
+	"account_security.device",
+	"account_security.disable",
+	"account_security.disable_warning",
+	"account_security.disabled_done",
+	"account_security.download_codes",
+	"account_security.enable_notifications",
+	"account_security.enabled",
+	"account_security.enabled_done",
+	"account_security.event",
+	"account_security.event_credentials_changed",
+	"account_security.event_login_blocked",
+	"account_security.event_login_failure",
+	"account_security.event_login_success",
+	"account_security.event_logout",
+	"account_security.event_mfa_disabled",
+	"account_security.event_mfa_enabled",
+	"account_security.event_recovery_regenerated",
+	"account_security.event_recovery_used",
+	"account_security.event_session_revoked",
+	"account_security.event_sessions_revoked",
+	"account_security.event_time",
+	"account_security.finish",
+	"account_security.last_active",
+	"account_security.login_time",
+	"account_security.mfa_already_enabled",
+	"account_security.mfa_help",
+	"account_security.mfa_invalid_code",
+	"account_security.mfa_invalid_password",
+	"account_security.mfa_not_enabled",
+	"account_security.mfa_rate_limited",
+	"account_security.mfa_setup_expired",
+	"account_security.mfa_title",
+	"account_security.mfa_unavailable",
+	"account_security.missing_recovery_codes",
+	"account_security.next",
+	"account_security.no_audit",
+	"account_security.no_channels",
+	"account_security.no_sessions",
+	"account_security.not_configured",
+	"account_security.not_enabled",
+	"account_security.notification_disabled",
+	"account_security.notification_failed",
+	"account_security.notification_none",
+	"account_security.notification_pending",
+	"account_security.notification_sent",
+	"account_security.notification_status",
+	"account_security.notification_suppressed",
+	"account_security.notification_unconfigured",
+	"account_security.notifications",
+	"account_security.notifications_help",
+	"account_security.notifications_saved",
+	"account_security.open_authenticator",
+	"account_security.other_sessions_revoked",
+	"account_security.pagination",
+	"account_security.previous",
+	"account_security.recovery_once",
+	"account_security.regenerate",
+	"account_security.regenerate_warning",
+	"account_security.regenerated_done",
+	"account_security.revoke",
+	"account_security.revoke_others",
+	"account_security.save_recovery_codes",
+	"account_security.sessions",
+	"account_security.sessions_help",
+	"account_security.sessions_revoked",
+	"account_security.setup",
+	"account_security.setup_expires",
+	"account_security.setup_help",
+	"account_security.setup_key",
+	"account_security.setup_key_help",
+	"account_security.six_digits",
+	"account_security.subtitle",
+	"account_security.unknown_device",
+	"account_security.unusual_activity",
+	"account_security.username",
+	"account_security.verify_enable",
+	"account_security.working",
+	"auth.account_security_unavailable",
+	"auth.invalid_security_request",
+	"auth.session_not_found",
+	"security_center.access",
+	"security_center.access_help",
+	"security_center.account",
+	"security_center.account_help",
+	"security_center.activity",
+	"security_center.activity_help",
+	"security_center.alert_settings",
+	"security_center.firewall_events",
+	"security_center.incomplete_settings",
+	"security_center.loading_settings",
+	"security_center.no_cdn_groups",
+	"security_center.protection",
+	"security_center.protection_help",
+	"security_center.refresh_queued",
+	"security_center.reload_settings",
+	"security_center.request_failed",
+	"security_center.retry",
+	"security_center.saved_runtime_refreshed",
+	"security_center.saved_status_unavailable",
+	"security_center.sections",
+	"security_center.settings_load_failed",
+	"security_center.subtitle",
+	"security_center.title",
+
+	"auth.back_credentials",
+	"auth.code_required",
+	"auth.mfa_code",
+	"auth.mfa_code_help",
+	"auth.mfa_prompt",
+	"auth.mfa_title",
+	"auth.recovery_code",
+	"auth.recovery_help",
+	"auth.use_authenticator",
+	"auth.use_recovery",
+	"auth.verify_login",
+	"common.retry",
+	"settings.account_load_failed",
+	"settings.current_web_password",
+	"settings.mfa_code_optional",
+	"settings.security_center_link",
+
 	"ssh_port.title",
 	"ssh_port.help",
 	"ssh_port.current",
@@ -1508,6 +1672,12 @@ var i18nKeys = []string{
 }
 
 func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version string, configPath string) *gin.Engine {
+	r, _ := SetupRouterWithCleanup(cfg, tmplFS, staticFS, version, configPath)
+	return r
+}
+
+// The server must stop notification delivery before closing its database.
+func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version string, configPath string) (*gin.Engine, func()) {
 	panelVersion = version
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -1544,6 +1714,18 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	})
 
 	db := database.GetDB()
+	dbPath := cfg.SQLite.Path
+	if dbPath == "" {
+		if err := db.QueryRow("SELECT file FROM pragma_database_list WHERE name = 'main'").Scan(&dbPath); err != nil || dbPath == "" {
+			panic("account security requires a persistent database path")
+		}
+	}
+	mfaService, err := accountsecurity.NewMFAService(db, filepath.Join(filepath.Dir(dbPath), "account-mfa.key"))
+	if err != nil {
+		log.Panicf("cannot initialize account security: %v", err)
+	}
+	auditService := accountsecurity.NewAuditService(db)
+	auditService.SetNotifier(executor.SendAccountSecurityNotification)
 	r.Use(middleware.ScanDefense(db, cfg.Panel.RandomSuffix))
 
 	// Site migration remains disabled for the OLS release line. The inherited protocol edits
@@ -1556,6 +1738,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 		cfg.Security.AttemptWindowMinutes,
 		cfg.Security.BanDurationHours,
 	)
+	attemptTracker.Audit = auditService
 
 	basicAuthChecker := &middleware.BasicAuthChecker{
 		RecordAttempt: attemptTracker.RecordAttempt,
@@ -1579,7 +1762,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	panelGroup := r.Group(prefix)
 	panelGroup.Use(middleware.RandomPath(suffix))
 	panelGroup.Use(middleware.BasicAuth(basicAuthChecker))
-	authHandler := &handlers.AuthHandler{DB: db, Prefix: suffix, Tracker: attemptTracker}
+	authHandler := &handlers.AuthHandler{DB: db, Prefix: suffix, Tracker: attemptTracker, MFA: mfaService, Audit: auditService}
 
 	// 面板根路径重定向到登录页（解决用户访问面板地址不带 /login 的问题）
 	panelGroup.GET("", func(c *gin.Context) {
@@ -1670,6 +1853,17 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 
 	protected.POST("/api/auth/logout", authHandler.Logout)
 	protected.GET("/api/auth/check", authHandler.Check)
+	protected.GET("/api/auth/mfa", authHandler.MFAStatus)
+	protected.POST("/api/auth/mfa/setup", authHandler.MFASetup)
+	protected.POST("/api/auth/mfa/confirm", authHandler.MFAConfirm)
+	protected.POST("/api/auth/mfa/disable", authHandler.MFADisable)
+	protected.POST("/api/auth/mfa/recovery-codes", authHandler.MFARecoveryCodes)
+	protected.GET("/api/auth/sessions", authHandler.ListSessions)
+	protected.DELETE("/api/auth/sessions/:id", authHandler.RevokeSession)
+	protected.POST("/api/auth/sessions/revoke-others", authHandler.RevokeOtherSessions)
+	protected.GET("/api/auth/audit", authHandler.AuditLog)
+	protected.GET("/api/auth/security-notifications", authHandler.GetSecurityNotifications)
+	protected.PUT("/api/auth/security-notifications", authHandler.SetSecurityNotifications)
 	vpsHandler := &handlers.VPSHandler{}
 	protected.GET("/api/vps/overview", vpsHandler.Overview)
 	protected.POST("/api/vps/tools", vpsHandler.SimpleTool)
@@ -1875,7 +2069,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	if err != nil {
 		log.Printf("WordPress package service disabled: code=%s", executor.ArchiveErrorCode(err))
 	}
-	settingsHandler := &handlers.SettingsHandler{WPPackageService: wpPackageService, ConfigPath: configPath}
+	settingsHandler := &handlers.SettingsHandler{WPPackageService: wpPackageService, ConfigPath: configPath, Auth: authHandler}
 	aiHandler := &handlers.AIHandler{}
 	logAnalysisHandler := &handlers.LogAnalysisHandler{}
 	protected.GET("/api/settings", settingsHandler.GetSettings)
@@ -2004,7 +2198,7 @@ func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version
 	tmpl := template.Must(template.New("").Funcs(i18n.FuncMap()).ParseFS(tmplFS, "templates/*.html"))
 	r.SetHTMLTemplate(tmpl)
 
-	return r
+	return r, auditService.Close
 }
 
 func newWPCoreUpdateHandler(db *sql.DB, backupDir string) *handlers.WPCoreUpdateHandler {

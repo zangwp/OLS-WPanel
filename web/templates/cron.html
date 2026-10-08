@@ -2,7 +2,7 @@
 {{define "cron_content"}}
 <div x-data="cronManager()" x-init="fetchList()">
     <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold text-white">{{t .Lang "nav.cron"}}</h2>
+        <h1 class="page-title">{{t .Lang "nav.cron"}}</h1>
         <div class="flex space-x-3">
             <button @click="showLog = true; fetchCronLogs()" class="btn-secondary text-sm">{{t .Lang "cron.view_logs"}}</button>
             <button @click="openCreate()" class="btn-primary">{{t .Lang "cron.create_job"}}</button>
@@ -42,7 +42,7 @@
                                 <div class="flex flex-wrap gap-1">
                                     <button x-show="job.task_type !== 'wp_cron'" @click="runJob(job)" :disabled="job.running" class="btn-secondary text-xs py-1 px-2" :class="job.running ? 'opacity-50 cursor-not-allowed' : ''" x-text="job.running ? t('cron.job_running') : t('cron.run')"></button>
                                     <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
-                                    <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "cron.edit"}}</button>
+                                    <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "cron.edit"}}</button>
                                     <button x-show="job.task_type !== 'wp_cron'" @click="deleteJob(job)" class="btn-danger text-xs py-1 px-2">{{t .Lang "cron.delete"}}</button>
                                 </div>
                             </td>
@@ -92,7 +92,7 @@
                 <h3 class="text-lg font-bold text-white">{{t .Lang "cron.execution_logs"}}</h3>
                 <button @click="showLog = false" class="text-gray-400 hover:text-white text-xl">&times;</button>
             </div>
-            <pre x-text="cronLogContent" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: #0f172a; border: 1px solid #334155; color: #94a3b8; max-height: 500px; white-space: pre-wrap; word-break: break-all;"></pre>
+            <pre x-text="cronLogContent" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-muted); max-height: 500px; white-space: pre-wrap; word-break: break-all;"></pre>
         </div>
     </div>
 
@@ -115,7 +115,7 @@
 
                     </select>
                 </div>
-                <div x-show="form.task_type === 'wp_cron'" class="p-3 rounded mb-3" style="background-color: #0f172a;">
+                <div x-show="form.task_type === 'wp_cron'" class="p-3 rounded mb-3" style="background-color: var(--panel-surface-muted);">
                     <p class="text-xs text-gray-300 mb-3"><strong class="text-white">{{t .Lang "cron.wp_cron_replace_title"}}</strong> — {{t .Lang "cron.wp_cron_replace_help"}}</p>
                     <div class="mb-2">
                         <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "cron.target_site"}}</label>
@@ -128,7 +128,7 @@
                     </div>
                     <p class="text-xs text-gray-500 mt-2">{{t .Lang "cron.wp_cron_config_help_prefix"}} <code>define('DISABLE_WP_CRON', true)</code>{{t .Lang "cron.wp_cron_config_help_suffix"}}</p>
                 </div>
-                <div x-show="form.task_type === 'file_backup'" class="p-3 rounded mb-3" style="background-color: #0f172a;">
+                <div x-show="form.task_type === 'file_backup'" class="p-3 rounded mb-3" style="background-color: var(--panel-surface-muted);">
                     <p class="text-xs text-gray-400 mb-3"><strong class="text-white">{{t .Lang "cron.full_backup"}}</strong>{{t .Lang "cron.full_backup_help"}}<br><strong class="text-white">{{t .Lang "cron.smart_incremental"}}</strong>{{t .Lang "cron.smart_incremental_help"}}</p>
                     <div class="mb-2">
                         <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "cron.target_site"}}</label>
@@ -181,9 +181,10 @@
                 </div>
                 <div class="flex justify-end space-x-3">
                     <button type="button" @click="showModal = false" class="btn-secondary">{{t .Lang "cron.cancel"}}</button>
-                    <button type="submit" class="btn-primary">
-                        <span x-show="editingId">{{t .Lang "cron.save"}}</span>
-                        <span x-show="!editingId">{{t .Lang "cron.create"}}</span>
+                    <button type="submit" :disabled="saving" class="btn-primary">
+                        <span x-show="saving" x-text="t('common.saving')"></span>
+                        <span x-show="!saving && editingId">{{t .Lang "cron.save"}}</span>
+                        <span x-show="!saving && !editingId">{{t .Lang "cron.create"}}</span>
                     </button>
                 </div>
             </form>
@@ -200,6 +201,8 @@ function cronManager() {
         showLog: false,
         cronLogContent: '',
         editingId: null,
+        saving: false,
+        formVersion: 0,
         form: { name: '', cron_expression: '', command: '', task_type: 'command', backup_mode: 'incremental', keep_count: 3, site_id: '', notify_fail: false },
         async fetchSites() {
             try { const r = await api("/websites"); if (r.success) this.sites = r.data || []; } catch(e) {}
@@ -257,17 +260,23 @@ function cronManager() {
             try { const r = await api('/cron'); if (r.success) this.jobs = r.data || []; } catch(e) {}
         },
         openCreate() {
+            this.formVersion++;
             this.editingId = null;
             this.form = { name: '', cron_expression: '', command: '', task_type: 'command', backup_mode: 'incremental', keep_count: 3, site_id: '', notify_fail: false };
             this.showModal = true;
         },
         openEdit(job) {
+            this.formVersion++;
             this.editingId = job.id;
             this.form = { name: job.name, cron_expression: job.cron_expression, command: job.command || '', task_type: job.task_type || 'command', backup_mode: job.backup_mode || 'incremental', keep_count: job.keep_count || 3, site_id: job.site_id || '', notify_fail: !!job.notify_fail };
             this.onTaskTypeChange(false);
             this.showModal = true;
         },
         async saveJob() {
+            if (this.saving) return;
+            this.saving = true;
+            const editingId = this.editingId;
+            const formVersion = this.formVersion;
             try {
                 const body = { ...this.form };
                 if (body.site_id === "") body.site_id = null; else body.site_id = parseInt(body.site_id);
@@ -278,18 +287,22 @@ function cronManager() {
                     body.command = site.domain;
                 }
                 let r;
-                if (this.editingId) {
-                    r = await api('/cron/' + this.editingId, { method: 'PUT', body });
+                if (editingId) {
+                    r = await api('/cron/' + editingId, { method: 'PUT', body });
                 } else {
                     r = await api('/cron', { method: 'POST', body });
                 }
+                if (!r.success) throw new Error(r.message || t('common.request_failed'));
                 if (r.success) {
-                    this.showModal = false;
-                    this.form = { name: '', cron_expression: '', command: '', task_type: 'command', backup_mode: 'incremental', keep_count: 3, site_id: '', notify_fail: false };
+                    if (formVersion === this.formVersion) {
+                        this.showModal = false;
+                        this.form = { name: '', cron_expression: '', command: '', task_type: 'command', backup_mode: 'incremental', keep_count: 3, site_id: '', notify_fail: false };
+                    }
                     await this.fetchList();
-                    showToast(this.editingId ? t('cron.job_updated') : t('cron.job_created'), 'success');
+                    showToast(editingId ? t('cron.job_updated') : t('cron.job_created'), 'success');
                 }
             } catch(e) { showToast(e.message, 'error'); }
+            finally { this.saving = false; }
         },
         async runJob(job) {
             if (job.task_type === 'wp_cron') return;

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zangwp/OLS-WPanel/internal/accountsecurity"
 	"github.com/zangwp/OLS-WPanel/internal/middleware"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
@@ -21,7 +22,7 @@ func setupLoginCSRFTest(t *testing.T) (*gin.Engine, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.Exec(`CREATE TABLE admin_users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE admin_users (id INTEGER PRIMARY KEY DEFAULT 1, username TEXT UNIQUE, password_hash TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
@@ -32,7 +33,15 @@ func setupLoginCSRFTest(t *testing.T) (*gin.Engine, *sql.DB) {
 		t.Fatal(err)
 	}
 	router := gin.New()
-	handler := &AuthHandler{DB: db}
+	if err := accountsecurity.InitMFASchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := accountsecurity.InitAuditSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	audit := accountsecurity.NewAuditService(db)
+	t.Cleanup(audit.Close)
+	handler := &AuthHandler{DB: db, Audit: audit}
 	router.POST("/login", middleware.CSRF(), handler.Login)
 	return router, db
 }

@@ -28,29 +28,56 @@
    ls -lh /www/ols-wpanel/backups/panel-db/
    ```
 
-2. 停止面板并保留当前数据库：
+2. 选定面板生成的独立备份文件，在同一个 Bash 会话中执行下面的恢复步骤。先将示例文件名替换为真实备份；备份校验失败时保持原数据库不变：
 
    ```bash
+   set -euo pipefail
+   umask 077
+   backup='/www/ols-wpanel/backups/panel-db/<backup-file>.db'
+   test -f "$backup" && test ! -L "$backup"
+   recovery_dir=$(mktemp -d /www/ols-wpanel/recovery.XXXXXXXXXX)
+   printf '恢复工作目录（请保留）: %s\n' "$recovery_dir"
+   install -m 0600 -- "$backup" "$recovery_dir/restored.db"
+   python3 - "$recovery_dir/restored.db" <<'PY'
+   import pathlib, sqlite3, sys
+   path = pathlib.Path(sys.argv[1])
+   with sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True) as db:
+       if db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
+           raise SystemExit('备份完整性校验失败；尚未替换数据库')
+       db.execute('SELECT COUNT(*) FROM websites').fetchone()
+   PY
+
    systemctl stop ols-wpanel
-   cp /www/ols-wpanel/panel.db /www/ols-wpanel/panel.db.broken
-   ```
-
-3. 用已确认的备份替换数据库，然后启动并检查：
-
-   ```bash
-   cp /www/ols-wpanel/backups/panel-db/<backup-file>.db /www/ols-wpanel/panel.db
+   test "$(systemctl show ols-wpanel --property=MainPID --value)" = 0
+   if systemctl is-active --quiet ols-wpanel; then
+       echo '面板仍在运行，停止恢复' >&2
+       exit 1
+   fi
+   # 先整体保存异常数据库及崩溃遗留日志，避免旧 WAL 覆盖恢复的备份。
+   for suffix in '' -wal -shm; do
+       source="/www/ols-wpanel/panel.db${suffix}"
+       test ! -L "$source"
+       if test -e "$source"; then
+           mv -- "$source" "$recovery_dir/panel.db${suffix}"
+       fi
+   done
+   mv -- "$recovery_dir/restored.db" /www/ols-wpanel/panel.db
    systemctl start ols-wpanel
-   systemctl status ols-wpanel
+   systemctl status ols-wpanel --no-pager
    journalctl -u ols-wpanel -n 50 --no-pager
    ```
 
+面板数据库使用 WAL 模式。崩溃后 `panel.db-wal` 可能包含尚未合并的数据，不能只覆盖 `panel.db` 后重启。操作期间应停止其他访问该数据库的工具；不得移动或删除运行中数据库的 WAL/SHM。上面的步骤将旧数据库、WAL 和 SHM 保存在同一个 `recovery.*` 目录，恢复中断时先检查该目录及日志，不要直接重新执行或删除它。
+
 仅恢复同一 OLS WPanel 发布链且仍在支持范围内的备份。恢复前保留现有数据库，并确认系统上已有站点文件和 MariaDB 数据。
+
+启用双因素认证后，数据库备份必须配合数据库同目录的原 `account-mfa.key` 使用。普通数据库备份下载不包含此文件，应通过受控主机管理通道单独加密备份；恢复时保留原文件、所属用户和 `0600` 权限。不要生成替代密钥；恢复码无法代替丢失的加密密钥。恢复旧备份后重新生成恢复码并核对双因素状态，详细流程见 [账户安全中心](account-security.md)。
 
 ## 常用检查
 
 ```bash
 o status
-systemctl status ols-wpanel openlitespeed mariadb redis-server fail2ban
+systemctl status ols-wpanel lshttpd mariadb redis-server fail2ban
 journalctl -u ols-wpanel -n 100 --no-pager
 /usr/local/lsws/bin/openlitespeed -t
 ```
@@ -71,4 +98,4 @@ dpkg-query -W -f='${binary:Package}\t${db:Status-Abbrev}\n' 'openlitespeed*' 'ls
 tail -n 100 /var/log/apt/term.log
 ```
 
-已移除的服务和文件提示不存在是正常结果。普通卸载保留网站、数据库和运行环境；完全卸载仍保留 Redis、Fail2ban 及可能共享的目录残留。出现软件包权限错误或“卸载未完成”时，先核对完整日志，避免盲目删除共享目录或重复完全卸载。
+已移除的服务和文件提示不存在是正常结果。普通卸载保留网站、数据库、运行环境以及对应的签名 APT 软件源和密钥；完全卸载仍保留 Redis、其更新源、Fail2ban 及可能共享的目录残留。检测到网站登记、网站文件或运行配置时，安装器会拒绝全新安装或重装，应使用更新/修复或先迁移网站。出现软件包权限错误或“卸载未完成”时，先核对完整日志，避免盲目删除共享目录或重复完全卸载。

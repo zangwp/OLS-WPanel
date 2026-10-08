@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.18.0 — 2026-10-08
+
+- Adds an account security workspace with opt-in TOTP two-factor authentication, encrypted enrollment secrets, single-use recovery codes, password rechecks for sensitive account changes, replay protection and bounded verification attempts. Existing accounts retain password login until enrollment is completed.
+- Adds active-session metadata and revocation, independent display identifiers, copied session state and renewed authorization checks for queued sensitive requests. MFA changes revoke other sessions; panel credential changes revoke all sessions. Invalid-session HTML redirects now abort protected handlers.
+- Persists account security events for up to 90 days and 10,000 records. New sign-in environments, recovery-code use, MFA disablement and credential changes can notify configured SMTP / Webhook channels, with deduplication, rate limits, a bounded queue and network deadlines. Initial sign-in also counts as a new environment; IP/browser metadata is not a verified device identity.
+- Rebuilds the interface around a light workspace and dark blue navigation, a grouped dashboard metric strip, theme-aware charts, responsive site tables, clearer login and account-security flows, and accessible confirmation dialogs. Preserves existing operations and both interface languages.
+- Prevents stale requests and incomplete configuration reads from replacing newer page state or enabling unsafe saves. Remote backup, notification and database backup policy forms stay read-only after a failed load; backend configuration reads reject database errors instead of returning partial defaults. Rule changes save serially using the latest snapshot, and cron submission guards prevent duplicate requests. Keeps valid sessions active after failed MFA step-up checks, preserves unsaved input and distinguishes a submitted maintenance task from a completed one.
+- Creates and verifies a private database snapshot before importing a site backup. Failed imports attempt rollback, retain the safety copy if rollback fails, release transferred site locks and clean up owned upload files. Site deletion now retains its deleting record and reports incomplete external cleanup for a later retry.
+- Preserves existing destination files when a cross-site copy fails. Panel SQLite recovery stops subsequent restore actions if stopping the service or cleaning up inactive WAL/SHM sidecars fails, preventing recovery from continuing with unsafe database state.
+- Blocks fresh installation or reinstallation over retained websites, applies the version guard to every repair/update entry, preserves repositories and signing keys for retained runtime packages, and reuses protected MariaDB client credentials during complete-uninstall checks and cleanup.
+- Documents WAL-safe manual database recovery and the separate MFA encryption-key backup. Private installer repair snapshots preserve `account-mfa.key`; ordinary downloadable panel database backups continue to exclude it. SMTP now reports rejection of the final message data as a delivery failure, and Webhook connections retain checked dual-stack fallback.
+
+Upgrade notes: back up the panel database and configuration before upgrading. After enabling MFA, preserve the matching `account-mfa.key` separately and do not roll back to a pre-v1.18.0 binary, which does not enforce MFA. See [upgrade compatibility](docs/upgrade-compatibility.md) and [account security](docs/account-security.md). Publishing the GitHub Release does not by itself deploy the short installation endpoint.
+
 ## v1.17.2 — 2026-10-05
 
 - Uses Y/y confirmation after displaying the ordinary or complete uninstall scope; Enter cancels. Keeps inventory ownership checks and the separate backup-deletion confirmation.

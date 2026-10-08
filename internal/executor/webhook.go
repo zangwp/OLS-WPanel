@@ -39,6 +39,12 @@ func isBlockedIP(ip net.IP) bool {
 }
 
 func isSafeWebhookURL(rawURL string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return isSafeWebhookURLContext(ctx, rawURL)
+}
+
+func isSafeWebhookURLContext(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
@@ -47,12 +53,12 @@ func isSafeWebhookURL(rawURL string) error {
 		return fmt.Errorf("不支持的协议: %s", u.Scheme)
 	}
 	host := u.Hostname()
-	ips, err := net.LookupIP(host)
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return fmt.Errorf("无法解析主机名: %s", host)
 	}
 	for _, ip := range ips {
-		if isBlockedIP(ip) {
+		if isBlockedIP(ip.IP) {
 			return fmt.Errorf("不允许的内网地址: %s", ip.String())
 		}
 	}
@@ -72,35 +78,67 @@ func safeWebhookClient() *http.Client {
 				if err != nil {
 					return nil, err
 				}
-				ips, err := net.LookupIP(host)
+				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 				if err != nil {
 					return nil, err
 				}
-				for _, ip := range ips {
-					if isBlockedIP(ip) {
-						return nil, fmt.Errorf("webhook: 目标 IP 被禁止: %s", ip.String())
-					}
-				}
-				return dialer.DialContext(ctx, network, addr)
+				_, port, _ := net.SplitHostPort(addr)
+				return dialSafeWebhookAddresses(ctx, network, port, ips, dialer.DialContext)
 			},
 		},
 	}
 }
 
+func dialSafeWebhookAddresses(ctx context.Context, network, port string, ips []net.IPAddr, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("webhook: no destination addresses")
+	}
+	// Check the complete resolution before connecting to any address, then
+	// preserve dual-stack fallback without performing an unchecked second DNS lookup.
+	for _, ip := range ips {
+		if isBlockedIP(ip.IP) {
+			return nil, fmt.Errorf("webhook: 目标 IP 被禁止: %s", ip.String())
+		}
+	}
+	var lastErr error
+	for _, ip := range ips {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		conn, err := dial(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 func SendWebhook(subject, body string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return SendWebhookContext(ctx, subject, body)
+}
+
+func SendWebhookContext(ctx context.Context, subject, body string) error {
 	cfg := GetWebhookConfig()
+	return sendWebhookWithConfig(ctx, cfg, subject, body)
+}
+
+func sendWebhookWithConfig(ctx context.Context, cfg *WebhookConfig, subject, body string) error {
 	if !webhookConfigured(cfg) {
 		return fmt.Errorf("Webhook 未配置")
 	}
 
-	if err := isSafeWebhookURL(cfg.URL); err != nil {
+	if err := isSafeWebhookURLContext(ctx, cfg.URL); err != nil {
 		return fmt.Errorf("Webhook URL 不安全: %w", err)
 	}
 
 	client := safeWebhookClient()
+	defer client.CloseIdleConnections()
 
 	if cfg.Channel == "bark" {
-		return sendBark(client, cfg.URL, subject, body)
+		return sendBarkContext(ctx, client, cfg.URL, subject, body)
 	}
 
 	payload, err := buildPayload(cfg.Channel, subject, body)
@@ -108,7 +146,12 @@ func SendWebhook(subject, body string) error {
 		return err
 	}
 
-	resp, err := client.Post(cfg.URL, "application/json", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Webhook 请求失败: %w", err)
 	}
@@ -121,12 +164,20 @@ func SendWebhook(subject, body string) error {
 }
 
 func sendBark(client *http.Client, baseURL, title, body string) error {
+	return sendBarkContext(context.Background(), client, baseURL, title, body)
+}
+
+func sendBarkContext(ctx context.Context, client *http.Client, baseURL, title, body string) error {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return fmt.Errorf("Bark URL 格式错误: %w", err)
 	}
 	u = u.JoinPath(url.PathEscape(title), url.PathEscape(body))
-	resp, err := client.Get(u.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Bark 请求失败: %w", err)
 	}

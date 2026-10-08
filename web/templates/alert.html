@@ -1,57 +1,66 @@
 {{template "base" .}}
 {{define "alert_content"}}
-<div x-data="alertManager()" x-init="fetchAll()">
+<div x-data="alertManager()" x-init="fetchAll()" @alert-channel-saved.window="Object.assign(settings, $event.detail)">
     <div class="flex items-center justify-between gap-3 mb-6">
-        <h2 class="text-xl font-bold text-white">{{t .Lang "nav.alert"}}</h2>
-        <button @click="fetchAll()" class="btn-secondary text-xs">{{t .Lang "alert.refresh"}}</button>
+        <h1 class="page-title">{{t .Lang "nav.alert"}}</h1>
+        <button @click="fetchAll()" :disabled="loading || rulesSaving || wpSecSaving" class="btn-secondary text-xs">{{t .Lang "alert.refresh"}}</button>
     </div>
 
+    <p x-show="loading" role="status" class="text-sm text-gray-500 mb-3">{{t .Lang "followup.loading_config"}}</p>
+    <div x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-4"><p x-text="loadError"></p><button @click="fetchAll()" :disabled="loading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.email_channel"}}</p><p class="text-sm mt-2" :class="settings.smtp_host && settings.admin_email ? 'text-green-400' : 'text-yellow-400'" x-text="settings.smtp_host && settings.admin_email ? t('alert.configured') : t('alert.not_configured')"></p></div>
-        <div class="card py-4"><p class="text-xs text-gray-500">Webhook</p><p class="text-sm mt-2" :class="settings.webhook_url ? 'text-green-400' : 'text-yellow-400'" x-text="settings.webhook_url ? t('alert.configured') : t('alert.not_configured')"></p></div>
-        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.enabled_rules"}}</p><p class="text-xl text-white mt-1" x-text="enabledRuleCount()"></p></div>
-        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.recent_events"}}</p><p class="text-xl text-white mt-1" x-text="logs.length"></p></div>
+        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.email_channel"}}</p><p class="text-sm mt-2" :class="settings.smtp_host && settings.admin_email ? 'text-green-400' : 'text-yellow-400'" x-text="!loaded ? t('followup.status_unknown') : settings.smtp_host && settings.admin_email ? t('alert.configured') : t('alert.not_configured')"></p></div>
+        <div class="card py-4"><p class="text-xs text-gray-500">Webhook</p><p class="text-sm mt-2" :class="settings.webhook_url ? 'text-green-400' : 'text-yellow-400'" x-text="!loaded ? t('followup.status_unknown') : settings.webhook_url ? t('alert.configured') : t('alert.not_configured')"></p></div>
+        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.enabled_rules"}}</p><p class="text-xl text-white mt-1" x-text="loaded ? enabledRuleCount() : '—'"></p></div>
+        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.recent_events"}}</p><p class="text-xl text-white mt-1" x-text="logsLoaded ? logs.length : '—'"></p></div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
         <div class="space-y-8">
             <div class="card" x-data="smtpConfig()" x-init="fetch()">
                 <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "alert.smtp_config"}}</h3>
+                <p x-show="loading" role="status" class="text-sm text-gray-500 mb-3">{{t .Lang "followup.loading_config"}}</p>
+                <div x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-3"><p x-text="loadError"></p><button type="button" @click="fetch()" :disabled="loading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
+                <p x-show="operationError" role="alert" class="text-sm text-red-400 mb-3" x-text="operationError"></p>
+                <fieldset :disabled="!loaded || busy()" class="min-w-0">
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.smtp_server"}}</label>
-                    <input type="text" x-model="cfg.smtp_host" class="input-field text-sm">
+                    <label for="alert-smtp_host" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.smtp_server"}}</label>
+                    <input id="alert-smtp_host" type="text" x-model="cfg.smtp_host" class="input-field text-sm">
                 </div>
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.port"}}</label>
-                    <input type="text" x-model="cfg.smtp_port" class="input-field text-sm">
+                    <label for="alert-smtp_port" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.port"}}</label>
+                    <input id="alert-smtp_port" type="text" x-model="cfg.smtp_port" class="input-field text-sm">
                 </div>
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.encryption"}}</label>
-                    <select x-model="cfg.smtp_encryption" class="input-field text-sm">
+                    <label for="alert-smtp_encryption" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.encryption"}}</label>
+                    <select id="alert-smtp_encryption" x-model="cfg.smtp_encryption" class="input-field text-sm">
                         <option value="starttls">STARTTLS</option>
                         <option value="ssl">SSL</option>
                         <option value="none">{{t .Lang "alert.none"}}</option>
                     </select>
                 </div>
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.sender_email"}}</label>
-                    <input type="text" x-model="cfg.smtp_user" class="input-field text-sm">
+                    <label for="alert-smtp_user" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.sender_email"}}</label>
+                    <input id="alert-smtp_user" type="text" x-model="cfg.smtp_user" class="input-field text-sm">
                 </div>
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.password_or_token"}}</label>
-                    <input type="password" x-model="cfg.smtp_pass" class="input-field text-sm">
+                    <label for="alert-smtp_pass" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.password_or_token"}}</label>
+                    <input id="alert-smtp_pass" type="password" x-model="cfg.smtp_pass" class="input-field text-sm">
                 </div>
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.admin_email"}}</label>
-                    <input type="text" x-model="cfg.admin_email" class="input-field text-sm" placeholder="admin@example.com">
+                    <label for="alert-admin_email" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.admin_email"}}</label>
+                    <input id="alert-admin_email" type="text" x-model="cfg.admin_email" class="input-field text-sm" placeholder="admin@example.com">
                 </div>
                 <p class="text-xs text-amber-400 mb-3">{{t .Lang "alert.smtp_transfer_warning"}}</p>
                 <div class="flex flex-wrap gap-3">
-                    <button @click="save" :disabled="saving" class="btn-primary text-sm" x-text="saving ? t('alert.saving') : t('common.save')"></button>
-                    <button @click="test" :disabled="testing" class="btn-secondary text-sm" x-text="testing ? t('alert.sending') : t('alert.test_send')"></button>
-                    <button @click="copyConfig" :disabled="transferring" class="btn-secondary text-sm" x-text="t('alert.smtp_copy')"></button>
-                    <button @click="openImportModal" :disabled="transferring" class="btn-secondary text-sm" x-text="t('alert.smtp_import')"></button>
+                    <button @click="save" :disabled="!loaded || busy()" class="btn-primary text-sm" x-text="saving ? t('alert.saving') : t('common.save')"></button>
+                    <button @click="test" :disabled="!loaded || busy() || dirty()" class="btn-secondary text-sm" x-text="testing ? t('alert.sending') : t('alert.test_send')"></button>
+                    <button @click="copyConfig" :disabled="!loaded || busy() || dirty()" class="btn-secondary text-sm" x-text="t('alert.smtp_copy')"></button>
+                    <button @click="openImportModal" :disabled="!loaded || busy()" class="btn-secondary text-sm" x-text="t('alert.smtp_import')"></button>
                 </div>
+
+                </fieldset>
+                <p x-show="dirty()" class="text-xs text-gray-500 mt-3">{{t .Lang "followup.smtp_save_first"}}</p>
 
                 <div x-cloak x-show="importOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" @click.self="closeImportModal()" @keydown.escape.window="closeImportModal()">
                     <div class="card w-full max-w-xl" role="dialog" aria-modal="true" aria-labelledby="smtp-import-title">
@@ -69,9 +78,13 @@
 
             <div class="card" x-data="webhookConfig()" x-init="fetch()">
                 <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "alert.webhook_push"}}</h3>
+                <p x-show="loading" role="status" class="text-sm text-gray-500 mb-3">{{t .Lang "followup.loading_config"}}</p>
+                <div x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-3"><p x-text="loadError"></p><button type="button" @click="fetch()" :disabled="loading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
+                <p x-show="operationError" role="alert" class="text-sm text-red-400 mb-3" x-text="operationError"></p>
+                <fieldset :disabled="!loaded || busy()" class="min-w-0">
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.push_channel"}}</label>
-                    <select x-model="cfg.webhook_channel" class="input-field text-sm">
+                    <label for="alert-webhook_channel" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.push_channel"}}</label>
+                    <select id="alert-webhook_channel" x-model="cfg.webhook_channel" class="input-field text-sm">
                         <option value="wecom">{{t .Lang "alert.wecom"}}</option>
                         <option value="dingtalk">{{t .Lang "alert.dingtalk"}}</option>
                         <option value="feishu">{{t .Lang "alert.feishu"}}</option>
@@ -81,14 +94,15 @@
                     </select>
                 </div>
                 <div class="mb-3">
-                    <label class="text-sm text-gray-300 mb-1 block">Webhook URL</label>
-                    <input type="text" x-model="cfg.webhook_url" class="input-field text-sm" placeholder="https://...">
+                    <label for="alert-webhook_url" class="text-sm text-gray-300 mb-1 block">Webhook URL</label>
+                    <input id="alert-webhook_url" type="text" x-model="cfg.webhook_url" class="input-field text-sm" placeholder="https://...">
                     <p class="text-xs text-gray-500 mt-1">{{t .Lang "alert.webhook_url_help"}}</p>
                 </div>
                 <div class="flex space-x-3">
                     <button @click="save" :disabled="saving" class="btn-primary text-sm" x-text="saving ? t('alert.saving') : t('common.save')"></button>
                     <button @click="test" :disabled="testing" class="btn-secondary text-sm" x-text="testing ? t('alert.sending') : t('alert.test_send')"></button>
                 </div>
+                </fieldset>
             </div>
         </div>
 
@@ -97,71 +111,74 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_cpu" @change="save">
+                    <input type="checkbox" x-model="rules.alert_cpu" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_cpu"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_memory" @change="save">
+                    <input type="checkbox" x-model="rules.alert_memory" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_memory"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_oom" @change="save">
+                    <input type="checkbox" x-model="rules.alert_oom" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_oom"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_disk" @change="save">
+                    <input type="checkbox" x-model="rules.alert_disk" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_disk"}}</span>
                 </label>
             </div>
             <div>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_service" @change="save">
+                    <input type="checkbox" x-model="rules.alert_service" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_service"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_ssl" @change="save">
+                    <input type="checkbox" x-model="rules.alert_ssl" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_ssl"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_backup" @change="save">
+                    <input type="checkbox" x-model="rules.alert_backup" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_backup"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_remote_backup" @change="save">
+                    <input type="checkbox" x-model="rules.alert_remote_backup" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_remote_backup"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_cron_fail" @change="save">
+                    <input type="checkbox" x-model="rules.alert_cron_fail" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_cron_fail"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_website_expiry" @change="save">
+                    <input type="checkbox" x-model="rules.alert_website_expiry" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_website_expiry"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_system_update" @change="save">
+                    <input type="checkbox" x-model="rules.alert_system_update" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_system_update"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_panel_update" @change="save">
+                    <input type="checkbox" x-model="rules.alert_panel_update" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_panel_update"}}</span>
                 </label>
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                    <input type="checkbox" x-model="rules.alert_wp_fake_search_bot" @change="save">
+                    <input type="checkbox" x-model="rules.alert_wp_fake_search_bot" @change="save" :disabled="!loaded || loading">
                     <span>{{t .Lang "alert.rule_wp_fake_search_bot"}}</span>
                 </label>
                 <div class="flex flex-wrap items-center gap-4 mt-2 mb-3 text-sm text-gray-300">
                     <label class="flex items-center gap-2">
                         <span>{{t .Lang "alert.wp_security_threshold_label"}}</span>
-                        <input type="number" min="1" max="10000" x-model.number="wpSecCfg.threshold" @change="saveWPSecCfg" :disabled="wpSecSaving" class="input-field w-20 py-1 text-sm">
+                        <input type="number" min="1" max="10000" x-model.number="wpSecCfg.threshold" @change="saveWPSecCfg" :disabled="!loaded || loading || wpSecSaving" class="input-field w-20 py-1 text-sm">
                     </label>
                     <label class="flex items-center gap-2">
                         <span>{{t .Lang "alert.wp_security_window_label"}}</span>
-                        <input type="number" min="1" max="168" x-model.number="wpSecCfg.windowHours" @change="saveWPSecCfg" :disabled="wpSecSaving" class="input-field w-20 py-1 text-sm">
+                        <input type="number" min="1" max="168" x-model.number="wpSecCfg.windowHours" @change="saveWPSecCfg" :disabled="!loaded || loading || wpSecSaving" class="input-field w-20 py-1 text-sm">
                     </label>
                 </div>
             </div>
         </div>
+        <p x-show="rulesSaving || wpSecSaving" role="status" class="text-xs text-gray-500 mt-2">{{t .Lang "alert.saving"}}</p>
+        <div x-show="rulesError" role="alert" class="text-sm text-red-400 mt-2"><p x-text="rulesError"></p><button @click="save()" :disabled="rulesSaving || !loaded" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_save"}}</button></div>
+        <div x-show="wpSecError" role="alert" class="text-sm text-red-400 mt-2"><p x-text="wpSecError"></p><button @click="saveWPSecCfg()" :disabled="wpSecSaving || !loaded" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_save"}}</button></div>
         <p class="text-xs text-gray-500 mt-2">{{t .Lang "alert.rate_limit_help"}}</p>
         <p class="text-xs text-gray-500 mt-1">{{t .Lang "alert.wp_security_alert_help"}}</p>
     </div>
@@ -170,11 +187,13 @@
     <div class="card">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "alert.recent_logs"}}</h3>
-            <div class="flex gap-2">
-                <input type="search" x-model.trim="logFilter" class="input-field text-xs py-1.5 w-52" placeholder="{{t .Lang "alert.search_logs"}}">
-                <select x-model="logLevel" class="input-field text-xs py-1.5 w-28"><option value="">{{t .Lang "alert.all_levels"}}</option><option value="critical">{{t .Lang "alert.level_critical"}}</option><option value="info">{{t .Lang "alert.level_info"}}</option></select>
+            <div class="flex flex-wrap gap-2">
+                <input type="search" x-model.trim="logFilter" aria-label="{{t .Lang "alert.search_logs"}}" class="input-field text-xs py-1.5 w-52" placeholder="{{t .Lang "alert.search_logs"}}">
+                <select aria-label="{{t .Lang "alert.all_levels"}}" x-model="logLevel" class="input-field text-xs py-1.5 w-28"><option value="">{{t .Lang "alert.all_levels"}}</option><option value="critical">{{t .Lang "alert.level_critical"}}</option><option value="info">{{t .Lang "alert.level_info"}}</option></select>
             </div>
         </div>
+        <p x-show="logsLoading" role="status" class="text-sm text-gray-500 mb-3">{{t .Lang "followup.loading_logs"}}</p>
+        <div x-show="logsError" role="alert" class="text-sm text-red-400 mb-3"><p x-text="logsError"></p><button @click="fetchLog()" :disabled="logsLoading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
         <div class="overflow-auto max-h-[32rem] overscroll-contain">
             <table class="table-fixed w-full min-w-[860px] text-sm">
                 <thead class="border-b border-gray-700 text-gray-400">
@@ -197,7 +216,7 @@
                             <td class="py-2 text-sm text-gray-400" style="white-space: normal; overflow-wrap: anywhere;" x-text="l.message"></td>
                         </tr>
                     </template>
-                    <tr x-show="filteredLogs().length === 0">
+                    <tr x-show="logsLoaded && !logsLoading && !logsError && filteredLogs().length === 0">
                         <td colspan="4" class="py-6 text-center text-gray-500">{{t .Lang "alert.no_logs"}}</td>
                     </tr>
                 </tbody>
@@ -207,36 +226,48 @@
 </div>
 
 <script>
+let alertSettingsPending = null;
 function alertSettings() {
-    return cachedAPI('/alert/settings', { silent: true }, 2000);
+    // Share the initial read across cards without serving stale data after writes.
+    if (!alertSettingsPending) alertSettingsPending = api('/alert/settings', { silent: true }).finally(() => { alertSettingsPending = null; });
+    return alertSettingsPending;
+}
+function alertData(response, keys) {
+    const data = response?.data;
+    if (!response?.success || !data || Array.isArray(data) || keys.some(key => typeof data[key] !== 'string')) throw new Error(t('followup.invalid_config'));
+    return data;
+}
+function alertSaved(response) {
+    if (!response?.success) throw new Error(response?.message || t('common.operation_failed'));
+    return response;
 }
 
 function smtpConfig() {
     return {
         cfg: { smtp_host: '', smtp_port: '587', smtp_encryption: 'starttls', smtp_user: '', smtp_pass: '', admin_email: '' },
+        loaded: false, loading: false, loadError: '', operationError: '', savedConfig: '',
+        busy() { return this.loading || this.saving || this.testing || this.transferring; },
+        dirty() { return this.loaded && JSON.stringify(this.cfg) !== this.savedConfig; },
         saving: false,
         testing: false,
         transferring: false,
         importOpen: false,
         importCode: '',
         async fetch() {
+            if (this.busy()) return;
+            this.loading = true; this.loaded = false; this.loadError = '';
             try {
-                const r = await alertSettings();
-                if (r.success) {
-                    const d = r.data || {};
-                    this.cfg = {
-                        smtp_host: d.smtp_host || '',
-                        smtp_port: d.smtp_port || '587',
-                        smtp_encryption: d.smtp_encryption || 'starttls',
-                        smtp_user: d.smtp_user || '',
-                        smtp_pass: d.smtp_pass || '',
-                        admin_email: d.admin_email || ''
-                    };
-                }
-            } catch(e) {}
+                const d = alertData(await alertSettings(), Object.keys(this.cfg));
+                this.cfg = Object.fromEntries(Object.keys(this.cfg).map(key => [key, d[key]]));
+                this.savedConfig = JSON.stringify(this.cfg);
+                this.loaded = true;
+            } catch(e) { this.loadError = e.message || t('followup.load_failed'); }
+            finally { this.loading = false; }
         },
         async save() {
-            this.saving = true;
+            if (!this.loaded || this.busy()) return;
+            this.saving = true; this.operationError = '';
+            const submitted = JSON.stringify(this.cfg);
             try {
                 const body = {
                     smtp_host: this.cfg.smtp_host || '',
@@ -246,23 +277,31 @@ function smtpConfig() {
                     smtp_pass: this.cfg.smtp_pass || '',
                     admin_email: this.cfg.admin_email || ''
                 };
-                await api('/alert/settings', { method: 'PUT', body });
+                alertSaved(await api('/alert/settings', { method: 'PUT', body }));
+                if (JSON.stringify(this.cfg) === submitted) this.cfg = { ...body };
+                this.savedConfig = JSON.stringify(body);
+                window.dispatchEvent(new CustomEvent('alert-channel-saved', { detail: body }));
                 showToast(t('alert.smtp_config_saved'), 'success');
-            } catch(e) { showToast(e.message, 'error'); }
+            } catch(e) { this.operationError = e.message || t('common.operation_failed'); showToast(this.operationError, 'error'); }
             this.saving = false;
         },
         async test() {
-            this.testing = true;
+            if (!this.loaded || this.busy() || this.dirty()) return;
+            this.testing = true; this.operationError = '';
             try {
                 const r = await api('/alert/test-smtp', { method: 'POST', body: { email: this.cfg.admin_email || '' } });
+                alertSaved(r);
                 showToast(r.data?.message || t('common.operation_success'), 'success');
-            } catch(e) { showToast(e.message || t('alert.send_failed'), 'error'); }
+            } catch(e) { this.operationError = e.message || t('alert.send_failed'); showToast(this.operationError, 'error'); }
             this.testing = false;
         },
         async copyConfig() {
-            this.transferring = true;
+            if (!this.loaded || this.busy() || this.dirty()) return;
+            this.transferring = true; this.operationError = '';
             try {
                 const r = await api('/alert/smtp-config/export', { method: 'POST', body: {} });
+                alertSaved(r);
+                if (!r.data?.code) throw new Error(t('alert.smtp_copy_failed'));
                 let copied = false;
                 if (navigator.clipboard?.writeText) {
                     try {
@@ -282,10 +321,11 @@ function smtpConfig() {
                 }
                 if (!copied) throw new Error(t('alert.smtp_copy_failed'));
                 showToast(t('alert.smtp_copy_success'), 'success');
-            } catch(e) { showToast(e.message || t('alert.smtp_copy_failed'), 'error'); }
+            } catch(e) { this.operationError = e.message || t('alert.smtp_copy_failed'); showToast(this.operationError, 'error'); }
             this.transferring = false;
         },
         openImportModal() {
+            if (!this.loaded || this.busy()) return;
             this.importCode = '';
             this.importOpen = true;
             this.$nextTick(() => this.$refs.importCode.focus());
@@ -297,11 +337,12 @@ function smtpConfig() {
         },
         async importConfig() {
             const code = this.importCode.trim();
-            if (!code) return;
+            if (!this.loaded || this.busy() || !code) return;
+            this.operationError = '';
             this.transferring = true;
             try {
                 const r = await api('/alert/smtp-config/import', { method: 'POST', body: { code } });
-                const d = r.data || {};
+                const d = alertData(r, Object.keys(this.cfg));
                 const hasExisting = ['smtp_host', 'smtp_user', 'smtp_pass', 'admin_email'].some(k => String(this.cfg[k] || '').trim() !== '');
                 if (hasExisting && !await confirmModal(t('alert.smtp_overwrite_confirm'))) {
                     showToast(t('alert.smtp_import_cancelled'), 'info');
@@ -320,7 +361,7 @@ function smtpConfig() {
                 this.importOpen = false;
                 this.importCode = '';
                 showToast(t('alert.smtp_import_success'), 'success');
-            } catch(e) { showToast(e.message, 'error'); }
+            } catch(e) { this.operationError = e.message || t('common.operation_failed'); showToast(this.operationError, 'error'); }
             finally { this.transferring = false; }
         }
     }
@@ -329,33 +370,48 @@ function smtpConfig() {
 function webhookConfig() {
     return {
         cfg: { webhook_channel: 'wecom', webhook_url: '' },
-        saving: false,
-        testing: false,
+        loaded: false, loading: false, loadError: '', operationError: '', saving: false, testing: false,
+        busy() { return this.loading || this.saving || this.testing; },
         async fetch() {
-            try { const r = await alertSettings(); if (r.success) { const d = r.data || {}; if (d.webhook_channel) this.cfg.webhook_channel = d.webhook_channel; if (d.webhook_url) this.cfg.webhook_url = d.webhook_url; } } catch(e) {}
+            if (this.busy()) return;
+            this.loading = true; this.loaded = false; this.loadError = '';
+            try {
+                // Webhook keys are absent on installations that have never configured a channel.
+                const d = alertData(await alertSettings(), ['smtp_host', 'alert_cpu']);
+                if (['webhook_channel', 'webhook_url'].some(key => d[key] != null && typeof d[key] !== 'string')) throw new Error(t('followup.invalid_config'));
+                this.cfg = { webhook_channel: d.webhook_channel || 'wecom', webhook_url: d.webhook_url || '' };
+                this.loaded = true;
+            } catch(e) { this.loadError = e.message || t('followup.load_failed'); }
+            finally { this.loading = false; }
         },
         async save() {
-            this.saving = true;
+            if (!this.loaded || this.busy()) return;
+            this.saving = true; this.operationError = '';
             try {
-                await api('/alert/settings', { method: 'PUT', body: { ...this.cfg } });
+                const body = { ...this.cfg };
+                alertSaved(await api('/alert/settings', { method: 'PUT', body }));
+                window.dispatchEvent(new CustomEvent('alert-channel-saved', { detail: body }));
                 showToast(t('alert.webhook_config_saved'), 'success');
-            } catch(e) { showToast(e.message, 'error'); }
-            this.saving = false;
+            } catch(e) { this.operationError = e.message || t('common.operation_failed'); showToast(this.operationError, 'error'); }
+            finally { this.saving = false; }
         },
         async test() {
+            if (!this.loaded || this.busy()) return;
             if (!this.cfg.webhook_url) { showToast(t('alert.webhook_url_required'), 'error'); return; }
-            this.testing = true;
+            this.testing = true; this.operationError = '';
             try {
-                const r = await api('/alert/test-webhook', { method: 'POST', body: { channel: this.cfg.webhook_channel, url: this.cfg.webhook_url } });
+                const r = alertSaved(await api('/alert/test-webhook', { method: 'POST', body: { channel: this.cfg.webhook_channel, url: this.cfg.webhook_url } }));
                 showToast(r.data?.message || t('common.operation_success'), 'success');
-            } catch(e) { showToast(e.message || t('alert.send_failed'), 'error'); }
-            this.testing = false;
+            } catch(e) { this.operationError = e.message || t('alert.send_failed'); showToast(this.operationError, 'error'); }
+            finally { this.testing = false; }
         }
     }
 }
 
 function alertManager() {
     return {
+        loaded: false, loading: false, loadError: '', rulesSaving: false, rulesPending: false, rulesError: '', wpSecError: '',
+        logsLoaded: false, logsLoading: false, logsError: '',
         rules: {},
         settings: {},
         wpSecCfg: { threshold: 10, windowHours: 24 },
@@ -364,24 +420,21 @@ function alertManager() {
         logFilter: '',
         logLevel: '',
         async fetchAll() {
+            if (this.loading || this.rulesSaving || this.wpSecSaving) return;
+            this.loading = true; this.loaded = false; this.loadError = '';
+            const logs = this.fetchLog();
             try {
-                const r = await alertSettings();
-                if (r.success) {
-                    const d = r.data || {};
-                    this.settings = d;
-                    for (const k of Object.keys(d)) {
-                        // alert_wp_security_threshold / alert_wp_security_window_hours
-                        // 是数值键，不能走布尔 rules 通道，否则 "10" 会被 !== 'false'
-                        // 判成 true，下次 save() 又把 true 写回去覆盖数值。
-                        if (k.startsWith('alert_') && k !== 'alert_wp_sqli_probe' && k !== 'alert_wp_security_threshold' && k !== 'alert_wp_security_window_hours') {
-                            this.rules[k] = d[k] !== 'false';
-                        }
-                    }
-                    this.wpSecCfg.threshold = parseInt(d.alert_wp_security_threshold) || 10;
-                    this.wpSecCfg.windowHours = parseInt(d.alert_wp_security_window_hours) || 24;
-                }
-            } catch(e) {}
-            this.fetchLog();
+                const keys = ['alert_cpu', 'alert_memory', 'alert_oom', 'alert_disk', 'alert_service', 'alert_ssl', 'alert_backup', 'alert_remote_backup', 'alert_cron_fail', 'alert_website_expiry', 'alert_system_update', 'alert_panel_update', 'alert_wp_fake_search_bot'];
+                const d = alertData(await alertSettings(), [...keys, 'alert_wp_security_threshold', 'alert_wp_security_window_hours']);
+                if (keys.some(key => !['true', 'false'].includes(d[key]))) throw new Error(t('followup.invalid_config'));
+                this.settings = d;
+                this.rules = Object.fromEntries(Object.entries(d).filter(([key, value]) => key.startsWith('alert_') && key !== 'alert_wp_sqli_probe' && ['true', 'false'].includes(value)).map(([key, value]) => [key, value === 'true']));
+                this.wpSecCfg = { threshold: parseInt(d.alert_wp_security_threshold) || 10, windowHours: parseInt(d.alert_wp_security_window_hours) || 24 };
+                this.rulesError = ''; this.wpSecError = '';
+                this.loaded = true;
+            } catch(e) { this.loadError = e.message || t('followup.load_failed'); }
+            finally { this.loading = false; }
+            await logs;
         },
         enabledRuleCount() {
             return Object.values(this.rules).filter(Boolean).length;
@@ -395,33 +448,46 @@ function alertManager() {
             });
         },
         async save() {
+            if (!this.loaded || this.loading) return;
+            this.rulesPending = true;
+            if (this.rulesSaving) return;
+            this.rulesSaving = true;
+            this.rulesError = '';
             try {
-                const body = {};
-                for (const k of Object.keys(this.rules)) {
-                    body[k] = this.rules[k] ? 'true' : 'false';
+                // At most one PUT runs; further edits are sent as the latest snapshot.
+                while (this.rulesPending) {
+                    this.rulesPending = false;
+                    const body = Object.fromEntries(Object.entries(this.rules).map(([key, value]) => [key, value ? 'true' : 'false']));
+                    alertSaved(await api('/alert/settings', { method: 'PUT', body }));
                 }
-                await api('/alert/settings', { method: 'PUT', body });
             } catch(e) {
-                showToast(e.message || t('common.operation_failed'), 'error');
-                await this.fetchAll();
-            }
+                this.rulesPending = false;
+                this.rulesError = e.message || t('common.operation_failed');
+            } finally { this.rulesSaving = false; }
         },
         async saveWPSecCfg() {
-            this.wpSecSaving = true;
+            if (!this.loaded || this.loading || this.wpSecSaving) return;
+            this.wpSecSaving = true; this.wpSecError = '';
             try {
-                await api('/alert/settings', { method: 'PUT', body: {
-                    alert_wp_security_threshold: String(this.wpSecCfg.threshold),
-                    alert_wp_security_window_hours: String(this.wpSecCfg.windowHours)
-                }});
+                const threshold = Number(this.wpSecCfg.threshold), windowHours = Number(this.wpSecCfg.windowHours);
+                if (!Number.isInteger(threshold) || threshold < 1 || threshold > 10000 || !Number.isInteger(windowHours) || windowHours < 1 || windowHours > 168) throw new Error(t('followup.invalid_threshold'));
+                alertSaved(await api('/alert/settings', { method: 'PUT', body: {
+                    alert_wp_security_threshold: String(threshold),
+                    alert_wp_security_window_hours: String(windowHours)
+                }}));
                 showToast(t('alert.wp_security_config_saved'), 'success');
-            } catch(e) { showToast(e.message || t('common.operation_failed'), 'error'); }
-            this.wpSecSaving = false;
+            } catch(e) { this.wpSecError = e.message || t('common.operation_failed'); }
+            finally { this.wpSecSaving = false; }
         },
         async fetchLog() {
+            if (this.logsLoading) return;
+            this.logsLoading = true; this.logsError = '';
             try {
-                const r = await api('/alert/log');
-                if (r.success) this.logs = r.data || [];
-            } catch(e) {}
+                const r = await api('/alert/log', { silent: true });
+                if (!r.success || !Array.isArray(r.data)) throw new Error(t('followup.load_failed'));
+                this.logs = r.data; this.logsLoaded = true;
+            } catch(e) { this.logsError = e.message || t('followup.load_failed'); }
+            finally { this.logsLoading = false; }
         },
         typeLabel(alertType) {
             const m = {

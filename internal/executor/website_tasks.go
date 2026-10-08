@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
@@ -514,6 +515,41 @@ func createSiteSystemUser(systemUser string, run func(string, ...string) (string
 	return rollback, nil
 }
 
+var (
+	deleteSiteUser      = removeWebsiteSystemUser
+	deleteSiteRemove    = os.Remove
+	deleteSiteRemoveAll = os.RemoveAll
+	deleteSiteDatabase  = dropMariaDBDatabase
+	deleteSiteReload    = reloadOLSManagedRegistry
+)
+
+func removeWebsiteSystemUser(name string) error {
+	return removeWebsiteSystemUserWith(name, user.Lookup, executeCommand)
+}
+
+func removeWebsiteSystemUserWith(name string, lookup func(string) (*user.User, error), run func(string, ...string) (string, error)) error {
+	_, err := lookup(name)
+	var unknown user.UnknownUserError
+	if errors.As(err, &unknown) {
+		return nil // Retrying an interrupted deletion may find the user absent.
+	}
+	if err != nil {
+		return err
+	}
+	_, removeErr := run("userdel", "-r", "-f", name)
+	_, verifyErr := lookup(name)
+	if errors.As(verifyErr, &unknown) {
+		return nil
+	}
+	if removeErr != nil {
+		return removeErr
+	}
+	if verifyErr != nil {
+		return verifyErr
+	}
+	return fmt.Errorf("系统用户 %s 仍然存在", name)
+}
+
 func executeDeleteSite(task *Task) TaskResult {
 	payload, ok := task.Payload.(*DeleteSitePayload)
 	if !ok {
@@ -590,35 +626,38 @@ func executeDeleteSite(task *Task) TaskResult {
 		return TaskResult{Success: false, Message: "标记网站删除状态失败: " + err.Error()}
 	}
 
-	if _, err := executeCommand("userdel", "-r", "-f", site.SystemUser); err != nil {
-		fmt.Fprintf(os.Stderr, "删除系统用户警告: %v\n", err)
+	var cleanupErrors []string
+	recordCleanup := func(label string, err error) {
+		if err != nil && !os.IsNotExist(err) {
+			cleanupErrors = append(cleanupErrors, label+": "+err.Error())
+		}
 	}
-
-	os.RemoveAll(webRoot)
-	os.RemoveAll(logDir)
-	os.RemoveAll(secretsDir)
-
-	// Clean up logrotate config
-	os.Remove(logrotatePath)
-
-	dbCleanupWarning := ""
-	if err := dropMariaDBDatabase(site.DBName, site.DBUser, cfg); err != nil {
-		log.Printf("删除数据库失败 domain=%s db=%s: %v", site.Domain, site.DBName, err)
-		dbCleanupWarning = "，但数据库清理失败，请检查 MariaDB 后手动清理"
+	// Continue independent cleanup, but keep the deleting record until every
+	// external resource is gone so a retry still knows what must be removed.
+	if err := deleteSiteUser(site.SystemUser); err != nil {
+		cleanupErrors = append(cleanupErrors, "系统用户: "+err.Error())
 	}
-
-	os.Remove(phpSocketPath)
-	os.Remove(enabledPath)
-	os.Remove(olsVHostConfigPath)
+	recordCleanup("网站目录", deleteSiteRemoveAll(webRoot))
+	recordCleanup("日志目录", deleteSiteRemoveAll(logDir))
+	recordCleanup("密钥目录", deleteSiteRemoveAll(secretsDir))
+	recordCleanup("日志轮转配置", deleteSiteRemove(logrotatePath))
+	if err := deleteSiteDatabase(site.DBName, site.DBUser, cfg); err != nil {
+		cleanupErrors = append(cleanupErrors, "数据库: "+err.Error())
+	}
+	recordCleanup("PHP Socket", deleteSiteRemove(phpSocketPath))
+	recordCleanup("OpenLiteSpeed 启用链接", deleteSiteRemove(enabledPath))
+	recordCleanup("OpenLiteSpeed 配置", deleteSiteRemove(olsVHostConfigPath))
 	for _, maintenancePath := range maintenancePaths {
-		os.Remove(maintenancePath)
+		recordCleanup("维护配置", deleteSiteRemove(maintenancePath))
 	}
 
-	if _, reloadErr := reloadOLSManagedRegistry(cfg.Paths.OLSVHostsEnabled); reloadErr != nil {
-		return TaskResult{Success: false, Message: "刷新 OpenLiteSpeed 站点注册表失败: " + reloadErr.Error()}
+	if _, reloadErr := deleteSiteReload(cfg.Paths.OLSVHostsEnabled); reloadErr != nil {
+		cleanupErrors = append(cleanupErrors, "刷新 OpenLiteSpeed 站点注册表: "+reloadErr.Error())
 	}
-
-	os.RemoveAll(certDir)
+	recordCleanup("证书目录", deleteSiteRemoveAll(certDir))
+	if len(cleanupErrors) != 0 {
+		return TaskResult{Success: false, Message: "网站删除未完成，已保留删除状态，请修复后重试: " + strings.Join(cleanupErrors, "；")}
+	}
 
 	cronDeleted, err := deleteSiteAndAssociatedCronJobs(db, site.ID)
 	if err != nil {
@@ -630,7 +669,7 @@ func executeDeleteSite(task *Task) TaskResult {
 		}
 	}
 
-	return TaskResult{Success: true, Message: "网站 " + site.Domain + " 已删除" + dbCleanupWarning}
+	return TaskResult{Success: true, Message: "网站 " + site.Domain + " 已删除"}
 }
 
 func markWebsiteDeleting(db *sql.DB, siteID int) error {

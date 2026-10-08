@@ -1,19 +1,26 @@
 {{template "base" .}}
 {{define "dashboard_content"}}
-<div>
-    <p class="text-sm text-gray-400 mb-5">{{t .Lang "dashboard.introduction"}}</p>
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-6" x-data="versionCheck()" x-init="scheduleCheck()">
-        <div class="flex flex-wrap items-center gap-3">
-            <h2 class="text-xl font-bold text-white">{{t .Lang "nav.dashboard"}}</h2>
-            <span class="version-pill text-xs px-2 py-0.5">{{.PanelVersion}}</span>
-            <a x-show="hasUpdate" href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs bg-yellow-600 text-yellow-100 px-2 py-0.5 rounded hover:bg-yellow-500" x-text="t('dashboard.update_available', { version: latestVersion })"></a>
-            <a x-show="sysCount > 0" href="/{{.RandomSuffix}}/settings#system-updates" class="text-xs bg-red-700 text-red-100 px-2 py-0.5 rounded hover:bg-red-600" x-text="t('dashboard.system_updates', { count: sysCount })"></a>
-            <span x-show="checkError" x-text="checkError" class="text-xs text-red-300"></span>
+<div class="overview-page">
+    <div class="overview-heading" x-data="versionCheck()" x-init="scheduleCheck()">
+        <div class="overview-heading-copy">
+            <div class="overview-heading-title">
+                <h1 class="page-title">{{t .Lang "nav.dashboard"}}</h1>
+                <span class="version-pill text-xs px-2 py-0.5">{{.PanelVersion}}</span>
+            </div>
+            <p class="overview-introduction">{{t .Lang "dashboard.introduction"}}</p>
+            <div class="overview-update-notices">
+                <a x-show="hasUpdate" href="/{{.RandomSuffix}}/settings#system-updates" class="overview-update-warning" x-text="t('dashboard.update_available', { version: latestVersion })"></a>
+                <a x-show="sysCount > 0" href="/{{.RandomSuffix}}/settings#system-updates" class="overview-update-alert" x-text="t('dashboard.system_updates', { count: sysCount })"></a>
+                <span x-show="checkError" x-text="checkError" class="overview-update-error"></span>
+            </div>
         </div>
-        <a href="/{{.RandomSuffix}}/vps" class="btn-secondary text-xs py-1.5 px-3">{{t .Lang "dashboard.vps_management"}}</a>
+        <a href="/{{.RandomSuffix}}/vps" class="btn-secondary overview-heading-action">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M5 4h14v6H5zM5 14h14v6H5zM8 7h.01M8 17h.01M12 7h4M12 17h4"/></svg>
+            {{t .Lang "dashboard.vps_management"}}
+        </a>
     </div>
     <div x-data="announcement()" x-init="fetch()" class="mb-4" x-show="visible">
-        <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 text-blue-200 text-sm leading-relaxed prose-a:text-blue-300 prose-a:underline prose-a:hover:text-blue-100 flex items-start">
+        <div class="overview-announcement bg-blue-900/30 border border-blue-700 rounded-lg p-4 text-blue-200 text-sm leading-relaxed prose-a:text-blue-300 prose-a:underline prose-a:hover:text-blue-100 flex items-start">
             <svg class="w-5 h-5 mr-3 flex-shrink-0 mt-0.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
             </svg>
@@ -25,56 +32,59 @@
             </button>
         </div>
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6" x-data="dashboardStats()" x-init="fetchStats()">
-        <div class="card">
-            <p class="text-gray-400 text-sm">{{t .Lang "dashboard.cpu_usage"}}</p>
-            <p class="text-3xl font-bold text-white mt-2" x-text="stats.cpu_percent?.toFixed(1) + '%'">--</p>
+    <dl class="overview-metrics" x-data="dashboardStats()" x-init="fetchStats()">
+        <div class="overview-metric">
+            <dt>{{t .Lang "dashboard.cpu_usage"}}</dt>
+            <dd class="overview-metric-value" x-text="Number.isFinite(stats.cpu_percent) ? stats.cpu_percent.toFixed(1) + '%' : '—'">—</dd>
+            <dd class="overview-meter" aria-hidden="true"><span :style="'width:' + Math.min(100, Math.max(0, stats.cpu_percent || 0)) + '%'"></span></dd>
         </div>
-        <div class="card">
-            <p class="text-gray-400 text-sm">{{t .Lang "dashboard.memory_usage"}}</p>
-            <p class="text-3xl font-bold text-white mt-2" x-text="stats.memory_percent?.toFixed(1) + '%'">--</p>
-            <p class="text-xs text-gray-500 mt-1" x-text="formatBytes(stats.memory_used_bytes) + ' / ' + formatBytes(stats.memory_total_bytes)"></p>
-            <p class="text-xs text-gray-500 mt-1" x-text="t('dashboard.swap_usage') + ': ' + formatBytes(stats.swap_used_bytes) + ' / ' + formatBytes(stats.swap_total_bytes)"></p>
+        <div class="overview-metric">
+            <dt>{{t .Lang "dashboard.memory_usage"}}</dt>
+            <dd class="overview-metric-value" x-text="Number.isFinite(stats.memory_percent) ? stats.memory_percent.toFixed(1) + '%' : '—'">—</dd>
+            <dd class="overview-meter overview-meter-memory" aria-hidden="true"><span :style="'width:' + Math.min(100, Math.max(0, stats.memory_percent || 0)) + '%'"></span></dd>
+            <dd class="overview-metric-detail" x-text="stats.memory_total_bytes ? formatBytes(stats.memory_used_bytes) + ' / ' + formatBytes(stats.memory_total_bytes) : '—'"></dd>
+            <dd class="overview-metric-detail" x-text="t('dashboard.swap_usage') + ': ' + (Number.isFinite(stats.swap_total_bytes) ? formatBytes(stats.swap_used_bytes) + ' / ' + formatBytes(stats.swap_total_bytes) : '—')"></dd>
         </div>
-        <div class="card">
-            <p class="text-gray-400 text-sm">{{t .Lang "dashboard.disk_usage"}}</p>
-            <p class="text-3xl font-bold text-white mt-2" x-text="stats.disk_total_bytes ? (stats.disk_used_bytes / stats.disk_total_bytes * 100).toFixed(1) + '%' : '--' ">--</p>
-            <p class="text-xs text-gray-500 mt-1" x-text="formatBytes(stats.disk_used_bytes) + ' / ' + formatBytes(stats.disk_total_bytes)"></p>
+        <div class="overview-metric">
+            <dt>{{t .Lang "dashboard.disk_usage"}}</dt>
+            <dd class="overview-metric-value" x-text="stats.disk_total_bytes ? (stats.disk_used_bytes / stats.disk_total_bytes * 100).toFixed(1) + '%' : '—'">—</dd>
+            <dd class="overview-meter overview-meter-disk" aria-hidden="true"><span :style="'width:' + (stats.disk_total_bytes ? Math.min(100, Math.max(0, stats.disk_used_bytes / stats.disk_total_bytes * 100)) : 0) + '%'"></span></dd>
+            <dd class="overview-metric-detail" x-text="stats.disk_total_bytes ? formatBytes(stats.disk_used_bytes) + ' / ' + formatBytes(stats.disk_total_bytes) : '—'"></dd>
         </div>
-        <div class="card">
-            <p class="text-gray-400 text-sm">{{t .Lang "dashboard.system_load"}}</p>
-            <p class="text-3xl font-bold text-white mt-2" x-text="stats.load_avg_1?.toFixed(1)">--</p>
-            <p class="text-xs text-gray-500 mt-1" x-text="stats.load_avg_5?.toFixed(1) + ' / ' + stats.load_avg_15?.toFixed(1)"></p>
+        <div class="overview-metric overview-metric-secondary">
+            <dt>{{t .Lang "dashboard.system_load"}}</dt>
+            <dd class="overview-metric-value" x-text="Number.isFinite(stats.load_avg_1) ? stats.load_avg_1.toFixed(1) : '—'">—</dd>
+            <dd class="overview-metric-detail" x-text="Number.isFinite(stats.load_avg_5) ? stats.load_avg_5.toFixed(1) + ' / ' + stats.load_avg_15?.toFixed(1) : '—'"></dd>
         </div>
-        <div class="card">
-            <p class="text-gray-400 text-sm">{{t .Lang "dashboard.uptime"}}</p>
-            <p class="text-3xl font-bold text-white mt-2" x-text="formatUptime(stats.uptime)">--</p>
+        <div class="overview-metric overview-metric-secondary overview-metric-uptime">
+            <dt>{{t .Lang "dashboard.uptime"}}</dt>
+            <dd class="overview-metric-value" x-text="Number.isFinite(stats.uptime) ? formatUptime(stats.uptime) : '—'">—</dd>
         </div>
-    </div>
+    </dl>
 
-    <div class="card mb-6" x-data="{ range: '24h' }">
-        <div class="flex items-center justify-between mb-4">
+    <div class="card overview-section overview-chart" x-data="{ range: '24h' }">
+        <div class="overview-section-heading">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "dashboard.history_trend"}}</h3>
-            <div class="flex space-x-1">
-                <button @click="range='24h'; fetchMetrics('24h')" :class="range === '24h' ? 'btn-primary text-xs' : 'btn-secondary text-xs'" class="py-1 px-3">{{t .Lang "dashboard.hours_24"}}</button>
-                <button @click="range='7d'; fetchMetrics('7d')" :class="range === '7d' ? 'btn-primary text-xs' : 'btn-secondary text-xs'" class="py-1 px-3">{{t .Lang "dashboard.days_7"}}</button>
-                <button @click="range='15d'; fetchMetrics('15d')" :class="range === '15d' ? 'btn-primary text-xs' : 'btn-secondary text-xs'" class="py-1 px-3">{{t .Lang "dashboard.days_15"}}</button>
+            <div class="overview-range" role="group" aria-label="{{t .Lang "dashboard.history_trend"}}">
+                <button @click="range='24h'; fetchMetrics('24h')" :class="{ 'is-selected': range === '24h' }" :aria-pressed="range === '24h'">{{t .Lang "dashboard.hours_24"}}</button>
+                <button @click="range='7d'; fetchMetrics('7d')" :class="{ 'is-selected': range === '7d' }" :aria-pressed="range === '7d'">{{t .Lang "dashboard.days_7"}}</button>
+                <button @click="range='15d'; fetchMetrics('15d')" :class="{ 'is-selected': range === '15d' }" :aria-pressed="range === '15d'">{{t .Lang "dashboard.days_15"}}</button>
             </div>
         </div>
-        <canvas id="metricsCanvas" class="w-full" height="80"></canvas>
+        <div class="overview-chart-frame"><canvas id="metricsCanvas" class="w-full" height="280" role="img" aria-label="{{t .Lang "dashboard.history_trend"}}"></canvas></div>
     </div>
 
-    <div class="card mb-6" x-data="siteResources()" x-init="initFetch()">
-        <div class="flex items-center justify-between mb-4">
+    <div class="card overview-section overview-resources" x-data="siteResources()" x-init="initFetch()">
+        <div class="overview-section-heading">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "dashboard.site_resources"}}</h3>
-            <div class="flex items-center space-x-3">
+            <div class="overview-section-tools">
                 <span class="text-xs text-gray-500" x-show="since" x-text="since"></span>
                 <button @click="fetch()" class="btn-secondary text-xs py-1 px-3">{{t .Lang "dashboard.refresh"}}</button>
             </div>
         </div>
         <p x-show="error" class="text-xs text-yellow-300 mb-3" x-text="t('dashboard.data_stale') + ': ' + error"></p>
-<div class="overflow-x-auto">
-            <table class="w-full text-sm">
+        <div class="overview-table-scroll" tabindex="0" role="region" aria-label="{{t .Lang "dashboard.site_resources"}}">
+            <table class="overview-resources-table w-full text-sm">
                 <thead class="border-b border-gray-700 text-gray-400">
                     <tr>
                         <th class="py-2 text-left">{{t .Lang "dashboard.site"}}</th>
@@ -178,11 +188,13 @@ function dashboardStats() {
 // Chart.js — initialized outside Alpine to avoid proxy conflict
 (function() {
     let chart = null;
+    let metricsRequestID = 0;
 
     async function fetchMetrics(range) {
+        const requestID = ++metricsRequestID;
         try {
             const resp = await api('/dashboard/metrics?range=' + (range || '24h'));
-            if (resp.success && chart) {
+            if (requestID === metricsRequestID && resp.success && chart) {
                 chart.data.labels = resp.data.labels || [];
                 chart.data.datasets[0].data = resp.data.cpu || [];
                 chart.data.datasets[1].data = resp.data.memory || [];
@@ -195,34 +207,45 @@ function dashboardStats() {
     function initChart() {
         const canvas = document.getElementById('metricsCanvas');
         if (!canvas) return;
+        const theme = typeof getComputedStyle === 'function' ? getComputedStyle(canvas) : null;
+        const chartToken = (name, fallback) => theme?.getPropertyValue(name).trim() || fallback;
+        const cpuColor = chartToken('--panel-chart-cpu', chartToken('--panel-accent', '#116b9a'));
+        const memoryColor = chartToken('--panel-chart-memory', '#25877e');
+        const loadColor = chartToken('--panel-chart-load', '#bc7d22');
+        const labelColor = chartToken('--panel-muted', '#637589');
+        const gridColor = chartToken('--panel-border', '#dce4ec');
         chart = new Chart(canvas.getContext('2d'), {
             type: 'line',
             data: {
                 labels: [],
                 datasets: [
-                    { label: 'CPU %', borderColor: '#3b82f6', backgroundColor: '#3b82f6', data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
-                    { label: t('dashboard.chart_memory'), borderColor: '#22c55e', backgroundColor: '#22c55e', data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
-                    { label: t('dashboard.chart_load'), borderColor: '#eab308', backgroundColor: '#eab308', data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
+                    { label: 'CPU %', borderColor: cpuColor, backgroundColor: cpuColor, borderWidth: 2, data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
+                    { label: t('dashboard.chart_memory'), borderColor: memoryColor, backgroundColor: memoryColor, borderWidth: 2, data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
+                    { label: t('dashboard.chart_load'), borderColor: loadColor, backgroundColor: loadColor, borderWidth: 2, data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
                 ]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
                 interaction: {
                     mode: 'index',
                     intersect: false,
                 },
                 scales: {
                     x: {
-                        ticks: { color: '#9ca3af', maxTicksLimit: 12, maxRotation: 0 },
-                        grid: { color: '#374151' }
+                        ticks: { color: labelColor, maxTicksLimit: 12, maxRotation: 0, padding: 8 },
+                        grid: { display: false },
+                        border: { display: false }
                     },
                     y: {
-                        ticks: { color: '#9ca3af' },
-                        grid: { color: '#374151' }
+                        ticks: { color: labelColor, padding: 8 },
+                        grid: { color: gridColor },
+                        border: { display: false }
                     }
                 },
                 plugins: {
-                    legend: { labels: { color: '#9ca3af' } },
+                    legend: { position: 'bottom', align: 'start', labels: { color: labelColor, usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 20 } },
                     tooltip: {
                         mode: 'index',
                         intersect: false,

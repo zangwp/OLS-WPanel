@@ -2,7 +2,7 @@
 {{define "firewall_content"}}
 <div x-data="firewallManager()">
     <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold text-white">{{t .Lang "nav.firewall"}}</h2>
+        <h1 class="page-title">{{t .Lang "nav.firewall"}}</h1>
         <button @click="openRules('rules-overview')" class="btn-secondary text-sm">{{t .Lang "firewall.rules_help"}}</button>
     </div>
 
@@ -211,7 +211,7 @@
             <div>
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "firewall.file_security_events"}}</h3>
                 <p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.file_security_events_help"}}</p>
-                <p class="text-xs text-gray-500 mt-1" x-show="fileSecuritySummary" x-text="t('firewall.file_security_summary', { sites: fileSecuritySummary.sites_scanned || 0, files: fileSecuritySummary.file_events || 0, access: fileSecuritySummary.access_events || 0 })"></p>
+                <p class="text-xs text-gray-500 mt-1" x-show="fileSecuritySummary" x-text="t('firewall.file_security_summary', { sites: fileSecuritySummary?.sites_scanned || 0, files: fileSecuritySummary?.file_events || 0, access: fileSecuritySummary?.access_events || 0 })"></p>
             </div>
                 <div class="flex items-center space-x-2">
                     <button @click="refreshFileSecurityEvents(false)" :disabled="fileSecurityLoading" class="btn-secondary text-xs py-1.5 px-3" x-text="fileSecurityLoading ? t('firewall.refreshing') : t('firewall.incremental_refresh')"></button>

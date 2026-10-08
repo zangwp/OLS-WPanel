@@ -32,9 +32,12 @@ See the [installation guide](docs/verified-install.md) for manual verification, 
 | Certificates and caching | Website certificate issuance and renewal; official LiteSpeed Cache for page and Redis object caching |
 | Backups and recovery | Website, database and panel backups, with SFTP / S3 remote storage |
 | VPS maintenance | Resource and service status, system updates, DNS, Swap, time synchronization and open ports |
-| Security and alerts | Login protection, file protection, Fail2ban, nftables, email notifications and log analysis |
+| Account security | Optional TOTP two-factor authentication, single-use recovery codes, active sessions, persistent sign-in audit and new-environment notifications |
+| Protection and alerts | File protection, Fail2ban, nftables, email / Webhook notifications and log analysis |
 
 Fresh installations default to **LSPHP 8.5 and MariaDB 11.8**. LSPHP 8.4 / 8.3 can be added per site. Existing databases retain their installed series; routine updates do not automatically upgrade across database series.
+
+The interface combines a light workspace with dark blue navigation, English / Chinese layouts and mobile controls. The dashboard groups resource metrics, and wide website tables scroll horizontally. Account protection is under **Security settings → Account sign-in**. Two-factor authentication requires explicit enrollment; before enabling it, separately back up `account-mfa.key` as described in the [account security guide](docs/account-security.md). Ordinary panel database downloads do not contain that key.
 
 ## SSH commands
 
@@ -51,13 +54,14 @@ o update          update / repair the panel
 o uninstall       remove the panel, preserving websites, databases and shared software
 ```
 
-Ordinary uninstall requires the exact `UNINSTALL` confirmation. Updates use the signed published installation entry.
+Uninstall displays its scope and requires `Y` or `y`; Enter cancels. It exits the active menu and removes the `o` / `O` commands. Updates use the signed published installation entry. Fresh installation and reinstallation are blocked when retained site data or configuration is detected; use update / repair for an existing OLS WPanel installation.
 
 ## Documentation
 
 - [Installation and signature verification](docs/verified-install.md)
 - [Operations and recovery](docs/operations-and-recovery.md)
 - [Upgrade compatibility](docs/upgrade-compatibility.md)
+- [Account security, recovery codes and key backups](docs/account-security.md)
 - [Optimizer migration](docs/optimizer-migration.md): existing sites can explicitly migrate and remove the legacy plugin.
 - [Installer security](docs/security/ols-wpanel-install-security.md) · [Runtime security](docs/security/ols-wpanel-runtime-security.md)
 - [Repository layout](docs/repository-layout.md)

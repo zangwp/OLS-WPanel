@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 )
 
 func GetRemoteBackup(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	db := database.GetDB()
 	serverID, err := ensureRemoteBackupIdentity()
 	if err != nil {
@@ -26,11 +29,14 @@ func GetRemoteBackup(c *gin.Context) {
 	}
 	var s models.RemoteBackupSettings
 	var enabled, port, isolatePath, keepLocal int
-	db.QueryRow(`SELECT enabled, backup_type, host, port, username, auth_type, connection_mode, server_id, password, ssh_key, remote_path, remote_base_path, keep_local,
+	if err := db.QueryRowContext(c.Request.Context(), `SELECT enabled, backup_type, host, port, username, auth_type, connection_mode, server_id, password, ssh_key, remote_path, remote_base_path, keep_local,
 			isolate_path, s3_endpoint, s3_bucket, s3_region, s3_access_key_id, s3_secret_key, s3_path_prefix, s3_base_prefix
 		FROM remote_backup_settings WHERE id = 1`).Scan(
 		&enabled, &s.BackupType, &s.Host, &port, &s.Username, &s.AuthType, &s.ConnectionMode, &s.ServerID, &s.Password, &s.SSHKey, &s.RemotePath, &s.RemoteBasePath, &keepLocal,
-		&isolatePath, &s.S3Endpoint, &s.S3Bucket, &s.S3Region, &s.S3AccessKeyID, &s.S3SecretKey, &s.S3PathPrefix, &s.S3BasePrefix)
+		&isolatePath, &s.S3Endpoint, &s.S3Bucket, &s.S3Region, &s.S3AccessKeyID, &s.S3SecretKey, &s.S3PathPrefix, &s.S3BasePrefix); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取远程备份设置失败"))
+		return
+	}
 	if s.ServerID == "" {
 		s.ServerID = serverID
 	}
@@ -143,7 +149,10 @@ func SaveRemoteBackup(c *gin.Context) {
 
 	db := database.GetDB()
 	var currentPassword, currentS3Secret string
-	_ = db.QueryRow(`SELECT password, s3_secret_key FROM remote_backup_settings WHERE id = 1`).Scan(&currentPassword, &currentS3Secret)
+	if err := db.QueryRowContext(c.Request.Context(), `SELECT password, s3_secret_key FROM remote_backup_settings WHERE id = 1`).Scan(&currentPassword, &currentS3Secret); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取远程备份设置失败"))
+		return
+	}
 	if req.Password == "已设置" {
 		req.Password = currentPassword
 	}
@@ -208,8 +217,20 @@ func SaveRemoteBackup(c *gin.Context) {
 
 func ensureRemoteBackupIdentity() (string, error) {
 	db := database.GetDB()
+	if db == nil {
+		return "", errors.New("database unavailable")
+	}
 	var serverID string
-	if err := db.QueryRow(`SELECT server_id FROM remote_backup_settings WHERE id = 1`).Scan(&serverID); err != nil {
+	err := db.QueryRow(`SELECT server_id FROM remote_backup_settings WHERE id = 1`).Scan(&serverID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A missing singleton represents an unconfigured destination. Use schema
+		// defaults, while preserving an existing row created by a concurrent request.
+		if _, err := db.Exec(`INSERT OR IGNORE INTO remote_backup_settings(id) VALUES(1)`); err != nil {
+			return "", err
+		}
+		err = db.QueryRow(`SELECT server_id FROM remote_backup_settings WHERE id = 1`).Scan(&serverID)
+	}
+	if err != nil {
 		return "", err
 	}
 	if serverID != "" {

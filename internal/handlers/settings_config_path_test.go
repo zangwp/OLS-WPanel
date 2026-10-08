@@ -18,6 +18,7 @@ func writeSettingsConfigFixture(t *testing.T, path, username string) {
 }
 
 func TestSettingsBasicAuthUsesConfiguredPath(t *testing.T) {
+	setupSettingsSessionTest(t)
 	root := t.TempDir()
 	customPath := filepath.Join(root, "custom-config.json")
 	decoyPath := filepath.Join(root, "default-config.json")
@@ -33,7 +34,7 @@ func TestSettingsBasicAuthUsesConfiguredPath(t *testing.T) {
 	t.Cleanup(func() { config.AppConfig = oldCfg })
 
 	handler := &SettingsHandler{ConfigPath: customPath}
-	recorder := updateSystemSettingWithHandler(t, handler, `{"basic_auth_user":"custom-new"}`)
+	recorder := updateSystemSettingWithHandler(t, handler, `{"basic_auth_user":"custom-new","old_password":"old-password"}`)
 	if recorder.Code != 200 {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

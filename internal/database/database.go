@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zangwp/OLS-WPanel/internal/accountsecurity"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -72,6 +74,12 @@ func RunMigrations() error {
 	// 版本化的同名步骤先把字段加上——两边最终都会收敛到同一个正确状态。
 	if err := ensureWPUpdateBatchSchema(); err != nil {
 		return fmt.Errorf("migration failed: %w", err)
+	}
+	if err := accountsecurity.InitMFASchema(DB); err != nil {
+		return fmt.Errorf("account MFA migration failed: %w", err)
+	}
+	if err := accountsecurity.InitAuditSchema(DB); err != nil {
+		return fmt.Errorf("account audit migration failed: %w", err)
 	}
 	return nil
 }

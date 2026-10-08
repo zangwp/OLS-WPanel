@@ -49,6 +49,7 @@ func (h *SecurityHandler) GetStatus(c *gin.Context) {
 }
 
 func (h *SecurityHandler) GetSettings(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	db := database.GetDB()
 	rows, err := db.Query("SELECT id, skey, svalue, description, updated_at FROM security_settings")
 	if err != nil {
@@ -61,12 +62,17 @@ func (h *SecurityHandler) GetSettings(c *gin.Context) {
 	for rows.Next() {
 		var s models.SecuritySetting
 		if err := rows.Scan(&s.ID, &s.Key, &s.Value, &s.Description, &s.UpdatedAt); err != nil {
-			continue
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取安全配置失败，请重试"))
+			return
 		}
 		if s.Key == "fail2ban_bantime" {
 			s.Value = "600"
 		}
 		settings = append(settings, s)
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取安全配置失败，请重试"))
+		return
 	}
 	if settings == nil {
 		settings = []models.SecuritySetting{}

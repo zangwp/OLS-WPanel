@@ -3,7 +3,7 @@
 <div x-data="softwareManager()" x-init="fetchList()">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-5">
         <div>
-            <h2 class="text-xl font-bold text-white">{{t .Lang "nav.software"}}</h2>
+            <h1 class="page-title">{{t .Lang "nav.software"}}</h1>
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "software.page_help"}}</p>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -186,7 +186,7 @@
                         <span x-show="!sw._recommending">{{t .Lang "software.recommend"}}</span>
                         <span x-show="sw._recommending">{{t .Lang "software.recommending"}}</span>
                     </button>
-                    <button x-show="sw.name === 'PHP'" @click="clearOpcache()" :disabled="clearingOpcache" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;">
+                    <button x-show="sw.name === 'PHP'" @click="clearOpcache()" :disabled="clearingOpcache" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">
                         <span x-show="!clearingOpcache">{{t .Lang "software.opcache_clear"}}</span>
                         <span x-show="clearingOpcache">{{t .Lang "software.opcache_clearing"}}</span>
                     </button>
@@ -222,7 +222,7 @@
                 </table>
             </div>
 
-            <div class="mt-4 p-3 rounded text-xs" style="background-color: #0f172a;">
+            <div class="mt-4 p-3 rounded text-xs" style="background-color: var(--panel-surface-muted);">
                 <p class="text-gray-300 font-medium mb-2">{{t .Lang "software.advice_principles"}}</p>
                 <ul class="text-gray-400 space-y-1 list-disc list-inside">
                     <li>{{t .Lang "software.advice_upload_rule"}}</li>
@@ -247,7 +247,7 @@
                     <button @click="logModal.open = false" class="text-gray-400 hover:text-white text-xl">&times;</button>
                 </div>
             </div>
-            <pre x-text="logModal.content" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: #0f172a; border: 1px solid #334155; color: #94a3b8; max-height: 500px; white-space: pre-wrap; word-break: break-all;"></pre>
+            <pre x-text="logModal.content" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-muted); max-height: 500px; white-space: pre-wrap; word-break: break-all;"></pre>
         </div>
     </div>
 </div>
@@ -256,21 +256,42 @@
 function processGuard() {
     return {
         services: [],
+        actingServices: {},
+        pollTimer: null,
+        statusRequestID: 0,
+        disposed: false,
+        destroy() {
+            this.disposed = true;
+            this.statusRequestID++;
+            if (this.pollTimer !== null) clearTimeout(this.pollTimer);
+            this.pollTimer = null;
+        },
         async fetchStatus() {
+            if (this.disposed) return;
+            if (this.pollTimer !== null) clearTimeout(this.pollTimer);
+            this.pollTimer = null;
+            const requestID = ++this.statusRequestID;
             try {
                 const r = await api('/software/guard');
+                if (this.disposed || requestID !== this.statusRequestID) return;
                 if (r.success) {
-                    (r.data || []).forEach(s => s._acting = false);
+                    (r.data || []).forEach(s => s._acting = !!this.actingServices[s.service]);
                     this.services = r.data || [];
                 }
-            } catch(e) {}
-            setTimeout(() => this.fetchStatus(), 30000);
+            } catch(e) {
+            } finally {
+                if (!this.disposed && requestID === this.statusRequestID) {
+                    this.pollTimer = setTimeout(() => this.fetchStatus(), 30000);
+                }
+            }
         },
         async action(service, act) {
             const s = this.services.find(s => s.service === service);
-            if (!s) return;
+            if (!s || this.actingServices[service] || this.disposed) return;
             if (act === 'stop' && !await confirmModal(t('software.confirm_stop_service', { service: s.name }))) return;
             if (act === 'restart' && !await confirmModal(t('software.confirm_restart_service', { service: s.name }))) return;
+            if (this.actingServices[service] || this.disposed) return;
+            this.actingServices[service] = true;
             s._acting = true;
             try {
                 const r = await api('/software/guard/action', { method: 'POST', body: { service, action: act } });
@@ -278,7 +299,11 @@ function processGuard() {
                 await this.fetchStatus();
             } catch(e) {
                 showToast(e.message, 'error');
+            } finally {
+                delete this.actingServices[service];
                 s._acting = false;
+                const current = this.services.find(item => item.service === service);
+                if (current) current._acting = false;
             }
         }
     }
@@ -369,26 +394,28 @@ function softwareManager() {
         },
         async saveConfig(sw) {
             if (sw._saving) return;
+            const changed = sw.configs.filter(cfg => cfg._value !== cfg.value)
+                .map(cfg => ({ cfg, value: cfg._value }));
+            if (!changed.length) return;
+            sw._saving = true;
             if (sw.name === 'PHP') {
-                const changed = sw.configs.filter(cfg => cfg._value !== cfg.value);
-                if (!changed.length) return;
-                sw._saving = true;
                 try {
-                    await api('/software/php-config', { method: 'PUT', body: { values: Object.fromEntries(changed.map(cfg => [cfg.key, cfg._value])) }, timeout: 120000 });
-                    for (const cfg of changed) cfg.value = cfg._value;
+                    await api('/software/php-config', { method: 'PUT', body: { values: Object.fromEntries(changed.map(({cfg, value}) => [cfg.key, value])) }, timeout: 120000 });
+                    for (const {cfg, value} of changed) cfg.value = value;
                     showToast(t('software.config_updated_reloaded', { service: 'OpenLiteSpeed' }), 'success');
                 } catch(e) { showToast(e.message, 'error'); }
                 finally { sw._saving = false; }
                 return;
             }
-            for (const cfg of sw.configs) {
-                if (cfg._value === cfg.value) continue;
-                sw._saving = true;
-                try {
-                    const r = await api('/software/config', { method: 'PUT', body: { name: sw.name, key: cfg.key, value: cfg._value } });
-                    cfg.value = cfg._value;
-                    showToast(r.data?.message || t('software.config_updated', { label: cfg.label }), 'success');
-                } catch(e) { showToast(e.message, 'error'); }
+            try {
+                for (const {cfg, value} of changed) {
+                    try {
+                        const r = await api('/software/config', { method: 'PUT', body: { name: sw.name, key: cfg.key, value } });
+                        cfg.value = value;
+                        showToast(r.data?.message || t('software.config_updated', { label: cfg.label }), 'success');
+                    } catch(e) { showToast(e.message, 'error'); }
+                }
+            } finally {
                 sw._saving = false;
             }
         },

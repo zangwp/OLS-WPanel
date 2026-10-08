@@ -3,7 +3,7 @@
 <div x-data="databaseManager()" x-init="loadDatabases()">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
-            <h2 class="text-xl font-bold text-white">{{t .Lang "nav.databases"}}</h2>
+            <h1 class="page-title">{{t .Lang "nav.databases"}}</h1>
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "database.list_help"}}</p>
         </div>
         <button @click="loadDatabases()" :disabled="loading" class="btn-secondary text-sm" x-text="loading ? t('database.refreshing') : t('database.refresh')"></button>

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,10 +12,19 @@ import (
 )
 
 type Session struct {
-	Token     string
-	Username  string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Token      string    `json:"-"`
+	ID         string    `json:"id"`
+	Username   string    `json:"-"`
+	IP         string    `json:"ip"`
+	UserAgent  string    `json:"user_agent"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+type SessionSummary struct {
+	Session
+	Current bool `json:"current"`
 }
 
 type SessionStore struct {
@@ -27,18 +37,35 @@ var GlobalSessionStore = &SessionStore{
 }
 
 func (s *SessionStore) Create(username string) *Session {
+	return s.CreateWithMetadata(username, "", "")
+}
+
+func (s *SessionStore) CreateWithMetadata(username, ip, userAgent string) *Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.sessions == nil {
+		s.sessions = make(map[string]*Session)
+	}
 
 	now := time.Now()
 	session := &Session{
-		Token:     uuid.New().String(),
-		Username:  username,
-		CreatedAt: now,
-		ExpiresAt: now.Add(30 * time.Minute),
+		Token:    uuid.New().String(),
+		ID:       uuid.New().String(),
+		Username: username,
+		IP:       ip,
+		UserAgent: strings.Map(func(r rune) rune {
+			if r < 32 || r == 127 {
+				return -1
+			}
+			return r
+		}, string([]rune(userAgent)[:min(len([]rune(userAgent)), 512)])),
+		CreatedAt:  now,
+		LastSeenAt: now,
+		ExpiresAt:  now.Add(30 * time.Minute),
 	}
 	s.sessions[session.Token] = session
-	return session
+	copy := *session
+	return &copy
 }
 
 func (s *SessionStore) Get(token string) *Session {
@@ -49,13 +76,62 @@ func (s *SessionStore) Get(token string) *Session {
 	if !ok {
 		return nil
 	}
-	if time.Now().After(session.ExpiresAt) {
+	now := time.Now()
+	if !now.Before(session.ExpiresAt) {
 		delete(s.sessions, token)
 		return nil
 	}
 	// 滑动续期：每次有效访问延长 30 分钟
-	session.ExpiresAt = time.Now().Add(30 * time.Minute)
-	return session
+	session.LastSeenAt = now
+	session.ExpiresAt = now.Add(30 * time.Minute)
+	copy := *session
+	return &copy
+}
+
+// List returns copies and an independent display ID, never a bearer token.
+func (s *SessionStore) List(username, currentToken string) []SessionSummary {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]SessionSummary, 0)
+	now := time.Now()
+	for token, session := range s.sessions {
+		if !now.Before(session.ExpiresAt) {
+			delete(s.sessions, token)
+			continue
+		}
+		if session.Username == username {
+			copy := *session
+			copy.Token = ""
+			result = append(result, SessionSummary{Session: copy, Current: token == currentToken})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result
+}
+
+func (s *SessionStore) DeleteByID(username, id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, session := range s.sessions {
+		if session.Username == username && session.ID == id {
+			delete(s.sessions, token)
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SessionStore) DeleteOthers(username, currentToken string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for token, session := range s.sessions {
+		if session.Username == username && token != currentToken {
+			delete(s.sessions, token)
+			count++
+		}
+	}
+	return count
 }
 
 func (s *SessionStore) CleanExpired() {
@@ -112,6 +188,7 @@ func SessionRequired() gin.HandlerFunc {
 }
 
 func abortSession(c *gin.Context, msg string) {
+	c.Abort()
 	c.SetCookie("wp_session", "", -1, "/", "", false, true)
 
 	if isPageRequest(c) {

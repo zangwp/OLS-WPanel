@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"os"
 	"os/exec"
@@ -1722,25 +1723,147 @@ func TestSidebarNavigationOrder(t *testing.T) {
 	}
 }
 
-func TestPanelKeepsDarkAppearance(t *testing.T) {
+func TestPanelLightWorkspaceAndDarkSidebar(t *testing.T) {
 	source, err := os.ReadFile("../../web/templates/base.html")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Contains(source, []byte(`data-theme="dark"`)) {
-		t.Fatal("dark appearance is missing")
 	}
 	for _, forbidden := range []string{"toggleTheme", "ols-wpanel-theme", "theme.label"} {
 		if bytes.Contains(source, []byte(forbidden)) {
 			t.Fatalf("removed appearance control remains: %s", forbidden)
 		}
 	}
+	for _, lang := range []string{"zh-CN", "en-US"} {
+		t.Run(lang, func(t *testing.T) {
+			data := testPageData("dashboard_content")
+			data["Lang"] = lang
+			data["MessagesJSON"] = i18n.MessagesJSON(lang, i18nKeys)
+			data["CSRFToken"] = "shell-csrf-proof"
+			var output bytes.Buffer
+			if err := parseTemplates(t).ExecuteTemplate(&output, "dashboard.html", data); err != nil {
+				t.Fatal(err)
+			}
+			for _, required := range []string{
+				`<html lang="` + lang + `" data-theme="light">`,
+				`<meta name="csrf-token" content="shell-csrf-proof">`,
+				`data-panel-prefix="/test" data-lang="` + lang + `"`,
+				`class="panel-workspace"`, `class="panel-sidebar `,
+				`href="#panel-main"`, `id="panel-main" class="panel-main" tabindex="-1"`,
+				`aria-controls="panel-sidebar"`, `href="?lang=zh-CN"`, `href="?lang=en-US"`,
+				i18n.T(lang, "nav.skip_content"), i18n.T(lang, "nav.menu"),
+			} {
+				if !strings.Contains(output.String(), required) {
+					t.Fatalf("rendered %s workspace is missing %q", lang, required)
+				}
+			}
+			previous := -1
+			for _, asset := range []string{"main.css", "palette.css", "theme.css", "overview.css"} {
+				link := `href="/test/assets/css/` + asset + `?v=test"`
+				position := strings.Index(output.String(), link)
+				if strings.Count(output.String(), link) != 1 || position <= previous {
+					t.Fatalf("stylesheet %s must load once in cascade order", asset)
+				}
+				previous = position
+			}
+		})
+	}
 	css, err := os.ReadFile("../../web/css/theme.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(css, []byte(`data-theme="light"`)) {
-		t.Fatal("removed light styles remain")
+	for _, required := range []string{"color-scheme: light", "background: var(--panel-bg)", "background: var(--panel-sidebar)", ":focus-visible", ".panel-skip-link:focus"} {
+		if !bytes.Contains(css, []byte(required)) {
+			t.Fatalf("workspace theme is missing %q", required)
+		}
+	}
+	// Assert the intended light/dark contrast without fixing a specific palette.
+	brightness := func(token string) float64 {
+		t.Helper()
+		match := regexp.MustCompile(regexp.QuoteMeta(token) + `:\s*#([0-9a-fA-F]{6})\s*;`).FindSubmatch(css)
+		if len(match) != 2 {
+			t.Fatalf("missing six-digit color token %s", token)
+		}
+		var value uint32
+		if _, err := fmt.Sscanf(string(match[1]), "%x", &value); err != nil {
+			t.Fatal(err)
+		}
+		return (float64(value>>16)*0.2126 + float64(value>>8&255)*0.7152 + float64(value&255)*0.0722) / 255
+	}
+	if brightness("--panel-bg") < 0.8 || brightness("--panel-sidebar") > 0.3 {
+		t.Fatal("workspace must stay light and navigation must stay dark")
+	}
+	compiled, err := os.ReadFile("../../web/css/main.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{`.lg\:hidden`, `.lg\:static`, `.fixed`, `.flex`} {
+		if !bytes.Contains(compiled, []byte(required)) {
+			t.Fatalf("compiled Tailwind shell utility is missing %s", required)
+		}
+	}
+}
+
+func TestPanelMobileSidebarStateAndFocusTransitions(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+	rendered := renderPage(t, "dashboard.html", "dashboard_content")
+	bindings := map[string]string{}
+	for _, attribute := range []string{"x-data", "@resize.window", "@keydown.escape.window", ":inert", ":aria-expanded"} {
+		match := regexp.MustCompile(regexp.QuoteMeta(attribute) + `="([^"]*)"`).FindSubmatch(rendered)
+		if len(match) != 2 {
+			t.Fatalf("rendered shell is missing %s", attribute)
+		}
+		bindings[attribute] = html.UnescapeString(string(match[1]))
+	}
+	encoded, err := json.Marshal(bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `
+const assert = require('node:assert/strict');
+const bindings = ` + string(encoded) + `;
+global.window = { innerWidth: 390 };
+const shell = new Function('return (' + bindings['x-data'] + ')')();
+let sidebarFocus = 0, toggleFocus = 0;
+shell.$nextTick = callback => callback();
+shell.$refs = {
+    sidebar: { querySelector: selector => { assert.equal(selector, 'a'); return { focus: () => sidebarFocus++ }; } },
+    menuToggle: { focus: () => toggleFocus++ },
+};
+const expression = key => new Function('state', 'with(state) { return (' + bindings[key] + '); }')(shell);
+const event = key => new Function('state', 'with(state) { ' + bindings[key] + '; }')(shell);
+assert.equal(shell.sidebarOpen, false, 'mobile navigation starts closed');
+assert.equal(expression(':inert'), false, 'mobile content starts interactive');
+shell.toggleSidebar();
+assert.equal(expression(':aria-expanded'), 'true');
+assert.equal(expression(':inert'), true, 'open mobile navigation blocks content focus');
+assert.equal(sidebarFocus, 1, 'opening navigation focuses its first link');
+event('@keydown.escape.window');
+assert.equal(shell.sidebarOpen, false);
+assert.equal(expression(':inert'), false);
+assert.equal(toggleFocus, 1, 'Escape restores focus to the menu button');
+shell.toggleSidebar();
+window.innerWidth = 1440;
+event('@resize.window');
+assert.equal(shell.sidebarOpen, true, 'desktop navigation remains open');
+assert.equal(expression(':inert'), false, 'mobile-to-desktop resize releases main content');
+event('@keydown.escape.window');
+assert.equal(shell.sidebarOpen, true, 'desktop Escape does not hide persistent navigation');
+assert.equal(toggleFocus, 1, 'desktop Escape does not steal focus');
+window.innerWidth = 375;
+event('@resize.window');
+assert.equal(shell.sidebarOpen, false, 'desktop-to-mobile resize closes navigation');
+assert.equal(expression(':aria-expanded'), 'false');
+assert.equal(expression(':inert'), false);
+`
+	scriptPath := filepath.Join(t.TempDir(), "panel-sidebar-behavior.js")
+	if err := os.WriteFile(scriptPath, []byte(harness), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(node, scriptPath).CombinedOutput(); err != nil {
+		t.Fatalf("panel sidebar behavior failed: %v\n%s", err, output)
 	}
 }
 

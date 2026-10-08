@@ -34,7 +34,8 @@ func TestSiteMigrationMachineRouteIsDisabledForOpenLiteSpeedV1(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Panel.RandomSuffix = "test-panel-prefix"
 	cfg.Panel.TLSCertPath = filepath.Join(t.TempDir(), "unused.crt")
-	engine := router.SetupRouter(cfg, web.TemplatesFS, web.StaticFS, "test-version", "")
+	engine, closeAccountSecurity := router.SetupRouterWithCleanup(cfg, web.TemplatesFS, web.StaticFS, "test-version", "")
+	t.Cleanup(closeAccountSecurity)
 
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)

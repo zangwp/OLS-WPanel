@@ -1,12 +1,14 @@
 package executor
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"html"
 	"net"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
@@ -36,7 +38,17 @@ func GetSMTPConfig() *SMTPConfig {
 }
 
 func SendMail(to, subject, body string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return SendMailContext(ctx, to, subject, body)
+}
+
+func SendMailContext(ctx context.Context, to, subject, body string) error {
 	cfg := GetSMTPConfig()
+	return sendMailWithConfig(ctx, cfg, to, subject, body)
+}
+
+func sendMailWithConfig(ctx context.Context, cfg *SMTPConfig, to, subject, body string) error {
 	if cfg == nil || cfg.Host == "" || cfg.User == "" || cfg.Pass == "" {
 		return fmt.Errorf("SMTP 未配置")
 	}
@@ -49,16 +61,30 @@ func SendMail(to, subject, body string) error {
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	msg := buildMessage(cfg.User, to, subject, body)
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("SMTP 连接失败: %w", err)
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(30 * time.Second)
+	if requested, ok := ctx.Deadline(); ok && requested.Before(deadline) {
+		deadline = requested
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopCancel()
 
 	switch cfg.Encryption {
 	case "ssl":
 		tlsCfg := &tls.Config{ServerName: cfg.Host}
-		conn, err := tls.Dial("tcp", addr, tlsCfg)
-		if err != nil {
+		tlsConn := tls.Client(conn, tlsCfg)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			return fmt.Errorf("TLS 连接失败: %w", err)
 		}
-		defer conn.Close()
-		client, err := smtp.NewClient(conn, cfg.Host)
+		client, err := smtp.NewClient(tlsConn, cfg.Host)
 		if err != nil {
 			return fmt.Errorf("SMTP 客户端创建失败: %w", err)
 		}
@@ -67,11 +93,6 @@ func SendMail(to, subject, body string) error {
 			return err
 		}
 	case "none":
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			return fmt.Errorf("连接失败: %w", err)
-		}
-		defer conn.Close()
 		client, err := smtp.NewClient(conn, cfg.Host)
 		if err != nil {
 			return fmt.Errorf("SMTP 客户端创建失败: %w", err)
@@ -81,11 +102,6 @@ func SendMail(to, subject, body string) error {
 			return err
 		}
 	default: // starttls
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			return fmt.Errorf("连接失败: %w", err)
-		}
-		defer conn.Close()
 		client, err := smtp.NewClient(conn, cfg.Host)
 		if err != nil {
 			return fmt.Errorf("SMTP 客户端创建失败: %w", err)
@@ -117,8 +133,11 @@ func authAndSend(client *smtp.Client, cfg *SMTPConfig, to, msg string) error {
 		return err
 	}
 	_, err = wc.Write([]byte(msg))
-	wc.Close()
-	return err
+	closeErr := wc.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 func buildMessage(from, to, subject, body string) string {
