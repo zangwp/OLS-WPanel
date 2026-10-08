@@ -1,17 +1,20 @@
 package middleware
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/zangwp/OLS-WPanel/internal/accountsecurity"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
 )
 
 type LoginAttemptTracker struct {
 	DB               *sql.DB
+	Audit            *accountsecurity.AuditService
 	MaxAttempts      int
 	AttemptWindow    time.Duration
 	BanDurationHours int
@@ -30,6 +33,13 @@ func NewLoginAttemptTracker(db *sql.DB, maxAttempts int, windowMinutes int, banH
 func (t *LoginAttemptTracker) RecordAttempt(ip string, attemptType string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	// Web authentication records the attempted username and browser itself.
+	// Gateway failures and newly created bans must also survive counter cleanup.
+	if attemptType == "basic_auth" && t.Audit != nil {
+		if _, err := t.Audit.Record(context.Background(), accountsecurity.Event{Event: "login_failure", IP: ip}); err != nil {
+			log.Printf("account security: gateway failure audit unavailable")
+		}
+	}
 
 	_, _ = t.DB.Exec(
 		"INSERT INTO login_attempts (ip_address, attempt_type) VALUES (?, ?)",
@@ -91,11 +101,20 @@ func (t *LoginAttemptTracker) banIP(ip string, attemptType string) {
 	reason := fmt.Sprintf("panel_%s: 连续%d次认证失败", attemptType, t.MaxAttempts)
 	expiresAt := time.Now().UTC().Add(time.Duration(t.BanDurationHours) * time.Hour).Format("2006-01-02 15:04:05")
 
-	_, _ = t.DB.Exec(
+	_, err := t.DB.Exec(
 		`INSERT INTO firewall_bans (ip_address, ban_level, reason, source_jail, expires_at, ban_count)
 		 VALUES (?, 3, ?, 'panel', ?, 1)`,
 		ip, reason, expiresAt,
 	)
+	if err != nil {
+		log.Printf("account security: panel ban record failed: %v", err)
+		return
+	}
+	if t.Audit != nil {
+		if _, err := t.Audit.Record(context.Background(), accountsecurity.Event{Event: "login_blocked", IP: ip}); err != nil {
+			log.Printf("account security: panel ban audit unavailable")
+		}
+	}
 
 	if err := executor.AddPersistBan(ip); err != nil {
 		log.Printf("登录防护 IP %s 已写入数据库，但持久封禁层应用失败，将等待同步重试: %v", ip, err)

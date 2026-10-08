@@ -1,0 +1,64 @@
+/* Security workspace: real account and server state, with contained operational forms. */
+.security-center-heading, .security-section-heading, .security-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.security-center-heading { margin-bottom: 24px; }
+.security-center-heading p, .security-section-heading p, .security-card-heading p { color: var(--panel-muted); font-size: 13px; margin-top: 6px; max-width: 72ch; }
+.security-center-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--panel-border); border-radius: 10px; background: var(--panel-surface); margin-bottom: 28px; overflow: hidden; }
+.security-center-nav a { min-width: 0; padding: 17px 19px; border-right: 1px solid var(--panel-border); color: var(--panel-text); }
+.security-center-nav a:last-child { border-right: 0; }
+.security-center-nav strong { display: block; font-size: 14px; font-weight: 650; }
+.security-center-nav span { display: block; margin-top: 4px; font-size: 12px; color: var(--panel-muted); line-height: 1.6; }
+.security-center-nav a:hover { background: var(--panel-surface-muted); }
+.security-center-nav a.selected { background: var(--panel-accent-soft); box-shadow: inset 0 -3px var(--panel-accent); }
+.security-center-nav a.selected strong { color: var(--panel-accent); }
+.security-center-nav a:focus-visible { outline-offset: -4px; }
+.security-section-title { font-size: 21px; font-weight: 650; line-height: 1.4; }
+.security-section-heading { margin-bottom: 20px; }
+.security-card-heading { margin-bottom: 18px; }
+.security-card-heading h3 { font-size: 17px; line-height: 1.5; font-weight: 650; }
+.account-security section > .card + .card { margin-top: 24px; }
+.security-muted { color: var(--panel-muted); font-size: 12px; line-height: 1.8; }
+.security-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.security-actions:not(:first-child) { margin-top: 16px; }
+.security-card-heading > .security-actions, .security-pagination > .security-actions { margin-top: 0; }
+.security-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; border: 1px solid var(--panel-accent-border); border-radius: 7px; background: var(--panel-accent-soft); color: var(--panel-accent); padding: 11px 14px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.security-feedback > span { flex: 1; min-width: 160px; }
+.security-feedback-error { border-color: var(--panel-danger-border); color: var(--panel-danger); background: var(--panel-danger-soft); }
+.security-feedback-warning { border-color: var(--panel-warning-border); color: var(--panel-warning); background: var(--panel-warning-soft); }
+.security-text-link { color: var(--panel-accent); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.security-mfa-form { max-width: 700px; }
+.security-credential-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 20px; }
+.security-enrollment { padding: 18px; margin: 16px 0; background: var(--panel-surface-muted); border: 1px solid var(--panel-border); border-radius: 8px; }
+.security-enrollment-step { font-weight: 600; margin-bottom: 14px; }
+.security-enrollment .security-muted { margin: 8px 0; }
+.security-mfa-form > .security-muted:last-child { margin-top: 15px; }
+.security-recovery { padding: 22px; background: var(--panel-warning-soft); border: 1px solid var(--panel-warning-border); border-radius: 9px; max-width: 800px; }
+.security-recovery h4 { font-size: 17px; font-weight: 650; }
+.security-recovery > p { margin: 8px 0 18px; font-size: 13px; color: var(--panel-warning); }
+.security-recovery-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; padding: 16px; border: 1px solid var(--panel-warning-border); border-radius: 6px; background: var(--panel-surface); }
+.security-recovery-codes code { font-family: Consolas, ui-monospace, monospace; font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.security-check { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; font-size: 13px; }
+.security-check input { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; }
+.security-channel-list { display: flex; flex-wrap: wrap; gap: 12px 28px; font-size: 13px; }
+.security-channel-list .badge-success, .security-channel-list .badge-warning { margin-left: 6px; }
+.security-session-table { min-width: 780px; text-align: left; }
+.security-audit-table { min-width: 850px; text-align: left; }
+.security-device { display: block; max-width: 280px; overflow-wrap: anywhere; font-size: 12px; color: var(--panel-muted); margin-top: 4px; }
+.security-nowrap { white-space: nowrap; }
+.security-empty { padding: 26px 0; color: var(--panel-muted); font-size: 14px; }
+.security-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: 20px; }
+.account-security .input-field { width: 100%; }
+@media (max-width: 1100px) { .security-center-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); } .security-center-nav a:nth-child(2) { border-right: 0; } .security-center-nav a:nth-child(-n+2) { border-bottom: 1px solid var(--panel-border); } }
+@media (max-width: 767px) {
+    .security-center-heading, .security-section-heading, .security-card-heading { flex-direction: column; }
+    .security-center-heading { gap: 14px; }
+    .security-center-nav { margin-bottom: 22px; }
+    .security-center-nav a { padding: 14px 12px; }
+    .security-center-nav strong { font-size: 13px; }
+    .security-center-nav span { font-size: 11px; }
+    .security-section-title { font-size: 20px; }
+    .security-credential-fields { grid-template-columns: 1fr; }
+    .security-recovery { padding: 16px; }
+    .security-recovery-codes { grid-template-columns: 1fr; padding: 12px; }
+    .security-recovery-codes code { font-size: 12px; }
+    .security-card-heading > .security-actions { width: 100%; }
+}

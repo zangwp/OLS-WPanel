@@ -3,7 +3,7 @@
 <div x-data="panelSettings()" x-init="initPage()">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
-            <h2 class="text-xl font-bold text-white">{{t .Lang "nav.settings"}}</h2>
+            <h1 class="page-title">{{t .Lang "nav.settings"}}</h1>
             <p class="text-sm text-gray-400 mt-1">{{t .Lang "settings.page_description"}}</p>
         </div>
     </div>
@@ -21,8 +21,10 @@
     <div x-show="activeSection === 'general' || activeSection === 'updates'" x-cloak class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start mb-6">
         <div x-show="activeSection === 'general'" class="card">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "settings.account_security"}}</h3>
+            <a class="text-sm text-blue-400 hover:underline block mb-4" href="/{{.RandomSuffix}}/security#account">{{t .Lang "settings.security_center_link"}}</a>
+            <div x-show="accountLoadError" x-cloak role="alert" class="text-sm text-red-400 mb-4"><span x-text="accountLoadError"></span> <button type="button" class="underline" @click="fetchSettings()">{{t .Lang "common.retry"}}</button></div>
 
-            <div class="mb-4 p-4 rounded" style="background-color: #0f172a;">
+            <div class="mb-4 p-4 rounded" style="background-color: var(--panel-surface-muted);">
                 <p class="text-xs text-blue-400 font-medium mb-2">{{t .Lang "settings.basic_auth_title"}}</p>
                 <p class="text-xs text-gray-500 mb-3">{{t .Lang "settings.basic_auth_desc"}}</p>
                 <div class="mb-3">
@@ -33,10 +35,12 @@
                     <label class="text-xs text-gray-400">{{t .Lang "settings.password_keep"}}</label>
                     <input type="password" x-model="pw.basic" class="input-field text-sm py-1.5 mt-1" placeholder="{{t .Lang "settings.leave_unchanged_placeholder"}}" autocomplete="new-password">
                 </div>
-                <button @click="saveBasicAuth" :disabled="accountSaving" class="btn-primary w-full mt-4" x-text="accountSaving ? t('settings.saving') : t('settings.save_basic_auth')"></button>
+                <div class="mt-3"><label for="basic-current-password" class="text-xs text-gray-400">{{t .Lang "settings.current_web_password"}}</label><input id="basic-current-password" type="password" x-model="pw.basicCurrent" class="input-field text-sm mt-1" autocomplete="current-password"></div>
+                <div class="mt-3"><label for="basic-security-code" class="text-xs text-gray-400">{{t .Lang "settings.mfa_code_optional"}}</label><input id="basic-security-code" type="text" x-model="pw.basicCode" class="input-field text-sm mt-1" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false"></div>
+                <button @click="saveBasicAuth" :disabled="accountSaving || !accountLoaded" class="btn-primary w-full mt-4" x-text="accountSaving ? t('settings.saving') : t('settings.save_basic_auth')"></button>
             </div>
 
-            <div class="p-4 rounded" style="background-color: #0f172a;">
+            <div class="p-4 rounded" style="background-color: var(--panel-surface-muted);">
                 <p class="text-xs text-green-400 font-medium mb-2">{{t .Lang "settings.web_login_title"}}</p>
                 <p class="text-xs text-gray-500 mb-3">{{t .Lang "settings.web_login_desc"}}</p>
                 <div class="mb-3">
@@ -52,7 +56,8 @@
                     </div>
                 </div>
                 <p class="text-xs text-yellow-400 mt-3" x-show="username !== originalUsername">{{t .Lang "settings.username_change_requires_password"}}</p>
-                <button @click="saveWebAccount" :disabled="accountSaving" class="btn-primary w-full mt-4" x-text="accountSaving ? t('settings.saving') : t('settings.save_web_account')"></button>
+                <div class="mt-3"><label for="web-security-code" class="text-xs text-gray-400">{{t .Lang "settings.mfa_code_optional"}}</label><input id="web-security-code" type="text" x-model="pw.code" class="input-field text-sm mt-1" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false"></div>
+                <button @click="saveWebAccount" :disabled="accountSaving || !accountLoaded" class="btn-primary w-full mt-4" x-text="accountSaving ? t('settings.saving') : t('settings.save_web_account')"></button>
             </div>
             <p class="text-xs text-yellow-400 mt-2" x-show="accountSaved">{{t .Lang "settings.account_saved_logout"}}</p>
         </div>
@@ -89,7 +94,7 @@
                     <p class="text-xs text-gray-400">{{t .Lang "settings.server_time"}}<span x-text="serverTime" class="text-white font-mono"></span></p>
                     <div class="flex items-center space-x-2">
                         <span class="text-xs" :class="ntpSynced ? 'text-green-400' : 'text-yellow-400'" x-text="ntpSynced ? t('settings.ntp_synced') : (ntpEnabled ? t('settings.ntp_waiting') : t('settings.ntp_not_synced'))"></span>
-                        <button @click="syncNTP()" :disabled="ntpSyncing" class="text-xs py-0.5 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;" x-text="ntpSyncing ? t('settings.ntp_starting') : t('settings.sync')"></button>
+                        <button @click="syncNTP()" :disabled="ntpSyncing" class="text-xs py-0.5 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);" x-text="ntpSyncing ? t('settings.ntp_starting') : t('settings.sync')"></button>
                     </div>
                 </div>
                 <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.time_help"}}</span></details>
@@ -122,7 +127,7 @@
 </section>
 
 <div x-show="activeSection === 'updates'" x-cloak>
-            <details class="mb-5 rounded border border-gray-700 p-4" style="background-color: #0f172a;">
+            <details class="mb-5 rounded border border-gray-700 p-4" style="background-color: var(--panel-surface-muted);">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "settings.advanced_download_settings"}}</summary>
             <div class="mt-4">
                 <label class="label">{{t .Lang "settings.github_proxy"}}</label>
@@ -143,7 +148,7 @@
                     <span class="text-sm text-gray-400">{{t .Lang "settings.panel_version"}}</span>
                     <span class="version-pill text-sm font-mono px-2 py-0.5" x-text="currentVersion"></span>
                 </div>
-                <div x-show="hasUpdate" class="mb-3 p-3 rounded" style="background-color: #064e3b; border: 1px solid #059669;">
+                <div x-show="hasUpdate" class="mb-3 p-3 rounded" style="background-color: var(--panel-success-soft); border: 1px solid #059669;">
                     <p class="text-sm text-green-300">{{t .Lang "settings.new_version_prefix"}} <span x-text="latestVersion" class="font-bold"></span> {{t .Lang "settings.new_version_suffix"}}</p>
                     <pre x-text="releaseNotes" class="text-xs text-gray-400 mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap"></pre>
                 </div>
@@ -151,12 +156,12 @@
                     <button @click="checkUpdate()" :disabled="checking" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.check_updates')"></button>
                     <button @click="doUpdate()" x-show="hasUpdate" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.update_now')"></button>
                 </div>
-                <div x-show="updating || updateStatus.running || updateStatus.completed || updateStatus.error" class="mt-3 p-3 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
+                <div x-show="updating || updateStatus.running || updateStatus.completed || updateStatus.error" class="mt-3 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                     <div class="flex items-center justify-between mb-2">
                         <span class="text-xs" :class="updateStatus.error ? 'text-red-400' : 'text-gray-300'" x-text="updateStatusText()"></span>
                         <span class="text-xs text-gray-500" x-text="progressLabel()"></span>
                     </div>
-                    <div class="h-2 rounded overflow-hidden" style="background-color: #020617;">
+                    <div class="h-2 rounded overflow-hidden" style="background-color: var(--panel-surface-soft);">
                         <div class="h-full transition-all duration-300" :style="'width: ' + progressPercent() + '%; background-color: ' + (updateStatus.error ? '#dc2626' : '#059669')"></div>
                     </div>
                     <div x-show="updateStatus.stage === 'download_binary' && updateStatus.has_total" class="flex justify-between mt-2 text-xs text-gray-500">
@@ -168,7 +173,7 @@
                 <p x-show="updateError" class="text-xs text-red-400 mt-2" x-text="updateError"></p>
             </div>
 
-            <div class="mt-4 p-3 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
+            <div class="mt-4 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <p class="text-sm text-gray-300">{{t .Lang "settings.auto_update"}}</p>
@@ -225,10 +230,10 @@
                         </div>
                         <button type="button" @click="listOpen = !listOpen" class="text-xs text-blue-400 hover:text-blue-300" x-text="listOpen ? t('settings.hide_update_list') : t('settings.show_update_list')"></button>
                     </div>
-                    <div x-show="listOpen" class="p-2 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
+                    <div x-show="listOpen" class="p-2 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                         <div class="space-y-2 pr-1" style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;">
                             <template x-for="pkg in filteredPackages" :key="pkg.name">
-                                <div class="flex flex-wrap items-center justify-between gap-3 p-2 rounded" style="background-color: #111827; border: 1px solid #1e293b;">
+                                <div class="flex flex-wrap items-center justify-between gap-3 p-2 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                                     <div class="min-w-0 flex flex-wrap items-center gap-2">
                                         <span class="text-sm text-white font-mono" x-text="pkg.name"></span>
                                         <span class="text-xs" :class="isSecurity(pkg) ? 'text-red-400' : 'text-gray-500'" x-text="pkg.repo"></span>
@@ -244,7 +249,7 @@
                     </div>
                     <p class="text-xs text-gray-500 mt-2">{{t .Lang "settings.system_update_help"}}</p>
                 </div>
-                <div class="flex flex-wrap items-center gap-3 py-2" style="background-color: #1e293b;">
+                <div class="flex flex-wrap items-center gap-3 py-2" style="background-color: var(--panel-surface);">
                     <button @click="check(true)" :disabled="checking || updating" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.refresh')"></button>
                     <button @click="doUpdate()" x-show="count > 0" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.one_click_update')"></button>
                 </div>
@@ -275,7 +280,7 @@
             <p class="text-xs text-gray-500 mb-4">{{t .Lang "settings.wp_package_help"}}</p>
 
             <div>
-                <div class="p-3 rounded mb-4" style="background-color: #0f172a;">
+                <div class="p-3 rounded mb-4" style="background-color: var(--panel-surface-muted);">
                     <div class="flex items-center justify-between mb-2">
                         <span class="text-xs text-gray-400">{{t .Lang "settings.local_package_status"}}</span>
                 <span class="text-xs font-medium" :class="pkg.available ? 'text-green-400' : 'text-yellow-400'" x-text="pkg.available ? t('settings.package_ready') : t('settings.package_not_installed')"></span>
@@ -307,12 +312,12 @@
                         <span x-text="uploading ? t('settings.uploading') : t('settings.upload_package')"></span>
                         <input type="file" accept=".zip" class="hidden" @change="uploadPkg($event)" :disabled="uploading">
                     </label>
-                    <button x-show="pkg.available" @click="deletePkg()" :disabled="deleting" class="text-sm py-1.5 px-3 rounded" style="background-color: #7f1d1d; color: #fca5a5;" x-text="deleting ? t('settings.deleting') : t('settings.delete')"></button>
-                    <button @click="fetchStatus()" class="text-xs py-1 px-2 rounded" style="background-color: #1e3a5f; color: #93c5fd;">{{t .Lang "settings.refresh"}}</button>
+                    <button x-show="pkg.available" @click="deletePkg()" :disabled="deleting" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);" x-text="deleting ? t('settings.deleting') : t('settings.delete')"></button>
+                    <button @click="fetchStatus()" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "settings.refresh"}}</button>
                 </div>
                 <p x-show="msg" class="text-xs mt-2" :class="msgOk ? 'text-green-400' : 'text-red-400'" x-text="msg"></p>
 
-                <div class="mt-4 p-3 rounded" style="background-color: #0f172a; border: 1px solid #1e293b;">
+                <div class="mt-4 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                     <div class="flex items-center justify-between mb-2">
                         <div>
                             <p class="text-sm text-gray-300">{{t .Lang "settings.wp_package_auto_check"}}</p>
@@ -345,6 +350,7 @@
             </div>
         </div>
         <p class="text-gray-400 text-xs mb-2">{{t .Lang "settings.panel_db_backup_help"}}</p>
+        <p class="text-gray-500 text-xs mb-3">{{t .Lang "settings.mfa_backup_help"}}</p>
         <p class="text-yellow-500/80 text-xs mb-4">{{t .Lang "settings.panel_db_backup_warning"}}</p>
         <div class="overflow-x-auto">
             <table class="w-full">
@@ -559,6 +565,8 @@ function panelSettings() {
         proxyResult: '',
         proxyOk: false,
         accountSaving: false,
+        accountLoaded: false,
+        accountLoadError: '',
         accountSaved: false,
         autoUpdate: {
             enabled: false,
@@ -573,7 +581,7 @@ function panelSettings() {
             lastSuccess: '',
             lastSuccessVersion: ''
         },
-        pw: { old: '', new1: '', new2: '', basic: '' },
+        pw: { old: '', new1: '', new2: '', basic: '', basicCurrent: '', basicCode: '', code: '' },
         timeTimer: null,
         destroy() { if (this.timeTimer) clearInterval(this.timeTimer); },
         initPage() {
@@ -605,9 +613,13 @@ function panelSettings() {
                 : 'px-4 py-2 rounded text-sm text-gray-300 hover:bg-gray-700';
         },
         async fetchSettings() {
+            this.accountLoaded = false;
+            this.accountLoadError = '';
             try {
                 const r = await api('/settings');
+                if (!r.success) throw new Error(r.message || t('settings.account_load_failed'));
                 if (r.success) {
+                    if (typeof r.data?.username !== 'string' || !r.data.username || typeof r.data.basic_auth_user !== 'string') throw new Error(t('settings.account_load_failed'));
                     this.panelTitle = r.data.panel_title || 'OLS WPanel';
                     this.username = r.data.username || '';
                     this.originalUsername = this.username;
@@ -634,8 +646,9 @@ function panelSettings() {
                     this.autoUpdate.lastError = au.panel_auto_update_last_error || '';
                     this.autoUpdate.lastSuccess = au.panel_auto_update_last_success_at || '';
                     this.autoUpdate.lastSuccessVersion = au.panel_auto_update_last_success_version || '';
+                    this.accountLoaded = true;
                 }
-            } catch(e) {}
+            } catch(e) { this.accountLoadError = e.message || t('settings.account_load_failed'); }
             this.tickTime();
             if (this.timeTimer) clearInterval(this.timeTimer);
 this.timeTimer = setInterval(() => this.tickTime(), 1000);
@@ -655,19 +668,25 @@ this.timeTimer = setInterval(() => this.tickTime(), 1000);
             }
         },
         async saveBasicAuth() {
+            if (!this.accountLoaded || this.accountSaving) return;
             if (!this.basicAuthUser.trim()) { showToast(t('settings.basic_auth_username_required'), 'error'); return; }
+            if (!this.pw.basicCurrent) { showToast(t('settings.current_password_required_for_account'), 'error'); return; }
             if (this.pw.basic && this.pw.basic.length < 8) { showToast(t('settings.basic_auth_password_min_length'), 'error'); return; }
-            const body = { basic_auth_user: this.basicAuthUser.trim() };
+            const body = { basic_auth_user: this.basicAuthUser.trim(), old_password: this.pw.basicCurrent, code: this.pw.basicCode.trim() };
             if (this.pw.basic) body.basic_auth_password = this.pw.basic;
             this.accountSaving = true;
             try {
-                await api('/settings', { method: 'PUT', body });
+                const r = await api('/settings', { method: 'PUT', body, allowAuthFailure: true });
+                if (!r.success) throw new Error(r.message || t('settings.save_failed'));
                 this.pw.basic = '';
+                this.pw.basicCurrent = '';
+                this.pw.basicCode = '';
                 showToast(t('settings.basic_auth_saved'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
             this.accountSaving = false;
         },
         async saveWebAccount() {
+            if (!this.accountLoaded || this.accountSaving) return;
             const username = this.username.trim();
             const usernameChanged = username !== this.originalUsername;
             const passwordChanged = Boolean(this.pw.new1 || this.pw.new2);
@@ -678,11 +697,13 @@ this.timeTimer = setInterval(() => this.tickTime(), 1000);
                 if (this.pw.new1 !== this.pw.new2) { showToast(t('settings.passwords_not_match'), 'error'); return; }
                 if (this.pw.new1.length < 8) { showToast(t('settings.new_password_min_length'), 'error'); return; }
             }
-            const body = { username, old_password: this.pw.old };
+            const body = { username, old_password: this.pw.old, code: this.pw.code.trim() };
             if (passwordChanged) body.new_password = this.pw.new1;
             this.accountSaving = true;
             try {
-                await api('/settings', { method: 'PUT', body });
+                const r = await api('/settings', { method: 'PUT', body, allowAuthFailure: true });
+                if (!r.success) throw new Error(r.message || t('settings.save_failed'));
+                this.pw.old = ''; this.pw.new1 = ''; this.pw.new2 = ''; this.pw.code = '';
                 this.accountSaved = true;
                 showToast(t('settings.account_saved_please_relogin'), 'success');
                 setTimeout(async () => {

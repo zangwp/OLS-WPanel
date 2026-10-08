@@ -1,0 +1,230 @@
+{{define "account_security"}}
+<div class="account-security" x-data="accountSecurity()" x-show="securityTab === 'account' || securityTab === 'activity'" x-cloak>
+<section x-show="securityTab === 'account'" aria-labelledby="account-heading">
+    <header class="security-section-heading"><div><h2 id="account-heading" class="security-section-title">{{t .Lang "security_center.account"}}</h2><p>{{t .Lang "account_security.subtitle"}}</p></div><a class="btn-secondary" href="/{{.RandomSuffix}}/settings">{{t .Lang "account_security.change_password"}}</a></header>
+    <section class="card security-mfa" aria-labelledby="mfa-heading" :aria-busy="mfaLoading || mfaBusy">
+        <div class="security-card-heading"><div><h3 id="mfa-heading" tabindex="-1">{{t .Lang "account_security.mfa_title"}}</h3><p>{{t .Lang "account_security.mfa_help"}}</p></div><span x-show="mfaLoaded" :class="mfa.enabled ? 'badge-success' : 'badge-warning'" x-text="t(mfa.enabled ? 'account_security.enabled' : 'account_security.not_enabled')"></span></div>
+        <p x-show="mfaLoading" role="status" class="security-muted">{{t .Lang "common.loading"}}</p>
+        <div x-show="mfaError" class="security-feedback security-feedback-error" role="alert"><span x-text="mfaError"></span><button type="button" class="btn-secondary" @click="fetchMFA()" :disabled="mfaLoading || mfaBusy">{{t .Lang "security_center.retry"}}</button></div>
+        <div x-show="mfaLoaded && !recoveryCodes.length && !mfaAction">
+            <p x-show="mfa.enabled" class="security-muted" x-text="t('account_security.codes_remaining', { count: mfa.recovery_codes_remaining })"></p>
+            <div class="security-actions">
+                <button type="button" x-show="!mfa.enabled" class="btn-primary" @click="beginMFA('setup')" :disabled="mfaLoading || mfaBusy">{{t .Lang "account_security.setup"}}</button>
+                <button type="button" x-show="mfa.enabled" class="btn-secondary" @click="beginMFA('regenerate')" :disabled="mfaLoading || mfaBusy">{{t .Lang "account_security.regenerate"}}</button>
+                <button type="button" x-show="mfa.enabled" class="btn-danger" @click="beginMFA('disable')" :disabled="mfaLoading || mfaBusy">{{t .Lang "account_security.disable"}}</button>
+            </div>
+        </div>
+        <form x-show="mfaAction && !recoveryCodes.length" @submit.prevent="submitMFA()" class="security-mfa-form">
+            <p x-show="mfaAction === 'setup' && !setupData" class="security-muted">{{t .Lang "account_security.setup_help"}}</p>
+            <p x-show="mfaAction === 'disable'" class="security-feedback security-feedback-warning">{{t .Lang "account_security.disable_warning"}}</p>
+            <p x-show="mfaAction === 'regenerate'" class="security-feedback security-feedback-warning">{{t .Lang "account_security.regenerate_warning"}}</p>
+            <div x-show="setupData" class="security-enrollment">
+                <p class="security-enrollment-step">{{t .Lang "account_security.add_authenticator"}}</p>
+                <label class="label" for="mfa-secret">{{t .Lang "account_security.setup_key"}}</label>
+                <input id="mfa-secret" class="input-field font-mono" readonly :value="setupData?.secret || ''" autocomplete="off" spellcheck="false">
+                <p class="security-muted">{{t .Lang "account_security.setup_key_help"}}</p>
+                <a class="security-text-link" :href="authenticatorURL()" x-show="authenticatorURL()">{{t .Lang "account_security.open_authenticator"}}</a>
+                <p class="security-muted" x-text="t('account_security.setup_expires', { time: formatDate(setupData?.expires_at) })"></p>
+            </div>
+            <div class="security-credential-fields">
+                <div><label class="label" for="mfa-current-password">{{t .Lang "account_security.current_password"}}</label><input id="mfa-current-password" type="password" class="input-field" x-model="mfaPassword" autocomplete="current-password" :disabled="mfaBusy" required></div>
+                <div x-show="setupData || mfaAction !== 'setup'"><label class="label" for="mfa-code" x-text="t(mfaAction === 'setup' ? 'account_security.authenticator_code' : 'account_security.code_or_recovery')"></label><input id="mfa-code" type="text" class="input-field font-mono" x-model.trim="mfaCode" autocomplete="one-time-code" :inputmode="mfaAction === 'setup' ? 'numeric' : 'text'" :maxlength="mfaAction === 'setup' ? 6 : 64" autocapitalize="off" spellcheck="false" :disabled="mfaBusy" :required="!!setupData || mfaAction !== 'setup'"></div>
+            </div>
+            <div class="security-actions"><button type="submit" class="btn-primary" :disabled="mfaBusy || !mfaLoaded || mfaLoading" x-text="mfaBusy ? t('account_security.working') : mfaSubmitLabel()"></button><button type="button" class="btn-secondary" @click="cancelMFA()" :disabled="mfaBusy">{{t .Lang "common.cancel"}}</button></div>
+            <p class="security-muted">{{t .Lang "account_security.other_sessions_revoked"}}</p>
+        </form>
+        <div x-show="recoveryCodes.length" class="security-recovery" role="region" aria-labelledby="recovery-heading">
+            <h4 id="recovery-heading" tabindex="-1">{{t .Lang "account_security.save_recovery_codes"}}</h4><p>{{t .Lang "account_security.recovery_once"}}</p>
+            <div class="security-recovery-codes"><template x-for="(code, index) in recoveryCodes" :key="index"><code x-text="code"></code></template></div>
+            <div class="security-actions"><button type="button" class="btn-secondary" @click="downloadRecoveryCodes()">{{t .Lang "account_security.download_codes"}}</button><button type="button" class="btn-secondary" @click="copyRecoveryCodes()">{{t .Lang "account_security.copy_codes"}}</button></div>
+            <label class="security-check"><input type="checkbox" x-model="recoverySaved"><span>{{t .Lang "account_security.codes_saved_confirm"}}</span></label>
+            <button type="button" class="btn-primary" @click="finishRecoveryCodes()" :disabled="!recoverySaved">{{t .Lang "account_security.finish"}}</button>
+        </div>
+        <p x-show="mfaActionError" class="security-feedback security-feedback-error" role="alert" x-text="mfaActionError"></p>
+        <p x-show="mfaNotice" class="security-feedback" role="status" x-text="mfaNotice"></p>
+    </section>
+    <section class="card" aria-labelledby="sessions-heading" :aria-busy="sessionsLoading || sessionBusy">
+        <div class="security-card-heading"><div><h3 id="sessions-heading">{{t .Lang "account_security.sessions"}}</h3><p>{{t .Lang "account_security.sessions_help"}}</p></div><div class="security-actions"><button type="button" class="btn-secondary" @click="fetchSessions()" :disabled="sessionsLoading || sessionBusy">{{t .Lang "security.refresh_status"}}</button><button type="button" class="btn-danger" @click="revokeOtherSessions()" :disabled="!sessionsLoaded || sessionsLoading || sessionBusy || !sessions.some(s => !s.current)">{{t .Lang "account_security.revoke_others"}}</button></div></div>
+        <p x-show="sessionsLoading" class="security-muted" role="status">{{t .Lang "common.loading"}}</p>
+        <div x-show="sessionsError" class="security-feedback security-feedback-error" role="alert"><span x-text="sessionsError"></span><button type="button" class="btn-secondary" @click="fetchSessions()" :disabled="sessionsLoading || sessionBusy">{{t .Lang "security_center.retry"}}</button></div>
+        <p x-show="sessionNotice" class="security-feedback" role="status" x-text="sessionNotice"></p>
+        <p x-show="sessionsLoaded && !sessions.length && !sessionsLoading" class="security-empty">{{t .Lang "account_security.no_sessions"}}</p>
+        <div x-show="sessionsLoaded && sessions.length && !sessionsError" class="overflow-x-auto" tabindex="0" role="region" aria-label="{{t .Lang "account_security.sessions"}}">
+            <table class="w-full security-session-table"><thead><tr><th>{{t .Lang "account_security.device"}}</th><th>IP</th><th>{{t .Lang "account_security.login_time"}}</th><th>{{t .Lang "account_security.last_active"}}</th><th>{{t .Lang "account_security.actions"}}</th></tr></thead><tbody><template x-for="session in sessions" :key="session.id"><tr><td><span x-show="session.current" class="badge-info">{{t .Lang "account_security.current_session"}}</span><span class="security-device" :title="session.user_agent" x-text="deviceLabel(session.user_agent)"></span></td><td class="font-mono" x-text="session.ip || '—'"></td><td class="security-nowrap" x-text="formatDate(session.created_at)"></td><td class="security-nowrap" x-text="formatDate(session.last_seen_at)"></td><td><span x-show="session.current" class="security-muted">{{t .Lang "account_security.current_session"}}</span><button type="button" x-show="!session.current" class="btn-danger" @click="revokeSession(session)" :disabled="sessionBusy || sessionsLoading">{{t .Lang "account_security.revoke"}}</button></td></tr></template></tbody></table>
+        </div>
+    </section>
+</section>
+<section x-show="securityTab === 'activity'" aria-labelledby="activity-heading">
+    <header class="security-section-heading"><div><h2 id="activity-heading" class="security-section-title">{{t .Lang "security_center.activity"}}</h2><p>{{t .Lang "account_security.activity_help"}}</p></div><a class="btn-secondary" href="/{{.RandomSuffix}}/firewall">{{t .Lang "security_center.firewall_events"}}</a></header>
+    <section class="card" aria-labelledby="notifications-heading" :aria-busy="notificationsLoading || notificationsSaving">
+        <div class="security-card-heading"><div><h3 id="notifications-heading">{{t .Lang "account_security.notifications"}}</h3><p>{{t .Lang "account_security.notifications_help"}}</p></div><a class="security-text-link" href="/{{.RandomSuffix}}/alert">{{t .Lang "account_security.configure_channels"}}</a></div>
+        <p x-show="notificationsLoading" class="security-muted" role="status">{{t .Lang "common.loading"}}</p>
+        <div x-show="notificationsError" class="security-feedback security-feedback-error" role="alert"><span x-text="notificationsError"></span><button type="button" class="btn-secondary" @click="fetchNotifications()" :disabled="notificationsLoading || notificationsSaving">{{t .Lang "security_center.retry"}}</button></div>
+        <div class="security-channel-list" x-show="notificationsLoaded"><span>SMTP <span :class="notifications.smtp_configured ? 'badge-success' : 'badge-warning'" x-text="t(notifications.smtp_configured ? 'account_security.configured' : 'account_security.not_configured')"></span></span><span>Webhook <span :class="notifications.webhook_configured ? 'badge-success' : 'badge-warning'" x-text="t(notifications.webhook_configured ? 'account_security.configured' : 'account_security.not_configured')"></span></span></div>
+        <label class="security-check"><input type="checkbox" x-model="notificationDraft" :disabled="!notificationsLoaded || notificationsLoading || notificationsSaving"><span>{{t .Lang "account_security.enable_notifications"}}</span></label>
+        <p x-show="notificationsLoaded && notificationDraft && !notifications.smtp_configured && !notifications.webhook_configured" class="security-feedback security-feedback-warning">{{t .Lang "account_security.no_channels"}}</p>
+        <button type="button" class="btn-primary" @click="saveNotifications()" :disabled="!notificationsLoaded || notificationsLoading || notificationsSaving || notificationDraft === notifications.enabled" x-text="notificationsSaving ? t('common.saving') : t('security.save_settings')"></button>
+        <p x-show="notificationNotice" class="security-feedback" role="status" x-text="notificationNotice"></p>
+    </section>
+    <section class="card" aria-labelledby="audit-heading" :aria-busy="auditLoading">
+        <div class="security-card-heading"><div><h3 id="audit-heading">{{t .Lang "account_security.audit"}}</h3><p>{{t .Lang "account_security.audit_help"}}</p></div><button type="button" class="btn-secondary" @click="fetchAudit(auditPage)" :disabled="auditLoading">{{t .Lang "security.refresh_status"}}</button></div>
+        <p x-show="auditLoading" class="security-muted" role="status">{{t .Lang "common.loading"}}</p>
+        <div x-show="auditError" class="security-feedback security-feedback-error" role="alert"><span x-text="auditError"></span><button type="button" class="btn-secondary" @click="fetchAudit(auditRequestedPage)" :disabled="auditLoading">{{t .Lang "security_center.retry"}}</button></div>
+        <p x-show="auditLoaded && !auditLoading && !auditError && !auditEvents.length" class="security-empty">{{t .Lang "account_security.no_audit"}}</p>
+        <div x-show="auditLoaded && !auditError && auditEvents.length" class="overflow-x-auto" tabindex="0" role="region" aria-label="{{t .Lang "account_security.audit"}}"><table class="w-full security-audit-table"><thead><tr><th>{{t .Lang "account_security.event_time"}}</th><th>{{t .Lang "account_security.event"}}</th><th>{{t .Lang "account_security.username"}}</th><th>IP / {{t .Lang "account_security.device"}}</th><th>{{t .Lang "account_security.notification_status"}}</th></tr></thead><tbody><template x-for="event in auditEvents" :key="event.id"><tr><td class="security-nowrap" x-text="formatDate(event.created_at)"></td><td><span x-text="eventLabel(event.event)"></span><span x-show="event.anomaly" class="badge-warning" x-text="anomalyLabel(event.anomaly)"></span></td><td x-text="event.username || '—'"></td><td><span class="font-mono" x-text="event.ip || '—'"></span><span class="security-device" :title="event.user_agent" x-text="deviceLabel(event.user_agent)"></span></td><td x-text="notificationLabel(event.notification_status)"></td></tr></template></tbody></table></div>
+        <div class="security-pagination" x-show="auditLoaded && !auditError"><span class="security-muted" x-text="t('account_security.pagination', { page: auditPage, pages: auditPages(), total: auditTotal })"></span><div class="security-actions"><button type="button" class="btn-secondary" @click="fetchAudit(auditPage - 1)" :disabled="auditLoading || auditPage <= 1">{{t .Lang "account_security.previous"}}</button><button type="button" class="btn-secondary" @click="fetchAudit(auditPage + 1)" :disabled="auditLoading || auditPage >= auditPages()">{{t .Lang "account_security.next"}}</button></div></div>
+    </section>
+</section>
+</div>
+<script>
+function accountSecurity() {
+    return {
+        mfa: { enabled: false, recovery_codes_remaining: 0 }, mfaLoaded: false, mfaLoading: false, mfaError: '',
+        mfaBusy: false, mfaAction: '', mfaPassword: '', mfaCode: '', mfaActionError: '', mfaNotice: '', setupData: null,
+        recoveryCodes: [], recoverySaved: false, leaveHandler: null,
+        sessions: [], sessionsLoaded: false, sessionsLoading: false, sessionsError: '', sessionBusy: false, sessionNotice: '', sessionsRequest: 0,
+        auditEvents: [], auditLoaded: false, auditLoading: false, auditError: '', auditPage: 1, auditRequestedPage: 1, auditPageSize: 20, auditTotal: 0, auditRequest: 0,
+        notifications: { enabled: false, smtp_configured: false, webhook_configured: false }, notificationsLoaded: false, notificationsLoading: false, notificationsSaving: false, notificationsError: '', notificationDraft: false, notificationNotice: '',
+        async init() {
+            this.leaveHandler = event => { if (this.recoveryCodes.length && !this.recoverySaved) { event.preventDefault(); event.returnValue = ''; } };
+            window.addEventListener('beforeunload', this.leaveHandler);
+            await Promise.all([this.fetchMFA(), this.fetchSessions(), this.fetchAudit(1), this.fetchNotifications()]);
+        },
+        destroy() { window.removeEventListener('beforeunload', this.leaveHandler); this.mfaPassword = ''; this.mfaCode = ''; this.setupData = null; this.recoveryCodes = []; },
+        responseData(response) { if (!response?.success) throw new Error(response?.message || t('security_center.request_failed')); return response.data; },
+        formatDate(value) { if (!value) return '—'; const date = new Date(typeof value === 'number' && value < 1000000000000 ? value * 1000 : value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString(document.body.dataset.lang || 'zh-CN'); },
+        deviceLabel(value) { return value || t('account_security.unknown_device'); },
+        async fetchMFA() {
+            if (this.mfaLoading) return false;
+            this.mfaLoading = true; this.mfaLoaded = false; this.mfaError = '';
+            try {
+                const data = this.responseData(await api('/auth/mfa', { suppressToast: true }));
+                if (typeof data?.enabled !== 'boolean') throw new Error(t('security_center.request_failed'));
+                this.mfa = data; this.mfaLoaded = true; return true;
+            } catch(e) { this.mfaError = e.message; return false; }
+            finally { this.mfaLoading = false; }
+        },
+        beginMFA(action) {
+            if (!this.mfaLoaded || this.mfaLoading || this.mfaBusy || this.recoveryCodes.length) return;
+            if ((action === 'setup') === this.mfa.enabled || !['setup','disable','regenerate'].includes(action)) return;
+            this.cancelMFA(false); this.mfaAction = action; this.mfaNotice = ''; this.focusMFAElement('mfa-current-password');
+        },
+        cancelMFA(restoreFocus = true) { if (this.mfaBusy) return; this.mfaAction = ''; this.mfaPassword = ''; this.mfaCode = ''; this.mfaActionError = ''; this.setupData = null; if (restoreFocus) this.focusMFAElement('mfa-heading'); },
+        focusMFAElement(id) { if (typeof this.$nextTick !== 'function') return; this.$nextTick(() => requestAnimationFrame(() => { const field = document.getElementById(id); if (field?.getClientRects().length) field.focus(); })); },
+        authenticatorURL() { const value = this.setupData?.otpauth_url || ''; return value.startsWith('otpauth://totp/') ? value : ''; },
+        mfaSubmitLabel() { return t(this.mfaAction === 'setup' ? (this.setupData ? 'account_security.verify_enable' : 'account_security.create_setup') : this.mfaAction === 'disable' ? 'account_security.disable' : 'account_security.regenerate'); },
+        async submitMFA() {
+            if (!this.mfaLoaded || this.mfaLoading || this.mfaBusy || this.recoveryCodes.length || !this.mfaAction) return;
+            const action = this.mfaAction, isSetup = action === 'setup' && !this.setupData;
+            if (!this.mfaPassword || (!isSetup && !this.mfaCode)) { this.mfaActionError = t('account_security.credentials_required'); return; }
+            if (action === 'setup' && !isSetup && !/^\d{6}$/.test(this.mfaCode)) { this.mfaActionError = t('account_security.six_digits'); return; }
+            const body = { current_password: this.mfaPassword, ...(!isSetup ? { code: this.mfaCode } : {}) };
+            const path = isSetup ? 'setup' : action === 'setup' ? 'confirm' : action === 'disable' ? 'disable' : 'recovery-codes';
+            this.mfaBusy = true; this.mfaActionError = ''; this.mfaNotice = '';
+            try {
+                const data = this.responseData(await api('/auth/mfa/' + path, { method: 'POST', body, suppressToast: true, allowAuthFailure: true }));
+                if (isSetup) {
+                    if (!data?.secret || !data?.otpauth_url) throw new Error(t('security_center.request_failed'));
+                    this.setupData = { secret: data.secret, otpauth_url: data.otpauth_url, expires_at: data.expires_at }; this.mfaCode = '';
+                } else {
+                    this.mfaPassword = ''; this.mfaCode = ''; this.setupData = null; this.mfaAction = '';
+                    if (action !== 'disable') {
+                        this.recoveryCodes = Array.isArray(data?.recovery_codes) ? data.recovery_codes.slice() : [];
+                        this.recoverySaved = false;
+                        if (!this.recoveryCodes.length) this.mfaActionError = t('account_security.missing_recovery_codes');
+                    }
+                    this.mfaNotice = t(action === 'disable' ? 'account_security.disabled_done' : action === 'setup' ? 'account_security.enabled_done' : 'account_security.regenerated_done');
+                    await Promise.all([this.fetchMFA(), this.fetchSessions(), this.fetchAudit(1)]);
+                }
+            } catch(e) {
+                const code = e.code || e.error_code;
+                const known = ['mfa_invalid_code','mfa_invalid_password','mfa_rate_limited','mfa_already_enabled','mfa_not_enabled','mfa_setup_expired','mfa_unavailable'];
+                this.mfaActionError = known.includes(code) ? t('account_security.' + code) : e.message;
+                if (code === 'mfa_setup_expired') this.setupData = null;
+                if (code === 'mfa_invalid_password') this.mfaPassword = '';
+            }
+            finally {
+                this.mfaBusy = false;
+                const focusID = this.recoveryCodes.length ? 'recovery-heading' : this.mfaAction ? (this.mfaPassword && (this.setupData || this.mfaAction !== 'setup') ? 'mfa-code' : 'mfa-current-password') : 'mfa-heading';
+                this.focusMFAElement(focusID);
+            }
+        },
+        recoveryText() { return 'OLS WPanel recovery codes\n\n' + this.recoveryCodes.join('\n') + '\n'; },
+        async copyRecoveryCodes() {
+            if (!this.recoveryCodes.length) return;
+            try { await navigator.clipboard.writeText(this.recoveryText()); this.mfaNotice = t('account_security.copied'); }
+            catch(e) { this.mfaActionError = t('account_security.copy_failed'); }
+        },
+        downloadRecoveryCodes() {
+            if (!this.recoveryCodes.length) return;
+            const url = URL.createObjectURL(new Blob([this.recoveryText()], { type: 'text/plain;charset=utf-8' }));
+            const link = document.createElement('a'); link.href = url; link.download = 'ols-wpanel-recovery-codes.txt';
+            document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        },
+        finishRecoveryCodes() { if (!this.recoverySaved) return; this.recoveryCodes = []; this.recoverySaved = false; this.mfaNotice = t('account_security.codes_stored'); this.mfaActionError = ''; this.focusMFAElement('mfa-heading'); },
+        async fetchSessions() {
+            const request = ++this.sessionsRequest; this.sessionsLoading = true; this.sessionsLoaded = false; this.sessionsError = '';
+            try {
+                const data = this.responseData(await api('/auth/sessions', { suppressToast: true }));
+                if (request !== this.sessionsRequest) return false;
+                if (!Array.isArray(data?.sessions)) throw new Error(t('security_center.request_failed'));
+                this.sessions = data.sessions; this.sessionsLoaded = true; return true;
+            } catch(e) { if (request === this.sessionsRequest) this.sessionsError = e.message; return false; }
+            finally { if (request === this.sessionsRequest) this.sessionsLoading = false; }
+        },
+        async revokeSession(session) {
+            if (!this.sessionsLoaded || this.sessionsLoading || this.sessionBusy || session.current) return;
+            return this.changeSessions('/auth/sessions/' + encodeURIComponent(session.id), 'DELETE', t('account_security.confirm_revoke', { ip: session.ip || '—' }));
+        },
+        async revokeOtherSessions() {
+            if (!this.sessionsLoaded || this.sessionsLoading || this.sessionBusy || !this.sessions.some(s => !s.current)) return;
+            return this.changeSessions('/auth/sessions/revoke-others', 'POST', t('account_security.confirm_revoke_others'));
+        },
+        async changeSessions(path, method, message) {
+            if (this.sessionBusy) return;
+            this.sessionBusy = true; this.sessionNotice = ''; this.sessionsError = '';
+            try {
+                if (!await confirmModal(message)) return;
+                this.responseData(await api(path, { method, suppressToast: true }));
+                this.sessionNotice = t('account_security.sessions_revoked');
+                await Promise.all([this.fetchSessions(), this.fetchAudit(1)]);
+            } catch(e) { this.sessionsError = e.message; }
+            finally { this.sessionBusy = false; }
+        },
+        auditPages() { return Math.max(1, Math.ceil(this.auditTotal / this.auditPageSize)); },
+        async fetchAudit(page = 1) {
+            const requestedPage = Math.max(1, Math.trunc(Number(page)) || 1), request = ++this.auditRequest;
+            this.auditRequestedPage = requestedPage; this.auditLoading = true; this.auditError = '';
+            try {
+                const data = this.responseData(await api('/auth/audit?page=' + requestedPage + '&page_size=' + this.auditPageSize, { suppressToast: true }));
+                if (request !== this.auditRequest) return false;
+                if (!Array.isArray(data?.events)) throw new Error(t('security_center.request_failed'));
+                this.auditEvents = data.events; this.auditTotal = Number(data.total) || 0; this.auditPage = Number(data.page) || requestedPage; this.auditPageSize = Number(data.page_size) || 20; this.auditLoaded = true; return true;
+            } catch(e) { if (request === this.auditRequest) this.auditError = e.message; return false; }
+            finally { if (request === this.auditRequest) this.auditLoading = false; }
+        },
+        eventLabel(value) { const allowed = ['login_success','login_failure','login_blocked','credentials_changed','mfa_enabled','mfa_disabled','recovery_used','recovery_regenerated','session_revoked','sessions_revoked','notifications_changed','logout']; return allowed.includes(value) ? t('account_security.event_' + value) : value || '—'; },
+        anomalyLabel(value) { return value ? t('account_security.unusual_activity') : ''; },
+        notificationLabel(value) { const allowed = ['none','pending','sent','failed','suppressed','disabled','unconfigured']; return allowed.includes(value) ? t('account_security.notification_' + value) : value || '—'; },
+        async fetchNotifications() {
+            if (this.notificationsLoading || this.notificationsSaving) return false;
+            this.notificationsLoading = true; this.notificationsLoaded = false; this.notificationsError = '';
+            try {
+                const data = this.responseData(await api('/auth/security-notifications', { suppressToast: true }));
+                if (typeof data?.enabled !== 'boolean') throw new Error(t('security_center.request_failed'));
+                this.notifications = data; this.notificationDraft = data.enabled; this.notificationsLoaded = true; return true;
+            } catch(e) { this.notificationsError = e.message; return false; }
+            finally { this.notificationsLoading = false; }
+        },
+        async saveNotifications() {
+            if (!this.notificationsLoaded || this.notificationsLoading || this.notificationsSaving || this.notificationDraft === this.notifications.enabled) return;
+            const enabled = !!this.notificationDraft;
+            this.notificationsSaving = true; this.notificationsError = ''; this.notificationNotice = '';
+            try { this.responseData(await api('/auth/security-notifications', { method: 'PUT', body: { enabled }, suppressToast: true })); this.notifications.enabled = enabled; this.notificationNotice = t('account_security.notifications_saved'); }
+            catch(e) { this.notificationsError = e.message; }
+            finally { this.notificationsSaving = false; }
+        }
+    };
+}
+</script>
+{{end}}

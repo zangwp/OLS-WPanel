@@ -32,9 +32,12 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 | 证书与缓存 | 网站证书申请与续签；使用官方 LiteSpeed Cache 管理页面及 Redis 对象缓存 |
 | 备份与恢复 | 网站、数据库和面板备份，支持 SFTP / S3 异地保存 |
 | VPS 维护 | 查看资源与服务状态，管理系统更新、DNS、Swap、时间同步和开放端口 |
-| 安全与告警 | 登录保护、文件保护、Fail2ban、nftables、邮件通知和日志分析 |
+| 账户安全 | 可选 TOTP 双因素认证、一次性恢复码、在线会话管理、持久登录审计及异常登录通知 |
+| 防护与告警 | 文件保护、Fail2ban、nftables、邮件 / Webhook 通知和日志分析 |
 
 全新安装默认使用 **LSPHP 8.5、MariaDB 11.8**；可为网站增加 LSPHP 8.4 / 8.3。现有数据库保留当前系列，常规系统更新不会自动跨系列升级。
+
+界面采用浅色工作区与深蓝导航，提供中英文布局和手机端操作；看板集中展示资源指标，网站表格可横向滚动。账户安全入口位于“安全设置 → 账户登录”。双因素认证需要管理员主动绑定；启用前请按 [账户安全指南](docs/account-security.md) 单独备份 `account-mfa.key`，普通面板数据库下载不包含此密钥。
 
 ## SSH 快捷命令
 
@@ -58,6 +61,7 @@ o uninstall       卸载面板，保留网站、数据库与共享软件
 - [安装与验签](docs/verified-install.md)
 - [日常维护与恢复](docs/operations-and-recovery.md)
 - [升级兼容性](docs/upgrade-compatibility.md)
+- [账户安全、恢复码与密钥备份](docs/account-security.md)
 - [旧 Optimizer 迁移](docs/optimizer-migration.md)：现有网站可显式迁移并移除旧插件。
 - [安装安全](docs/security/ols-wpanel-install-security.md) · [运行时安全](docs/security/ols-wpanel-runtime-security.md)
 - [仓库目录说明](docs/repository-layout.md)

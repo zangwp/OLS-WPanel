@@ -1151,6 +1151,14 @@ create_repair_backup() {
     install -d -m 0700 "$REPAIR_BACKUP_DIR"
 
     install -m 0600 "$CONFIG_FILE" "$REPAIR_BACKUP_DIR/config.json"
+    # Preserve the separate MFA encryption key alongside the private repair
+    # snapshot. Ordinary downloadable database backups deliberately exclude it.
+    local account_mfa_key="${DB_PATH%/*}/account-mfa.key"
+    if [[ -e "$account_mfa_key" ]] || [[ -L "$account_mfa_key" ]]; then
+        [[ -f "$account_mfa_key" ]] && [[ ! -L "$account_mfa_key" ]] || \
+            log_error "repair前双因素认证密钥不是安全常规文件"
+        install -m 0600 "$account_mfa_key" "$REPAIR_BACKUP_DIR/account-mfa.key"
+    fi
     if [[ -f "$DB_PATH" ]]; then
         sqlite3 "$DB_PATH" ".timeout 10000" ".backup $REPAIR_BACKUP_DIR/panel.db"
         [[ "$(sqlite3 "$REPAIR_BACKUP_DIR/panel.db" 'PRAGMA integrity_check;')" == "ok" ]] || \
@@ -1903,20 +1911,31 @@ select_platform_source() {
 }
 
 restore_managed_apt_sources() {
+    # Uninstalling the panel does not necessarily uninstall its runtime. Keep
+    # the repositories and verification keys for every retained runtime.
+    local runtime_policy="${1:-remove-runtime}"
     local original=""
     local backup=""
     local disabled=""
 
+    case "$runtime_policy" in
+        remove-runtime|retain-runtime|retain-redis) ;;
+        *) log_error "未知的软件源恢复策略" ;;
+    esac
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-debian.sources
     remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-ubuntu.sources
+	if [[ "$runtime_policy" != "retain-runtime" ]]; then
 	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-litespeed.sources
 	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-mariadb.sources
-	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-redis.sources
 	if [[ ! -e /etc/apt/sources.list.d/ols-wpanel-mariadb.sources ]] && [[ ! -L /etc/apt/sources.list.d/ols-wpanel-mariadb.sources ]]; then
 		rm -f -- /usr/share/keyrings/ols-wpanel-mariadb-archive-keyring.gpg
 	fi
+	fi
+	if [[ "$runtime_policy" == "remove-runtime" ]]; then
+	remove_managed_source_file /etc/apt/sources.list.d/ols-wpanel-redis.sources
 	if [[ ! -e /etc/apt/sources.list.d/ols-wpanel-redis.sources ]] && [[ ! -L /etc/apt/sources.list.d/ols-wpanel-redis.sources ]]; then
 		rm -f -- /usr/share/keyrings/ols-wpanel-redis-archive-keyring.asc
+	fi
 	fi
     for original in \
         /etc/apt/sources.list.d/debian.sources \
@@ -2070,7 +2089,7 @@ do_uninstall() {
     remove_managed_panel_command /usr/local/bin/O '# OLS WPanel CLI — o'
     rm -rf "$INSTALL_DIR"
     rm -rf -- "$LICENSE_DOC_DIR"
-    restore_managed_apt_sources
+    restore_managed_apt_sources retain-runtime
     echo -e "  ${GREEN}✓${NC} 面板文件已删除"
 
     echo -e "  → 重新加载 OpenLiteSpeed..."
@@ -2118,7 +2137,15 @@ if main.exists():
   if name!='olsw_default' and not name.startswith('olsw_'):raise SystemExit('检测到共享 OpenLiteSpeed 虚拟主机：'+name)
 client=next((p for p in ['/usr/bin/mariadb','/usr/bin/mysql'] if os.path.isfile(p)),None)
 if not client:raise SystemExit('无法确认数据库归属，取消完全卸载')
-result=subprocess.run([client,'--protocol=socket','-N','-B','-e','SHOW DATABASES'],capture_output=True,text=True,timeout=15)
+credentials=cfg.get('mariadb',{})
+def option(value):
+ if not isinstance(value,str) or '\x00' in value:raise SystemExit('数据库认证配置格式异常')
+ return '"'+value.replace('\\','\\\\').replace('"','\\"').replace('\n','\\n').replace('\r','\\r').replace('\t','\\t').replace('\b','\\b')+'"'
+client_config=work/'purge-mariadb.cnf'
+client_options='[client]\nuser='+option(credentials.get('root_user','root'))+'\npassword='+option(credentials.get('root_password',''))+'\nsocket='+option(credentials.get('socket','/run/mysqld/mysqld.sock'))+'\nprotocol=socket\n'
+fd=os.open(client_config,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
+with os.fdopen(fd,'w') as output:output.write(client_options)
+result=subprocess.run([client,'--defaults-file='+str(client_config),'--protocol=socket','-N','-B','-e','SHOW DATABASES'],capture_output=True,text=True,timeout=15)
 if result.returncode:raise SystemExit('无法读取数据库清单，取消完全卸载')
 existing=set(result.stdout.splitlines());unknown=existing-dbs-{'mysql','sys','information_schema','performance_schema'}
 if unknown:raise SystemExit('检测到其他程序数据库，保留共享环境：'+', '.join(sorted(unknown)))
@@ -2178,7 +2205,7 @@ do_purge() {
     systemctl stop lshttpd 2>/dev/null || true
     local purge_client=""
     purge_client=$(cat "$INSTALL_WORKDIR/purge-client")
-    "$purge_client" --protocol=socket < "$INSTALL_WORKDIR/purge-databases.sql" || log_error "数据库删除失败，停止后续卸载"
+    "$purge_client" --defaults-file="$INSTALL_WORKDIR/purge-mariadb.cnf" --protocol=socket < "$INSTALL_WORKDIR/purge-databases.sql" || log_error "数据库删除失败，停止后续卸载"
     systemctl stop mariadb 2>/dev/null || true
     # Redis 和 Fail2ban 可能被共享工作负载使用，保留其服务与软件包。
     echo -e "  ${GREEN}✓${NC} 服务已停止"
@@ -2213,7 +2240,7 @@ do_purge() {
     remove_managed_panel_command /usr/local/bin/O '# OLS WPanel CLI — o'
     rm -rf "$INSTALL_DIR"
     rm -rf -- "$LICENSE_DOC_DIR"
-    restore_managed_apt_sources
+    restore_managed_apt_sources retain-redis
     echo -e "  ${GREEN}✓${NC} 面板文件已删除"
 
     echo -e "  → 删除网站数据..."
@@ -2446,6 +2473,51 @@ maintenance_current_version() {
     timeout 5s "$BIN_PATH" --info --config "$CONFIG_FILE" 2>/dev/null |
         sed -n 's/^版本: \(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
 }
+assert_repair_version_compatible() {
+    local current=""
+    current=$(maintenance_current_version) || current=""
+    [[ -n "$current" ]] || log_error "无法确认已安装面板版本，拒绝更新/修复；请检查现有二进制和配置"
+    panel_version_at_least "$INSTALLER_RELEASE_VERSION" "$current" || \
+        log_error "目标版本 ${INSTALLER_RELEASE_VERSION} 低于当前版本 ${current} 或版本无法比较；未执行降级，请使用最新安装入口"
+}
+
+assert_no_retained_sites() {
+    local site_dir="" entries=""
+    # Also protect a fresh install after ordinary uninstall removed panel.db.
+    for site_dir in /www/wwwroot /usr/local/lsws/conf/ols-wpanel/sites-available /usr/local/lsws/conf/ols-wpanel/sites-enabled /usr/local/lsws/conf/ols-wpanel/lsphp-sites; do
+        [[ ! -L "$site_dir" ]] || log_error "网站目录是链接，拒绝全新安装或重装；请使用更新/修复"
+        [[ -e "$site_dir" ]] || continue
+        [[ -d "$site_dir" ]] || log_error "网站目录类型异常，拒绝全新安装或重装"
+        entries=$(find "$site_dir" -mindepth 1 -maxdepth 1 -print -quit) || log_error "无法检查保留的网站目录"
+        [[ -z "$entries" ]] || log_error "检测到保留的网站文件或运行配置，拒绝全新安装或重装；请使用更新/修复，或先迁移网站"
+    done
+    local registry=/usr/local/lsws/conf/ols-wpanel/sites.conf
+    if [[ -e "$registry" ]] || [[ -L "$registry" ]]; then
+        [[ -f "$registry" ]] && [[ ! -L "$registry" ]] || log_error "网站注册配置类型异常，拒绝重装"
+        if ! awk '$1 == "virtualHost" && $2 != "olsw_default" {found=1} END {exit found ? 1 : 0}' "$registry"; then
+            log_error "检测到保留的网站注册配置，拒绝全新安装或重装；请使用更新/修复"
+        fi
+    fi
+    if [[ -e "$CONFIG_FILE" ]] || [[ -e "$DB_PATH" ]] || [[ -L "$CONFIG_FILE" ]] || [[ -L "$DB_PATH" ]]; then
+        command -v python3 >/dev/null 2>&1 || log_error "缺少 python3，无法确认网站登记，拒绝重装"
+        python3 - "$CONFIG_FILE" "$DB_PATH" <<'PYREINSTALLCHECK' || log_error "无法确认网站登记为空，拒绝重装；请使用更新/修复，或先迁移网站"
+import json,pathlib,sqlite3,sys
+config_path=pathlib.Path(sys.argv[1]);db_path=pathlib.Path(sys.argv[2])
+if config_path.is_symlink() or db_path.is_symlink():raise SystemExit('拒绝链接形式的面板状态')
+if config_path.exists():
+ with config_path.open() as source:cfg=json.load(source)
+ db_path=pathlib.Path(cfg.get('sqlite',{}).get('path',str(db_path)))
+ web_root=pathlib.Path(cfg.get('paths',{}).get('www_root','/www/wwwroot'))
+ if not web_root.is_absolute() or web_root.is_symlink():raise SystemExit('网站根目录异常')
+ if web_root.exists() and any(web_root.iterdir()):raise SystemExit('检测到保留的网站文件')
+if not db_path.is_absolute() or db_path.is_symlink():raise SystemExit('数据库路径异常')
+if db_path.exists():
+ with sqlite3.connect(db_path.as_uri()+'?mode=ro',uri=True) as conn:
+  if conn.execute('SELECT COUNT(*) FROM websites').fetchone()[0]:raise SystemExit('检测到已登记网站')
+PYREINSTALLCHECK
+    fi
+}
+
 installed_maintenance_menu() {
     local choice="" current="" label="" allow_repair=false
     INSTALL_MENU_ACTION=exit
@@ -2499,7 +2571,7 @@ installed_maintenance_menu() {
                     echo ""
                     echo "OLS WPanel · 卸载与重装"
                     echo "1. 重新安装面板"
-                    echo "   删除面板配置、登录信息、证书和本地备份；保留网站与网站数据库"
+                    echo "   仅限无网站环境；删除面板配置、登录信息、证书和本地备份"
                     echo "2. 普通卸载"
                     echo "   删除面板及其本地数据；保留网站、网站数据库和共享软件"
                     echo "3. 完全卸载"
@@ -2567,6 +2639,7 @@ elif $INSTALL_TRACES || $INSTALL_COMPLETE; then
     case "$INSTALL_MENU_ACTION" in
         repair) REPAIR_MODE=true ;;
         reinstall)
+            assert_no_retained_sites
             confirm_ordinary_uninstall || { log_info "已取消重新安装"; exit 0; }
             do_uninstall
             log_info "开始重新安装..."
@@ -2597,6 +2670,7 @@ if $REPAIR_MODE; then
         log_error "现有config.json未通过repair安全校验，未修改服务器状态"
     validate_existing_panel_binary || \
         log_error "现有面板二进制不是root持有的单链接常规0755文件；未修改服务器状态"
+    assert_repair_version_compatible
     validate_repair_service_unit || \
         log_error "现有systemd unit不是OLS WPanel生成的精确安全版本，或存在drop-in；未修改服务器状态"
     validate_existing_panel_cron_file || \
@@ -2624,6 +2698,7 @@ if $REPAIR_MODE; then
     prepare_repair_snapshot
     log_info "repair预检与备份完成"
 else
+    assert_no_retained_sites
     if [[ -e "$SERVICE_PATH" ]] || [[ -L "$SERVICE_PATH" ]]; then
         log_error "fresh安装前仍存在systemd unit或链接，拒绝继续"
     fi

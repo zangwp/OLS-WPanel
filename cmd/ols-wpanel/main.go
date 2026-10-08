@@ -432,7 +432,8 @@ func main() {
 		}
 	}()
 
-	r := router.SetupRouter(cfg, web.TemplatesFS, web.StaticFS, Version, *configPath)
+	r, closeAccountSecurity := router.SetupRouterWithCleanup(cfg, web.TemplatesFS, web.StaticFS, Version, *configPath)
+	defer closeAccountSecurity()
 	useTLS := cfg.Panel.TLSPort > 0 && cfg.Panel.TLSCertPath != "" && cfg.Panel.TLSKeyPath != ""
 	port := cfg.Panel.Port
 	if useTLS {

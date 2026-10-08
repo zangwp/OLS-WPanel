@@ -2396,11 +2396,17 @@ func (h *FileHandler) Copy(c *gin.Context) {
 		}
 		if req.SiteID != destSiteID {
 			if err := chownTransferredPath(destSiteID, item.dest); err != nil {
-				if cleanupErr := removeFileOrDir(item.dest); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
-					log.Printf("跨站复制清理目标失败 dest=%s: %v", item.dest, cleanupErr)
-				}
+				// Overwrite may have merged into an existing directory. Its old
+				// contents are not owned by this request and must survive failure.
+				cleanupFailed := cleanupTransferredItems([]fileTransferItem{item})
 				log.Printf("跨站复制权限修复失败 dest=%s: %v", item.dest, err)
-				c.JSON(http.StatusInternalServerError, models.ErrorResponse("目标权限修复失败"))
+				message := "目标权限修复失败"
+				if item.conflict {
+					message += "；目标已更新并保留，请检查目标权限后重试"
+				} else if len(cleanupFailed) > 0 {
+					message += "，且目标清理失败: " + joinItemNames(cleanupFailed)
+				}
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse(message))
 				return
 			}
 		}

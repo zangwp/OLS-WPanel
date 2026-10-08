@@ -1,0 +1,23 @@
+const fs = require('fs'), vm = require('vm'), assert = require('assert'), path = require('path');
+const script = fs.readFileSync(path.resolve(__dirname, '../../web/js/app.js'), 'utf8');
+const start = script.indexOf('function api('), end = script.indexOf('const __apiGetCache', start);
+let response, request;
+const ctx = {t: key => key, document: {body: {dataset: {panelPrefix: '/panel'}}, querySelector: () => ({content: 'csrf'})}, window: {location: {href: ''}}, FormData, AbortController, setTimeout, clearTimeout, console: {error() {}}, friendlyAPIError: error => error.message, showToast() {}, fetch: async (url, options) => {request = options; return response;}};
+vm.createContext(ctx); vm.runInContext(script.slice(start, end), ctx);
+const reply = (status, data) => ({status, ok: status < 400, headers: {get: () => 'application/json'}, json: async () => data});
+(async () => {
+  response = reply(401, {success: false, error_code: 'mfa_invalid_code', message: 'bad code'});
+  await assert.rejects(ctx.api('/auth/mfa/disable', {allowAuthFailure: true, silent: true}), error => error.code === 'mfa_invalid_code' && error.status === 401);
+  assert.equal(ctx.window.location.href, ''); assert(!Object.hasOwn(request, 'allowAuthFailure'));
+  response = reply(401, {success: false, message: 'expired'});
+  await assert.rejects(ctx.api('/auth/mfa/disable', {allowAuthFailure: true, silent: true}));
+  assert.equal(ctx.window.location.href, '/panel/login');
+  ctx.window.location.href = '';
+  response = reply(401, {success: false, error_code: 'mfa_invalid_password', message: 'bad password'});
+  await assert.rejects(ctx.api('/settings', {silent: true})); assert.equal(ctx.window.location.href, '/panel/login');
+  ctx.window.location.href = '';
+  await assert.rejects(ctx.api('/auth/login', {silent: true})); assert.equal(ctx.window.location.href, '');
+  response = reply(503, {success: false, error_code: 'mfa_unavailable', message: 'unavailable'});
+  await assert.rejects(ctx.api('/auth/mfa', {silent: true}), error => error.code === 'mfa_unavailable');
+  console.log('PASS API: step-up errors preserve valid session, expired session redirects, opt-in stays out of fetch, typed errors retained');
+})().catch(error => {console.error(error); process.exit(1);});

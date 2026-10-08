@@ -1,68 +1,94 @@
 <!DOCTYPE html>
-<html lang="{{.Lang}}" class="dark">
+<html lang="{{.Lang}}" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{.CSRFToken}}">
+    <meta name="theme-color" content="#f3f6fa">
     <title>{{t .Lang "auth.login"}} - {{.PanelTitle}}</title>
+    <link rel="icon" type="image/png" href="{{.AssetPrefix}}/logo.png">
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/main.css?v={{.AssetVersion}}">
+    <link rel="stylesheet" href="{{.AssetPrefix}}/css/palette.css?v={{.AssetVersion}}">
+    <link rel="stylesheet" href="{{.AssetPrefix}}/css/theme.css?v={{.AssetVersion}}">
+    <link rel="stylesheet" href="{{.AssetPrefix}}/css/login.css?v={{.AssetVersion}}">
     <script defer src="{{.AssetPrefix}}/js/alpine.min.js?v={{.AssetVersion}}"></script>
     <script>
         window.OLS_WPANEL_I18N = { lang: "{{.Lang}}", messages: {{.MessagesJSON}} };
     </script>
     <script src="{{.AssetPrefix}}/js/app.js?v={{.AssetVersion}}"></script>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen" data-panel-prefix="/{{.RandomSuffix}}" data-lang="{{.Lang}}">
-    <div class="min-h-screen flex items-center justify-center" x-data="loginForm()">
-        <div class="card max-w-md w-full">
-            <div class="text-center mb-8">
-                <div class="w-16 h-16 mx-auto mb-4">
-                    <img src="{{.AssetPrefix}}/logo.png" alt="{{.PanelTitle}}" class="w-16 h-16 rounded-xl">
-                </div>
-                <h2 class="text-2xl font-bold text-white">{{.PanelTitle}}</h2>
-                <p class="text-gray-400 mt-2">{{t .Lang "auth.login_prompt"}}</p>
-                <div class="mt-4 text-xs text-gray-500">
-                    <a href="?lang=zh-CN" class="{{if eq .Lang "zh-CN"}}text-blue-400{{else}}text-gray-400{{end}}">{{t .Lang "language.chinese"}}</a>
-                    <span class="mx-2">/</span>
-                    <a href="?lang=en-US" class="{{if eq .Lang "en-US"}}text-blue-400{{else}}text-gray-400{{end}}">{{t .Lang "language.english"}}</a>
+<body class="login-page" data-panel-prefix="/{{.RandomSuffix}}" data-lang="{{.Lang}}">
+    <a class="login-skip" href="#login-main">{{t .Lang "nav.skip_content"}}</a>
+    <div class="login-layout" x-data="loginForm()">
+        <section class="login-brand" aria-labelledby="login-brand-title">
+            <div class="login-brand-identity">
+                <img src="{{.AssetPrefix}}/logo.png" alt="" width="48" height="48">
+                <span>{{.PanelTitle}}</span>
+            </div>
+            <div class="login-brand-content">
+                <h1 id="login-brand-title">{{t .Lang "auth.brand_heading"}}</h1>
+                <p class="login-brand-description">{{t .Lang "auth.brand_description"}}</p>
+                <div class="login-stack" role="group" aria-label="{{t .Lang "auth.stack_title"}}">
+                    <div class="login-stack-layer">
+                        <span class="login-stack-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01M7 13h4M7 16h9"/></svg></span>
+                        <div><p>{{t .Lang "auth.stack_websites"}}</p><strong translate="no">WordPress</strong></div>
+                    </div>
+                    <div class="login-stack-layer">
+                        <span class="login-stack-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5M12 10v4"/></svg></span>
+                        <div><p>{{t .Lang "auth.stack_runtime"}}</p><strong translate="no">OpenLiteSpeed <span>+ PHP</span></strong></div>
+                    </div>
+                    <div class="login-stack-layer">
+                        <span class="login-stack-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>
+                        <div><p>{{t .Lang "auth.stack_database"}}</p><strong translate="no">MariaDB</strong></div>
+                    </div>
                 </div>
             </div>
-
-            <form method="POST" @submit.prevent="login" x-show="!loading">
-                <div class="mb-4">
-                    <label class="label">{{t .Lang "auth.username"}}</label>
-                    <input type="text" x-model="username" name="username" class="input-field" placeholder="admin" autocomplete="username">
+            <p class="login-brand-footer">{{t .Lang "app.tagline"}}</p>
+        </section>
+        <main id="login-main" class="login-main" tabindex="-1">
+            <nav class="login-language" aria-label="{{t .Lang "language.label"}}">
+                <a href="?lang=zh-CN" lang="zh-CN" {{if eq .Lang "zh-CN"}}aria-current="true"{{end}}>{{t .Lang "language.chinese"}}</a>
+                <a href="?lang=en-US" lang="en-US" {{if eq .Lang "en-US"}}aria-current="true"{{end}}>{{t .Lang "language.english"}}</a>
+            </nav>
+            <div class="login-form-shell">
+                <header class="login-form-heading">
+                    <h2 x-text="mfaRequired ? t('auth.mfa_title') : t('auth.workspace_login')">{{t .Lang "auth.workspace_login"}}</h2>
+                    <p x-text="mfaRequired ? t('auth.mfa_prompt') : t('auth.workspace_prompt')">{{t .Lang "auth.workspace_prompt"}}</p>
+                </header>
+                <div class="login-form-state" :aria-busy="loading && !success">
+                    <form method="POST" @submit.prevent="login" x-show="!loading">
+                        <div class="login-field" x-show="!mfaRequired">
+                            <label for="login-username">{{t .Lang "auth.username"}}</label>
+                            <input id="login-username" type="text" x-model="username" name="username" class="input-field" placeholder="admin" autocomplete="username" autocapitalize="none" spellcheck="false" :aria-describedby="error ? 'login-error' : null">
+                        </div>
+                        <div class="login-field" x-show="!mfaRequired">
+                            <label for="login-password">{{t .Lang "auth.password"}}</label>
+                            <input id="login-password" type="password" x-model="password" name="password" class="input-field" placeholder="{{t .Lang "auth.password_placeholder"}}" autocomplete="current-password" :aria-describedby="error ? 'login-error' : null">
+                        </div>
+                        <div class="login-field" x-show="mfaRequired" x-cloak>
+                            <label for="login-code" x-text="recoveryMode ? t('auth.recovery_code') : t('auth.mfa_code')"></label>
+                            <input id="login-code" x-ref="codeInput" type="text" x-model="code" name="code" class="input-field" autocomplete="one-time-code" :inputmode="recoveryMode ? 'text' : 'numeric'" :maxlength="recoveryMode ? 64 : 6" autocapitalize="none" spellcheck="false" aria-describedby="login-code-help" :aria-invalid="!!error">
+                            <p id="login-code-help" class="login-mfa-help" x-text="recoveryMode ? t('auth.recovery_help') : t('auth.mfa_code_help')"></p>
+                            <button type="button" class="login-mfa-link" @click="recoveryMode = !recoveryMode; code = ''; error = ''; focusCode()" x-text="recoveryMode ? t('auth.use_authenticator') : t('auth.use_recovery')"></button>
+                        </div>
+                        <div id="login-error" x-cloak x-show="error" class="login-error" role="alert" x-text="error"></div>
+                        <button type="submit" class="btn-primary login-submit" :disabled="loading" x-text="mfaRequired ? t('auth.verify_login') : t('auth.login')">{{t .Lang "auth.login"}}</button>
+                        <button x-show="mfaRequired" x-cloak type="button" class="login-mfa-link login-back" @click="resetMFA()">{{t .Lang "auth.back_credentials"}}</button>
+                    </form>
+                    <div x-cloak x-show="loading && !success" class="login-feedback" role="status" aria-live="polite">
+                        <span class="login-spinner" aria-hidden="true"></span>
+                        <p>{{t .Lang "auth.validating"}}</p>
+                    </div>
+                    <div x-cloak x-show="success" class="login-feedback login-success" role="status" aria-live="polite">
+                        <span class="login-success-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>
+                        <p>{{t .Lang "auth.verified"}}</p>
+                        <blockquote class="login-quote" lang="zh-CN" x-text="quote"></blockquote>
+                    </div>
                 </div>
-                <div class="mb-6">
-                    <label class="label">{{t .Lang "auth.password"}}</label>
-                    <input type="password" x-model="password" name="password" class="input-field" placeholder="{{t .Lang "auth.password_placeholder"}}" autocomplete="current-password">
-                </div>
-
-                <div x-cloak x-show="error" class="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm"
-                     x-text="error"></div>
-
-                <button type="submit" class="btn-primary w-full" :disabled="!username || !password">
-                    {{t .Lang "auth.login"}}
-                </button>
-            </form>
-
-            <div x-cloak x-show="loading && !success" class="text-center py-4">
-                <div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-                <p class="text-gray-400 mt-2">{{t .Lang "auth.validating"}}</p>
+                <p class="login-account-note"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>{{t .Lang "auth.admin_account_note"}}</p>
             </div>
-
-            <div x-show="success" class="text-center py-8">
-                <div class="w-12 h-12 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                    </svg>
-                </div>
-                <p class="text-green-400 font-medium mb-6">{{t .Lang "auth.verified"}}</p>
-                <div class="p-5 rounded-lg mx-auto max-w-sm" style="background-color: #0f172a; border: 1px solid #334155;">
-                    <p class="text-gray-300 text-sm leading-relaxed italic" x-text="quote"></p>
-                </div>
-            </div>
-        </div>
+            <p class="login-main-footer">{{.PanelTitle}}</p>
+        </main>
     </div>
 
     <script>
@@ -94,10 +120,26 @@
         return {
             username: '',
             password: '',
+            code: '',
+            mfaRequired: false,
+            recoveryMode: false,
             loading: false,
             success: false,
             quote: '',
             error: '',
+            focusCode() {
+                this.$nextTick(() => requestAnimationFrame(() => {
+                    if (this.mfaRequired && !this.loading) this.$refs.codeInput.focus();
+                }));
+            },
+            resetMFA() {
+                this.mfaRequired = false;
+                this.recoveryMode = false;
+                this.code = '';
+                this.password = '';
+                this.error = '';
+                this.$nextTick(() => requestAnimationFrame(() => document.getElementById('login-password').focus()));
+            },
             async refreshCSRFToken() {
                 const prefix = document.body.dataset.panelPrefix || '';
                 const response = await fetch(prefix + '/api/auth/csrf-token', {
@@ -113,8 +155,14 @@
                 document.querySelector('meta[name="csrf-token"]').content = data.data.token;
             },
             async login() {
+                if (this.loading) return;
                 if (!this.username || !this.password) {
                     this.error = t('auth.missing_credentials');
+                    return;
+                }
+                if (this.mfaRequired && !this.code.trim()) {
+                    this.error = t('auth.code_required');
+                    this.focusCode();
                     return;
                 }
                 this.loading = true;
@@ -126,7 +174,7 @@
                         try {
                             resp = await api('/auth/login', {
                                 method: 'POST',
-                                body: { username: this.username, password: this.password },
+                                body: { username: this.username, password: this.password, code: this.code.trim() },
                                 silent: true
                             });
                             break;
@@ -134,7 +182,14 @@
                             if (e.status !== 403 || attempt > 0) throw e;
                         }
                     }
-                    if (resp.success) {
+                    if (resp.success && resp.data?.mfa_required) {
+                        this.mfaRequired = true;
+                        this.code = '';
+                        this.loading = false;
+                        this.focusCode();
+                    } else if (resp.success) {
+                        this.password = '';
+                        this.code = '';
                         this.success = true;
                         this.quote = quotes[Math.floor(Math.random() * quotes.length)];
                         setTimeout(() => {
