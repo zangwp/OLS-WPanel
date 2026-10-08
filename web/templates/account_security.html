@@ -138,8 +138,16 @@ function accountSecurity() {
                 }
             } catch(e) {
                 const code = e.code || e.error_code;
-                const known = ['mfa_invalid_code','mfa_invalid_password','mfa_rate_limited','mfa_already_enabled','mfa_not_enabled','mfa_setup_expired','mfa_unavailable'];
-                this.mfaActionError = known.includes(code) ? t('account_security.' + code) : e.message;
+                const errors = {
+                    mfa_invalid_code: t('account_security.mfa_invalid_code'),
+                    mfa_invalid_password: t('account_security.mfa_invalid_password'),
+                    mfa_rate_limited: t('account_security.mfa_rate_limited'),
+                    mfa_already_enabled: t('account_security.mfa_already_enabled'),
+                    mfa_not_enabled: t('account_security.mfa_not_enabled'),
+                    mfa_setup_expired: t('account_security.mfa_setup_expired'),
+                    mfa_unavailable: t('account_security.mfa_unavailable')
+                };
+                this.mfaActionError = Object.prototype.hasOwnProperty.call(errors, code) ? errors[code] : e.message || t('security_center.request_failed');
                 if (code === 'mfa_setup_expired') this.setupData = null;
                 if (code === 'mfa_invalid_password') this.mfaPassword = '';
             }
@@ -203,9 +211,36 @@ function accountSecurity() {
             } catch(e) { if (request === this.auditRequest) this.auditError = e.message; return false; }
             finally { if (request === this.auditRequest) this.auditLoading = false; }
         },
-        eventLabel(value) { const allowed = ['login_success','login_failure','login_blocked','credentials_changed','mfa_enabled','mfa_disabled','recovery_used','recovery_regenerated','session_revoked','sessions_revoked','notifications_changed','logout']; return allowed.includes(value) ? t('account_security.event_' + value) : value || '—'; },
+        eventLabel(value) {
+            const labels = {
+                login_success: t('account_security.event_login_success'),
+                login_failure: t('account_security.event_login_failure'),
+                login_blocked: t('account_security.event_login_blocked'),
+                credentials_changed: t('account_security.event_credentials_changed'),
+                mfa_enabled: t('account_security.event_mfa_enabled'),
+                mfa_disabled: t('account_security.event_mfa_disabled'),
+                recovery_used: t('account_security.event_recovery_used'),
+                recovery_regenerated: t('account_security.event_recovery_regenerated'),
+                session_revoked: t('account_security.event_session_revoked'),
+                sessions_revoked: t('account_security.event_sessions_revoked'),
+                notifications_changed: t('account_security.event_notifications_changed'),
+                logout: t('account_security.event_logout')
+            };
+            return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : value || '—';
+        },
         anomalyLabel(value) { return value ? t('account_security.unusual_activity') : ''; },
-        notificationLabel(value) { const allowed = ['none','pending','sent','failed','suppressed','disabled','unconfigured']; return allowed.includes(value) ? t('account_security.notification_' + value) : value || '—'; },
+        notificationLabel(value) {
+            const labels = {
+                none: t('account_security.notification_none'),
+                pending: t('account_security.notification_pending'),
+                sent: t('account_security.notification_sent'),
+                failed: t('account_security.notification_failed'),
+                suppressed: t('account_security.notification_suppressed'),
+                disabled: t('account_security.notification_disabled'),
+                unconfigured: t('account_security.notification_unconfigured')
+            };
+            return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : value || '—';
+        },
         async fetchNotifications() {
             if (this.notificationsLoading || this.notificationsSaving) return false;
             this.notificationsLoading = true; this.notificationsLoaded = false; this.notificationsError = '';

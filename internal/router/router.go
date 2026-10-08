@@ -24,6 +24,9 @@ import (
 var panelVersion string
 
 var i18nKeys = []string{
+	"auth.login",
+	"auth.workspace_login",
+	"auth.workspace_prompt",
 	"followup.invalid_config",
 	"followup.invalid_threshold",
 	"followup.load_failed",

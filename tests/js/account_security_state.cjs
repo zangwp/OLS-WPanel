@@ -98,3 +98,20 @@ test('notification settings require load, retain channel state, and serialize sa
 test('notification failure preserves the last confirmed setting and permits retry',async()=>{
  const {m}=setup(async()=>{throw Error('offline');});m.notificationsLoaded=true;m.notificationDraft=true;await m.saveNotifications();assert.equal(m.notifications.enabled,false);assert.equal(m.notificationDraft,true);assert.equal(m.notificationsError,'offline');assert.equal(m.notificationsSaving,false);
 });
+
+
+test('audit and notification enums resolve full translations with safe unknown fallbacks',()=>{
+ const {m}=setup();
+ for(const event of ['login_success','login_failure','login_blocked','credentials_changed','mfa_enabled','mfa_disabled','recovery_used','recovery_regenerated','session_revoked','sessions_revoked','notifications_changed','logout']) assert.equal(m.eventLabel(event),'account_security.event_'+event);
+ for(const status of ['none','pending','sent','failed','suppressed','disabled','unconfigured']) assert.equal(m.notificationLabel(status),'account_security.notification_'+status);
+ for(const value of ['future_event','toString','constructor','__proto__']) {assert.equal(m.eventLabel(value),value);assert.equal(m.notificationLabel(value),value);}
+ assert.equal(m.eventLabel(null),'—');assert.equal(m.notificationLabel(''),'—');
+});
+
+test('all MFA response error codes resolve their full translation and preserve safe fallback messages',async()=>{
+ let code;const {m}=setup(async()=>{const error=Error('Request could not be completed');error.code=code;throw error;});
+ for(code of ['mfa_invalid_code','mfa_invalid_password','mfa_rate_limited','mfa_already_enabled','mfa_not_enabled','mfa_setup_expired','mfa_unavailable','future_error','toString']) {
+  m.mfaLoaded=true;m.mfaAction='setup';m.mfaPassword='synthetic';m.setupData=null;await m.submitMFA();
+  assert.equal(m.mfaActionError,code.startsWith('mfa_')?'account_security.'+code:'Request could not be completed');assert.equal(m.mfaBusy,false);
+ }
+});
