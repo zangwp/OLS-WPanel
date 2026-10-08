@@ -9,8 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// VPSHandler exposes bounded VPS facts and Swap operations. It never accepts
-// arbitrary shell input; every mutation is validated and audited by executor.
+// VPSHandler exposes read-only host facts. System changes belong to the SSH
+// maintenance menu, not the web API.
 type VPSHandler struct{}
 
 type VPSIdentity struct {
@@ -57,23 +57,6 @@ func (h *VPSHandler) Overview(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
-type swapSettingsRequest struct {
-	SizeMB     int64 `json:"size_mb"`
-	Swappiness int64 `json:"swappiness"`
-}
-
-type swappinessRequest struct {
-	Swappiness int64 `json:"swappiness"`
-}
-
-type removeSwapRequest struct {
-	Confirm string `json:"confirm"`
-}
-
-type dnsPresetRequest struct {
-	Preset string `json:"preset"`
-}
-
 func (h *VPSHandler) SwapStatus(c *gin.Context) {
 	status, err := executor.GetSwapStatus()
 	if err != nil {
@@ -83,102 +66,6 @@ func (h *VPSHandler) SwapStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
-func (h *VPSHandler) ApplyRecommendedSwap(c *gin.Context) {
-	status, err := executor.ApplyRecommendedSwap()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-func (h *VPSHandler) ApplyCustomSwap(c *gin.Context) {
-	var req swapSettingsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
-		return
-	}
-	status, err := executor.ApplyManagedSwap(req.SizeMB, req.Swappiness)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-func (h *VPSHandler) SetSwappiness(c *gin.Context) {
-	var req swappinessRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
-		return
-	}
-	status, err := executor.SetSwapSwappiness(req.Swappiness)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-func (h *VPSHandler) RemoveManagedSwap(c *gin.Context) {
-	var req removeSwapRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
-		return
-	}
-	status, err := executor.RemoveManagedSwap(req.Confirm)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
 func (h *VPSHandler) DNSStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(executor.GetDNSStatus()))
-}
-
-func (h *VPSHandler) TestDNSPreset(c *gin.Context) {
-	var req dnsPresetRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
-		return
-	}
-	status, err := executor.ProbeDNSPreset(c.Request.Context(), req.Preset)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-func (h *VPSHandler) ApplyDNSPreset(c *gin.Context) {
-	var req dnsPresetRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse("请求参数无效"))
-		return
-	}
-	status, err := executor.ApplyDNSPreset(c.Request.Context(), req.Preset)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-func (h *VPSHandler) RestoreAutomaticDNS(c *gin.Context) {
-	status, err := executor.RestoreAutomaticDNS(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(status))
-}
-
-func (h *VPSHandler) EnableNftablesBoot(c *gin.Context) {
-	if err := executor.EnableNftablesBoot(); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"enabled": true}))
 }

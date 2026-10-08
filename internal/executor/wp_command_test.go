@@ -96,7 +96,7 @@ pick() {
 
 func TestPanelMenuReturnsWithoutRepeatingResults(t *testing.T) {
 	out := runPanelMenuFixture(t, "choices=(1 4 1 0 0 0)\nvps_menu\n")
-	if strings.Count(out, "VIEW:info") != 1 || strings.Count(out, "VIEW:dns") != 1 || strings.Count(out, "PAUSE") != 1 {
+	if strings.Count(out, "VIEW:info\n") != 1 || strings.Count(out, "VIEW:dns\n") != 1 || strings.Count(out, "PAUSE") != 1 {
 		t.Fatalf("result pause/navigation failed: %s", out)
 	}
 	if strings.Count(out, "\033[2J\033[H") < 5 {

@@ -192,7 +192,7 @@ func TestPanelCommandMigrationProtectsUnrelatedOneCharacterCommands(t *testing.T
 		"remove_managed_panel_command() {",
 		"remove_managed_panel_command /usr/local/bin/o '# OLS WPanel CLI — o'",
 		"remove_managed_panel_command /usr/local/bin/O '# OLS WPanel CLI — o'",
-		"输入 o 打开管理菜单；o help 查看帮助。",
+		"输入 o 打开终端管理菜单；o help 查看帮助。",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("installer is missing panel command migration control %q", required)
@@ -296,7 +296,7 @@ func TestInstallerFailureAndCertificateGuidanceAreEvidenceBased(t *testing.T) {
 		"网络/DNS 与系统时间、APT 错误、发行包哈希/签名",
 		"现有服务冲突",
 		"不要在未定位原因前直接重装系统",
-		"openssl x509 -in ${CERT_FILE} -noout -fingerprint -sha256",
+		`printf '  openssl x509 -in %s -noout -fingerprint -sha256\n' "$CERT_FILE"`,
 		"指纹不一致时立即停止，不要输入任何凭据",
 		"长期公网使用请替换为由受信任 CA 签发",
 	} {

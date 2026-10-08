@@ -2,8 +2,10 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -81,6 +83,123 @@ func TestQueueMigrationRestoreAndVerificationRollback(t *testing.T) {
 				t.Fatal("restore left stale baseline")
 			}
 		})
+	}
+}
+
+func TestQueueRollbackHasIndependentContextAndVerifiesRuntime(t *testing.T) {
+	for _, failRestore := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cancelled operation restores", true: "failed rollback reported"}[failRestore], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dir := t.TempDir()
+			path, baseline, installer := filepath.Join(dir, "queue.conf"), filepath.Join(dir, "baseline.json"), filepath.Join(dir, "installer.conf")
+			live := map[string]string{vpsTuningKeys[0]: "128", vpsTuningKeys[1]: "256"}
+			restored := 0
+			run := func(commandCtx context.Context, _ string, args ...string) (string, error) {
+				if commandCtx.Err() != nil {
+					return "", commandCtx.Err()
+				}
+				switch args[0] {
+				case "-n":
+					return live[args[1]], nil
+				case "-p":
+					live[vpsTuningKeys[0]] = "4096"
+					cancel()
+					return "", ctx.Err()
+				case "-w":
+					restored++
+					if _, ok := commandCtx.Deadline(); !ok {
+						t.Fatal("rollback must have its own deadline")
+					}
+					key, value, _ := strings.Cut(args[1], "=")
+					if failRestore && key == vpsTuningKeys[0] {
+						return "", errors.New("injected restoration failure")
+					}
+					live[key] = value
+				}
+				return "", nil
+			}
+			_, err := setVPSTuningAt(ctx, "balanced", path, baseline, installer, run)
+			if !errors.Is(err, context.Canceled) || restored != 2 {
+				t.Fatalf("err=%v restore attempts=%d", err, restored)
+			}
+			if failRestore {
+				if !strings.Contains(err.Error(), "回滚验证失败") || !strings.Contains(err.Error(), "运行值回滚失败") {
+					t.Fatalf("lost rollback failure: %v", err)
+				}
+			} else if live[vpsTuningKeys[0]] != "128" || live[vpsTuningKeys[1]] != "256" {
+				t.Fatalf("runtime not restored: %v", live)
+			}
+		})
+	}
+}
+
+func TestVPSTimezoneUsesSystemDatabaseAndRejectsPaths(t *testing.T) {
+	for _, zone := range []string{"America/New_York", "Europe/Berlin", "UTC", "../etc/passwd", "/etc/localtime", "--help", "Asia/Shanghai;reboot", "Asia/../Shanghai", "Unknown/City"} {
+		t.Run(zone, func(t *testing.T) {
+			var calls []string
+			run := func(_ context.Context, command string, args ...string) (string, error) {
+				calls = append(calls, command+" "+strings.Join(args, " "))
+				if args[0] == "list-timezones" {
+					return "America/New_York\nEurope/Berlin\nAsia/Shanghai\n", nil
+				}
+				if args[0] == "show" {
+					return zone, nil
+				}
+				return "", nil
+			}
+			_, err := setVPSTimezone(context.Background(), zone, run)
+			valid := zone == "America/New_York" || zone == "Europe/Berlin" || zone == "UTC"
+			if (err == nil) != valid {
+				t.Fatalf("zone=%q err=%v", zone, err)
+			}
+			for _, call := range calls {
+				if !valid && strings.Contains(call, "set-timezone") {
+					t.Fatalf("invalid zone submitted: %v", calls)
+				}
+			}
+		})
+	}
+}
+
+func TestVPSHostnameStrictValidationAndRuntimeCheck(t *testing.T) {
+	for _, name := range []string{"web-01", "Node.Example.com", "x", "-bad", "bad-", "bad..host", "bad host", "服务器", "$(reboot)", strings.Repeat("a", 64), "bad/host"} {
+		t.Run(name, func(t *testing.T) {
+			var calls []string
+			run := func(_ context.Context, command string, args ...string) (string, error) {
+				calls = append(calls, command+" "+strings.Join(args, " "))
+				return strings.ToLower(name), nil
+			}
+			_, err := setVPSHostname(context.Background(), name, run)
+			valid := name == "web-01" || name == "Node.Example.com" || name == "x"
+			if (err == nil) != valid || (!valid && len(calls) != 0) {
+				t.Fatalf("name=%q err=%v calls=%v", name, err, calls)
+			}
+			if valid && calls[0] != "hostnamectl set-hostname --static "+strings.ToLower(name) {
+				t.Fatalf("wrong command: %v", calls)
+			}
+		})
+	}
+	if _, err := setVPSHostname(context.Background(), "web-01", func(context.Context, string, ...string) (string, error) { return "different-host", nil }); err == nil {
+		t.Fatal("accepted hostname verification mismatch")
+	}
+}
+
+func TestVPSLocaleInstallIsExplicitAndBounded(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, command string, args ...string) (string, error) {
+		calls = append(calls, append([]string{command}, args...))
+		return "", nil
+	}
+	if _, err := installVPSLocale(context.Background(), "arbitrary-package", run); err == nil || len(calls) != 0 {
+		t.Fatal("accepted package parameter")
+	}
+	if _, err := installVPSLocale(context.Background(), "", run); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"apt-get", "install", "-y", "--no-install-recommends", "locales"}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls=%v", calls)
 	}
 }
 

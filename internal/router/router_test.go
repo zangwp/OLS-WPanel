@@ -1898,34 +1898,29 @@ func TestCronPageExplainsManagedAndAutomaticTasks(t *testing.T) {
 	}
 }
 
-func TestVPSPageProvidesSafeLifecycleAndDedicatedOperationLinks(t *testing.T) {
+func TestVPSPageIsReadOnlyAndKeepsFirewallDeepLinks(t *testing.T) {
 	source, err := os.ReadFile("../../web/templates/vps.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range [][]byte{
-		[]byte(`api('/vps/overview')`),
-		[]byte(`'/vps/swap/recommended'`),
-		[]byte(`'/vps/swap/swappiness'`),
-		[]byte(`'/vps/dns/test'`),
-		[]byte(`'/vps/dns'`),
-		[]byte(`'/vps/nftables/enable-boot'`),
-		[]byte(`recommended_swappiness`),
-		[]byte(`active_wordpress_sites`),
-		[]byte(`confirm: this.swapConfirm`),
-		[]byte(`swapConfirm !== 'REMOVE SWAP'`),
-		[]byte(`command: 'o update'`),
-		[]byte(`copy('o uninstall')`),
-		[]byte(`/security#ports`),
-		[]byte(`/settings#system-updates`),
-		[]byte(`vps.destructive_note`),
-	} {
+	for _, required := range [][]byte{[]byte(`api('/vps/overview')`), []byte(`addresses(4)`), []byte(`addresses(6)`), []byte(`vps.terminal_maintenance`), []byte(`vps.dns_readonly_help`), []byte(`vps.swap_readonly_help`)} {
 		if !bytes.Contains(source, required) {
-			t.Fatalf("VPS management page is missing %q", required)
+			t.Fatalf("read-only server page is missing %q", required)
 		}
 	}
-	if bytes.Contains(source, []byte(`exec`)) || bytes.Contains(source, []byte(`shell`)) {
-		t.Fatal("VPS management page must not expose arbitrary command execution")
+	for _, forbidden := range [][]byte{[]byte(`tab='maintenance'`), []byte(`applyDNS`), []byte(`testDNS`), []byte(`saveCustomSwap`), []byte(`removeManagedSwap`), []byte(`enableNftablesBoot`), []byte(`method: 'POST'`), []byte(`method: 'PUT'`), []byte(`method: 'DELETE'`), []byte(`resource_snapshot`)} {
+		if bytes.Contains(source, forbidden) {
+			t.Fatalf("read-only server page still contains %q", forbidden)
+		}
+	}
+	routes, err := os.ReadFile("router.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"POST", "PUT", "DELETE", "PATCH"} {
+		if bytes.Contains(routes, []byte(`protected.`+method+`("/api/vps/`)) {
+			t.Fatalf("VPS mutation route remains registered for %s", method)
+		}
 	}
 
 	firewall, err := os.ReadFile("../../web/templates/firewall.html")

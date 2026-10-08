@@ -513,8 +513,10 @@ net.ipv4.tcp_sack = 1
 net.ipv4.tcp_timestamps = 1
 SYSCTLEOF
 
-    # BBR + FQ: 仅 2 核及以上机器开启（单核 VPS CPU 争抢时 BBR 吞吐量会暴跌）
+    # First-install preset; report success only after reading the actual kernel state.
+    local bbr_requested=false bbr_actual="" qdisc_actual=""
     if [[ $CPU_CORES -ge 2 ]]; then
+        bbr_requested=true
         cat >> "$SYSCTL_FILE" << 'BBREOF'
 
 # ── BBR 拥塞控制 + FQ 调度 ──
@@ -522,12 +524,22 @@ net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 BBREOF
         modprobe tcp_bbr 2>/dev/null || true
-        log_info "BBR + FQ 已启用（${CPU_CORES} 核 CPU）"
     else
-        log_info "单核 CPU，跳过 BBR（避免 CPU 争抢副作用）"
+        log_info "单核 CPU，保留当前拥塞控制配置"
     fi
 
-    sysctl --system >/dev/null 2>&1
+    if ! sysctl --system >/dev/null 2>&1; then
+        log_warn "部分 sysctl 配置未能应用，请安装后使用 o bbr 与 o status 检查"
+    fi
+    if [[ "$bbr_requested" == true ]]; then
+        bbr_actual=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null) || bbr_actual=""
+        qdisc_actual=$(sysctl -n net.core.default_qdisc 2>/dev/null) || qdisc_actual=""
+        if [[ "$bbr_actual" == bbr && "$qdisc_actual" == fq ]]; then
+            log_info "BBR + FQ 已启用并核验（${CPU_CORES} 核 CPU）"
+        else
+            log_warn "BBR + FQ 未确认生效：拥塞控制=${bbr_actual:-未知}，队列=${qdisc_actual:-未知}；请用 o bbr 检查内核支持"
+        fi
+    fi
 
     # 文件描述符限制
     if ! grep -q "nofile 65535" /etc/security/limits.conf 2>/dev/null; then
@@ -3470,11 +3482,11 @@ fi
 # 最终输出
 # ============================================================
 if systemctl is-active --quiet ols-wpanel; then
-    STATUS="${GREEN}运行中${NC}"
+    STATUS="运行中"
 elif $REPAIR_INACTIVE_HEALTH_VERIFIED; then
-    STATUS="${YELLOW}保持未运行（健康验证已通过）${NC}"
+    STATUS="保持未运行（健康验证已通过）"
 else
-    STATUS="${RED}未运行${NC}"
+    STATUS="未运行"
 fi
 
 if $REPAIR_MODE; then
@@ -3512,35 +3524,52 @@ LOCAL_HOST="$LOCAL_IP"
 [[ "$PUBLIC_HOST" == *:* ]] && PUBLIC_HOST="[$PUBLIC_HOST]"
 [[ "$LOCAL_HOST" == *:* ]] && LOCAL_HOST="[$LOCAL_HOST]"
 
-echo ""
-echo -e "${BOLD}OLS WPanel · 安装完成${NC}"
-echo -e "版本: ${INSTALLER_RELEASE_VERSION}    状态: ${STATUS}"
-if $REPAIR_MODE; then
-    echo "更新 / 修复完成；登录地址与账号密码保持不变。"
-    echo "输入 o 查看当前登录地址。"
-elif [[ "$PUBLIC_IP" != "<未知>" ]]; then
-    echo -e "登录地址: ${BOLD}https://${PUBLIC_HOST}:${VALIDATED_TLS_PORT}/${PANEL_SUFFIX}/${NC}"
-    if [[ "$LOCAL_IP" != "<未知>" && "$LOCAL_IP" != "$PUBLIC_IP" ]]; then
-        echo -e "网卡地址: https://${LOCAL_HOST}:${VALIDATED_TLS_PORT}/${PANEL_SUFFIX}/"
+# Keep values on separate lines: URLs and generated passwords stay easy to copy
+# in narrow SSH terminals. Format credentials as data, never as printf escapes.
+print_install_summary() {
+    local heading="" warning="" reset=""
+    local rule="------------------------------------------------------------"
+    if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
+        heading="$BOLD"
+        warning="$YELLOW"
+        reset="$NC"
     fi
-else
-    echo -e "登录地址: ${BOLD}https://${LOCAL_HOST}:${VALIDATED_TLS_PORT}/${PANEL_SUFFIX}/${NC}"
-fi
-if ! $PORT_OK && ! $REPAIR_INACTIVE_HEALTH_VERIFIED; then
-    echo -e "${YELLOW}端口未监听；输入 o status 检查。${NC}"
-fi
-if ! $REPAIR_MODE; then
-    echo ""
-    echo -e "${BOLD}登录账号（仅显示一次，请保存）${NC}"
-    echo "  浏览器验证: ${BASIC_USER} / ${BASIC_PASS}"
-    echo "  面板登录:   ${WEB_USER} / ${WEB_PASS}"
-    echo "  先完成浏览器验证，再输入面板登录账号。"
-fi
-echo ""
-echo -e "${YELLOW}自签名证书：首次登录前，通过 SSH 核对浏览器显示的 SHA-256 指纹。${NC}"
-echo "  openssl x509 -in ${CERT_FILE} -noout -fingerprint -sha256"
-echo -e "${YELLOW}指纹不一致时立即停止，不要输入任何凭据。${NC}"
-echo "长期公网使用请替换为由受信任 CA 签发的域名证书，可在面板设置中申请。"
-echo ""
-echo -e "${BOLD}输入 o 打开管理菜单；o help 查看帮助。${NC}"
+
+    printf '\n%b%s%b\n' "$heading" "OLS WPanel / 安装完成" "$reset"
+    printf '%s\n' "$rule"
+    printf '  版本  %s\n  状态  %s\n' "$INSTALLER_RELEASE_VERSION" "$STATUS"
+    printf '\n'
+    if $REPAIR_MODE; then
+        printf '%s\n' "更新 / 修复完成，登录地址与账号密码保持不变。" "输入 o 查看当前登录地址。"
+    else
+        printf '%b%s%b\n' "$heading" "登录地址" "$reset"
+        if [[ "$PUBLIC_IP" != "<未知>" ]]; then
+            printf '  https://%s:%s/%s/\n' "$PUBLIC_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
+            if [[ "$LOCAL_IP" != "<未知>" && "$LOCAL_IP" != "$PUBLIC_IP" ]]; then
+                printf '\n%s\n  https://%s:%s/%s/\n' "网卡地址（是否可达取决于网络配置）" "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
+            fi
+        else
+            printf '  https://%s:%s/%s/\n' "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
+        fi
+        printf '\n%s\n' "$rule"
+        printf '%b%s%b\n' "$heading" "登录凭据 / 仅显示一次，请立即保存" "$reset"
+        printf '\n%b%s%b\n' "$heading" "1. 浏览器身份验证" "$reset"
+        printf '  用户名\n    %s\n  密码\n    %s\n' "$BASIC_USER" "$BASIC_PASS"
+        printf '\n%b%s%b\n' "$heading" "2. 面板账户登录" "$reset"
+        printf '  用户名\n    %s\n  密码\n    %s\n' "$WEB_USER" "$WEB_PASS"
+        printf '\n%s\n' "打开登录地址后，先完成浏览器身份验证，再登录面板。"
+    fi
+    if ! $PORT_OK && ! $REPAIR_INACTIVE_HEALTH_VERIFIED; then
+        printf '\n%b%s%b\n' "$warning" "端口未监听；输入 o status 检查。" "$reset"
+    fi
+    printf '\n%s\n' "$rule"
+    printf '%b%s%b\n' "$warning" "首次登录 / 核对 TLS 证书" "$reset"
+    printf '%s\n' "自签名证书：通过 SSH 核对浏览器显示的 SHA-256 指纹。"
+    printf '  openssl x509 -in %s -noout -fingerprint -sha256\n' "$CERT_FILE"
+    printf '%b%s%b\n' "$warning" "指纹不一致时立即停止，不要输入任何凭据。" "$reset"
+    printf '%s\n' "长期公网使用请替换为由受信任 CA 签发的域名证书，可在面板设置中申请。"
+    printf '\n%b%s%b\n' "$heading" "输入 o 打开终端管理菜单；o help 查看帮助。" "$reset"
+    printf '%s\n\n' "$rule"
+}
+print_install_summary
 # 可选运行统计 / Optional Runtime Telemetry 默认关闭，详情见项目文档。

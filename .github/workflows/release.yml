@@ -140,6 +140,14 @@ jobs:
             node "$test_file"
           done
 
+      - name: Verify terminal maintenance behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n internal/executor/panel_cli.sh
+          python3 internal/executor/panel_cli_render_test.py
+          python3 internal/executor/panel_cli_behavior_test.py
+
       - name: Test
         shell: bash
         run: |

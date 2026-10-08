@@ -2,6 +2,8 @@ package executor
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
@@ -20,8 +23,38 @@ const (
 	swapMinFreeBytes = int64(8 * 1024 * 1024 * 1024)
 )
 
-var swapCommand = func(name string, args ...string) error {
-	output, err := exec.Command(name, args...).CombinedOutput()
+var swapCommand = runBoundedSwapCommand
+
+var swapProcessRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, name, args...)
+	command.WaitDelay = 5 * time.Second
+	return command.CombinedOutput()
+}
+
+func swapCommandBudget(name string) time.Duration {
+	switch name {
+	case "dd":
+		return 10 * time.Minute
+	case "swapoff":
+		return 3 * time.Minute
+	default:
+		return time.Minute
+	}
+}
+
+func runBoundedSwapCommand(name string, args ...string) error {
+	return runSwapCommandWithTimeout(name, args, swapCommandBudget(name), swapProcessRunner)
+}
+
+func runSwapCommandWithTimeout(name string, args []string, budget time.Duration, run func(context.Context, string, ...string) ([]byte, error)) error {
+	// Each command, including rollback, receives an independent budget. A failed
+	// or expired forward command cannot cancel the subsequent recovery command.
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	output, err := run(ctx, name, args...)
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s 执行超时（上限 %s）: %w: %s", name, budget, errors.Join(ctx.Err(), err), strings.TrimSpace(string(output)))
+	}
 	if err != nil {
 		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(output)))
 	}
@@ -57,6 +90,17 @@ func ensureSwapUpgrade() error {
 }
 
 func ensureAutomaticSwap(meminfoPath, swapsPath, swapPath, fstabPath, sysctlPath string) (bool, string, error) {
+	swapManagerMu.Lock()
+	defer swapManagerMu.Unlock()
+	// This legacy upgrade runs outside RunSwapCLI; it does not already hold the
+	// terminal lock. Coordinate the production path with concurrent SSH changes.
+	if swapPath == swapFilePath {
+		lock, err := acquireSwapCLILock(canonicalSwapCLILockPath)
+		if err != nil {
+			return false, "", err
+		}
+		defer lock.Close()
+	}
 	totalMemory, err := readMeminfoValue(meminfoPath, "MemTotal:")
 	if err != nil {
 		return false, "", err
@@ -92,63 +136,10 @@ func ensureAutomaticSwap(meminfoPath, swapsPath, swapPath, fstabPath, sysctlPath
 	}
 
 	log.Printf("[升级] 正在创建 %dMB Swap，可能需要几十秒", swapSizeMB)
-	if err := swapCommand("dd", "if=/dev/zero", "of="+swapPath, "bs=1M", "count="+strconv.FormatInt(swapSizeMB, 10), "status=none"); err != nil {
-		_ = os.Remove(swapPath)
-		return false, "", err
-	}
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(swapPath)
-		}
-	}()
-
-	if err := os.Chmod(swapPath, 0600); err != nil {
-		return false, "", fmt.Errorf("设置 Swap 文件权限: %w", err)
-	}
-	if err := swapCommand("mkswap", swapPath); err != nil {
-		return false, "", err
-	}
-	if err := swapCommand("swapon", swapPath); err != nil {
-		return false, "", err
-	}
-
-	fstabInfo, err := os.Stat(fstabPath)
+	status, err := applyManagedSwapLocked(swapSizeMB, systemDefaultSwappiness, swapManagerPaths{meminfo: meminfoPath, swaps: swapsPath, swap: swapPath, fstab: fstabPath, sysctl: sysctlPath})
+	recordSwapOperation("swap_upgrade_create", status, err)
 	if err != nil {
-		_ = swapCommand("swapoff", swapPath)
-		return false, "", fmt.Errorf("检查 %s: %w", fstabPath, err)
-	}
-	fstabSize := fstabInfo.Size()
-	fstab, err := os.OpenFile(fstabPath, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		_ = swapCommand("swapoff", swapPath)
-		return false, "", fmt.Errorf("打开 %s: %w", fstabPath, err)
-	}
-	if _, err := fmt.Fprintf(fstab, "\n# OLS WPanel managed swap\n%s none swap sw 0 0\n", swapPath); err != nil {
-		_ = fstab.Close()
-		rollbackFstabAppend(fstabPath, fstabSize)
-		_ = swapCommand("swapoff", swapPath)
-		return false, "", fmt.Errorf("写入 %s: %w", fstabPath, err)
-	}
-	if err := fstab.Sync(); err != nil {
-		_ = fstab.Close()
-		rollbackFstabAppend(fstabPath, fstabSize)
-		_ = swapCommand("swapoff", swapPath)
-		return false, "", fmt.Errorf("同步 %s: %w", fstabPath, err)
-	}
-	if err := fstab.Close(); err != nil {
-		rollbackFstabAppend(fstabPath, fstabSize)
-		_ = swapCommand("swapoff", swapPath)
-		return false, "", fmt.Errorf("关闭 %s: %w", fstabPath, err)
-	}
-
-	cleanup = false
-	if err := os.WriteFile(sysctlPath, []byte("# OLS WPanel managed swap\nvm.swappiness = 60\n"), 0644); err != nil {
-		log.Printf("[升级] Swap 已启用，但写入 swappiness 配置失败: %v", err)
-		return true, "", nil
-	}
-	if err := swapCommand("sysctl", "-p", sysctlPath); err != nil {
-		log.Printf("[升级] Swap 已启用，但应用 swappiness=60 失败: %v", err)
+		return false, "", err
 	}
 	return true, "", nil
 }

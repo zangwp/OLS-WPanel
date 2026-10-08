@@ -373,6 +373,9 @@ func detectSSHPort(ctx context.Context, listeners []FirewallListener) int {
 }
 
 func loadFirewallPortRules(db *sql.DB) ([]FirewallPortRule, error) {
+	if db == nil {
+		return nil, errors.New("面板数据库未打开，无法读取受管防火墙规则")
+	}
 	rows, err := db.Query(`SELECT id,protocol,port,source,description,expires_at,created_at
 		FROM firewall_port_rules ORDER BY port,protocol,source`)
 	if err != nil {

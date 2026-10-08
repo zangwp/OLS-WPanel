@@ -7,9 +7,11 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -195,6 +197,21 @@ func TestMFAHandlerConfirmationBoundToSessionAndRevokesOthers(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &setup); err != nil {
 		t.Fatal(err)
 	}
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("MFA enrollment QR response is cacheable")
+	}
+	const qrPrefix = "data:image/png;base64,"
+	if !strings.HasPrefix(setup.Data.QRCodeDataURL, qrPrefix) {
+		t.Fatal("setup did not return a local PNG QR code")
+	}
+	qrBytes, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(setup.Data.QRCodeDataURL, qrPrefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	qr, err := png.Decode(bytes.NewReader(qrBytes))
+	if err != nil || qr.Bounds().Dx() != 256 || qr.Bounds().Dy() != 256 {
+		t.Fatal("setup QR code is not a valid 256px PNG")
+	}
 	code := mfaTestCode(setup.Data.Secret)
 	w = mfaHandlerCall(t, r, "/mfa/confirm", other.Token, gin.H{"current_password": "correct-password", "code": code})
 	if w.Code != 409 {
@@ -222,6 +239,38 @@ func TestMFAHandlerConfirmationBoundToSessionAndRevokesOthers(t *testing.T) {
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("recovery response is cacheable")
+	}
+}
+
+func TestMFASetupQRCodeRequiresCurrentPasswordSessionAndCSRF(t *testing.T) {
+	_, router := setupMFAHandler(t)
+	owner := middleware.GlobalSessionStore.Create("admin")
+	for _, tc := range []struct {
+		name, session, password string
+		csrf                    bool
+		status                  int
+	}{
+		{"no session", "", "correct-password", true, http.StatusUnauthorized},
+		{"wrong password", owner.Token, "wrong-password", true, http.StatusUnauthorized},
+		{"missing CSRF", owner.Token, "correct-password", false, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(gin.H{"current_password": tc.password})
+			req := httptest.NewRequest(http.MethodPost, "/mfa/setup", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.session != "" {
+				req.AddCookie(&http.Cookie{Name: "wp_session", Value: tc.session})
+			}
+			if tc.csrf {
+				req.Header.Set("X-CSRF-Token", "test-csrf")
+				req.AddCookie(&http.Cookie{Name: "csrf_token", Value: "test-csrf"})
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+			if response.Code != tc.status || strings.Contains(response.Body.String(), "qr_code_data_url") || strings.Contains(response.Body.String(), "otpauth_url") || strings.Contains(response.Body.String(), `"secret"`) {
+				t.Fatalf("rejected setup leaked enrollment credentials: status=%d", response.Code)
+			}
+		})
 	}
 }
 

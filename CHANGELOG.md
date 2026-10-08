@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.19.0 — 2026-10-08
+
+- Adds a locally generated QR code to TOTP enrollment while retaining manual secret entry. Restores a centered login form with a dark background and translucent card, and removes quotation text from login success messages.
+- Makes the web Server information page read-only, separates IPv4 and IPv6 addresses, and removes its host-maintenance forms and write APIs. DNS, Swap and system maintenance are available through the SSH `o` / `O` menu.
+- Adds verified custom DNS and ordinary resolv.conf management with explicit takeover, a private original snapshot, preserved permissions and immutable state, and restoration. Externally managed resolvers remain read-only; failed probes or transaction verification prevent unsafe writes.
+- Strengthens Swap creation, resize and removal with full temporary-space checks, independent command deadlines, activation readback and rollback of the original file and settings. Preserves partitions, zram, unmarked files and system swappiness on removal, and shows unknown workload or available-memory readings explicitly.
+- Adds terminal port/firewall inspection, service logs, BBR status, disk/inode and APT health checks, dependency checks, hostname settings and independent maintenance history. SSH port changes reuse new-session confirmation and the existing automatic rollback watchdog.
+- Corrects maintenance failure exit codes, diagnostic results, update-started messages and login URLs. Update checks distinguish the installed version, latest GitHub release and signed short-entry target; downloaded lifecycle scripts show their actual version and refuse downgrades.
+- Preserves active time-sync providers, detects conflicting providers, supports installed IANA timezones and explicit locale-tool installation, and verifies applied settings. Improves first-install credential layout and verifies BBR settings before reporting success.
+
+Upgrade notes: host-maintenance writes are now terminal-only. Use `o dns` and `o swap` over SSH; unsupported externally managed configurations report their owner and remain protected. Existing account-security and MFA backup requirements still apply. The short installation entry is deployed only after the matching signed GitHub Release is available.
+
 ## v1.18.0 — 2026-10-08
 
 - Adds an account security workspace with opt-in TOTP two-factor authentication, encrypted enrollment secrets, single-use recovery codes, password rechecks for sensitive account changes, replay protection and bounded verification attempts. Existing accounts retain password login until enrollment is completed.

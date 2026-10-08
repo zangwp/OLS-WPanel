@@ -31,7 +31,7 @@ See the [installation guide](docs/verified-install.md) for manual verification, 
 | Websites and WordPress | WordPress / PHP provisioning, domains, PHP versions, files, databases and WordPress updates |
 | Certificates and caching | Website certificate issuance and renewal; official LiteSpeed Cache for page and Redis object caching |
 | Backups and recovery | Website, database and panel backups, with SFTP / S3 remote storage |
-| VPS maintenance | Resource and service status, system updates, DNS, Swap, time synchronization and open ports |
+| VPS maintenance | Web resource, host and service status; DNS, Swap and system settings through the SSH `o` menu; open ports managed in the Security center |
 | Account security | Optional TOTP two-factor authentication, single-use recovery codes, active sessions, persistent sign-in audit and new-environment notifications |
 | Protection and alerts | File protection, Fail2ban, nftables, email / Webhook notifications and log analysis |
 
@@ -44,7 +44,16 @@ The interface combines a light workspace with dark blue navigation, English / Ch
 Lowercase `o` and uppercase `O` are equivalent. Panel information shows the version, port and access path.
 
 ```text
-o                 show panel information
+o                 open the management menu
+o dns             view, test and configure preset or custom DNS addresses
+o swap            manage Swap capacity and swappiness
+o ports           diagnose local listeners, processes and inbound rules
+o services        inspect core services and recent logs
+o bbr             inspect active algorithms and persistent configuration
+o disk            inspect disk space and inode usage
+o apt-check       read-only APT / dpkg health checks
+o history         show the latest 200 terminal maintenance records
+o ssh             change SSH ports with dual-port transition and timed rollback
 o status          diagnose panel status
 o log [N]         show the latest N panel log entries
 o restart         restart the panel
@@ -53,6 +62,12 @@ o unban           clear panel-managed IP bans
 o update          update / repair the panel
 o uninstall       remove the panel, preserving websites, databases and shared software
 ```
+
+Swap is under `o → 5. System settings → 3. Swap management`. Only the OLS WPanel marked `/swapfile` is managed; existing partitions, zram and external files are preserved. Resizing checks the full temporary-file disk requirement and verifies runtime state, restoring prior files and settings on failure. Removing the managed file retains system swappiness.
+
+DNS is under `o → 4. Network settings → 1. DNS settings and tests`. Active `systemd-resolved` configurations and ordinary `/etc/resolv.conf` files are supported. Taking over an ordinary file requires confirmation and saves its contents, permissions and immutable state; search/options are preserved and the original configuration can be restored. Every custom IP address must pass checks; ordinary files support up to 3 and resolved up to 4. DHCP, cloud-init, NetworkManager, resolvconf and unrecognized symlinks remain read-only with a specific reason.
+
+The time menu accepts installed IANA time zones; missing locale tools can be installed after confirmation. SSH port changes retain the old port until `o ssh-confirm` is executed from a new SSH connection on the new port. An independent watchdog rolls back unconfirmed changes. `o check-update` distinguishes the latest GitHub release from the short entry's actual target, and `o update` rejects downgrades. The terminal menu currently uses Chinese labels.
 
 Uninstall displays its scope and requires `Y` or `y`; Enter cancels. It exits the active menu and removes the `o` / `O` commands. Updates use the signed published installation entry. Fresh installation and reinstallation are blocked when retained site data or configuration is detected; use update / repair for an existing OLS WPanel installation.
 

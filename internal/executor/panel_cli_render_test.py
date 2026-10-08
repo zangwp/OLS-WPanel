@@ -12,16 +12,26 @@ SOURCE = pathlib.Path(__file__).with_name('panel_cli.sh').read_text(encoding='ut
 CODE = SOURCE.split("<<'PYVIEW'\n", 1)[1].split('\nPYVIEW', 1)[0]
 
 
-def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None, status='failed', remaining=0):
+def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None, status='failed', remaining=0, swap=None, swap_failure=False, manager=None, takeover=False, restore=False, locale_available=True, payloads=None, files_extra=None, fail_command=None):
     presets = [
         dict(id='international', ipv4=['1.1.1.1', '1.0.0.1'], ipv6=['2606:4700:4700::1111', '2606:4700:4700::1001']),
         dict(id='mainland_china', ipv4=['223.5.5.5', '223.6.6.6'], ipv6=['2400:3200::1', '2400:3200:baba::1']),
     ]
     dns = dict(current=['8.8.8.8', '8.8.4.4'], current_source='/etc/resolv.conf',
-               manager='systemd-resolved' if configurable else 'external', configurable=configurable,
+               manager=manager or ('systemd-resolved' if configurable else 'external'), configurable=configurable,
+               takeover_required=takeover,restore_available=restore,immutable=takeover,
+               max_servers=3 if manager in ['static-resolv.conf','ols-resolv.conf'] else (4 if configurable else 0),
+               warning='普通 resolv.conf 最多使用 3 台 DNS；预设按检测通过后的优先顺序保留前三台。' if manager in ['static-resolv.conf','ols-resolv.conf'] else '',
                ipv6_available=True, presets=presets, reason='当前配置不支持由面板直接修改。',
                ipv4_probe_ok=True, ipv6_probe_ok=False, ipv6_skipped=False)
+    if swap is None:
+        swap = dict(supported=True, total_bytes=1280*1024**2, used_bytes=0,
+                    memory_available_bytes=1700*1024**2, recommended_bytes=1024**3,
+                    swappiness=60, recommended_swappiness=60, recommendation_satisfied=True,
+                    can_manage=True, managed_file=False, managed_size_bytes=0,
+                    entries=[dict(filename='/dev/vda2',type='partition',size_bytes=1280*1024**2,used_bytes=0,managed=False)])
     files = {
+        'config': json.dumps({'panel':{'port':8080,'tls_port':8443,'tls_cert_path':'/www/data/panel.crt','tls_key_path':'/www/data/panel.key','random_suffix':'entry123'}}),
         '/etc/os-release': 'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"',
         '/proc/cpuinfo': 'model name : Intel Xeon E5-2697 v2 @ 2.70GHz',
         '/proc/meminfo': 'MemTotal: 2500000 kB\nMemAvailable: 1750000 kB\nSwapTotal: 1310720 kB\nSwapFree: 1310720 kB',
@@ -32,6 +42,7 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         '/etc/sysctl.d/99-ols-wpanel.conf': '# OLS WPanel — 网络与内核优化\nnet.core.somaxconn = 65535\nnet.ipv4.tcp_max_syn_backlog = 8192',
         '/etc/sysctl.d/.ols-wpanel-vps-original.json': json.dumps({'net.core.somaxconn':'65535','net.ipv4.tcp_max_syn_backlog':'8192'}) if baseline else '',
     }
+    files.update(files_extra or {})
     ticks = [0]
 
     def read(path, *args, **kwargs):
@@ -43,8 +54,14 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
 
     def command(args, **kwargs):
         output = ''
+        if fail_command and args[0]==fail_command:return types.SimpleNamespace(returncode=1,stdout='',stderr='fixture command failure')
         if '--vps-tool' in args:
-            if args[args.index('--vps-tool')+1] in ['dns-status','dns-test']: output=json.dumps(dns)
+            action=args[args.index('--vps-tool')+1]
+            if action in (payloads or {}):output=json.dumps(payloads[action])
+            elif action in ['dns-status','dns-test','dns-custom-test']: output=json.dumps(dns)
+            elif args[args.index('--vps-tool')+1]=='swap-status':
+                if swap_failure:return types.SimpleNamespace(returncode=1, stdout='', stderr='fixture failure')
+                output=json.dumps(swap)
             else: output=json.dumps(dict(status=status,stage=stage,remaining_count=remaining,detail=detail if detail is not None else 'service lshttpd did not become active: systemctl failed: exit status 4',updated_at='2026-10-02T08:54:54Z'))
         elif args[0]=='ip':
             family=6 if '-6' in args else 4
@@ -60,15 +77,16 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
     out=io.StringIO();code=0;namespace={}
     with contextlib.ExitStack() as stack:
         stack.enter_context(patch.dict(os.environ, {'OLS_CLI_WIDTH':str(width)}))
-        stack.enter_context(patch('sys.argv',['formatter',view,'panel','config',preset]))
+        stack.enter_context(patch('sys.argv',['formatter',view,'panel','config','' if view in ['swap','swap-actions'] else preset]))
         stack.enter_context(patch('pathlib.Path.read_text',read))
         stack.enter_context(patch('subprocess.run',command))
         stack.enter_context(patch('os.getloadavg',return_value=(.07,.04,0),create=True))
         stack.enter_context(patch('os.cpu_count',return_value=2))
         stack.enter_context(patch('os.path.isfile',return_value=baseline))
         stack.enter_context(patch('os.path.exists',return_value=False))
-        stack.enter_context(patch('shutil.which',return_value='/usr/sbin/locale-gen'))
-        stack.enter_context(patch('shutil.disk_usage',return_value=types.SimpleNamespace(total=43*1024**3,used=2*1024**3)))
+        stack.enter_context(patch('shutil.which',side_effect=lambda cmd:'/usr/bin/'+cmd if locale_available or cmd not in ['locale-gen','update-locale'] else None))
+        stack.enter_context(patch('shutil.disk_usage',return_value=types.SimpleNamespace(total=43*1024**3,used=2*1024**3,free=41*1024**3)))
+        stack.enter_context(patch('os.statvfs',return_value=types.SimpleNamespace(f_files=100000,f_ffree=90000),create=True))
         for key,val in [('node','demo-vps'),('release','6.12.107+deb13-amd64'),('machine','x86_64')]:stack.enter_context(patch('platform.'+key,return_value=val))
         stack.enter_context(patch('time.sleep'))
         stack.enter_context(contextlib.redirect_stdout(out))
@@ -122,7 +140,7 @@ class RendererTest(unittest.TestCase):
 
     def test_widths(self):
         for width in [48,72]:
-            for view in ['info','dns','dns-preset','dns-test','ip','network','tuning','queues','queue-menu','queue-change','updates','update-details','time','locale','clean']:
+            for view in ['info','dns','dns-preset','dns-test','swap','swap-actions','ip','network','tuning','queues','queue-menu','queue-change','updates','update-details','time','locale','clean']:
                 text,_,ns=render(view,width)
                 for line in text.splitlines():
                     self.assertLessEqual(ns['cells'](line),width,(view,width,line))
@@ -153,6 +171,90 @@ class RendererTest(unittest.TestCase):
         self.assertIn('OpenLiteSpeed 无法访问证书验证目录',text)
         self.assertIn('\n  /usr/local/lsws/bin/openlitespeed',text)
         self.assertNotIn('详细信息',text)
+
+    def test_swap_displays_actual_sources_and_separate_recommendation(self):
+        text,status,_=render('swap')
+        self.assertEqual(status,0)
+        for expected in ['当前状态','建议配置','Swap 来源','/dev/vda2','分区 · 外部管理','已有容量满足建议时','swappiness']:
+            self.assertIn(expected,text)
+        self.assertEqual(render('swap-actions')[0].strip(),'1 1 0')
+
+    def test_swap_external_file_hides_file_edits_but_allows_recommended_swappiness(self):
+        fixture=dict(supported=True,can_manage=False,recommendation_satisfied=True,managed_file=False,
+                     manage_reason='/swapfile 已存在但不是 OLS WPanel 管理的文件')
+        self.assertEqual(render('swap-actions',swap=fixture)[0].strip(),'1 0 0')
+        text,status,_=render('swap',swap=fixture)
+        self.assertEqual(status,0)
+        self.assertIn('未配置',text)
+        self.assertIn('不是 OLS WPanel 管理',text)
+        fixture['recommendation_satisfied']=False
+        self.assertEqual(render('swap-actions',swap=fixture)[0].strip(),'0 0 0')
+
+    def test_swap_status_failure_and_unsupported_system_fail_closed(self):
+        for view in ['swap','swap-actions']:
+            self.assertNotEqual(render(view,swap_failure=True)[1],0)
+            self.assertNotEqual(render(view,swap=dict(supported=False))[1],0)
+            self.assertNotEqual(render(view,swap=dict())[1],0)
+
+    def test_swap_long_source_paths_wrap_without_exposing_control_characters(self):
+        fixture=dict(supported=True,managed_file=True,managed_size_bytes=1024**3,
+                     entries=[dict(filename='/dev/mapper/'+('long-source-'*8)+'\x1b',type='partition',size_bytes=1024**3,used_bytes=0),
+                              dict(filename='/tmp/x\x1b',type='file',size_bytes=1024**3,used_bytes=0)])
+        for width in [48,72]:
+            text,status,ns=render('swap',width,swap=fixture)
+            self.assertEqual(status,0)
+            self.assertNotIn('\x1b',text)
+            for line in text.splitlines():self.assertLessEqual(ns['cells'](line),width)
+
+    def test_plain_dns_displays_takeover_backup_and_actual_manager(self):
+        text,status,_=render('dns',configurable=True,manager='static-resolv.conf',takeover=True)
+        self.assertEqual(status,0)
+        for expected in ['尚未接管','首次应用将备份','search/options','临时解除','最多使用 3 台']:self.assertIn(expected,text)
+        self.assertEqual(render('dns-restore-ready',configurable=True,restore=False)[1],2)
+        self.assertEqual(render('dns-restore-ready',configurable=True,restore=True)[1],0)
+        text,status,_=render('dns',manager='cloud-init')
+        self.assertEqual(status,2);self.assertIn('cloud-init',text)
+
+    def test_login_addresses_follow_actual_http_tls_and_separate_families(self):
+        text,status,_=render('login-addresses')
+        self.assertEqual(status,0)
+        self.assertIn('https://192.0.2.10:8443/entry123',text)
+        self.assertIn('https://[2001:db8::10]:8443/entry123',text)
+        plain={'panel':{'port':8080,'tls_port':0,'random_suffix':'entry123'}}
+        text,status,_=render('login-addresses',files_extra={'config':json.dumps(plain)})
+        self.assertEqual(status,0);self.assertIn('http://192.0.2.10:8080/entry123',text)
+        self.assertNotIn('https://',text)
+
+    def test_new_readonly_views_wrap_and_do_not_expose_control_characters(self):
+        payloads={
+            'ports-status':dict(backend='nftables',input_policy='drop',ssh_port=22,panel_port=8443,listeners=[dict(protocol='tcp',port=8443,address='[2001:db8::10]',process='ols-wpanel',bind_scope='all',host_exposure='unknown')]),
+            'services-status':dict(services=[dict(name='OpenLiteSpeed',active_state='failed',sub_state='failed',unit_file_state='enabled',error='failure\x1b')]),
+            'service-log':dict(unit='lshttpd.service',lines=['long log '+('abcdefgh '*10)+'\x1b']),
+            'bbr-status':dict(algorithm='cubic',queue_discipline='fq',available_algorithms=['reno','cubic'],persistent=[dict(path='/etc/sysctl.d/99-ols-wpanel.conf',managed=True,algorithm='bbr')],errors=[]),
+            'vps-history':dict(entries=[dict(at='2026-10-08T00:00:00Z',action='system-update',status='started',message='后台更新已启动')]),
+            'ssh-port-status':dict(port=22,available=True,service='ssh.service'),
+        }
+        for width in [32,40,48,72]:
+            for view in ['ports','services','service-log','bbr','history','ssh','disk','apt-health','dependencies','network']:
+                text,status,ns=render(view,width,payloads=payloads)
+                self.assertEqual(status,0,(view,text));self.assertNotIn('\x1b',text)
+                for line in text.splitlines():self.assertLessEqual(ns['cells'](line),width,(view,line))
+        text,_,_=render('bbr',payloads=payloads)
+        self.assertIn('cubic',text);self.assertIn('bbr',text);self.assertIn('实际内核状态',text)
+        self.assertIn('持久配置',text)
+
+    def test_missing_locale_dependencies_and_failed_health_checks_return_failure(self):
+        self.assertEqual(render('locale',locale_available=False)[1],2)
+        text,status,_=render('apt-health',fail_command='apt-get')
+        self.assertEqual(status,1);self.assertIn('检查失败',text)
+        text,status,_=render('network',fail_command='curl')
+        self.assertEqual(status,1);self.assertIn('失败或超时',text)
+
+    def test_unknown_wordpress_count_is_not_displayed_as_zero(self):
+        text,_,_=render('swap',swap=dict(supported=True,active_wordpress_sites=0,workload_known=False))
+        self.assertIn('未知，建议按保守基线计算',text)
+        text,_,_=render('swap',swap=dict(supported=True,active_wordpress_sites=3,workload_known=True))
+        self.assertIn('3 个',text);self.assertNotIn('保守基线',text)
 
 
 if __name__=='__main__':unittest.main()

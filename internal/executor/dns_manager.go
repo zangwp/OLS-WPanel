@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,27 +22,34 @@ const (
 )
 
 type DNSPreset struct {
-	ID   string   `json:"id"`
-	IPv4 []string `json:"ipv4"`
-	IPv6 []string `json:"ipv6"`
+	ID    string   `json:"id"`
+	IPv4  []string `json:"ipv4"`
+	IPv6  []string `json:"ipv6"`
+	Order []string `json:"-"`
 }
 
 type DNSStatus struct {
-	Supported       bool        `json:"supported"`
-	Configurable    bool        `json:"configurable"`
-	Manager         string      `json:"manager"`
-	Current         []string    `json:"current"`
-	CurrentSource   string      `json:"current_source"`
-	Managed         bool        `json:"managed"`
-	ActivePreset    string      `json:"active_preset"`
-	IPv6Available   bool        `json:"ipv6_available"`
-	Reason          string      `json:"reason,omitempty"`
-	ReasonCode      string      `json:"reason_code,omitempty"`
-	Presets         []DNSPreset `json:"presets"`
-	LastProbePreset string      `json:"last_probe_preset,omitempty"`
-	IPv4ProbeOK     bool        `json:"ipv4_probe_ok"`
-	IPv6ProbeOK     bool        `json:"ipv6_probe_ok"`
-	IPv6Skipped     bool        `json:"ipv6_skipped"`
+	Supported        bool        `json:"supported"`
+	Configurable     bool        `json:"configurable"`
+	Manager          string      `json:"manager"`
+	Current          []string    `json:"current"`
+	CurrentSource    string      `json:"current_source"`
+	Managed          bool        `json:"managed"`
+	ActivePreset     string      `json:"active_preset"`
+	IPv6Available    bool        `json:"ipv6_available"`
+	Reason           string      `json:"reason,omitempty"`
+	ReasonCode       string      `json:"reason_code,omitempty"`
+	Presets          []DNSPreset `json:"presets"`
+	LastProbePreset  string      `json:"last_probe_preset,omitempty"`
+	IPv4ProbeOK      bool        `json:"ipv4_probe_ok"`
+	IPv6ProbeOK      bool        `json:"ipv6_probe_ok"`
+	IPv6Skipped      bool        `json:"ipv6_skipped"`
+	TakeoverRequired bool        `json:"takeover_required"`
+	RestoreAvailable bool        `json:"restore_available"`
+	Immutable        bool        `json:"immutable"`
+	BackupPath       string      `json:"backup_path,omitempty"`
+	MaxServers       int         `json:"max_servers"`
+	Warning          string      `json:"warning,omitempty"`
 }
 
 var (
@@ -50,6 +59,11 @@ var (
 		_, err := resolver.LookupHost(ctx, host)
 		return err
 	}
+	dnsPaths         = defaultDNSPaths()
+	dnsSupported     = func() bool { return runtime.GOOS == "linux" }
+	dnsProbeAddress  = probeDNSAddress
+	dnsVerifyCurrent = verifySystemDNS
+	dnsDetectManager = detectDNSManager
 )
 
 func DNSPresets() []DNSPreset {
@@ -60,33 +74,74 @@ func DNSPresets() []DNSPreset {
 }
 
 func GetDNSStatus() DNSStatus {
-	status := DNSStatus{Supported: runtime.GOOS == "linux", Presets: DNSPresets(), Current: []string{}}
+	status := DNSStatus{Supported: dnsSupported(), Presets: DNSPresets(), Current: []string{}}
 	if !status.Supported {
-		status.Reason = "DNS 设置仅支持 Linux"
-		status.ReasonCode = "unsupported"
+		status.Reason, status.ReasonCode = "DNS 设置仅支持 Linux", "unsupported"
 		return status
 	}
-	status.Manager = detectDNSManager()
+	status.Manager = dnsDetectManager()
+	switch status.Manager {
+	case "static-resolv.conf", "ols-resolv.conf":
+		// glibc's resolv.conf MAXNS is 3. A fourth nameserver can appear in a
+		// file while never being consulted by ordinary system applications.
+		status.MaxServers = 3
+		status.Warning = "普通 resolv.conf 最多使用 3 台 DNS；预设按检测通过后的优先顺序保留前三台，自定义超过上限将拒绝应用。"
+	case "systemd-resolved":
+		status.MaxServers = 4
+	}
 	status.Current, status.CurrentSource = readCurrentDNS(status.Manager)
 	status.IPv6Available = hasIPv6DefaultRoute()
-	if status.Manager != "systemd-resolved" {
-		status.Reason = "当前 DNS 不由 systemd-resolved 管理，面板只读展示以避免覆盖云厂商网络配置"
-		status.ReasonCode = "external_manager"
+	if status.Manager != "systemd-resolved" && status.Manager != "static-resolv.conf" && status.Manager != "ols-resolv.conf" {
+		status.Reason = dnsUnsupportedManagerReason(status.Manager)
+		status.ReasonCode = "unsupported_manager"
 		return status
 	}
-	if data, err := os.ReadFile(dnsDropInPath); err == nil {
-		if !strings.HasPrefix(string(data), dnsManagedMarker+"\n") {
-			status.Reason = "检测到同名 DNS 配置，但它不是由 OLS WPanel 创建的"
-			status.ReasonCode = "foreign_config"
+	target := dnsPaths.ResolvConf
+	if status.Manager == "systemd-resolved" {
+		target = dnsPaths.DropIn
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		active := dnsCommandContext(ctx, "systemctl", "is-active", "--quiet", "systemd-resolved").Run() == nil
+		cancel()
+		if !active {
+			status.Reason, status.ReasonCode = "systemd-resolved 未运行，不能安全应用配置", "resolved_inactive"
 			return status
 		}
-		status.Managed = true
-		status.ActivePreset = presetFromConfig(string(data))
-	} else if !os.IsNotExist(err) {
-		status.Reason = "无法读取 systemd-resolved 配置"
-		status.ReasonCode = "read_failed"
+	}
+	snapshot, err := dnsReadSnapshot(target, status.Manager == "systemd-resolved")
+	if err != nil {
+		status.Reason, status.ReasonCode = "DNS 配置文件身份或读取检查失败: "+err.Error(), "unsafe_config"
 		return status
 	}
+	status.Immutable = snapshot.Immutable
+	status.Managed = snapshot.Exists && strings.HasPrefix(string(snapshot.Data), dnsManagedMarker+"\n")
+	if status.Manager == "systemd-resolved" && snapshot.Exists && !status.Managed {
+		status.Reason, status.ReasonCode = "检测到同名 DNS 配置，但它不是由 OLS WPanel 创建的", "foreign_config"
+		return status
+	}
+	if status.Managed {
+		if status.Manager == "systemd-resolved" {
+			status.ActivePreset = presetFromConfig(string(snapshot.Data))
+		} else {
+			status.ActivePreset = presetFromAddresses(parseResolvConf(string(snapshot.Data)))
+		}
+		backup, backupErr := readDNSBackup(dnsPaths, target)
+		if backupErr == nil && backup != nil {
+			status.BackupPath = dnsPaths.Backup
+			status.RestoreAvailable = backup.accepts(snapshot.Data)
+			if !status.RestoreAvailable {
+				status.Reason, status.ReasonCode = "DNS 配置在接管后被其他程序修改；原始备份仍保留，请先检查差异", "config_changed"
+				return status
+			}
+		} else if status.Manager == "systemd-resolved" && errors.Is(backupErr, os.ErrNotExist) {
+			// Older releases created a resolved drop-in without a backup. Removing
+			// only that exact marked drop-in retains their existing restore policy.
+			status.RestoreAvailable = true
+		} else {
+			status.Reason, status.ReasonCode = "受管 DNS 原始备份不可用，拒绝继续覆盖: "+fmt.Sprint(backupErr), "backup_unavailable"
+			return status
+		}
+	}
+	status.TakeoverRequired = status.Manager == "static-resolv.conf"
 	status.Configurable = true
 	return status
 }
@@ -96,103 +151,284 @@ func ProbeDNSPreset(ctx context.Context, presetID string) (DNSStatus, error) {
 	if !ok {
 		return GetDNSStatus(), errors.New("未知 DNS 预设")
 	}
+	status, _, err := probeDNSSelection(ctx, preset, false)
+	return status, err
+}
+
+// Custom addresses are comma-separated IP literals, not hostnames or shell text.
+func ParseCustomDNS(value string) (DNSPreset, error) {
+	fields := strings.Split(value, ",")
+	if len(fields) < 1 || len(fields) > 4 {
+		return DNSPreset{}, errors.New("自定义 DNS 需要 1–4 个逗号分隔的 IP 地址")
+	}
+	preset := DNSPreset{ID: "custom", IPv4: []string{}, IPv6: []string{}}
+	seen := map[string]bool{}
+	for _, field := range fields {
+		address, err := netip.ParseAddr(strings.TrimSpace(field))
+		if err != nil || address.Zone() != "" || address.IsUnspecified() || address.IsMulticast() {
+			return DNSPreset{}, errors.New("DNS 必须是有效 IPv4 / IPv6 地址，不能含端口、域名或网卡区域")
+		}
+		address = address.Unmap()
+		if seen[address.String()] {
+			return DNSPreset{}, errors.New("自定义 DNS 地址不能重复")
+		}
+		seen[address.String()] = true
+		preset.Order = append(preset.Order, address.String())
+		if address.Is4() {
+			preset.IPv4 = append(preset.IPv4, address.String())
+		} else {
+			preset.IPv6 = append(preset.IPv6, address.String())
+		}
+	}
+	return preset, nil
+}
+
+func ProbeCustomDNS(ctx context.Context, value string) (DNSStatus, error) {
+	preset, err := ParseCustomDNS(value)
+	if err != nil {
+		return GetDNSStatus(), err
+	}
+	status, _, err := probeDNSSelection(ctx, preset, true)
+	return status, err
+}
+
+func probeDNSSelection(ctx context.Context, preset DNSPreset, requireEveryAddress bool) (DNSStatus, DNSPreset, error) {
 	status := GetDNSStatus()
 	status.LastProbePreset = preset.ID
-	status.IPv4ProbeOK = probeDNSFamily(ctx, "udp4", preset.IPv4)
+	selected := DNSPreset{ID: preset.ID, IPv4: []string{}, IPv6: []string{}}
+	if !status.Supported {
+		return status, selected, errors.New(status.Reason)
+	}
+	if requireEveryAddress && status.MaxServers > 0 && len(preset.IPv4)+len(preset.IPv6) > status.MaxServers {
+		return status, selected, fmt.Errorf("当前 DNS 管理方式最多支持 %d 台服务器；自定义地址超过上限，未修改系统配置", status.MaxServers)
+	}
+	if requireEveryAddress && len(preset.IPv6) > 0 && !status.IPv6Available {
+		status.IPv6Skipped = true
+		return status, selected, errors.New("没有 IPv6 默认路由，自定义 IPv6 DNS 未应用")
+	}
+	for _, address := range preset.IPv4 {
+		if dnsProbeAddress(ctx, "udp4", address) {
+			selected.IPv4 = append(selected.IPv4, address)
+		}
+	}
+	status.IPv4ProbeOK = len(selected.IPv4) > 0
 	status.IPv6Skipped = !status.IPv6Available
 	if status.IPv6Available {
-		status.IPv6ProbeOK = probeDNSFamily(ctx, "udp6", preset.IPv6)
+		for _, address := range preset.IPv6 {
+			if dnsProbeAddress(ctx, "udp6", address) {
+				selected.IPv6 = append(selected.IPv6, address)
+			}
+		}
+	}
+	status.IPv6ProbeOK = len(selected.IPv6) > 0
+	if err := ctx.Err(); err != nil {
+		return status, selected, err
+	}
+	if requireEveryAddress && (len(selected.IPv4) != len(preset.IPv4) || len(selected.IPv6) != len(preset.IPv6)) {
+		return status, selected, errors.New("至少一个自定义 DNS 地址检测失败，未修改系统配置")
 	}
 	if !status.IPv4ProbeOK && !status.IPv6ProbeOK {
-		return status, errors.New("IPv4 与 IPv6 均无可用 DNS，未修改系统配置")
+		return status, selected, errors.New("IPv4 与 IPv6 均无可用 DNS，未修改系统配置")
 	}
-	return status, nil
+	if len(preset.Order) > 0 {
+		selected.Order = append([]string{}, preset.Order...)
+	}
+	if !requireEveryAddress && status.MaxServers > 0 {
+		verified := selectedDNSAddresses(selected)
+		if len(verified) > status.MaxServers {
+			selected = selectDNSAddresses(selected.ID, verified[:status.MaxServers])
+		}
+	}
+	return status, selected, nil
+}
+
+func selectDNSAddresses(id string, addresses []string) DNSPreset {
+	preset := DNSPreset{ID: id, IPv4: []string{}, IPv6: []string{}, Order: append([]string{}, addresses...)}
+	for _, address := range addresses {
+		ip := net.ParseIP(address)
+		if ip != nil && ip.To4() != nil {
+			preset.IPv4 = append(preset.IPv4, address)
+		} else {
+			preset.IPv6 = append(preset.IPv6, address)
+		}
+	}
+	return preset
 }
 
 func ApplyDNSPreset(ctx context.Context, presetID string) (DNSStatus, error) {
-	dnsManagerMu.Lock()
-	defer dnsManagerMu.Unlock()
 	preset, ok := findDNSPreset(presetID)
 	if !ok {
 		return GetDNSStatus(), errors.New("未知 DNS 预设")
 	}
-	status, err := ProbeDNSPreset(ctx, presetID)
+	return applyDNSSelection(ctx, preset, false)
+}
+
+// Callers must explicitly confirm takeover_required before invoking a write.
+// These operations are exposed by the root CLI only; the web API remains read-only.
+func ApplyCustomDNS(ctx context.Context, value string) (DNSStatus, error) {
+	preset, err := ParseCustomDNS(value)
 	if err != nil {
-		recordOperationLog("dns_apply_preset", presetID, "failed", err.Error())
-		return status, err
+		return GetDNSStatus(), err
 	}
+	return applyDNSSelection(ctx, preset, true)
+}
+
+func applyDNSSelection(ctx context.Context, preset DNSPreset, requireEveryAddress bool) (DNSStatus, error) {
+	dnsManagerMu.Lock()
+	defer dnsManagerMu.Unlock()
+	if !dnsSupported() {
+		return GetDNSStatus(), errors.New("DNS 设置仅支持 Linux")
+	}
+	unlock, err := dnsAcquireLock(dnsPaths.Lock)
+	if err != nil {
+		return GetDNSStatus(), err
+	}
+	defer unlock()
+	status := GetDNSStatus()
 	if !status.Configurable {
 		return status, errors.New(status.Reason)
 	}
-	oldData, readErr := os.ReadFile(dnsDropInPath)
-	oldExists := readErr == nil
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return status, readErr
+	manager := status.Manager
+	target := dnsPaths.ResolvConf
+	if manager == "systemd-resolved" {
+		target = dnsPaths.DropIn
 	}
-	if oldExists && !strings.HasPrefix(string(oldData), dnsManagedMarker+"\n") {
-		return status, errors.New("拒绝覆盖非 OLS WPanel 管理的 DNS 配置")
-	}
-	includeIPv6 := status.IPv6Available && status.IPv6ProbeOK
-	data := renderResolvedDNSFamilies(preset, status.IPv4ProbeOK, includeIPv6)
-	if err := os.MkdirAll(filepath.Dir(dnsDropInPath), 0755); err != nil {
+	previous, err := dnsReadSnapshot(target, manager == "systemd-resolved")
+	if err != nil {
 		return status, err
 	}
-	if err := writeDNSConfigAtomic(dnsDropInPath, []byte(data)); err != nil {
+	probed, selected, err := probeDNSSelection(ctx, preset, requireEveryAddress)
+	if err != nil {
+		return probed, err
+	}
+	// Probes can take several seconds. Reject an external writer or a changed
+	// manager instead of silently backing up or overwriting their new state.
+	now, err := dnsReadSnapshot(target, manager == "systemd-resolved")
+	if err != nil {
+		return GetDNSStatus(), err
+	}
+	if dnsDetectManager() != manager || !sameDNSSnapshot(previous, now) {
+		return GetDNSStatus(), errors.New("检测期间 DNS 管理方式或文件发生变化，未修改")
+	}
+	data := []byte(renderResolvedDNSFamilies(selected, len(selected.IPv4) > 0, len(selected.IPv6) > 0))
+	if manager != "systemd-resolved" {
+		data = renderStaticDNS(previous.Data, selectedDNSAddresses(selected))
+	}
+	backup, backupErr := readDNSBackup(dnsPaths, target)
+	managed := previous.Exists && strings.HasPrefix(string(previous.Data), dnsManagedMarker+"\n")
+	if backupErr != nil && !errors.Is(backupErr, os.ErrNotExist) {
+		return status, backupErr
+	}
+	if !managed {
+		backup = &dnsOriginalBackup{Version: 1, Target: target, Manager: manager, Original: previous}
+	} else if backup == nil {
+		if manager != "systemd-resolved" {
+			return status, errors.New("原始 DNS 备份缺失，未修改")
+		}
+		backup = &dnsOriginalBackup{Version: 1, Target: target, Manager: manager, Original: dnsFileSnapshot{}}
+	} else if !backup.accepts(previous.Data) {
+		return status, errors.New("受管 DNS 已被其他程序修改，原始备份保留，未覆盖")
+	}
+	backup.ManagedHashes = []string{dnsContentHash(data)}
+	if managed {
+		backup.ManagedHashes = append(backup.ManagedHashes, dnsContentHash(previous.Data))
+	}
+	if err := writeDNSBackup(dnsPaths, backup); err != nil {
 		return status, err
 	}
-	if err := restartResolved(ctx); err != nil {
-		restoreDNSConfig(ctx, oldData, oldExists)
-		recordOperationLog("dns_apply_preset", presetID, "failed", err.Error())
-		return GetDNSStatus(), err
+	next := previous
+	next.Exists, next.Data = true, data
+	if !previous.Exists {
+		next.Mode = 0o644
+		next.UID, next.GID = dnsFileOwner()
 	}
-	active := activeDNSAddresses()
-	if (status.IPv4ProbeOK && !containsAnyDNS(active, preset.IPv4)) ||
-		(includeIPv6 && !containsAnyDNS(active, preset.IPv6)) {
-		restoreDNSConfig(ctx, oldData, oldExists)
-		err = errors.New("systemd-resolved 未加载已选择的 DNS，已自动恢复原配置")
-		recordOperationLog("dns_apply_preset", presetID, "failed", err.Error())
-		return GetDNSStatus(), err
+	if err := dnsWriteSnapshot(target, next); err != nil {
+		return rollbackDNSStatus(ctx, manager, target, previous, fmt.Errorf("写入 DNS 失败: %w", err))
 	}
-	if err := verifySystemDNS(ctx); err != nil {
-		restoreDNSConfig(ctx, oldData, oldExists)
-		err = fmt.Errorf("应用后解析验证失败，已自动恢复原 DNS: %w", err)
-		recordOperationLog("dns_apply_preset", presetID, "failed", err.Error())
-		return GetDNSStatus(), err
+	if manager == "systemd-resolved" {
+		if err := restartResolved(ctx); err != nil {
+			return rollbackDNSStatus(ctx, manager, target, previous, err)
+		}
+		active := activeDNSAddresses()
+		if !containsAllDNS(active, selectedDNSAddresses(selected)) {
+			return rollbackDNSStatus(ctx, manager, target, previous, errors.New("systemd-resolved 未加载选定 DNS"))
+		}
+	}
+	if err := dnsVerifyCurrent(ctx); err != nil {
+		return rollbackDNSStatus(ctx, manager, target, previous, fmt.Errorf("应用后解析验证失败: %w", err))
+	}
+	actual, err := dnsReadSnapshot(target, false)
+	if err != nil || !sameDNSSnapshot(next, actual) {
+		return rollbackDNSStatus(ctx, manager, target, previous, errors.New("应用后的 DNS 文件或属性回读不一致"))
 	}
 	updated := GetDNSStatus()
-	updated.LastProbePreset = preset.ID
-	updated.IPv4ProbeOK = status.IPv4ProbeOK
-	updated.IPv6ProbeOK = status.IPv6ProbeOK
-	updated.IPv6Skipped = status.IPv6Skipped
-	recordOperationLog("dns_apply_preset", presetID, "success", "ipv6="+fmt.Sprint(includeIPv6))
+	updated.LastProbePreset, updated.IPv4ProbeOK, updated.IPv6ProbeOK, updated.IPv6Skipped = probed.LastProbePreset, probed.IPv4ProbeOK, probed.IPv6ProbeOK, probed.IPv6Skipped
+	if !updated.Managed || !updated.Configurable {
+		return updated, errors.New("DNS 写入完成，但管理状态验证失败；原始备份保留在 " + dnsPaths.Backup)
+	}
+	recordOperationLog("dns_apply_preset", preset.ID, "success", "manager="+manager)
 	return updated, nil
 }
 
 func RestoreAutomaticDNS(ctx context.Context) (DNSStatus, error) {
 	dnsManagerMu.Lock()
 	defer dnsManagerMu.Unlock()
-	data, err := os.ReadFile(dnsDropInPath)
-	if os.IsNotExist(err) {
-		return GetDNSStatus(), nil
+	if !dnsSupported() {
+		return GetDNSStatus(), errors.New("DNS 设置仅支持 Linux")
 	}
+	unlock, err := dnsAcquireLock(dnsPaths.Lock)
 	if err != nil {
 		return GetDNSStatus(), err
 	}
-	if !strings.HasPrefix(string(data), dnsManagedMarker+"\n") {
-		return GetDNSStatus(), errors.New("拒绝删除非 OLS WPanel 管理的 DNS 配置")
+	defer unlock()
+	status := GetDNSStatus()
+	if !status.Managed {
+		if !status.Configurable {
+			return status, errors.New(status.Reason)
+		}
+		return status, nil
 	}
-	if err := os.Remove(dnsDropInPath); err != nil {
-		return GetDNSStatus(), err
+	if !status.RestoreAvailable {
+		return status, errors.New(status.Reason)
 	}
-	if err := restartResolved(ctx); err != nil {
-		restoreDNSConfig(ctx, data, true)
-		return GetDNSStatus(), fmt.Errorf("恢复自动 DNS 失败，已还原面板配置: %w", err)
+	manager, target := status.Manager, dnsPaths.ResolvConf
+	if manager == "systemd-resolved" {
+		target = dnsPaths.DropIn
 	}
-	if err := verifySystemDNS(ctx); err != nil {
-		restoreDNSConfig(ctx, data, true)
-		return GetDNSStatus(), fmt.Errorf("自动 DNS 验证失败，已还原面板配置: %w", err)
+	previous, err := dnsReadSnapshot(target, false)
+	if err != nil {
+		return status, err
 	}
-	recordOperationLog("dns_restore_automatic", "systemd-resolved", "success", "")
+	backup, err := readDNSBackup(dnsPaths, target)
+	if errors.Is(err, os.ErrNotExist) && manager == "systemd-resolved" {
+		backup = &dnsOriginalBackup{Version: 1, Target: target, Manager: manager, Original: dnsFileSnapshot{}, ManagedHashes: []string{dnsContentHash(previous.Data)}}
+		if err = writeDNSBackup(dnsPaths, backup); err != nil {
+			return status, err
+		}
+	} else if err != nil {
+		return status, err
+	}
+	if backup == nil || !backup.accepts(previous.Data) {
+		return status, errors.New("备份与当前受管 DNS 不匹配，未恢复")
+	}
+	if err := dnsWriteSnapshot(target, backup.Original); err != nil {
+		return rollbackDNSStatus(ctx, manager, target, previous, fmt.Errorf("恢复原始 DNS 配置失败: %w", err))
+	}
+	if manager == "systemd-resolved" {
+		if err := restartResolved(ctx); err != nil {
+			return rollbackDNSStatus(ctx, manager, target, previous, err)
+		}
+	}
+	if err := dnsVerifyCurrent(ctx); err != nil {
+		return rollbackDNSStatus(ctx, manager, target, previous, fmt.Errorf("原始 DNS 解析验证失败: %w", err))
+	}
+	actual, err := dnsReadSnapshot(target, true)
+	if err != nil || !sameDNSSnapshot(backup.Original, actual) {
+		return rollbackDNSStatus(ctx, manager, target, previous, errors.New("原始 DNS 文件或属性恢复验证失败"))
+	}
+	// Keep the root-only original for manual recovery. A future explicit takeover
+	// refreshes it from the then-current unmarked file, never from a managed file.
+	recordOperationLog("dns_restore_automatic", manager, "success", "")
 	return GetDNSStatus(), nil
 }
 
@@ -217,7 +453,23 @@ func renderResolvedDNSFamilies(preset DNSPreset, includeIPv4, includeIPv6 bool) 
 	if includeIPv6 {
 		servers = append(servers, preset.IPv6...)
 	}
+	if len(preset.Order) > 0 {
+		var ordered []string
+		for _, address := range preset.Order {
+			if containsAnyDNS(servers, []string{address}) {
+				ordered = append(ordered, address)
+			}
+		}
+		servers = ordered
+	}
 	return dnsManagedMarker + "\n[Resolve]\nDNS=" + strings.Join(servers, " ") + "\nDomains=~.\n"
+}
+
+func selectedDNSAddresses(preset DNSPreset) []string {
+	if len(preset.Order) > 0 {
+		return append([]string{}, preset.Order...)
+	}
+	return append(append([]string{}, preset.IPv4...), preset.IPv6...)
 }
 
 func presetFromConfig(config string) string {
@@ -227,6 +479,10 @@ func presetFromConfig(config string) string {
 			addresses = parseIPAddresses(strings.TrimPrefix(strings.TrimSpace(line), "DNS="))
 		}
 	}
+	return presetFromAddresses(addresses)
+}
+
+func presetFromAddresses(addresses []string) string {
 	for _, preset := range DNSPresets() {
 		match := len(addresses) > 0
 		allowed := append(append([]string{}, preset.IPv4...), preset.IPv6...)
@@ -243,18 +499,54 @@ func presetFromConfig(config string) string {
 }
 
 func detectDNSManager() string {
+	info, err := os.Lstat(dnsPaths.ResolvConf)
+	if err != nil {
+		return "unavailable"
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(dnsPaths.ResolvConf)
+		if err != nil {
+			return "symbolic-link"
+		}
+		target = strings.ToLower(filepath.ToSlash(target))
+		switch {
+		case strings.Contains(target, "/systemd/resolve/"):
+			return "systemd-resolved"
+		case strings.Contains(target, "/networkmanager/"):
+			return "NetworkManager"
+		case strings.Contains(target, "/resolvconf/"), strings.Contains(target, "/openresolv/"):
+			return "resolvconf"
+		default:
+			return "symbolic-link"
+		}
+	}
+	if !info.Mode().IsRegular() {
+		return "unknown"
+	}
+	data, err := readDNSStatusFile(dnsPaths.ResolvConf)
+	if err != nil {
+		return "unavailable"
+	}
+	if strings.HasPrefix(string(data), dnsManagedMarker+"\n") {
+		return "ols-resolv.conf"
+	}
+	manager := managerFromResolvConf(string(data))
+	if manager != "static-resolv.conf" {
+		return manager
+	}
+	// A live NetworkManager can regenerate an unmarked regular resolv.conf.
+	// Its supported DNS backend must be configured explicitly instead of silently
+	// creating a competing OLS writer or forcing an immutable lock.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	active := dnsCommandContext(ctx, "systemctl", "is-active", "--quiet", "systemd-resolved").Run() == nil
-	target, linkErr := filepath.EvalSymlinks("/etc/resolv.conf")
-	if active && linkErr == nil && strings.Contains(filepath.ToSlash(target), "/systemd/resolve/") {
-		return "systemd-resolved"
+	if dnsCommandContext(ctx, "systemctl", "is-active", "--quiet", "NetworkManager").Run() == nil {
+		return "NetworkManager"
 	}
-	return "external"
+	return manager
 }
 
 func activeDNSAddresses() []string {
-	values, _ := readCurrentDNS(detectDNSManager())
+	values, _ := readCurrentDNS(dnsDetectManager())
 	return values
 }
 
@@ -268,11 +560,30 @@ func readCurrentDNS(manager string) ([]string, string) {
 			}
 		}
 	}
-	data, err := os.ReadFile("/etc/resolv.conf")
+	data, err := readDNSStatusFile(dnsPaths.ResolvConf)
 	if err != nil {
 		return []string{}, "unavailable"
 	}
 	return parseResolvConf(string(data)), "/etc/resolv.conf"
+}
+
+// Status may follow a known resolver symlink for reading, but it never reads a
+// device/FIFO or an unbounded file through an unknown link.
+func readDNSStatusFile(path string) ([]byte, error) {
+	file, err := openDNSStatusFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 128*1024 {
+		return nil, errors.New("DNS 状态来源不是有界普通文件")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 128*1024+1))
+	if err != nil || len(data) > 128*1024 {
+		return nil, errors.New("DNS 状态来源不可读取或过大")
+	}
+	return data, nil
 }
 
 func parseResolvConf(data string) []string {
@@ -333,24 +644,32 @@ func hasIPv6DefaultRoute() bool {
 
 func probeDNSFamily(parent context.Context, network string, servers []string) bool {
 	for _, server := range servers {
-		ctx, cancel := context.WithTimeout(parent, 4*time.Second)
-		resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			dialer := net.Dialer{Timeout: 3 * time.Second}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(server, "53"))
-		}}
-		err := dnsLookupHost(ctx, resolver, "wordpress.org")
-		cancel()
-		if err == nil {
+		if dnsProbeAddress(parent, network, server) {
 			return true
 		}
 	}
 	return false
 }
 
+func probeDNSAddress(parent context.Context, network, server string) bool {
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+	defer cancel()
+	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		dialer := net.Dialer{Timeout: 3 * time.Second}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(server, "53"))
+	}}
+	for _, host := range []string{"wordpress.org", "github.com"} {
+		if err := dnsLookupHost(ctx, resolver, host); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func restartResolved(ctx context.Context) error {
 	output, err := dnsCommandContext(ctx, "systemctl", "restart", "systemd-resolved").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("重启 systemd-resolved 失败: %s", strings.TrimSpace(string(output)))
+		return fmt.Errorf("重启 systemd-resolved 失败: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -361,31 +680,8 @@ func verifySystemDNS(parent context.Context) error {
 		err := dnsLookupHost(ctx, net.DefaultResolver, host)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("无法解析 %s", host)
+			return fmt.Errorf("无法解析 %s: %w", host, err)
 		}
 	}
 	return nil
-}
-
-func writeDNSConfigAtomic(path string, data []byte) error {
-	temp := path + ".new"
-	if err := os.WriteFile(temp, data, 0644); err != nil {
-		return err
-	}
-	if err := os.Rename(temp, path); err != nil {
-		_ = os.Remove(temp)
-		return err
-	}
-	return nil
-}
-
-func restoreDNSConfig(_ context.Context, data []byte, existed bool) {
-	if existed {
-		_ = writeDNSConfigAtomic(dnsDropInPath, data)
-	} else {
-		_ = os.Remove(dnsDropInPath)
-	}
-	rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = restartResolved(rollbackCtx)
 }

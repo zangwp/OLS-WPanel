@@ -19,15 +19,26 @@ test('unknown account state cannot start sensitive actions or notification write
 
 test('setup is not enabled until verification and recovery codes require explicit acknowledgement',async()=>{
  const calls=[];let enabled=false;const {m}=setup(async(url,opt)=>{
-  calls.push({url,opt});if(url.endsWith('/setup'))return ok({secret:'SECRET',otpauth_url:'otpauth://totp/Panel?secret=SECRET',expires_at:1800000000});
+  calls.push({url,opt});if(url.endsWith('/setup'))return ok({secret:'SECRET',otpauth_url:'otpauth://totp/Panel?secret=SECRET',qr_code_data_url:'data:image/png;base64,aGVsbG8=',expires_at:1800000000});
   if(url.endsWith('/confirm')){enabled=true;return ok({enabled:true,recovery_codes:['ABCD-EFGH','IJKL-MNOP']});}
   if(url==='/auth/mfa')return ok({enabled,recovery_codes_remaining:2});return defaultResponse(url);
  });
- await m.fetchMFA();m.beginMFA('setup');m.mfaPassword='current password';await m.submitMFA();assert.equal(m.mfa.enabled,false);assert.equal(m.setupData.secret,'SECRET');assert.equal(m.recoveryCodes.length,0);
+ await m.fetchMFA();m.beginMFA('setup');m.mfaPassword='current password';await m.submitMFA();assert.equal(m.mfa.enabled,false);assert.equal(m.setupData.secret,'SECRET');assert.equal(m.authenticatorQRCode(),'data:image/png;base64,aGVsbG8=');assert.equal(m.recoveryCodes.length,0);
  m.mfaCode='123456';await m.submitMFA();assert.equal(m.mfa.enabled,true);assert.deepEqual(clone(m.recoveryCodes),['ABCD-EFGH','IJKL-MNOP']);assert.equal(m.mfaPassword,'');assert.equal(m.mfaCode,'');assert.equal(m.setupData,null);
  assert.equal(calls.find(c=>c.url.endsWith('/confirm')).opt.allowAuthFailure,true);
  m.finishRecoveryCodes();assert.equal(m.recoveryCodes.length,2);m.beginMFA('regenerate');assert.equal(m.mfaAction,'');
  m.recoverySaved=true;m.finishRecoveryCodes();assert.equal(m.recoveryCodes.length,0);
+});
+
+test('QR enrollment accepts only bounded inline PNGs and retains manual setup for missing or invalid images',()=>{
+ const {m}=setup();
+ for(const value of [undefined,null,'','https://example.invalid/qr?secret=SECRET','data:image/svg+xml;base64,PHN2Zz4=','data:image/png;base64,a b','data:image/png;base64,'+'A'.repeat(65536)]) {
+  m.setupData={secret:'SECRET',otpauth_url:'otpauth://totp/Panel?secret=SECRET',qr_code_data_url:value};
+  assert.equal(m.authenticatorQRCode(),'');assert.equal(m.authenticatorURL(),m.setupData.otpauth_url);
+ }
+ m.mfaLoaded=true;m.setupData={secret:'SECRET',qr_code_data_url:'data:image/png;base64,aGVsbG8='};m.mfaQRFailed=true;
+ m.cancelMFA(false);assert.equal(m.setupData,null);assert.equal(m.authenticatorQRCode(),'');assert.equal(m.mfaQRFailed,false);
+ m.setupData={qr_code_data_url:'data:image/png;base64,aGVsbG8='};m.destroy();assert.equal(m.authenticatorQRCode(),'');
 });
 
 test('setup confirmation rejects malformed OTP locally and duplicate submission uses one request',async()=>{

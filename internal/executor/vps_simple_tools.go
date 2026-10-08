@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,10 +41,11 @@ func RunSimpleVPSTool(ctx context.Context, action, value string) (string, error)
 	defer unlock()
 	switch action {
 	case "timezone":
-		if value != "UTC" && value != "Asia/Shanghai" {
-			return "", fmt.Errorf("unsupported timezone")
-		}
-		return vpsToolCommand(ctx, "timedatectl", "set-timezone", value)
+		return setVPSTimezone(ctx, value, vpsToolCommand)
+	case "hostname":
+		return setVPSHostname(ctx, value, vpsToolCommand)
+	case "locale-install":
+		return installVPSLocale(ctx, value, vpsToolCommand)
 	case "clean-preview":
 		apt, e := vpsToolCommand(ctx, "du", "-sh", "/var/cache/apt/archives")
 		if e != nil {
@@ -67,7 +69,7 @@ func RunSimpleVPSTool(ctx context.Context, action, value string) (string, error)
 			return "", fmt.Errorf("invalid locale")
 		}
 		if _, err := exec.LookPath("locale-gen"); err != nil {
-			return "", fmt.Errorf("请先安装 locales 软件包 / Install the locales package first")
+			return "", fmt.Errorf("缺少 locales 软件包；请在 o 系统语言菜单选择安装后再设置 / Install locales from the o language menu first")
 		}
 		const path = "/etc/locale.gen"
 		data, err := os.ReadFile(path)
@@ -232,9 +234,19 @@ func setVPSTuningAt(ctx context.Context, mode, path, baseline, installerPath str
 		}
 	}
 	if err != nil {
+		rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancelRollback()
 		for _, key := range vpsTuningKeys {
-			if _, restoreErr := runCommand(ctx, "sysctl", "-w", key+"="+current[key]); restoreErr != nil {
-				err = fmt.Errorf("%w; restoration failed: %v", err, restoreErr)
+			if _, restoreErr := runCommand(rollbackCtx, "sysctl", "-w", key+"="+current[key]); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("%s 运行值回滚失败: %w", key, restoreErr))
+			}
+		}
+		for _, key := range vpsTuningKeys {
+			out, readErr := runCommand(rollbackCtx, "sysctl", "-n", key)
+			if readErr != nil {
+				err = errors.Join(err, fmt.Errorf("%s 回滚验证失败: %w", key, readErr))
+			} else if strings.TrimSpace(out) != current[key] {
+				err = errors.Join(err, fmt.Errorf("%s 回滚验证失败：实际 %s，原值 %s", key, strings.TrimSpace(out), current[key]))
 			}
 		}
 		if len(old) > 0 {
@@ -263,3 +275,67 @@ func setVPSTuningAt(ctx context.Context, mode, path, baseline, installerPath str
 }
 
 func SimpleVPSToolTimeout() time.Duration { return 2 * time.Minute }
+
+func installVPSLocale(ctx context.Context, value string, run func(context.Context, string, ...string) (string, error)) (string, error) {
+	if value != "" {
+		return "", errors.New("locale-install 不接受额外参数")
+	}
+	out, err := run(ctx, "apt-get", "install", "-y", "--no-install-recommends", "locales")
+	if err != nil {
+		return out, fmt.Errorf("安装 locales 失败，请检查软件源、包管理器状态和网络: %w", err)
+	}
+	return out + "\nlocales 已安装，请选择需要的系统语言。", nil
+}
+
+func setVPSTimezone(ctx context.Context, value string, run func(context.Context, string, ...string) (string, error)) (string, error) {
+	// Confirm membership in the operating system's timezone database. The shape
+	// guard rejects path traversal and option-like input before any command.
+	if value == "" || len(value) > 128 || !regexp.MustCompile(`^[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+)*$`).MatchString(value) {
+		return "", errors.New("无效时区名称")
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "." || part == ".." || strings.HasPrefix(part, "-") {
+			return "", errors.New("无效时区名称")
+		}
+	}
+	available, err := run(ctx, "timedatectl", "list-timezones", "--no-pager")
+	if err != nil {
+		return "", fmt.Errorf("无法读取系统时区列表，未修改时区: %w", err)
+	}
+	found := value == "UTC" // timedatectl accepts UTC even if it omits the alias.
+	for _, zone := range strings.Fields(available) {
+		found = found || zone == value
+	}
+	if !found {
+		return "", errors.New("此时区不在系统支持列表中，请通过 timedatectl list-timezones 查看可选值")
+	}
+	if _, err := run(ctx, "timedatectl", "set-timezone", value); err != nil {
+		return "", err
+	}
+	actual, err := run(ctx, "timedatectl", "show", "--property=Timezone", "--value")
+	if err != nil || strings.TrimSpace(actual) != value {
+		return "", errors.Join(errors.New("时区已提交，但实际状态验证失败，请检查 timedatectl"), err)
+	}
+	return "时区已更新为 " + value, nil
+}
+
+func setVPSHostname(ctx context.Context, value string, run func(context.Context, string, ...string) (string, error)) (string, error) {
+	if value == "" || len(value) > 64 {
+		return "", errors.New("主机名须为 1–64 个 ASCII 字符")
+	}
+	labelPattern := regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+	for _, label := range strings.Split(value, ".") {
+		if !labelPattern.MatchString(label) {
+			return "", errors.New("主机名每段须为 1–63 个字母、数字或短横线，首尾须为字母或数字")
+		}
+	}
+	value = strings.ToLower(value)
+	if _, err := run(ctx, "hostnamectl", "set-hostname", "--static", value); err != nil {
+		return "", err
+	}
+	actual, err := run(ctx, "hostnamectl", "--static")
+	if err != nil || strings.TrimSpace(actual) != value {
+		return "", errors.Join(errors.New("静态主机名已提交，但实际状态验证失败，请检查 hostnamectl"), err)
+	}
+	return "静态主机名已更新为 " + value + "；云镜像自动管理主机名时，重启可能恢复其配置", nil
+}

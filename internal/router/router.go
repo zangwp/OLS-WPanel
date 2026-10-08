@@ -1866,17 +1866,8 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.PUT("/api/auth/security-notifications", authHandler.SetSecurityNotifications)
 	vpsHandler := &handlers.VPSHandler{}
 	protected.GET("/api/vps/overview", vpsHandler.Overview)
-	protected.POST("/api/vps/tools", vpsHandler.SimpleTool)
 	protected.GET("/api/vps/swap", vpsHandler.SwapStatus)
-	protected.POST("/api/vps/swap/recommended", vpsHandler.ApplyRecommendedSwap)
-	protected.PUT("/api/vps/swap", vpsHandler.ApplyCustomSwap)
-	protected.PUT("/api/vps/swap/swappiness", vpsHandler.SetSwappiness)
-	protected.DELETE("/api/vps/swap", vpsHandler.RemoveManagedSwap)
 	protected.GET("/api/vps/dns", vpsHandler.DNSStatus)
-	protected.POST("/api/vps/dns/test", vpsHandler.TestDNSPreset)
-	protected.PUT("/api/vps/dns", vpsHandler.ApplyDNSPreset)
-	protected.DELETE("/api/vps/dns", vpsHandler.RestoreAutomaticDNS)
-	protected.POST("/api/vps/nftables/enable-boot", vpsHandler.EnableNftablesBoot)
 
 	websiteHandler := &handlers.WebsiteHandler{DB: db}
 	wpInventoryHandler := &handlers.WPInventoryHandler{DB: db}
