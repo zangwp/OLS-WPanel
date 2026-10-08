@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,31 +12,53 @@ import (
 func TestStartSystemTimeSync(t *testing.T) {
 	for _, tc := range []struct {
 		name, unit, fail, state string
+		providers               map[string]string
 		install, wantError      bool
 	}{
 		{name: "preserve chrony", unit: "chrony.service"},
 		{name: "preserve ntpsec", unit: "ntpsec.service"},
+		{name: "preserve openntpd", unit: "openntpd.service"},
 		{name: "install missing provider", install: true},
 		{name: "preserve mask", state: "masked", wantError: true},
 		{name: "install failure", fail: "apt-get", install: true, wantError: true},
 		{name: "enable failure", unit: "chrony.service", fail: "enable", wantError: true},
-		{name: "ntp failure", unit: "chrony.service", fail: "timedatectl", wantError: true},
+		{name: "restart failure", unit: "chrony.service", fail: "restart", wantError: true},
+		{name: "verification failure", unit: "chrony.service", fail: "is-active", wantError: true},
+		{name: "preserve active timesyncd over disabled chrony", unit: "systemd-timesyncd.service", providers: map[string]string{"chrony.service": "LoadState=loaded\nActiveState=inactive", "systemd-timesyncd.service": "LoadState=loaded\nActiveState=active"}},
+		{name: "multiple active providers", providers: map[string]string{"chrony.service": "LoadState=loaded\nActiveState=active", "systemd-timesyncd.service": "LoadState=loaded\nActiveState=active"}, wantError: true},
+		{name: "same active daemon aliases", unit: "ntpsec.service", providers: map[string]string{"ntpsec.service": "Id=ntpsec.service\nLoadState=loaded\nActiveState=active", "ntp.service": "Id=ntpsec.service\nLoadState=loaded\nActiveState=active"}},
+		{name: "state unavailable", fail: "show", wantError: true},
+		{name: "unknown active state", providers: map[string]string{"chrony.service": "LoadState=loaded"}, wantError: true},
+		{name: "masked active provider prevents second daemon", providers: map[string]string{"chrony.service": "LoadState=masked\nActiveState=active", "systemd-timesyncd.service": "LoadState=loaded\nActiveState=inactive"}, wantError: true},
+		{name: "masked provider state unknown", providers: map[string]string{"chrony.service": "LoadState=masked"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			oldUnit, oldCommand := ntpTimeSyncUnit, timeSyncCommand
-			t.Cleanup(func() { ntpTimeSyncUnit, timeSyncCommand = oldUnit, oldCommand })
-			ntpTimeSyncUnit = func() string { return tc.unit }
+			oldCommand := timeSyncCommand
+			t.Cleanup(func() { timeSyncCommand = oldCommand })
 			var mutations []string
 			timeSyncCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("time sync commands must have a bounded timeout")
 				}
 				if name == "systemctl" && args[0] == "show" {
-					return []byte(tc.state), nil
+					if tc.fail == "show" {
+						return nil, errors.New("systemd unavailable")
+					}
+					if tc.providers != nil {
+						if properties, ok := tc.providers[args[1]]; ok {
+							return []byte(properties), nil
+						}
+					} else if args[1] == tc.unit && tc.unit != "" {
+						return []byte("LoadState=loaded\nActiveState=active"), nil
+					}
+					if tc.state == "masked" && args[1] == "systemd-timesyncd.service" {
+						return []byte("LoadState=masked\nActiveState=inactive"), nil
+					}
+					return []byte("LoadState=not-found\nActiveState=inactive"), nil
 				}
 				mutations = append(mutations, name+" "+strings.Join(args, " "))
 				if name == tc.fail || (len(args) > 0 && args[0] == tc.fail) {
-					return []byte("failed"), errors.New("failed")
+					return []byte("failed"), fmt.Errorf("injected %s failure", tc.fail)
 				}
 				return nil, nil
 			}
@@ -43,8 +66,8 @@ func TestStartSystemTimeSync(t *testing.T) {
 			if (err != nil) != tc.wantError {
 				t.Fatalf("error=%v, wantError=%v", err, tc.wantError)
 			}
-			if tc.state == "masked" && len(mutations) != 0 {
-				t.Fatalf("masked provider was changed: %v", mutations)
+			if tc.wantError && tc.unit == "" && !tc.install && len(mutations) != 0 {
+				t.Fatalf("uncertain/conflicting provider was changed: %v", mutations)
 			}
 			if tc.install && !strings.HasPrefix(mutations[0], "apt-get install -y --no-install-recommends systemd-timesyncd") {
 				t.Fatalf("missing provider was not installed: %v", mutations)
@@ -57,7 +80,7 @@ func TestStartSystemTimeSync(t *testing.T) {
 				if unit == "" {
 					unit = "systemd-timesyncd.service"
 				}
-				want := []string{"systemctl enable --now " + unit, "timedatectl set-ntp true", "systemctl restart " + unit}
+				want := []string{"systemctl enable --now " + unit, "systemctl restart " + unit, "systemctl is-active --quiet " + unit}
 				if tc.install {
 					want = append([]string{"apt-get install -y --no-install-recommends systemd-timesyncd"}, want...)
 				}

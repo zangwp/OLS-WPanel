@@ -29,6 +29,12 @@
 .security-credential-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 20px; }
 .security-enrollment { padding: 18px; margin: 16px 0; background: var(--panel-surface-muted); border: 1px solid var(--panel-border); border-radius: 8px; }
 .security-enrollment-step { font-weight: 600; margin-bottom: 14px; }
+.security-enrollment-grid { display: grid; gap: 24px; }
+.security-enrollment-grid.has-qr { grid-template-columns: repeat(auto-fit, minmax(min(100%, 256px), 1fr)); }
+.security-enrollment-qr { width: 256px; max-width: 100%; margin: 0; justify-self: center; }
+.security-enrollment-qr img { display: block; width: 100%; height: auto; background: #fff; image-rendering: pixelated; }
+.security-enrollment-qr figcaption { margin-top: 10px; color: var(--panel-muted); font-size: 12px; line-height: 1.8; text-align: center; }
+.security-enrollment-manual { min-width: 0; }
 .security-enrollment .security-muted { margin: 8px 0; }
 .security-mfa-form > .security-muted:last-child { margin-top: 15px; }
 .security-recovery { padding: 22px; background: var(--panel-warning-soft); border: 1px solid var(--panel-warning-border); border-radius: 9px; max-width: 800px; }
@@ -56,7 +62,7 @@
     .security-center-nav strong { font-size: 13px; }
     .security-center-nav span { font-size: 11px; }
     .security-section-title { font-size: 20px; }
-    .security-credential-fields { grid-template-columns: 1fr; }
+    .security-credential-fields, .security-enrollment-grid.has-qr { grid-template-columns: 1fr; }
     .security-recovery { padding: 16px; }
     .security-recovery-codes { grid-template-columns: 1fr; padding: 12px; }
     .security-recovery-codes code { font-size: 12px; }

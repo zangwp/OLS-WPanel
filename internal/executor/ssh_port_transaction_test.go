@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,8 +13,12 @@ import (
 )
 
 func TestSSHPortTransaction(t *testing.T) {
-	for _, failReload := range []bool{false, true} {
-		t.Run(fmt.Sprintf("reload_failure_%v", failReload), func(t *testing.T) {
+	for _, sample := range []struct {
+		name                               string
+		failReload, resumeCLI, saveFailure bool
+	}{{"reload_failure_false", false, false, false}, {"reload_failure_true", true, false, false}, {"cli_new_process", false, true, false}, {"cli_state_save_failure", false, true, true}} {
+		t.Run(sample.name, func(t *testing.T) {
+			failReload := sample.failReload
 			oldConfig, oldJail, oldRun, oldDefaults := sshConfigPath, sshJailPath, sshMoveRunDirectory, sshDefaultsPath
 			oldCmd, oldAvailable, oldPersist, oldMove := portCommand, sshSystemdAvailable, persistAccessRules, sshMove
 			defer func() {
@@ -152,7 +157,25 @@ func TestSSHPortTransaction(t *testing.T) {
 				saved = true
 				return nil
 			}
-			change, e := BeginSSHPortChange(2222, "203.0.113.9")
+			var change SSHPortChange
+			var e error
+			stateDir := filepath.Join(dir, "cli-private")
+			storage := fixtureVPSCLIStorage()
+			if sample.resumeCLI {
+				if sample.saveFailure {
+					storage.writeFile = func(string, []byte) error { return errors.New("fixture storage failure") }
+				}
+				result, err := beginVPSCLISSHChangeWithStorage(stateDir, 2222, "203.0.113.9", storage)
+				change, e = result.SSHPortChange, err
+			} else {
+				change, e = BeginSSHPortChange(2222, "203.0.113.9")
+			}
+			if sample.saveFailure {
+				if e == nil || !strings.Contains(e.Error(), "自动恢复任务仍有效") || !armed || len(ports(sshConfigPath)) != 2 || saved {
+					t.Fatalf("state failure lost independent watchdog: %v", e)
+				}
+				return
+			}
 			if failReload {
 				if e == nil || !restored || table != initial || saved {
 					t.Fatalf("failed transaction not restored: %v", e)
@@ -172,11 +195,40 @@ func TestSSHPortTransaction(t *testing.T) {
 			if e = ConfirmSSHPortChange(change.Token); e == nil {
 				t.Fatal("confirmation bypassed proof")
 			}
-			if e = os.WriteFile(filepath.Join(sshMove.dir, "verified"), []byte(change.Token), 0600); e != nil {
-				t.Fatal(e)
-			}
-			if e = ConfirmSSHPortChange(change.Token); e != nil {
-				t.Fatal(e)
+			if sample.resumeCLI {
+				data, err := os.ReadFile(filepath.Join(stateDir, "ssh-pending.json"))
+				var snapshot vpsCLISSHState
+				if err != nil || json.Unmarshal(data, &snapshot) != nil {
+					t.Fatal("missing cross-process SSH state")
+				}
+				// Model the original CLI process exiting: finalization must not
+				// depend on its global token, paths or captured expected policy.
+				sshMove.SSHPortChange = SSHPortChange{}
+				sshMove.dir, sshMove.service, sshMove.expectedConfig, sshMove.expectedTable = "", "", "", ""
+				if _, err = confirmVPSCLISSHChangeWithStorage(stateDir, change.Token, "203.0.113.9 1234 192.0.2.10 22", storage); err == nil {
+					t.Fatal("old SSH connection confirmed migration")
+				}
+				if _, err = os.Stat(filepath.Join(snapshot.Directory, "verified")); !os.IsNotExist(err) {
+					t.Fatal("proof created before new connection validation")
+				}
+				armed = false
+				if _, err = confirmVPSCLISSHChangeWithStorage(stateDir, change.Token, "203.0.113.9 1234 192.0.2.10 2222", storage); err == nil {
+					t.Fatal("missing watchdog accepted for cross-process finalization")
+				}
+				if _, err = os.Stat(filepath.Join(snapshot.Directory, "verified")); !os.IsNotExist(err) {
+					t.Fatal("proof created without an independent rollback task")
+				}
+				armed = true
+				if _, err = confirmVPSCLISSHChangeWithStorage(stateDir, change.Token, "203.0.113.9 1234 192.0.2.10 2222", storage); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if e = os.WriteFile(filepath.Join(sshMove.dir, "verified"), []byte(change.Token), 0600); e != nil {
+					t.Fatal(e)
+				}
+				if e = ConfirmSSHPortChange(change.Token); e != nil {
+					t.Fatal(e)
+				}
 			}
 			p := ports(sshConfigPath)
 			if !saved || restored || len(p) != 1 || p[0] != 2222 || strings.Contains(table, "tcp dport 22 ") {
