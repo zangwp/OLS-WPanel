@@ -290,6 +290,7 @@ func legacyEnableSiteRestoresMigratedMaintenanceLink(t *testing.T) {
 
 func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 	openTestDB(t)
+	stubOLSDefaultVHostOwnership(t)
 	oldDeleteUser, oldDeleteDatabase := deleteSiteUser, deleteSiteDatabase
 	deleteSiteUser = func(string) error { return nil }
 	deleteSiteDatabase = func(string, string, *config.Config) error { return nil }
@@ -303,6 +304,7 @@ func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 			RootPassword: "test",
 		},
 		Paths: config.PathsConfig{
+			OLSRoot:            filepath.Join(root, "openlitespeed"),
 			WWWRoot:            filepath.Join(root, "wwwroot"),
 			WWWLogs:            filepath.Join(root, "wwwlogs"),
 			OLSVHostsAvailable: filepath.Join(root, "openlitespeed-available"),
@@ -326,6 +328,7 @@ func TestDeleteSiteWithEnabledFileBackupCronDoesNotDeadlockQueue(t *testing.T) {
 		runOLSCommand = oldRunOLSCommand
 	})
 	for _, dir := range []string{
+		cfg.Paths.OLSRoot,
 		cfg.Paths.WWWRoot,
 		cfg.Paths.WWWLogs,
 		cfg.Paths.OLSVHostsAvailable,

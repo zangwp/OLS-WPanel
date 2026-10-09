@@ -28,6 +28,23 @@ func testOLSVHostData(root string) *OLSVHostData {
 	}
 }
 
+// Tests of registry behavior do not need a host www-data account or permission
+// to change file ownership. The owner validation tests below supply their own
+// lookup and chown behavior so they still exercise those failure branches.
+func stubOLSDefaultVHostOwnership(t *testing.T) {
+	t.Helper()
+	oldLookup := lookupOLSDefaultVHostUser
+	oldChown := chownOLSDefaultVHostRoot
+	lookupOLSDefaultVHostUser = func(string) (*user.User, error) {
+		return &user.User{Username: "www-data", Uid: "33", Gid: "33"}, nil
+	}
+	chownOLSDefaultVHostRoot = func(string, int, int) error { return nil }
+	t.Cleanup(func() {
+		lookupOLSDefaultVHostUser = oldLookup
+		chownOLSDefaultVHostRoot = oldChown
+	})
+}
+
 func TestRenderOLSVHostIncludesLSPHPAndLiteSpeedCache(t *testing.T) {
 	old := config.AppConfig
 	config.AppConfig = nil
@@ -303,7 +320,7 @@ func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
 
 func TestEnsureOLSDefaultVHostRejectsPrivilegedOwner(t *testing.T) {
 	root := t.TempDir()
-	paths := olsRuntimePaths{managed: filepath.Join(root, "sites.conf")}
+	paths := olsRuntimePaths{root: root, managed: filepath.Join(root, "sites.conf")}
 	oldLookup := lookupOLSDefaultVHostUser
 	oldChown := chownOLSDefaultVHostRoot
 	lookupOLSDefaultVHostUser = func(string) (*user.User, error) {
@@ -326,7 +343,7 @@ func TestEnsureOLSDefaultVHostRejectsPrivilegedOwner(t *testing.T) {
 
 func TestEnsureOLSDefaultVHostReportsOwnerRepairFailure(t *testing.T) {
 	root := t.TempDir()
-	paths := olsRuntimePaths{managed: filepath.Join(root, "sites.conf")}
+	paths := olsRuntimePaths{root: root, managed: filepath.Join(root, "sites.conf")}
 	oldLookup := lookupOLSDefaultVHostUser
 	oldChown := chownOLSDefaultVHostRoot
 	lookupOLSDefaultVHostUser = func(string) (*user.User, error) {

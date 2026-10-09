@@ -301,12 +301,14 @@ func insertRegenTestWebsite(t *testing.T, domain, olsVHostConfigPath, status str
 func TestRegenerateAllSitesOLSConfigsKeepsPausedSitesDisabled(t *testing.T) {
 	openTestDB(t)
 	installStubOpenLiteSpeed(t)
+	stubOLSDefaultVHostOwnership(t)
 
 	baseDir := t.TempDir()
+	olsRoot := filepath.Join(baseDir, "openlitespeed")
 	sitesAvailable := filepath.Join(baseDir, "sites-available")
 	sitesEnabled := filepath.Join(baseDir, "sites-enabled")
 	backupDir := filepath.Join(baseDir, "backups")
-	for _, dir := range []string{sitesAvailable, sitesEnabled, backupDir} {
+	for _, dir := range []string{olsRoot, sitesAvailable, sitesEnabled, backupDir} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
@@ -316,6 +318,7 @@ func TestRegenerateAllSitesOLSConfigsKeepsPausedSitesDisabled(t *testing.T) {
 	config.AppConfig = &config.Config{
 		Panel: config.PanelConfig{BackupDir: backupDir},
 		Paths: config.PathsConfig{
+			OLSRoot:            olsRoot,
 			OLSVHostsAvailable: sitesAvailable,
 			OLSVHostsEnabled:   sitesEnabled,
 			LSPHPSocketDir:     filepath.Join(baseDir, "lsphp"),
