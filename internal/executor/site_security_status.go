@@ -26,7 +26,7 @@ func SetWebsiteSecurityCheck(report *models.WebsiteSecurityStatus, key, state st
 			if state == "effective" && (effective == nil || !*effective) {
 				state = "unknown"
 			}
-			report.Checks[i] = models.WebsiteSecurityCheck{Key: key, State: state, Configured: configured, Effective: effective}
+			report.Checks[i] = newWebsiteSecurityCheck(key, state, configured, effective, report.CheckedAt)
 			return
 		}
 	}
@@ -37,7 +37,7 @@ func securityBool(value bool) *bool { return &value }
 func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) models.WebsiteSecurityStatus {
 	report := models.WebsiteSecurityStatus{SiteID: site.ID, CheckedAt: time.Now().UTC().Format(time.RFC3339), Checks: make([]models.WebsiteSecurityCheck, 0, len(siteSecurityKeys))}
 	for _, key := range siteSecurityKeys {
-		report.Checks = append(report.Checks, models.WebsiteSecurityCheck{Key: key, State: "unknown"})
+		report.Checks = append(report.Checks, newWebsiteSecurityCheck(key, "unknown", nil, nil, report.CheckedAt))
 	}
 	set := func(key, state string, configured bool) {
 		SetWebsiteSecurityCheck(&report, key, state, securityBool(configured), nil)
@@ -62,6 +62,11 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 	}
 	cfg := config.AppConfig
 	if cfg == nil {
+		for i := range report.Checks {
+			if report.Checks[i].State != "unsupported" {
+				report.Checks[i].ReasonCode = "configuration_unavailable"
+			}
+		}
 		return report
 	}
 	vhost, readErr := readSiteSecurityFile(cfg.Paths.OLSVHostsAvailable, site.OLSVHostConfigPath, 256*1024)
@@ -138,17 +143,57 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 		for key, verified := range probes {
 			if verified {
 				SetWebsiteSecurityCheck(&report, key, "effective", securityBool(true), securityBool(true))
+				setWebsiteSecurityEvidence(&report, key, "path_denial_verified", "loopback_http", report.CheckedAt, nil)
 			}
 		}
 		if probes["_reachable"] && site.SiteType == "wordpress" {
-			if blockSQLi && !vhostChangedAt.IsZero() && HasRecentWPSecurityEvidence(site.LogDir, "sqli", vhostChangedAt) {
-				SetWebsiteSecurityCheck(&report, "sql_injection", "effective", securityBool(true), securityBool(true))
+			if blockSQLi {
+				set("sql_injection", "ready", true)
+				setWebsiteSecurityEvidence(&report, "sql_injection", "sqli_service_ready_no_event", "loopback_http", report.CheckedAt, nil)
+				if eventAt, ok := RecentWPSecurityEvidenceTime(site.LogDir, "sqli", vhostChangedAt); !vhostChangedAt.IsZero() && ok {
+					SetWebsiteSecurityCheck(&report, "sql_injection", "effective", securityBool(true), securityBool(true))
+					setWebsiteSecurityEvidence(&report, "sql_injection", "sqli_request_verified", "ols_security_log", eventAt.UTC().Format(time.RFC3339), nil)
+				}
 			}
-			if loginReady && HasRecentWPSecurityEvidence(site.LogDir, "login") && WPLoginFailureJailMatches(ctx, filepath.Join(site.LogDir, wpLoginFailureLogName)) {
-				SetWebsiteSecurityCheck(&report, "login_protection", "effective", securityBool(true), securityBool(true))
+			if loginReady {
+				if WPLoginFailureJailMatches(ctx, filepath.Join(site.LogDir, wpLoginFailureLogName)) {
+					set("login_protection", "ready", true)
+					setWebsiteSecurityEvidence(&report, "login_protection", "login_ready_no_event", "fail2ban_logpath", report.CheckedAt, nil)
+					if eventAt, ok := RecentWPSecurityEvidenceTime(site.LogDir, "login"); ok {
+						SetWebsiteSecurityCheck(&report, "login_protection", "effective", securityBool(true), securityBool(true))
+						setWebsiteSecurityEvidence(&report, "login_protection", "login_audit_verified", "wp_login_audit", eventAt.UTC().Format(time.RFC3339), nil)
+					}
+				} else {
+					setWebsiteSecurityEvidence(&report, "login_protection", "login_jail_not_monitoring", "wp_config", report.CheckedAt, nil)
+				}
 			}
 		}
 	}
+	for i := range report.Checks {
+		check := &report.Checks[i]
+		if site.Status != models.StatusActive {
+			check.CanVerify = false
+		}
+		if check.State == "error" {
+			switch check.Key {
+			case "sensitive_files", "uploads_php", "xmlrpc", "sql_injection":
+				check.ReasonCode = "ols_rules_not_confirmed"
+			case "application_passwords":
+				check.ReasonCode = "native_policy_not_confirmed"
+			case "file_editing", "wp_updates":
+				check.ReasonCode = "wp_policy_not_confirmed"
+			case "login_protection":
+				check.ReasonCode = "login_audit_not_ready"
+			}
+		}
+		if check.State == "configured" && (check.Key == "sensitive_files" || check.Key == "uploads_php" || check.Key == "xmlrpc" || check.Key == "sql_injection" || check.Key == "login_protection") && check.ReasonCode == "configured_not_run" {
+			check.ReasonCode = "http_control_not_verified"
+			if site.Status != models.StatusActive {
+				check.ReasonCode = "site_not_active"
+			}
+		}
+	}
+	applyCachedWebsiteSecurityVerification(site, &report)
 	return report
 }
 

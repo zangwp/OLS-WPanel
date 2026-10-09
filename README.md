@@ -37,7 +37,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 
 全新安装默认使用 **LSPHP 8.5、MariaDB 11.8**；可为网站增加 LSPHP 8.4 / 8.3。现有数据库保留当前系列，常规系统更新不会自动跨系列升级。
 
-界面采用浅色工作区与深蓝导航，提供中英文布局和手机端操作；看板集中展示资源指标，网站表格可横向滚动。账户安全入口位于“安全设置 → 账户登录”。双因素认证需要管理员主动绑定；启用前请按 [账户安全指南](docs/account-security.md) 单独备份 `account-mfa.key`，普通面板数据库下载不包含此密钥。
+界面采用浅色工作区与深蓝导航，提供中英文布局和手机端操作；看板集中展示资源指标，网站列表提供分组状态、搜索与筛选。网站详情中的登录地址、授权访问、缓存与安全证据说明见 [WordPress 访问与缓存指南](docs/wordpress-access-and-cache.md)。账户安全入口位于“安全设置 → 账户登录”。双因素认证需要管理员主动绑定；启用前请按 [账户安全指南](docs/account-security.md) 单独备份 `account-mfa.key`，普通面板数据库下载不包含此密钥。
 
 ## SSH 快捷命令
 

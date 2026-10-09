@@ -81,6 +81,34 @@ func TestAllWorkflowActionsArePinnedToCommitSHAs(t *testing.T) {
 	}
 }
 
+func legacyDistributionText(content string) string {
+	content = strings.ToLower(content)
+	// These compound names describe WordPress access through the panel, not a
+	// distribution identity. Keep substring detection for every other old name,
+	// including service units, directories and identifiers with legacy prefixes.
+	for _, feature := range []string{"wp" + "panelaccess", "wp" + "_panel_access", "wp" + "-panel-access"} {
+		content = strings.ReplaceAll(content, feature, "wordpress-administrator-access")
+	}
+	return content
+}
+
+func TestLegacyDistributionFeatureNamesRemainDistinct(t *testing.T) {
+	for _, feature := range []string{"WPPanelAccessHandler", "wpPanelAccess()", "wp_panel_access_tokens.go", "/api/wp-panel-access/login"} {
+		for _, old := range []string{"wpp" + "anel", "wp" + "_panel", "wp" + "-panel"} {
+			if strings.Contains(legacyDistributionText(feature), old) {
+				t.Fatalf("WordPress feature misidentified as a distribution: %s", feature)
+			}
+		}
+	}
+	for _, old := range []string{"wpp" + "anel", "wp" + "_panel", "wp" + "-panel", "wp" + " panel", "naiba" + "biji", "wpp" + "_optimizer"} {
+		for _, suffix := range []string{"", ".service", "/config.json", "_old", "-installer"} {
+			if !strings.Contains(legacyDistributionText("/usr/local/"+old+suffix), old) {
+				t.Fatalf("legacy distribution identity escaped detection: %s%s", old, suffix)
+			}
+		}
+	}
+}
+
 func TestLegacyDistributionNamesDoNotReturn(t *testing.T) {
 	legacyNames := []string{
 		"naiba" + "biji",
@@ -120,7 +148,7 @@ func TestLegacyDistributionNamesDoNotReturn(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		lowerContent := strings.ToLower(string(content))
+		lowerContent := legacyDistributionText(string(content))
 		for _, legacyName := range legacyNames {
 			if strings.Contains(lowerContent, legacyName) {
 				t.Errorf("legacy distribution name %q found in %s", legacyName, path)

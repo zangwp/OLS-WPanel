@@ -1,0 +1,122 @@
+{{define "wordpress_access"}}
+<section id="site-wordpress-access" x-show="detailTab === 'overview' && site.site_type === 'wordpress'" x-data="wordpressPanelAccess()" class="card wp-access-card" :aria-busy="loading || busy">
+    <div class="site-security-summary"><div><h3>{{t .Lang "wp_access.title"}}</h3><p>{{t .Lang "wp_access.subtitle"}}</p></div><button type="button" @click="load()" :disabled="loading || busy" class="btn-secondary">{{t .Lang "common.refresh"}}</button></div>
+    <p x-show="error" x-cloak role="alert" class="text-sm text-red-400 mb-4" x-text="error"></p>
+    <p x-show="loading && !status" class="text-sm text-gray-400" x-text="t('common.loading')"></p>
+    <template x-if="status"><div>
+        <div class="wp-access-address"><div><span class="label" x-text="status.installed ? t('wp_access.login_address') : t('wp_access.install_address')"></span><a :href="safeAddress(status.installed ? status.login_url : status.install_url) || '#'" target="_blank" rel="noopener noreferrer" x-text="safeAddress(status.installed ? status.login_url : status.install_url) || '—'"></a><p x-show="status.installed" class="text-xs text-gray-500 mt-2" x-text="t('wp_access.source_' + (status.login_source || 'native'))"></p></div><button type="button" class="btn-secondary" @click="copyAddress()" :disabled="!safeAddress(status.installed ? status.login_url : status.install_url)">{{t .Lang "common.copy"}}</button></div>
+        <p x-show="!status.installed" class="text-sm text-gray-400 mt-3">{{t .Lang "wp_access.install_notice"}}</p>
+        <div class="flex flex-wrap items-center gap-2 mt-4"><a :href="safeAddress(status.installed ? status.login_url : status.install_url) || '#'" target="_blank" rel="noopener noreferrer" class="btn-secondary" x-text="status.installed ? t('wp_access.open_login') : t('wp_access.open_install')"></a><button type="button" class="btn-primary" x-show="status.installed" :disabled="!status.sso_enabled || !status.sso_available || busy || loading || !status.administrators?.length" @click="loginOpen = !loginOpen" :aria-expanded="loginOpen">{{t .Lang "wp_access.one_click"}}</button></div>
+        <p x-show="status.installed" class="text-sm text-gray-500 mt-3" x-text="reasonText()"></p>
+        <form x-show="loginOpen && status.sso_enabled && status.sso_available" x-cloak @submit.prevent="login()" class="wp-access-form">
+            <label class="block"><span class="label">{{t .Lang "wp_access.administrator"}}</span><select x-model="administratorID" class="input-field" required :disabled="busy"><option value="">{{t .Lang "wp_access.choose_administrator"}}</option><template x-for="administrator in status.administrators || []" :key="administrator.id"><option :value="String(administrator.id)" x-text="administrator.display_name + ' (' + administrator.login + ')'"></option></template></select></label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4"><label><span class="label">{{t .Lang "wp_access.panel_password"}}</span><input type="password" x-model="password" autocomplete="current-password" required :disabled="busy" class="input-field"></label><label><span class="label">{{t .Lang "wp_access.panel_code"}}</span><input type="text" x-model="code" autocomplete="one-time-code" :disabled="busy" class="input-field"></label></div>
+            <p class="text-xs text-gray-500 mt-3">{{t .Lang "wp_access.ticket_notice"}}</p>
+            <div class="flex flex-wrap gap-2 mt-4"><button type="submit" class="btn-primary" :disabled="busy || loading || !administratorID || !password" x-text="busy ? t('wp_access.authorizing') : t('wp_access.authorize_login')"></button><button type="button" class="btn-secondary" :disabled="busy" @click="closeLogin()">{{t .Lang "common.cancel"}}</button></div>
+        </form>
+        <details class="wp-access-settings mt-5" x-show="status.installed" :open="settingsOpen" @toggle="settingsOpen = $el.open"><summary>{{t .Lang "wp_access.settings_title"}}</summary>
+            <form @submit.prevent="save()" class="pt-4">
+                <label class="block"><span class="label">{{t .Lang "wp_access.manual_url"}}</span><input type="url" x-model="manualURL" class="input-field" :disabled="busy" placeholder="https://example.com/my-login/"><span class="block text-xs text-gray-500 mt-2">{{t .Lang "wp_access.manual_help"}}</span></label>
+                <label class="block mt-4"><span class="label">{{t .Lang "wp_access.custom_suffix"}}</span><input type="text" x-model="suffix" class="input-field" :disabled="busy || status.external_login_control" autocomplete="off" maxlength="64" placeholder="my-login"><span class="block text-xs text-gray-500 mt-2">{{t .Lang "wp_access.suffix_help"}}</span></label>
+                <p x-show="status.external_login_control" class="text-sm text-yellow-300 mt-2">{{t .Lang "wp_access.external_control"}}</p>
+                <label class="flex items-start gap-2 mt-4 text-sm"><input type="checkbox" x-model="enableSSO" :disabled="busy || !!status.authentication_plugins?.length" class="mt-1"><span>{{t .Lang "wp_access.enable_sso"}}<span class="block text-xs text-gray-500 mt-1">{{t .Lang "wp_access.enable_help"}}</span></span></label>
+                <p x-show="status.authentication_plugins?.length" class="text-sm text-yellow-300 mt-2" x-text="t('wp_access.authentication_conflict') + ': ' + (status.authentication_plugins || []).join(', ')"></p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4"><label><span class="label">{{t .Lang "wp_access.panel_password"}}</span><input type="password" x-model="settingsPassword" required autocomplete="current-password" :disabled="busy" class="input-field"></label><label><span class="label">{{t .Lang "wp_access.panel_code"}}</span><input type="text" x-model="settingsCode" autocomplete="one-time-code" :disabled="busy" class="input-field"></label></div>
+                <p x-show="site.file_lock_enabled" class="text-sm text-yellow-300 mt-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
+                <div class="flex flex-wrap gap-2 mt-4"><button type="submit" class="btn-primary" :disabled="busy || loading || !settingsPassword || site.file_lock_enabled" x-text="busy ? t('common.saving') : t('website.save_settings')"></button><button type="button" class="btn-secondary" :disabled="busy" @click="revoke()">{{t .Lang "wp_access.revoke"}}</button></div>
+                <p x-show="status.recovery_file" class="text-xs text-gray-500 mt-4" x-text="t('wp_access.recovery_help') + ' ' + status.recovery_file"></p>
+            </form>
+        </details>
+    </div></template>
+</section>
+{{end}}
+{{define "wordpress_access_script"}}
+<script>
+function wordpressPanelAccess() {
+    return {
+        status: null, loading: false, busy: false, error: '', generation: 0, readController: null,
+        manualURL: '', suffix: '', enableSSO: false, administratorID: '',
+        password: '', code: '', settingsPassword: '', settingsCode: '', loginOpen: false, settingsOpen: false,
+        init() {
+            this.$watch?.('detailTab', tab => {
+                if (tab === 'overview' && !this.status) this.load();
+                if (tab !== 'overview') { this.cancelRead(); this.closeLogin(); this.settingsPassword = ''; this.settingsCode = ''; }
+            });
+            if (this.detailTab === 'overview') this.load();
+        },
+        cancelRead() { ++this.generation; this.readController?.abort(); this.readController = null; this.loading = false; },
+        safeAddress(raw) {
+            try {
+                const url = new URL(raw), expected = new URL((this.site.ssl_enabled ? 'https://' : 'http://') + this.site.domain);
+                if (url.origin !== expected.origin || url.username || url.password || url.hash || !['http:','https:'].includes(url.protocol)) return '';
+                return url.href;
+            } catch (_) { return ''; }
+        },
+        reasonText() { const key = 'wp_access.reason_' + (this.status?.reason_code || 'unavailable'); const value = t(key); return value === key ? t('wp_access.reason_unavailable') : value; },
+        errorText(error) { const key = 'wp_access.error_' + String(error.code || '').replace(/^wp_access_/, ''); const value = t(key); return value === key ? error.message || t('common.operation_failed') : value; },
+        async load() {
+            if (!this.site?.id || this.site.site_type !== 'wordpress' || (this.detailTab && this.detailTab !== 'overview') || this.loading || this.busy) return;
+            const generation = ++this.generation, siteID = this.site.id;
+            const controller = new AbortController(); this.readController = controller;
+            this.loading = true; this.error = '';
+            try {
+                const response = await api('/websites/' + siteID + '/wp-panel-access', {silent:true,cache:'no-store',timeout:20000,signal:controller.signal});
+                if (!response.success || !response.data || typeof response.data.installed !== 'boolean') throw new Error(t('wp_access.reason_unavailable'));
+                if (generation !== this.generation || this.site?.id !== siteID) return;
+                this.status = response.data;
+                if (!this.settingsOpen) this.resetSettings();
+                const administrators = this.status.administrators || [];
+                if (!administrators.some(admin => String(admin.id) === this.administratorID)) this.administratorID = administrators.length === 1 ? String(administrators[0].id) : '';
+            } catch (error) { if (generation === this.generation) { this.status = null; this.error = this.errorText(error); } }
+            finally { if (generation === this.generation) { this.loading = false; this.readController = null; } }
+        },
+        resetSettings() { this.manualURL = this.status?.manual_login_url || ''; this.suffix = this.status?.login_suffix || ''; this.enableSSO = this.status?.sso_enabled === true; },
+        closeLogin() { this.loginOpen = false; this.password = ''; this.code = ''; },
+        async copyAddress() { const url = this.safeAddress(this.status?.installed ? this.status.login_url : this.status?.install_url); if (!url) return; try { await navigator.clipboard.writeText(url); showToast(t('common.copied'), 'success'); } catch (_) { this.error = t('common.operation_failed'); } },
+        async save() {
+            if (this.busy || this.loading || !this.settingsPassword || this.site?.file_lock_enabled) return;
+            const manualURL = this.manualURL.trim();
+            if (manualURL && !this.safeAddress(manualURL)) { this.error = t('wp_access.invalid_url'); return; }
+            this.busy = true; this.error = '';
+            try {
+                const response = await api('/websites/' + this.site.id + '/wp-panel-access', {method:'PUT',body:{manual_login_url:manualURL,login_suffix:this.suffix.trim(),sso_enabled:this.enableSSO,current_password:this.settingsPassword,code:this.settingsCode,confirm:true},silent:true,allowAuthFailure:true,timeout:30000});
+                if (!response.success) throw new Error(t('common.operation_failed'));
+                this.settingsOpen = false; this.closeLogin(); showToast(t('settings.saved'), 'success');
+            } catch (error) { this.error = this.errorText(error); }
+            finally { this.settingsPassword = ''; this.settingsCode = ''; this.busy = false; }
+            if (!this.error) await this.load();
+        },
+        async revoke() {
+            if (this.busy || this.loading) return;
+            this.busy = true; this.error = '';
+            try { await api('/websites/' + this.site.id + '/wp-panel-access/revoke', {method:'POST',body:{},silent:true}); this.closeLogin(); showToast(t('wp_access.revoked'), 'success'); }
+            catch (error) { this.error = this.errorText(error); }
+            finally { this.busy = false; }
+        },
+        async login() {
+            if (this.busy || this.loading || !this.status?.sso_enabled || !this.status?.sso_available || !this.password || !this.administratorID) return;
+            const targetName = 'ols_wp_' + crypto.randomUUID().replaceAll('-', ''), popup = window.open('about:blank', targetName);
+            if (!popup) { this.error = t('wp_access.popup_blocked'); return; }
+            popup.opener = null;
+            this.busy = true; this.error = '';
+            try {
+                const response = await api('/websites/' + this.site.id + '/wp-panel-access/login', {method:'POST',body:{administrator_id:Number(this.administratorID),current_password:this.password,code:this.code,confirm:true},silent:true,allowAuthFailure:true,timeout:30000});
+                const ticket = response.data, action = this.safeAddress(ticket?.action_url), expires = Date.parse(ticket?.expires_at);
+                const expectedPath = (this.status.installation_path || '/').replace(/\/$/, '') + '/index.php';
+                if (!response.success || !action || new URL(action).protocol !== 'https:' || new URL(action).pathname !== expectedPath || new URL(action).search || !/^[A-Za-z0-9_-]{43}$/.test(ticket?.token || '') || !/^[a-f0-9]{32}$/.test(ticket?.generation || '') || !Number.isFinite(expires) || expires <= Date.now() || expires > Date.now() + 65000) throw new Error(t('wp_access.invalid_ticket'));
+                const popupDocument = popup.document, referrer = popupDocument.createElement('meta'); referrer.name = 'referrer'; referrer.content = 'no-referrer'; popupDocument.head.append(referrer);
+                const form = popupDocument.createElement('form'); form.method = 'POST'; form.action = action; form.target = '_self'; form.style.display = 'none'; form.rel = 'noopener noreferrer';
+                for (const [name,value] of Object.entries({ols_wpanel_access_token:ticket.token,ols_wpanel_access_generation:ticket.generation})) { const field = popupDocument.createElement('input'); field.type = 'hidden'; field.name = name; field.value = value; form.append(field); }
+                popupDocument.body.append(form);
+                try { if (popup.closed) throw new Error(t('wp_access.popup_blocked')); form.submit(); } finally { form.remove(); }
+                this.loginOpen = false;
+            } catch (error) {
+                popup.close(); this.error = this.errorText(error);
+                try { await api('/websites/' + this.site.id + '/wp-panel-access/revoke', {method:'POST',body:{},silent:true}); } catch (_) {}
+            } finally { this.password = ''; this.code = ''; this.busy = false; }
+        },
+        destroy() { this.cancelRead(); this.password = ''; this.code = ''; this.settingsPassword = ''; this.settingsCode = ''; },
+    };
+}
+</script>
+{{end}}

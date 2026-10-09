@@ -1767,6 +1767,200 @@ var i18nKeys = []string{
 	"wp_update_log.event_result_failed",
 	"wp_update_log.event_result_interrupted",
 	"wp_update_log.event_result_manual",
+	"cache_status.attempt",
+	"cache_status.checked_at",
+	"cache_status.plugin_help",
+	"cache_status.redis_help",
+	"cache_status.result_bypass",
+	"cache_status.result_hit",
+	"cache_status.result_miss",
+	"cache_status.result_not_verified",
+	"cache_status.result_unknown",
+	"cache_status.server_configured",
+	"cache_status.server_misconfigured",
+	"cache_status.server_title",
+	"cache_status.server_unknown",
+	"cache_status.server_unsupported",
+	"cache_status.source_local",
+	"cache_status.verification_failed",
+	"cache_status.verify",
+	"cache_status.verify_help",
+	"cache_status.verify_title",
+	"cache_status.verifying",
+	"common.copied",
+	"common.copy",
+	"common.refresh",
+	"site_security.certificate_expiry",
+	"site_security.collected_at",
+	"site_security.data_unavailable",
+	"site_security.evidence",
+	"site_security.invalid_request",
+	"site_security.rate_limited",
+	"site_security.reason_configuration_check_failed",
+	"site_security.reason_configuration_unavailable",
+	"site_security.reason_configured_not_run",
+	"site_security.reason_core_application_passwords_disabled",
+	"site_security.reason_core_debug_display_disabled",
+	"site_security.reason_core_file_editor_disabled",
+	"site_security.reason_core_policy_not_enforced",
+	"site_security.reason_core_policy_verified",
+	"site_security.reason_core_runtime_unavailable",
+	"site_security.reason_core_updates_allowed",
+	"site_security.reason_disabled_by_policy",
+	"site_security.reason_http_control_not_verified",
+	"site_security.reason_https_setting_enabled",
+	"site_security.reason_invalid_host",
+	"site_security.reason_login_audit_not_ready",
+	"site_security.reason_login_audit_verified",
+	"site_security.reason_login_jail_not_monitoring",
+	"site_security.reason_login_ready_no_event",
+	"site_security.reason_native_policy_not_confirmed",
+	"site_security.reason_not_applicable",
+	"site_security.reason_not_checked",
+	"site_security.reason_ols_rules_not_confirmed",
+	"site_security.reason_path_denial_verified",
+	"site_security.reason_request_verified",
+	"site_security.reason_service_ready",
+	"site_security.reason_site_not_active",
+	"site_security.reason_sqli_request_verified",
+	"site_security.reason_sqli_service_ready_no_event",
+	"site_security.reason_tls_certificate_invalid",
+	"site_security.reason_tls_connection_unavailable",
+	"site_security.reason_tls_domain_mismatch",
+	"site_security.reason_tls_untrusted",
+	"site_security.reason_tls_verified",
+	"site_security.reason_wp_policy_not_confirmed",
+	"site_security.recent_event",
+	"site_security.settings",
+	"site_security.site_busy",
+	"site_security.site_not_active",
+	"site_security.site_not_found",
+	"site_security.source_fail2ban_logpath",
+	"site_security.source_isolated_wp_core",
+	"site_security.source_loopback_http",
+	"site_security.source_loopback_tls",
+	"site_security.source_ols_configuration",
+	"site_security.source_ols_security_log",
+	"site_security.source_saved_configuration",
+	"site_security.source_wp_config",
+	"site_security.source_wp_login_audit",
+	"site_security.state_ready",
+	"site_security.state_runtime_verified",
+	"site_security.summary_help",
+	"site_security.verification_failed",
+	"site_security.verify",
+	"site_security.verifying",
+	"website.all_statuses",
+	"website.file_manage",
+	"website.filter_status",
+	"website.registry_clear_filters",
+	"website.registry_connection",
+	"website.registry_count",
+	"website.registry_expired",
+	"website.registry_files_for",
+	"website.registry_https_configured",
+	"website.registry_https_missing",
+	"website.registry_intro",
+	"website.registry_manage",
+	"website.registry_monitoring",
+	"website.registry_no_matches",
+	"website.registry_site",
+	"website.registry_status_creating",
+	"website.registry_status_error",
+	"website.search_sites",
+	"wp_access.administrator",
+	"wp_access.authentication_conflict",
+	"wp_access.authorize_login",
+	"wp_access.authorizing",
+	"wp_access.choose_administrator",
+	"wp_access.custom_suffix",
+	"wp_access.enable_help",
+	"wp_access.enable_sso",
+	"wp_access.external_control",
+	"wp_access.install_address",
+	"wp_access.install_notice",
+	"wp_access.invalid_ticket",
+	"wp_access.invalid_url",
+	"wp_access.login_address",
+	"wp_access.manual_help",
+	"wp_access.manual_url",
+	"wp_access.one_click",
+	"wp_access.open_install",
+	"wp_access.open_login",
+	"wp_access.panel_code",
+	"wp_access.panel_password",
+	"wp_access.popup_blocked",
+	"wp_access.reason_unavailable",
+	"wp_access.recovery_help",
+	"wp_access.revoke",
+	"wp_access.revoked",
+	"wp_access.settings_title",
+	"wp_access.source_manual",
+	"wp_access.source_native",
+	"wp_access.source_panel",
+	"wp_access.source_plugin",
+	"wp_access.subtitle",
+	"wp_access.suffix_help",
+	"wp_access.ticket_notice",
+	"wp_access.title",
+	"cache_status.reason_cache_header_absent",
+	"cache_status.reason_cache_header_ambiguous",
+	"cache_status.reason_cache_header_unrecognized",
+	"cache_status.reason_cache_hit_observed",
+	"cache_status.reason_cache_miss_observed",
+	"cache_status.reason_cache_module_invalid",
+	"cache_status.reason_cache_module_missing",
+	"cache_status.reason_config_unavailable",
+	"cache_status.reason_http_status",
+	"cache_status.reason_inactive_site",
+	"cache_status.reason_inactive_vhost",
+	"cache_status.reason_invalid_origin",
+	"cache_status.reason_module_ready",
+	"cache_status.reason_non_html_response",
+	"cache_status.reason_not_verified",
+	"cache_status.reason_origin_unreachable",
+	"cache_status.reason_private_or_uncacheable_response",
+	"cache_status.reason_redirect",
+	"cache_status.reason_request_timeout",
+	"cache_status.reason_response_unavailable",
+	"cache_status.reason_tls_verification_failed",
+	"cache_status.reason_unsafe_public_cache_default",
+	"cache_status.reason_unsupported_site",
+	"cache_status.reason_untrusted_vhost",
+	"wp_access.error_administrator_not_found",
+	"wp_access.error_authentication_plugin",
+	"wp_access.error_bridge_unavailable",
+	"wp_access.error_broker_unavailable",
+	"wp_access.error_confirmation_required",
+	"wp_access.error_curl_unavailable",
+	"wp_access.error_database_mismatch",
+	"wp_access.error_external_login_control",
+	"wp_access.error_https_required",
+	"wp_access.error_invalid_login_url",
+	"wp_access.error_invalid_site_url",
+	"wp_access.error_invalid_suffix",
+	"wp_access.error_multisite_unsupported",
+	"wp_access.error_not_installed",
+	"wp_access.error_operation_failed",
+	"wp_access.error_permalinks_required",
+	"wp_access.error_rollback_failed",
+	"wp_access.error_route_unavailable",
+	"wp_access.error_runtime_unavailable",
+	"wp_access.error_settings_unavailable",
+	"wp_access.error_site_unavailable",
+	"wp_access.error_sso_disabled",
+	"wp_access.error_suffix_conflict",
+	"wp_access.error_too_many_administrators",
+	"wp_access.error_unmanaged_bridge",
+	"wp_access.reason_administrator_not_found",
+	"wp_access.reason_authentication_plugin",
+	"wp_access.reason_bridge_unavailable",
+	"wp_access.reason_broker_unavailable",
+	"wp_access.reason_curl_unavailable",
+	"wp_access.reason_external_login_control",
+	"wp_access.reason_https_required",
+	"wp_access.reason_not_installed",
+	"wp_access.reason_sso_disabled",
 }
 
 func SetupRouter(cfg *config.Config, tmplFS embed.FS, staticFS embed.FS, version string, configPath string) *gin.Engine {
@@ -1780,6 +1974,10 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.SetTrustedProxies(nil)
+	messageCatalog, err := i18n.NewTemplateMessages(tmplFS, i18nKeys)
+	if err != nil {
+		log.Panicf("cannot initialize page translations: %v", err)
+	}
 
 	r.Use(middleware.CustomRecovery())
 	r.Use(middleware.SecurityHeaders())
@@ -1845,6 +2043,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 
 	staticPrefix := "/" + cfg.Panel.RandomSuffix + "/assets"
 	staticFileSystem, _ := fs.Sub(staticFS, ".")
+	r.Use(middleware.VersionedStaticCache(staticPrefix, version, staticFileSystem))
 	r.StaticFS(staticPrefix, http.FS(staticFileSystem))
 
 	r.GET("/", func(c *gin.Context) {
@@ -1890,7 +2089,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 			"AssetPrefix":  prefix + "/assets",
 			"CSRFToken":    csrfToken,
 			"Lang":         lang,
-			"MessagesJSON": i18n.MessagesJSON(lang, i18nKeys),
+			"MessagesJSON": messageCatalog.JSON(lang, "login"),
 		})
 	})
 	panelGroup.GET("/api/auth/csrf-token", func(c *gin.Context) {
@@ -1983,6 +2182,12 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.POST("/api/websites/ssl-preflight", websiteHandler.SSLPreflight)
 	protected.GET("/api/websites/:id", websiteHandler.Get)
 	protected.GET("/api/websites/:id/security-status", websiteHandler.SecurityStatus)
+	protected.POST("/api/websites/:id/security-verify", websiteHandler.VerifySecurityStatus)
+	wpPanelAccessHandler := &handlers.WPPanelAccessHandler{Auth: authHandler}
+	protected.GET("/api/websites/:id/wp-panel-access", wpPanelAccessHandler.Status)
+	protected.PUT("/api/websites/:id/wp-panel-access", wpPanelAccessHandler.Save)
+	protected.POST("/api/websites/:id/wp-panel-access/login", wpPanelAccessHandler.Login)
+	protected.POST("/api/websites/:id/wp-panel-access/revoke", wpPanelAccessHandler.Revoke)
 	protected.GET("/api/websites/:id/wp-inventory", wpInventoryHandler.Summary)
 	protected.POST("/api/websites/:id/wp-inventory/refresh", wpInventoryHandler.Refresh)
 	protected.GET("/api/websites/:id/wp-inventory/tasks/:task_id", wpInventoryHandler.Task)
@@ -2032,6 +2237,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.PUT("/api/websites/:id/cache", websiteHandler.UpdateCache)
 	protected.DELETE("/api/websites/:id/cache", websiteHandler.ClearCache)
 	protected.GET("/api/websites/:id/litespeed-cache/status", websiteHandler.LiteSpeedCacheStatus)
+	protected.POST("/api/websites/:id/litespeed-cache/verify", websiteHandler.VerifyLiteSpeedPageCache)
 	protected.POST("/api/websites/:id/litespeed-cache/migrate", websiteHandler.MigrateLiteSpeedCacheSettings)
 	protected.DELETE("/api/websites/:id/redis-object-cache", websiteHandler.ClearRedisObjectCache)
 	protected.PUT("/api/websites/:id/wp-optimizations", websiteHandler.SaveWPOptimizations)
@@ -2197,71 +2403,71 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.POST("/api/log-analysis/:id/diagnostic-session", logAnalysisHandler.CreateDiagnosticSession)
 
 	protected.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "dashboard.html", pageData(suffix, "dashboard", "dashboard_content", c))
+		c.HTML(http.StatusOK, "dashboard.html", pageData(suffix, "dashboard", "dashboard_content", c, messageCatalog))
 	})
 	protected.GET("/websites", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "websites.html", pageData(suffix, "websites", "websites_content", c))
+		c.HTML(http.StatusOK, "websites.html", pageData(suffix, "websites", "websites_content", c, messageCatalog))
 	})
 	protected.GET("/wordpress-overview", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "wordpress_overview.html", pageData(suffix, "wordpress_overview", "wordpress_overview_content", c))
+		c.HTML(http.StatusOK, "wordpress_overview.html", pageData(suffix, "wordpress_overview", "wordpress_overview_content", c, messageCatalog))
 	})
 	protected.GET("/websites/new", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "website_new.html", pageData(suffix, "websites", "websites_new_content", c))
+		c.HTML(http.StatusOK, "website_new.html", pageData(suffix, "websites", "websites_new_content", c, messageCatalog))
 	})
 	protected.GET("/websites/:id", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "website_detail.html", pageData(suffix, "websites", "websites_detail_content", c))
+		c.HTML(http.StatusOK, "website_detail.html", pageData(suffix, "websites", "websites_detail_content", c, messageCatalog))
 	})
 	protected.GET("/websites/:id/wordpress", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "wordpress_site_detail.html", pageData(suffix, "wordpress_overview", "wordpress_site_detail_content", c))
+		c.HTML(http.StatusOK, "wordpress_site_detail.html", pageData(suffix, "wordpress_overview", "wordpress_site_detail_content", c, messageCatalog))
 	})
 	protected.GET("/databases", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "databases.html", pageData(suffix, "databases", "databases_content", c))
+		c.HTML(http.StatusOK, "databases.html", pageData(suffix, "databases", "databases_content", c, messageCatalog))
 	})
 	protected.GET("/databases/:id", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "database_detail.html", pageData(suffix, "databases", "database_detail_content", c))
+		c.HTML(http.StatusOK, "database_detail.html", pageData(suffix, "databases", "database_detail_content", c, messageCatalog))
 	})
 	protected.GET("/ai-diagnostics", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "ai_diagnostics.html", pageData(suffix, "ai-diagnostics", "ai_diagnostics_content", c))
+		c.HTML(http.StatusOK, "ai_diagnostics.html", pageData(suffix, "ai-diagnostics", "ai_diagnostics_content", c, messageCatalog))
 	})
 	protected.GET("/log-analysis", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "log_analysis.html", pageData(suffix, "log-analysis", "log_analysis_content", c))
+		c.HTML(http.StatusOK, "log_analysis.html", pageData(suffix, "log-analysis", "log_analysis_content", c, messageCatalog))
 	})
 	protected.GET("/cron", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "cron.html", pageData(suffix, "cron", "cron_content", c))
+		c.HTML(http.StatusOK, "cron.html", pageData(suffix, "cron", "cron_content", c, messageCatalog))
 	})
 	protected.GET("/backups", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "backups.html", pageData(suffix, "backups", "backups_content", c))
+		c.HTML(http.StatusOK, "backups.html", pageData(suffix, "backups", "backups_content", c, messageCatalog))
 	})
 	protected.GET("/backups/remote-settings", func(c *gin.Context) {
-		data := pageData(suffix, "backups", "remote_backup_settings_content", c)
+		data := pageData(suffix, "backups", "remote_backup_settings_content", c, messageCatalog)
 		data["Title"] = i18n.T(i18n.LangFromRequest(c.Request), "backups.remote_settings")
 		c.HTML(http.StatusOK, "remote_backup_settings.html", data)
 	})
 	protected.GET("/firewall", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "firewall.html", pageData(suffix, "firewall", "firewall_content", c))
+		c.HTML(http.StatusOK, "firewall.html", pageData(suffix, "firewall", "firewall_content", c, messageCatalog))
 	})
 	protected.GET("/files", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "files.html", pageData(suffix, "files", "files_content", c))
+		c.HTML(http.StatusOK, "files.html", pageData(suffix, "files", "files_content", c, messageCatalog))
 	})
 	protected.GET("/security", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "security.html", pageData(suffix, "security", "security_content", c))
+		c.HTML(http.StatusOK, "security.html", pageData(suffix, "security", "security_content", c, messageCatalog))
 	})
 	protected.GET("/alert", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "alert.html", pageData(suffix, "alert", "alert_content", c))
+		c.HTML(http.StatusOK, "alert.html", pageData(suffix, "alert", "alert_content", c, messageCatalog))
 	})
 	protected.GET("/vps", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "vps.html", pageData(suffix, "vps", "vps_content", c))
+		c.HTML(http.StatusOK, "vps.html", pageData(suffix, "vps", "vps_content", c, messageCatalog))
 	})
 	protected.GET("/settings", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "settings.html", pageData(suffix, "settings", "settings_content", c))
+		c.HTML(http.StatusOK, "settings.html", pageData(suffix, "settings", "settings_content", c, messageCatalog))
 	})
 	protected.GET("/help", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "help.html", pageData(suffix, "help", "help_content", c))
+		c.HTML(http.StatusOK, "help.html", pageData(suffix, "help", "help_content", c, messageCatalog))
 	})
 
 	softwareHandler := &handlers.SoftwareHandler{}
 	protected.GET("/software", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "software.html", pageData(suffix, "software", "software_content", c))
+		c.HTML(http.StatusOK, "software.html", pageData(suffix, "software", "software_content", c, messageCatalog))
 	})
 	protected.GET("/api/software", softwareHandler.List)
 	protected.GET("/api/software/development-tools", softwareHandler.DevelopmentTools)
@@ -2354,7 +2560,7 @@ var pageTitleKeys = map[string]string{
 	"help":               "nav.help",
 }
 
-func pageData(suffix string, active string, contentTpl string, c *gin.Context) gin.H {
+func pageData(suffix string, active string, contentTpl string, c *gin.Context, catalog *i18n.TemplateMessages) gin.H {
 	i18n.MaybeSetLanguageCookie(c.Writer, c.Request)
 	lang := i18n.LangFromRequest(c.Request)
 	csrfToken := middleware.GetCSRFToken(c)
@@ -2370,6 +2576,6 @@ func pageData(suffix string, active string, contentTpl string, c *gin.Context) g
 		"AssetPrefix":     "/" + suffix + "/assets",
 		"CSRFToken":       csrfToken,
 		"Lang":            lang,
-		"MessagesJSON":    i18n.MessagesJSON(lang, i18nKeys),
+		"MessagesJSON":    catalog.JSON(lang, contentTpl),
 	}
 }

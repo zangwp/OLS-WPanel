@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/main.css?v={{.AssetVersion}}">
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/palette.css?v={{.AssetVersion}}">
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/theme.css?v={{.AssetVersion}}">
-    <link rel="stylesheet" href="{{.AssetPrefix}}/css/overview.css?v={{.AssetVersion}}">
+    {{if or (eq .Active "dashboard") (eq .Active "websites")}}<link rel="stylesheet" href="{{.AssetPrefix}}/css/overview.css?v={{.AssetVersion}}">{{end}}
     {{if eq .Active "security"}}<link rel="stylesheet" href="{{.AssetPrefix}}/css/security.css?v={{.AssetVersion}}">{{end}}
     <script>
         window.OLS_WPANEL_I18N = { lang: "{{.Lang}}", messages: {{.MessagesJSON}} };
@@ -43,15 +43,14 @@
              }
          }"
          @resize.window="mobileLayout = window.innerWidth < 1024; sidebarOpen = !mobileLayout"
-         @keydown.escape.window="closeSidebar()"
-         x-cloak>
+         @keydown.escape.window="closeSidebar()">
         <!-- Mobile overlay -->
-        <div x-show="sidebarOpen" @click="closeSidebar()" x-transition.opacity
+        <div x-show="sidebarOpen" @click="closeSidebar()" x-transition.opacity x-cloak
              class="lg:hidden fixed inset-0 bg-black/60 z-40"></div>
 
         <div class="panel-layout flex h-screen">
             <!-- Sidebar -->
-            <aside id="panel-sidebar" x-ref="sidebar" x-show="sidebarOpen" aria-label="{{.PanelTitle}}"
+            <aside id="panel-sidebar" x-ref="sidebar" x-show="sidebarOpen" x-cloak aria-label="{{.PanelTitle}}"
                    class="panel-sidebar fixed lg:static inset-y-0 left-0 z-40 w-64 flex-shrink-0 bg-gray-950 border-r border-gray-800 flex flex-col transition-transform duration-200"
                    :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'">
                 <div class="sidebar-brand p-4 border-b border-gray-800">
@@ -189,13 +188,14 @@
                         <span class="panel-context-current">{{.Title}}</span>
                     </div>
                     <span class="panel-topbar-brand" translate="no">{{.PanelTitle}}</span>
-                    <button type="button" x-ref="menuToggle" @click="toggleSidebar()" class="panel-menu-toggle relative z-50"
+                    <button type="button" x-ref="menuToggle" @click="toggleSidebar()" x-cloak class="panel-menu-toggle relative z-50"
                             aria-label="{{t .Lang "nav.menu"}}" aria-controls="panel-sidebar" :aria-expanded="sidebarOpen.toString()">
                         <svg x-show="!sidebarOpen" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                         <svg x-show="sidebarOpen" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </header>
-            <main id="panel-main" class="panel-main" tabindex="-1" :inert="sidebarOpen && mobileLayout">
+            <div class="panel-page-loading" x-show="false" role="status">{{t .Lang "common.loading"}}</div>
+            <main id="panel-main" class="panel-main" tabindex="-1" x-cloak :inert="sidebarOpen && mobileLayout">
                 <div class="panel-page-shell">
                 {{if eq .ContentTemplate "dashboard_content"}}{{template "dashboard_content" .}}{{end}}
                 {{if eq .ContentTemplate "websites_content"}}{{template "websites_content" .}}{{end}}
