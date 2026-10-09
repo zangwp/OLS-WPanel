@@ -1,9 +1,10 @@
 {{template "base" .}}
 {{define "websites_content"}}
-<div class="websites-page" x-data="websiteList()" x-init="fetchList()">
+<div class="websites-page" x-data="websiteList()" x-init="fetchList()" @keydown.escape.window="closeMore()" @resize.window="closeMore(false)" @scroll.window.capture="if ($event.target !== $refs.moreMenu) closeMore(false)">
     <div class="overview-heading websites-heading">
         <h1 class="page-title">{{t .Lang "nav.websites"}}</h1>
 		<div class="websites-heading-actions">
+            <button type="button" @click="fetchList()" :disabled="loading || Object.keys(actionBusy).length > 0" class="btn-secondary" x-text="loading ? t('website.loading') : t('website.refresh')"></button>
 			<a href="/{{.RandomSuffix}}/websites/new" class="btn-primary website-create-action">
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-width="1.8" d="M12 5v14M5 12h14"/></svg>
                 {{t .Lang "website.create_site"}}
@@ -13,89 +14,64 @@
 
     {{template "website_navigation" .}}
 
-    <!-- 重装 WordPress 对话框 -->
-    <div x-show="reinstallModal.show" x-cloak class="website-reinstall-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="reinstallModal.show = false">
-        <div class="website-reinstall-dialog bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="website-reinstall-title">
-            <h3 id="website-reinstall-title" class="text-lg font-bold text-white mb-2">
-                {{t .Lang "website.reinstall_wordpress"}} <span x-text="reinstallModal.site ? '— ' + reinstallModal.site.domain : ''"></span>
-            </h3>
-            <p class="text-sm text-red-400 mb-4">{{t .Lang "website.reinstall_warning"}}</p>
+    <div x-show="loadError" x-cloak role="alert" class="website-list-error"><span x-text="loadError"></span><button type="button" @click="fetchList()" :disabled="loading" class="btn-secondary">{{t .Lang "common.retry"}}</button></div>
 
-            <div class="flex justify-end space-x-3">
-                <button @click="reinstallModal.show = false" class="btn-secondary text-sm">{{t .Lang "website.cancel"}}</button>
-                <button @click="doReinstallWP()" class="btn-danger text-sm py-2 px-4">{{t .Lang "website.confirm_reinstall"}}</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="card websites-sheet">
+    <div class="card websites-sheet" :aria-busy="loading">
         <div class="websites-scroll" tabindex="0" role="region" aria-label="{{t .Lang "website.list_tab"}}">
             <table class="websites-table w-full">
-                <thead class="border-b border-gray-700">
-                    <tr>
-                        <th class="table-header website-col-domain" scope="col">{{t .Lang "website.domain"}}</th>
-                        <th class="table-header">{{t .Lang "website.status"}}</th>
-                        <th class="table-header">{{t .Lang "website.file_lock_column"}}</th>
-                        <th class="table-header">SSL</th>
-                        <th class="table-header">{{t .Lang "website.online_monitoring"}}</th>
-                        <th class="table-header">{{t .Lang "website.anomaly_monitoring"}}</th>
-                        <th class="table-header">{{t .Lang "website.cache"}}</th>
-                        <th class="table-header">{{t .Lang "website.logs"}}</th>
-                        <th class="table-header">{{t .Lang "website.db_backup"}}</th>
-                        <th class="table-header">{{t .Lang "website.created_at"}}</th>
-                        <th class="table-header">{{t .Lang "website.expiry_time"}}</th>
-                        <th class="table-header website-col-actions" scope="col">{{t .Lang "website.actions"}}</th>
-                    </tr>
-                </thead>
+                <thead><tr>
+                    <th class="table-header website-col-domain" scope="col">{{t .Lang "website.domain"}}</th>
+                    <th class="table-header" scope="col">{{t .Lang "website.status"}}</th>
+                    <th class="table-header" scope="col">{{t .Lang "website.list_security"}}</th>
+                    <th class="table-header" scope="col">{{t .Lang "website.list_monitoring"}}</th>
+                    <th class="table-header" scope="col">{{t .Lang "website.list_policies"}}</th>
+                    <th class="table-header" scope="col">{{t .Lang "website.list_dates"}}</th>
+                    <th class="table-header website-col-actions" scope="col">{{t .Lang "website.actions"}}</th>
+                </tr></thead>
                 <tbody>
                     <template x-for="site in websites" :key="site.id">
-                        <tr class="website-row border-b border-gray-700/50 transition-colors hover:bg-gray-700/40" :class="site.ai_development_enabled ? 'bg-purple-950/40 border-l-2 border-l-purple-500' : ''">
-                            <td class="table-cell website-col-domain font-medium">
-                                <a :href="'http://' + site.domain" target="_blank" rel="noopener noreferrer" class="website-domain-link text-blue-400 hover:text-blue-300 hover:underline" :title="site.domain" x-text="site.domain"></a>
+                        <tr class="website-row" :class="site.ai_development_enabled ? 'website-row-development' : ''">
+                            <td class="table-cell website-col-domain">
+                                <a :href="(site.ssl_enabled ? 'https://' : 'http://') + site.domain" target="_blank" rel="noopener noreferrer" class="website-domain-link" :title="site.domain" x-text="site.domain"></a>
+                                <div class="website-domain-meta"><span x-text="site.site_type === 'wordpress' ? 'WordPress' : 'PHP'"></span><span x-show="site.ai_development_enabled" class="badge-info">{{t .Lang "ai_development.active_badge"}}</span></div>
                             </td>
-                            <td class="table-cell">
-                                <div class="flex flex-wrap gap-2">
-                                    <span :class="site.status === 'active' ? 'badge-success' : 'badge-warning'" x-text="statusText(site.status)"></span>
-                                    <span x-show="site.ai_development_enabled" class="text-xs px-2 py-1 rounded bg-purple-900/60 text-purple-200">{{t .Lang "ai_development.active_badge"}}</span>
-                                </div>
-                            </td>
-                            <td class="table-cell"><span :class="site.file_lock_enabled ? 'badge-warning' : 'badge-success'" x-text="site.file_lock_enabled ? t('website.file_locked') : t('website.file_unlocked')"></span></td>
-                            <td class="table-cell">
-                                <div class="space-y-1">
-                                    <span :class="site.ssl_enabled ? 'badge-success' : site.ssl_last_error ? 'badge-warning' : 'badge-info'" x-text="site.ssl_enabled ? t('website.ssl_enabled') : site.ssl_last_error ? t('website.ssl_pending') : t('website.ssl_not_enabled')"></span>
-                                    <p x-show="!site.ssl_enabled && site.ssl_last_error" class="text-xs text-yellow-400 max-w-48 truncate" :title="site.ssl_last_error" x-text="site.ssl_last_error"></p>
-                                </div>
-                            </td>
-                            <td class="table-cell"><span :class="site.monitoring_enabled ? 'badge-success' : 'badge-info'" x-text="site.monitoring_enabled ? t('website.monitoring_enabled') : t('website.monitoring_disabled')"></span></td>
-                            <td class="table-cell"><span :class="!site.anomaly_monitoring_applicable ? 'badge-info' : site.anomaly_monitoring_enabled ? 'badge-success' : 'badge-info'" x-text="!site.anomaly_monitoring_applicable ? t('website.not_applicable') : site.anomaly_monitoring_enabled ? t('website.monitoring_enabled') : t('website.monitoring_disabled')"></span></td>
-                            <td class="table-cell"><span :class="site.litespeed_cache_enabled ? 'badge-success' : 'badge-info'" x-text="site.litespeed_cache_enabled ? t('website.enabled') : t('website.disabled')"></span></td>
-                            <td class="table-cell"><span :class="site.access_log_mode === 'full' ? 'badge-success' : site.access_log_mode === 'error_only' ? 'badge-warning' : 'badge-info'" x-text="site.access_log_mode === 'full' ? t('website.access_log_full') : site.access_log_mode === 'error_only' ? t('website.access_log_error_only') : t('website.access_log_off')"></span></td>
-                            <td class="table-cell">
-                                <a :href="'/{{$.RandomSuffix}}/databases/' + site.id" :class="site.backup_enabled ? 'badge-success' : 'badge-info'" class="hover:opacity-80" x-text="site.backup_enabled ? t('website.enabled') : t('website.disabled')"></a>
-                            </td>
-                            <td class="table-cell" x-text="new Date(site.created_at).toLocaleDateString(currentLocale())"></td>
-                            <td class="table-cell text-xs" x-text="site.expires_at ? new Date(site.expires_at).toLocaleDateString(currentLocale()) : t('website.never_expires')"></td>
-                            <td class="table-cell website-col-actions">
-                                <div class="website-actions">
-                                    <div class="website-actions-primary">
-                                    <a :href="'/{{$.RandomSuffix}}/websites/' + site.id" class="btn-secondary text-xs py-1 px-2">{{t .Lang "website.details"}}</a>
-                                    <a :href="'/{{$.RandomSuffix}}/files?site_id=' + site.id" class="btn-secondary text-xs py-1 px-2">{{t .Lang "website.file_short"}}</a>
-                                    </div>
-                                    <div class="website-actions-secondary">
-                                    <button x-show="site.status === 'active' || site.status === 'paused'" @click="toggleStatus(site)" class="text-xs py-1 px-2 rounded" :class="site.status === 'active' ? 'btn-warning bg-yellow-700 hover:bg-yellow-600 text-white' : 'btn-success text-xs'" x-text="site.status === 'active' ? t('website.site_pause') : t('website.site_enable')"></button>
-                                    <button x-show="site.status === 'migrated'" @click="restoreMigrated(site)" class="btn-success text-xs py-1 px-2" x-text="t('website.restore_migrated')"></button>
-                                    <button x-show="site.site_type === 'wordpress'" @click="reinstallWP(site)" :disabled="reinstallingId === site.id" class="btn-danger text-xs py-1 px-2" x-text="reinstallingId === site.id ? t('website.reinstalling') : t('website.reinstall')"></button>
-                                    <button @click="deleteSite(site)" class="btn-danger text-xs py-1 px-2">{{t .Lang "website.delete"}}</button>
-                                    </div>
-                                </div>
-                            </td>
+                            <td class="table-cell"><span :class="site.status === 'active' ? 'badge-success' : 'badge-warning'" x-text="statusText(site.status)"></span></td>
+                            <td class="table-cell"><div class="website-status-stack">
+                                <span :class="site.ssl_enabled ? 'badge-success' : site.ssl_last_error ? 'badge-warning' : 'badge-info'" :title="site.ssl_last_error || ''" x-text="site.ssl_enabled ? t('website.ssl_enabled') : site.ssl_last_error ? t('website.ssl_pending') : t('website.ssl_not_enabled')"></span>
+                                <span :class="site.file_lock_enabled ? 'badge-warning' : 'badge-info'" x-text="site.file_lock_enabled ? t('website.file_locked') : t('website.file_unlocked')"></span>
+                            </div></td>
+                            <td class="table-cell"><div class="website-policy-stack">
+                                <span><span class="website-value-label">{{t .Lang "website.online_monitoring"}}</span><span :class="site.monitoring_enabled ? 'website-value-on' : ''" x-text="site.monitoring_enabled ? t('website.enabled') : t('website.disabled')"></span></span>
+                                <span><span class="website-value-label">{{t .Lang "website.anomaly_monitoring"}}</span><span :class="site.anomaly_monitoring_enabled ? 'website-value-on' : ''" x-text="!site.anomaly_monitoring_applicable ? t('website.not_applicable') : site.anomaly_monitoring_enabled ? t('website.enabled') : t('website.disabled')"></span></span>
+                            </div></td>
+                            <td class="table-cell"><div class="website-policy-stack">
+                                <span><span class="website-value-label">{{t .Lang "website.server_page_cache"}}</span><span x-text="site.litespeed_cache_enabled ? t('website.enabled') : t('website.disabled')"></span></span>
+                                <span><span class="website-value-label">{{t .Lang "website.logs"}}</span><span x-text="site.access_log_mode === 'full' ? t('website.access_log_full') : site.access_log_mode === 'error_only' ? t('website.access_log_error_only') : t('website.access_log_off')"></span></span>
+                                <a :href="'/{{$.RandomSuffix}}/databases/' + site.id"><span class="website-value-label">{{t .Lang "website.db_backup"}}</span><span x-text="site.backup_enabled ? t('website.enabled') : t('website.disabled')"></span></a>
+                            </div></td>
+                            <td class="table-cell"><div class="website-policy-stack"><span x-text="site.expires_at ? formatDate(site.expires_at) : t('website.never_expires')"></span><span class="website-date-created" x-text="t('website.created_at') + ': ' + formatDate(site.created_at)"></span></div></td>
+                            <td class="table-cell website-col-actions"><div class="website-actions">
+                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id" class="btn-secondary">{{t .Lang "website.details"}}</a>
+                                <a :href="'/{{$.RandomSuffix}}/files?site_id=' + site.id" class="btn-secondary">{{t .Lang "website.file_short"}}</a>
+                                <button type="button" @click="openMore($event, site)" @keydown.arrow-down.prevent="openMore($event, site)" :disabled="siteBusy(site)" :aria-expanded="moreSite?.id === site.id" aria-haspopup="menu" :aria-label="t('website.more_actions_for', {domain: site.domain})" class="btn-secondary website-more-trigger">{{t .Lang "website.more_actions"}}<span aria-hidden="true">⌄</span></button>
+                            </div></td>
                         </tr>
                     </template>
-                    <tr x-show="websites.length === 0"><td colspan="12" class="table-cell website-empty-cell"><div class="website-empty-state">{{t .Lang "website.no_websites"}}</div></td></tr>
+                    <tr x-show="loading && !loaded"><td colspan="7" class="table-cell website-empty-cell"><div class="website-empty-state" role="status">{{t .Lang "website.loading"}}</div></td></tr>
+                    <tr x-show="loaded && !loading && !loadError && websites.length === 0"><td colspan="7" class="table-cell website-empty-cell"><div class="website-empty-state">{{t .Lang "website.no_websites"}}</div></td></tr>
                 </tbody>
             </table>
         </div>
     </div>
+    <template x-teleport="body">
+        <div x-ref="moreMenu" x-show="moreSite" x-cloak role="menu" :aria-label="t('website.more_actions_for', {domain: moreSite?.domain || ''})" :style="moreStyle" class="website-more-menu" @click.outside="closeMore(false)" @keydown="handleMoreKey($event)">
+            <p class="website-more-domain" x-text="moreSite?.domain || ''"></p>
+            <button type="button" role="menuitem" x-show="moreSite?.status === 'active' || moreSite?.status === 'paused'" @click="toggleStatus(moreSite)" :disabled="siteBusy(moreSite)" x-text="moreSite?.status === 'active' ? t('website.site_pause') : t('website.site_enable')"></button>
+            <button type="button" role="menuitem" x-show="moreSite?.status === 'migrated'" @click="restoreMigrated(moreSite)" :disabled="siteBusy(moreSite)" x-text="t('website.restore_migrated')"></button>
+            <button type="button" role="menuitem" x-show="moreSite?.site_type === 'wordpress'" @click="reinstallWP(moreSite)" :disabled="siteBusy(moreSite)" class="website-more-danger">{{t .Lang "website.reinstall_wordpress"}}</button>
+            <button type="button" role="menuitem" @click="deleteSite(moreSite)" :disabled="siteBusy(moreSite)" class="website-more-danger">{{t .Lang "website.delete"}}</button>
+        </div>
+    </template>
 </div>
 
 <script>
@@ -103,90 +79,148 @@ function websiteList() {
     return {
         websites: [],
         reinstallingId: null,
-        reinstallModal: {
-            show: false,
-            site: null,
+        loading: false,
+        loaded: false,
+        loadError: '',
+        actionBusy: {},
+        moreSite: null,
+        moreStyle: '',
+        moreTrigger: null,
+        siteBusy(site) { return !!(site && this.actionBusy[site.id]); },
+        openMore(event, site) {
+            if (this.siteBusy(site)) return;
+            if (this.moreSite?.id === site.id) {
+                if (event.type === 'keydown') this.$nextTick(() => this.moreItems(this.$refs.moreMenu)[0]?.focus({preventScroll: true}));
+                else this.closeMore();
+                return;
+            }
+            this.moreSite = site;
+            this.moreTrigger = event.currentTarget;
+            const bounds = this.moreTrigger.getBoundingClientRect();
+            const width = Math.min(244, window.innerWidth - 24);
+            const left = Math.max(12, Math.min(bounds.right - width, window.innerWidth - width - 12));
+            this.moreStyle = 'left:' + left + 'px;top:' + (bounds.bottom + 7) + 'px;width:' + width + 'px';
+            this.$nextTick(() => {
+                if (!this.moreSite) return;
+                const menu = this.$refs.moreMenu;
+                const height = menu.getBoundingClientRect().height;
+                const top = Math.max(12, Math.min(bounds.bottom + 7, window.innerHeight - height - 12));
+                this.moreStyle = 'left:' + left + 'px;top:' + top + 'px;width:' + width + 'px';
+                this.moreItems(menu)[0]?.focus({preventScroll: true});
+            });
+        },
+        moreItems(menu) { return Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(item => !item.disabled && item.style.display !== 'none'); },
+        closeMore(returnFocus = true) {
+            if (!this.moreSite) return;
+            this.moreSite = null;
+            if (returnFocus && this.moreTrigger?.isConnected) this.moreTrigger.focus({preventScroll: true});
+            this.moreTrigger = null;
+        },
+        handleMoreKey(event) {
+            const items = this.moreItems(event.currentTarget);
+            const index = items.indexOf(document.activeElement);
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.closeMore(); return; }
+            if (event.key === 'Tab') { this.closeMore(); return; }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !items.length) return;
+            event.preventDefault();
+            const target = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+            items[target].focus({preventScroll: true});
+        },
+        async withSiteAction(site, action) {
+            if (!site || this.siteBusy(site)) return;
+            this.actionBusy[site.id] = true;
+            this.closeMore();
+            try { await action(); } finally { delete this.actionBusy[site.id]; }
+        },
+        formatDate(value) {
+            const date = new Date(value);
+            return value && Number.isFinite(date.getTime()) ? date.toLocaleDateString(currentLocale()) : '—';
         },
         async fetchList() {
+            if (this.loading || Object.keys(this.actionBusy).length) return;
+            this.loading = true; this.loadError = ''; this.closeMore(false);
             try {
                 const resp = await api('/websites');
-                if (resp.success) this.websites = resp.data || [];
-            } catch (e) { showToast(e.message, 'error'); }
+                if (!resp.success || !Array.isArray(resp.data)) throw new Error(t('website.list_load_failed'));
+                this.websites = resp.data; this.loaded = true;
+            } catch (e) { this.loadError = e.message || t('website.list_load_failed'); }
+            finally { this.loading = false; }
         },
         statusText(status) {
             if (status === 'active') return t('website.status_running');
             if (status === 'migrated') return t('website.status_migrated');
             if (status === 'deleting') return t('website.status_deleting');
-            return t('website.status_paused');
+            if (status === 'paused') return t('website.status_paused');
+            return status || t('common.none');
         },
         async toggleStatus(site) {
-            const action = site.status === 'active' ? 'pause' : 'enable';
-            if (action === 'pause' && !await confirmModal(t('website.pause_confirm', { domain: site.domain }))) return;
-            try {
-                const resp = await api('/websites/' + site.id + '/status', { method: 'PATCH', body: { action } });
-                if (resp.success) {
-                    site.status = action === 'pause' ? 'paused' : 'active';
-                    showToast(resp.data?.message || t('common.operation_success'), 'success');
-                }
-            } catch (e) { showToast(e.message, 'error'); }
+            return this.withSiteAction(site, async () => {
+                const action = site.status === 'active' ? 'pause' : 'enable';
+                if (action === 'pause' && !await confirmModal(t('website.pause_confirm', { domain: site.domain }))) return;
+                try {
+                    const resp = await api('/websites/' + site.id + '/status', { method: 'PATCH', body: { action } });
+                    if (resp.success) {
+                        site.status = action === 'pause' ? 'paused' : 'active';
+                        showToast(resp.data?.message || t('common.operation_success'), 'success');
+                    }
+                } catch (e) { showToast(e.message, 'error'); }
+            });
         },
         async restoreMigrated(site) {
-            if (!await confirmModal(t('website.restore_migrated_confirm', { domain: site.domain }))) return;
-            try {
-                const resp = await api('/websites/' + site.id + '/status', { method: 'PATCH', body: { action: 'restore_migrated' } });
-                if (resp.success) {
-                    site.status = 'active';
-                    showToast(resp.data?.message || t('website.restore_migrated_success'), 'success');
-                }
-            } catch (e) { showToast(e.message, 'error'); }
+            return this.withSiteAction(site, async () => {
+                if (!await confirmModal(t('website.restore_migrated_confirm', { domain: site.domain }))) return;
+                try {
+                    const resp = await api('/websites/' + site.id + '/status', { method: 'PATCH', body: { action: 'restore_migrated' } });
+                    if (resp.success) {
+                        site.status = 'active';
+                        showToast(resp.data?.message || t('website.restore_migrated_success'), 'success');
+                    }
+                } catch (e) { showToast(e.message, 'error'); }
+            });
         },
         async reinstallWP(site) {
-            this.reinstallModal.site = site;
-            this.reinstallModal.show = true;
-        },
-        async doReinstallWP() {
-            const site = this.reinstallModal.site;
-            this.reinstallModal.show = false;
-            this.reinstallingId = site.id;
-            showToast(t('website.reinstalling_with_domain', { domain: site.domain }), 'info');
-            try {
-                const resp = await api('/websites/' + site.id + '/reinstall-wp', { method: 'POST', body: {} });
-                if (resp.success) {
-                    showToast(resp.data?.message || t('website.reinstall_completed'), 'success');
-                }
-            } catch (e) { showToast(e.message, 'error'); }
-            this.reinstallingId = null;
+            return this.withSiteAction(site, async () => {
+                if (!await confirmModal(t('website.reinstall_wordpress') + ' — ' + site.domain + '\n\n' + t('website.reinstall_warning'))) return;
+                this.reinstallingId = site.id;
+                try {
+                    const resp = await api('/websites/' + site.id + '/reinstall-wp', { method: 'POST', body: {} });
+                    if (resp.success) showToast(resp.data?.message || t('website.reinstall_completed'), 'success');
+                } catch (e) { showToast(e.message, 'error'); }
+                finally { this.reinstallingId = null; }
+            });
         },
         async deleteSite(site) {
-            let confirmMsg = t('website.delete_confirm', { domain: site.domain });
-            try {
-                const usageResp = await api('/websites/' + site.id + '/backup-usage', { silent: true });
-                if (usageResp.success) {
-                    const usage = usageResp.data;
-                    const items = [];
-                    if (usage.db_backup_count > 0) items.push(t('website.backup_conflict_db_count', { count: usage.db_backup_count }));
-                    if (usage.file_backup_count > 0) items.push(t('website.backup_conflict_file_count', { count: usage.file_backup_count }));
-                    if (usage.auto_backup_enabled) items.push(t('website.backup_conflict_auto_enabled'));
-                    if (usage.cron_jobs && usage.cron_jobs.length) {
-                        items.push(t('website.backup_conflict_cron_jobs', { names: usage.cron_jobs.map(j => j.name).join('、') }));
+            return this.withSiteAction(site, async () => {
+                let confirmMsg = t('website.delete_confirm', { domain: site.domain });
+                try {
+                    const usageResp = await api('/websites/' + site.id + '/backup-usage', { silent: true });
+                    if (usageResp.success) {
+                        const usage = usageResp.data;
+                        const items = [];
+                        if (usage.db_backup_count > 0) items.push(t('website.backup_conflict_db_count', { count: usage.db_backup_count }));
+                        if (usage.file_backup_count > 0) items.push(t('website.backup_conflict_file_count', { count: usage.file_backup_count }));
+                        if (usage.auto_backup_enabled) items.push(t('website.backup_conflict_auto_enabled'));
+                        if (usage.cron_jobs && usage.cron_jobs.length) {
+                            items.push(t('website.backup_conflict_cron_jobs', { names: usage.cron_jobs.map(j => j.name).join('、') }));
+                        }
+                        if (items.length) {
+                            confirmMsg = t('website.delete_has_backups_warning', { domain: site.domain, items: items.join('\n') });
+                        }
+                    } else {
+                        confirmMsg = t('website.delete_backup_check_failed_warning', { domain: site.domain });
                     }
-                    if (items.length) {
-                        confirmMsg = t('website.delete_has_backups_warning', { domain: site.domain, items: items.join('\n') });
-                    }
-                } else {
+                } catch (e) {
                     confirmMsg = t('website.delete_backup_check_failed_warning', { domain: site.domain });
                 }
-            } catch (e) {
-                confirmMsg = t('website.delete_backup_check_failed_warning', { domain: site.domain });
-            }
-            if (!await confirmModal(confirmMsg)) return;
-            try {
-                const resp = await api('/websites/' + site.id, { method: 'DELETE' });
-                if (resp.success) {
-                    this.websites = this.websites.filter(s => s.id !== site.id);
-                    showToast(t('website.delete_success'), 'success');
-                }
-            } catch (e) { showToast(e.message, 'error'); }
+                if (!await confirmModal(confirmMsg)) return;
+                try {
+                    const resp = await api('/websites/' + site.id, { method: 'DELETE' });
+                    if (resp.success) {
+                        this.websites = this.websites.filter(s => s.id !== site.id);
+                        showToast(t('website.delete_success'), 'success');
+                    }
+                } catch (e) { showToast(e.message, 'error'); }
+            });
         }
     }
 }

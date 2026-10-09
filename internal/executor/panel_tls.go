@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -27,10 +28,38 @@ var panelCertificate atomic.Pointer[tls.Certificate]
 var panelCertificateMu sync.Mutex
 var panelDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
+// PanelDomainError provides a stable, localizable diagnosis without exposing
+// filesystem paths, command output or certificate account information.
+type PanelDomainError struct {
+	Code    string            `json:"error_code"`
+	Details map[string]string `json:"details,omitempty"`
+	cause   error
+}
+
+func (e *PanelDomainError) Error() string { return e.Code }
+func (e *PanelDomainError) Unwrap() error { return e.cause }
+
+func panelDomainError(code string, cause error, details map[string]string) error {
+	return &PanelDomainError{Code: code, Details: details, cause: cause}
+}
+
+func PanelDomainErrorInfo(err error) (string, map[string]string) {
+	var diagnosis *PanelDomainError
+	if errors.As(err, &diagnosis) {
+		return diagnosis.Code, diagnosis.Details
+	}
+	return "panel_certificate_failed", nil
+}
+
+var lookupPanelDomainIPs = net.DefaultResolver.LookupIPAddr
+var dialPanelDomainHTTP = func(ctx context.Context, network, address string) (net.Conn, error) {
+	return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, address)
+}
+
 func NormalizePanelDomain(domain string) (string, error) {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if len(domain) > 253 || !panelDomainPattern.MatchString(domain) || net.ParseIP(domain) != nil {
-		return "", fmt.Errorf("enter a complete domain without protocol, port or path")
+		return "", panelDomainError("panel_domain_invalid", nil, nil)
 	}
 	return domain, nil
 }
@@ -101,66 +130,101 @@ func GetPanelCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 // Prove that the configured hostname serves a random file from this server.
 // Pin the HTTP connection to previously validated public DNS addresses.
 func CheckPanelDomain(ctx context.Context, domain string) error {
+	_, err := checkPanelDomain(ctx, domain)
+	return err
+}
+
+func checkPanelDomain(ctx context.Context, domain string) (string, error) {
 	domain, err := NormalizePanelDomain(domain)
 	if err != nil {
-		return err
+		return "", err
 	}
-	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
+	addresses, err := lookupPanelDomainIPs(ctx, domain)
 	if err != nil {
-		return fmt.Errorf("DNS lookup failed: %w", err)
+		return "", panelDomainError("panel_domain_dns_failed", err, nil)
 	}
 	if len(addresses) == 0 {
-		return fmt.Errorf("domain has no DNS addresses")
+		return "", panelDomainError("panel_domain_dns_empty", nil, nil)
 	}
 	for _, address := range addresses {
 		if !IsPublicIPAddress(address.IP.String()) {
-			return fmt.Errorf("domain must resolve to public server addresses")
+			return "", panelDomainError("panel_domain_dns_not_public", nil, panelDomainAddressDetails(address))
 		}
 	}
-	root, _ := olsDefaultVHostPaths(currentOLSRuntimePaths())
+	root, err := panelACMERootForDomain(domain)
+	if err != nil {
+		return "", panelDomainError("panel_domain_route_unavailable", err, nil)
+	}
 	if info, err := os.Lstat(root); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("managed OLS default webroot is unavailable")
+		return "", panelDomainError("panel_domain_route_unavailable", err, nil)
 	}
 	challenge := filepath.Join(root, ".well-known", "acme-challenge")
 	if err := ensurePanelACMEChallengeDirectory(root); err != nil {
-		return err
+		return "", panelDomainError("panel_domain_route_unavailable", err, nil)
 	}
 
 	token := make([]byte, 24)
 	if _, err := rand.Read(token); err != nil {
-		return err
+		return "", err
 	}
 	value := hex.EncodeToString(token)
 	probePath := filepath.Join(challenge, "panel-probe-"+value)
 	if err := os.WriteFile(probePath, []byte(value), 0644); err != nil {
-		return err
+		return "", panelDomainError("panel_domain_route_unavailable", err, nil)
 	}
 	defer os.Remove(probePath)
-	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		var last error
-		for _, ip := range addresses {
-			conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), "80"))
-			if err == nil {
-				return conn, nil
-			}
-			last = err
+	// Every published A/AAAA record must work. Trying the next address only on
+	// connection failure hid stale IPv6 records and round-robin DNS mistakes.
+	seen := make(map[string]bool)
+	for _, address := range addresses {
+		if seen[address.IP.String()] {
+			continue
 		}
-		return nil, last
+		seen[address.IP.String()] = true
+		if err := probePanelDomainAddress(ctx, domain, address, value); err != nil {
+			return "", err
+		}
+	}
+	return root, nil
+}
+
+func panelDomainAddressDetails(address net.IPAddr) map[string]string {
+	family := "IPv6"
+	if address.IP.To4() != nil {
+		family = "IPv4"
+	}
+	return map[string]string{"address": address.IP.String(), "address_family": family}
+}
+
+func probePanelDomainAddress(ctx context.Context, domain string, address net.IPAddr, value string) error {
+	details := panelDomainAddressDetails(address)
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dialPanelDomainHTTP(ctx, network, net.JoinHostPort(address.IP.String(), "80"))
 	}}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+domain+"/.well-known/acme-challenge/panel-probe-"+value, nil)
 	if err != nil {
-		return err
+		return panelDomainError("panel_domain_invalid", err, nil)
 	}
+	req.Header.Set("Cache-Control", "no-store")
 	response, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP domain verification failed: %w", err)
+		return panelDomainError("panel_domain_http_unreachable", err, details)
 	}
 	defer response.Body.Close()
+	details["http_status"] = fmt.Sprint(response.StatusCode)
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		// Do not return a redirect URL: it can contain credentials or tokens and
+		// an unrelated destination must never be followed by the pinned probe.
+		return panelDomainError("panel_domain_http_redirect", nil, details)
+	}
+	if response.StatusCode != http.StatusOK {
+		return panelDomainError("panel_domain_http_status", nil, details)
+	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, 128))
-	if err != nil || response.StatusCode != 200 || string(data) != value {
-		return fmt.Errorf("domain does not serve this panel's challenge; check DNS, port 80 and redirect rules")
+	if err != nil || string(data) != value {
+		return panelDomainError("panel_domain_challenge_mismatch", err, details)
 	}
 	return nil
 }
@@ -204,6 +268,9 @@ func applyPanelDomainCertificate(ctx context.Context, cfg *config.Config, domain
 	if err != nil {
 		return err
 	}
+	if cfg == nil || cfg.Panel.TLSCertPath == "" || cfg.Panel.TLSKeyPath == "" || cfg.Panel.TLSPort <= 0 {
+		return fmt.Errorf("panel HTTPS must already be configured")
+	}
 	if renewal {
 		state, stateErr := ReadPanelTLSState(cfg.Panel.TLSCertPath)
 		if stateErr != nil {
@@ -214,18 +281,15 @@ func applyPanelDomainCertificate(ctx context.Context, cfg *config.Config, domain
 			return nil
 		}
 	}
-	if err = CheckPanelDomain(ctx, domain); err != nil {
+	root, err := checkPanelDomain(ctx, domain)
+	if err != nil {
 		return err
-	}
-	if cfg.Panel.TLSCertPath == "" || cfg.Panel.TLSKeyPath == "" || cfg.Panel.TLSPort <= 0 {
-		return fmt.Errorf("panel HTTPS must already be configured")
 	}
 	stage, err := os.MkdirTemp(cfg.Panel.DataDir, ".panel-cert-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	root, _ := olsDefaultVHostPaths(currentOLSRuntimePaths())
 	if _, err = obtainLegoCert(domain, "", root, stage); err != nil {
 		return err
 	}
@@ -307,7 +371,9 @@ func StartPanelCertificateRenewal(cfg *config.Config) {
 			cancel()
 			message := ""
 			if err != nil {
-				message = FriendlySSLError(err)
+				code, details := PanelDomainErrorInfo(err)
+				encoded, _ := json.Marshal(PanelDomainError{Code: code, Details: details})
+				message = string(encoded)
 			}
 			_, _ = database.GetDB().Exec(`INSERT INTO security_settings(skey,svalue,updated_at) VALUES('panel_certificate_renewal_error',?,CURRENT_TIMESTAMP) ON CONFLICT(skey) DO UPDATE SET svalue=excluded.svalue,updated_at=excluded.updated_at`, message)
 		}

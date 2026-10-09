@@ -33,7 +33,7 @@ function firewallManager(initialTab = 'current') {
         page: 1,
         totalPages: 1,
         total: 0,
-        portStatus: { backend: '', writable: false, warning: '', input_policy: '', ssh_port: 22, panel_port: 8443, current_management_ip: '', managed_rule_count: 0, anomaly_count: 0, listener_count: 0, network_listener_count: 0, local_listener_count: 0, dangerous_listener_count: 0, listeners: [], rules: [] },
+        portStatus: { backend: '', writable: false, warning: '', input_policy: '', ssh_port: 22, panel_port: 0, current_management_ip: '', managed_rule_count: 0, anomaly_count: 0, listener_count: 0, network_listener_count: 0, local_listener_count: 0, dangerous_listener_count: 0, listeners: [], rules: [] },
         portForm: { protocol: 'tcp', port: null, source: '', source_mode: 'current', description: '', duration_mode: 'permanent', duration_minutes: 60, confirm_public: false },
         selectedPortPreset: '',
         portPresets: [
@@ -41,7 +41,7 @@ function firewallManager(initialTab = 'current') {
             { key: 'http', label: 'HTTP', protocol: 'tcp', fallback: 80, sourceMode: 'any', description: 'HTTP' },
             { key: 'https', label: 'HTTPS', protocol: 'tcp', fallback: 443, sourceMode: 'any', description: 'HTTPS' },
             { key: 'http3', label: 'HTTP/3', protocol: 'udp', fallback: 443, sourceMode: 'any', description: 'HTTP/3 QUIC' },
-            { key: 'panel', label: 'OLS WPanel', protocol: 'tcp', portKey: 'panel_port', fallback: 8443, sourceMode: 'current', description: 'OLS WPanel' },
+            { key: 'panel', label: 'OLS WPanel', protocol: 'tcp', portKey: 'panel_port', sourceMode: 'current', description: 'OLS WPanel' },
         ],
         portsLoaded: false,
         portsLoading: false,
@@ -73,19 +73,27 @@ function firewallManager(initialTab = 'current') {
         },
         resetAccessRows() {
             const s = this.portStatus, rows = new Map();
+            const panelPort = Number(s.panel_port);
+            const panelPortKnown = Number.isInteger(panelPort) && panelPort > 0 && panelPort <= 65535;
             const add = (protocol, port, label = '') => {
                 const key = protocol + ':' + port;
                 if (!rows.has(key)) rows.set(key, { key, protocol, port, label, scope: 'closed', sources: '', listening: false });
                 return rows.get(key);
             };
-            add('tcp', s.ssh_port || 22, 'SSH'); add('tcp', s.panel_port || 8443, 'OLS WPanel');
+            add('tcp', s.ssh_port || 22, 'SSH');
+            if (panelPortKnown) add('tcp', panelPort, 'OLS WPanel');
             add('tcp', 80, 'HTTP'); add('tcp', 443, 'HTTPS'); add('udp', 443, 'HTTP/3');
-            add('tcp', 3306, 'MariaDB'); add('tcp', 6379, 'Redis'); add('tcp', 7080, 'OLS WebAdmin');
+            add('tcp', 3306, 'MariaDB'); add('tcp', 6379, 'Redis'); add('tcp', 7080, 'OpenLiteSpeed WebAdmin');
             for (const l of s.listeners || []) {
-                const r = add(l.protocol, Number(l.port), l.process || '');
+                const label = this.serviceDisplayName(l.process) === 'OLS WPanel' && (!panelPortKnown || Number(l.port) !== panelPort) ? '' : l.process || '';
+                const r = add(l.protocol, Number(l.port), label);
+                r.process = l.process || '';
                 if (l.bind_scope !== 'local') r.listening = true;
             }
-            for (const r of s.rules || []) add(r.protocol, Number(r.port), r.description || '');
+            for (const r of s.rules || []) {
+                const label = this.serviceDisplayName(r.description) === 'OLS WPanel' && (!panelPortKnown || Number(r.port) !== panelPort) ? '' : r.description || '';
+                add(r.protocol, Number(r.port), label);
+            }
             if (s.access_enabled) {
                 for (const rule of s.access_rules || []) {
                     const r = add(rule.protocol, Number(rule.port));
@@ -93,7 +101,7 @@ function firewallManager(initialTab = 'current') {
                     else { if (r.scope !== 'public') r.scope = 'specific'; r.sources += (r.sources ? ', ' : '') + rule.source; }
                 }
             } else {
-                for (const port of [s.ssh_port || 22, s.panel_port || 8443]) Object.assign(add('tcp', port), { scope: 'public', sources: s.current_management_ip || '' });
+                for (const port of [s.ssh_port || 22, ...(panelPortKnown ? [panelPort] : [])]) Object.assign(add('tcp', port), { scope: 'public', sources: s.current_management_ip || '' });
                 add('tcp', 80).scope = 'public'; add('tcp', 443).scope = 'public';
             }
             this.accessRows = [...rows.values()]; this.accessPreview = null; this.accessDirty = false; this.accessError = '';
@@ -197,9 +205,11 @@ function firewallManager(initialTab = 'current') {
             this.portForm = { protocol: 'tcp', port: null, source: this.portStatus.current_management_ip || '', source_mode: 'current', description: '', duration_mode: 'permanent', duration_minutes: 60, confirm_public: false };
         },
         applyPortPreset(preset) {
+            const port = preset.portKey ? Number(this.portStatus[preset.portKey] || preset.fallback) : preset.fallback;
+            if (!Number.isInteger(port) || port < 1 || port > 65535) { showToast(t('firewall.panel_port_unknown'), 'error'); return; }
             this.selectedPortPreset = preset.key;
             this.portForm.protocol = preset.protocol;
-            this.portForm.port = preset.portKey ? (this.portStatus[preset.portKey] || preset.fallback) : preset.fallback;
+            this.portForm.port = port;
             this.portForm.description = preset.description;
             this.portForm.source_mode = preset.sourceMode;
             this.onSourceModeChange();
@@ -214,6 +224,19 @@ function firewallManager(initialTab = 'current') {
             if (this.portForm.source_mode === 'specific' && this.portForm.source === this.portStatus.current_management_ip) this.portForm.source = '';
         },
         async enableProtection() { await this.previewAccess(); },
+        firewallBackendLabel() {
+            const backend = this.portStatus.backend || '';
+            return { nftables: 'Nftables', ufw: 'UFW', iptables: 'Iptables' }[backend.toLowerCase()] || backend || '--';
+        },
+        firewallPolicyLabel() {
+            if (this.portStatus.access_enabled) return t('firewall.access_policy_restricted');
+            const policy = (this.portStatus.input_policy || '').toLowerCase();
+            return { drop: t('firewall.policy_drop'), accept: t('firewall.policy_accept') }[policy] || this.portStatus.input_policy || '--';
+        },
+        serviceDisplayName(value) {
+            const raw = String(value || '').trim();
+            return { http: 'HTTP', https: 'HTTPS', 'http/3': 'HTTP/3', ssh: 'SSH', sshd: 'SSH', dns: 'DNS', ntp: 'NTP', redis: 'Redis', 'redis-server': 'Redis', mariadb: 'MariaDB', mariadbd: 'MariaDB', mysqld: 'MariaDB', openlitespeed: 'OpenLiteSpeed', litespeed: 'OpenLiteSpeed', lshttpd: 'OpenLiteSpeed', wordpress: 'WordPress', lsphp: 'LSPHP', 'ols wpanel': 'OLS WPanel', 'ols-wpanel': 'OLS WPanel', 'ols webadmin': 'OpenLiteSpeed WebAdmin', 'openlitespeed webadmin': 'OpenLiteSpeed WebAdmin' }[raw.toLowerCase()] || raw;
+        },
         formatFirewallTime(value) {
             if (!value) return '--';
             const date = new Date(value);
@@ -381,6 +404,8 @@ function firewallManager(initialTab = 'current') {
             if (type === 'sensitive_file_scan') return t('firewall.type_sensitive_file_scan');
             if (type === 'sqli_probe') return t('firewall.type_sqli_probe');
             if (type === 'sqli_blocked') return t('firewall.type_sqli_blocked');
+            if (type === 'wp_login_failed') return t('firewall.type_wp_login_failed');
+            if (type === 'xmlrpc_blocked') return t('firewall.type_xmlrpc_blocked');
             if (type === 'fake_search_bot') return t('firewall.type_fake_search_bot');
             if (type === 'suspicious_php') return t('firewall.type_suspicious_php');
             return type;

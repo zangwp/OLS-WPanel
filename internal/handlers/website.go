@@ -2416,6 +2416,7 @@ func (h *WebsiteHandler) UpdateCache(c *gin.Context) {
 }
 
 func (h *WebsiteHandler) LiteSpeedCacheStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.invalid_site_id")))

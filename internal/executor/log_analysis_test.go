@@ -207,6 +207,23 @@ func TestAnalyzeWebsiteLogsFlagsSpoofedNonPublicClientIP(t *testing.T) {
 	}
 }
 
+func TestAccessLogPeerReadsNativeSecuritySuffixAndLegacyPeer(t *testing.T) {
+	base := `203.0.113.10 - - [15/Jan/2026:10:00:00 +0800] "GET / HTTP/1.1" 403 0 "-" "-"`
+	for _, tt := range []struct{ suffix, want string }{
+		{` peer=203.0.113.10`, "203.0.113.10"},
+		{` peer=203.0.113.10 ols_security="sqli" ols_autoban="1"`, "203.0.113.10"},
+		{` peer=2001:db8::10 ols_security="uploads_php" ols_autoban="0"`, "2001:db8::10"},
+		{` peer=- ols_security="-" ols_autoban="0"`, "-"},
+		{` peer=not-an-IP ols_security="sqli" ols_autoban="1"`, ""},
+		{` peer=203.0.113.10 ols_security="sqli" ols_autoban="1" forged_suffix`, ""},
+		{` peer=203.0.113.10 ols_security="forged" ols_autoban="1"`, ""},
+	} {
+		if got := accessLogPeer(base + tt.suffix); got != tt.want {
+			t.Errorf("accessLogPeer(%q)=%q, want %q", tt.suffix, got, tt.want)
+		}
+	}
+}
+
 func TestBuildLogAnalysisPromptRedactsSensitiveSamples(t *testing.T) {
 	report := &models.LogAnalysisReport{
 		TopIPs:   []models.LogAnalysisCount{{Name: "192.0.2.10", Count: 4}},

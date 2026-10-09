@@ -398,29 +398,94 @@ function ols_wpanel_inventory_anomaly_sample(array $query): array
     return ols_wpanel_inventory_collect_anomaly($query['since'], $query['until'], $query['known_ids']);
 }
 
+function ols_wpanel_inventory_cache_value(string $key, $default) {
+    // The official API includes constant overrides and plugin-side filters.
+    // Without a registered callback, apply_filters would just return the key.
+    if (false !== has_filter('litespeed_conf')) {
+        return apply_filters('litespeed_conf', $key);
+    }
+    $constant = 'LITESPEED_CONF__' . strtoupper(str_replace('-', '__', $key));
+    if (defined('LITESPEED_CONF') && LITESPEED_CONF && defined($constant)) {
+        return constant($constant);
+    }
+    // LSCWP 3+ persists each setting separately. Preserve false and zero.
+    $missing = new stdClass();
+    $value = get_option('litespeed.conf.' . $key, $missing);
+    if ($value !== $missing) return $value;
+    $legacy = get_option('litespeed-cache-conf', array());
+    return is_array($legacy) && array_key_exists($key, $legacy) ? $legacy[$key] : $default;
+}
+
+function ols_wpanel_inventory_cache_setting_value(string $key, $value) {
+    if (in_array($key, array('cache', 'object', 'object-kind', 'object-persistent', 'debug-disable-all'), true)) {
+        if (in_array($value, array(true, 1, '1', 'true'), true)) return true;
+        if (in_array($value, array(false, 0, '0', '', 'false'), true)) return false;
+    } elseif ($key === 'object-host') {
+        if (is_string($value)) return $value;
+    } elseif ($key === 'object-port' || $key === 'object-db_id') {
+        if (is_int($value) || (is_string($value) && preg_match('/^(0|[1-9][0-9]*)$/D', $value))) {
+            $integer = filter_var($value, FILTER_VALIDATE_INT);
+            if ($integer !== false && $integer >= 0 && ($key !== 'object-port' || $integer <= 65535)) return $integer;
+        }
+    }
+    throw new RuntimeException('invalid_cache_setting');
+}
+
 function ols_wpanel_inventory_cache_status(): array {
-    $conf = (array)get_option('litespeed-cache-conf', array());
-    $value = static function($key, $default) use ($conf) {
-        $constant = 'LITESPEED_CONF__' . strtoupper(str_replace('-', '__', $key));
-        return defined($constant) ? constant($constant) : ($conf[$key] ?? $default);
+    $value = static function (string $key, $default) {
+        return ols_wpanel_inventory_cache_setting_value($key, ols_wpanel_inventory_cache_value($key, $default));
     };
-    return array('page_enabled'=>(bool)$value('cache', true),
-        'object_enabled'=>(bool)$value('object', false) && (bool)$value('object-kind', false),
-        'host'=>substr((string)$value('object-host', 'localhost'),0,255),
-        'port'=>(int)$value('object-port',11211),'database'=>(int)$value('object-db_id',0));
+    return array('page_enabled'=>$value('cache', true),
+        'object_enabled'=>$value('object', false) && $value('object-kind', false),
+        'host'=>substr($value('object-host', 'localhost'),0,255),
+        'port'=>$value('object-port',11211),'database'=>$value('object-db_id',0));
 }
 
 function ols_wpanel_inventory_migrate_cache(array $patch): void {
     if (is_multisite()) throw new RuntimeException('multisite_unsupported');
+    if (!$patch) return;
+    // Inert overrides must not become active database settings during migration.
+    if (!defined('LITESPEED_CONF') || !LITESPEED_CONF) throw new RuntimeException('cache_overrides_inactive');
     $allowed = array('object','object-kind','object-host','object-port','object-db_id','object-persistent');
     foreach ($patch as $key=>$value) {
-        if (!in_array($key,$allowed,true) || (!is_bool($value) && !is_int($value) && !is_string($value))) throw new RuntimeException('invalid_cache_setting');
+        if (!is_string($key) || !in_array($key,$allowed,true)) throw new RuntimeException('invalid_cache_setting');
+        $patch[$key] = ols_wpanel_inventory_cache_setting_value($key, $value);
     }
-    $conf=(array)get_option('litespeed-cache-conf',array());
-    foreach ($patch as $key=>$value) $conf[$key]=$value;
-    update_option('litespeed-cache-conf',$conf);
-    $saved=(array)get_option('litespeed-cache-conf',array());
-    foreach ($patch as $key=>$value) if (!array_key_exists($key,$saved) || $saved[$key] != $value) throw new RuntimeException('cache_settings_write_failed');
+    if (false === has_action('litespeed_save_conf')) throw new RuntimeException('cache_settings_api_unavailable');
+    // Partial updates retain unrelated plugin settings and rebuild its runtime files.
+    do_action('litespeed_save_conf', $patch);
+    $missing = new stdClass();
+    foreach ($patch as $key=>$value) {
+        $saved = get_option('litespeed.conf.' . $key, $missing);
+        if ($saved === $missing || ols_wpanel_inventory_cache_setting_value($key, $saved) !== $value) {
+            throw new RuntimeException('cache_settings_write_failed');
+        }
+    }
+    // The API is void and may suppress file-write errors. Do not remove the old
+    // overrides until the early-loaded object-cache files contain the same values.
+    $objectEnabled = ols_wpanel_inventory_cache_setting_value('object', ols_wpanel_inventory_cache_value('object', false));
+    $disabled = ols_wpanel_inventory_cache_setting_value('debug-disable-all', ols_wpanel_inventory_cache_value('debug-disable-all', false));
+    if ($objectEnabled && !$disabled) {
+        if (!defined('LSCWP_DIR') || !defined('LSCWP_CONTENT_DIR') || !defined('WP_CONTENT_DIR')) {
+            throw new RuntimeException('cache_runtime_files_unavailable');
+        }
+        $source = rtrim(LSCWP_DIR, '/\\') . '/lib/object-cache.php';
+        $dropin = rtrim(WP_CONTENT_DIR, '/\\') . '/object-cache.php';
+        $sourceHash = is_file($source) ? hash_file('sha256', $source) : false;
+        $dropinHash = is_file($dropin) ? hash_file('sha256', $dropin) : false;
+        $data = @file_get_contents(rtrim(LSCWP_CONTENT_DIR, '/\\') . '/.litespeed_conf.dat');
+        $runtime = is_string($data) ? json_decode($data, true, 8) : null;
+        if (!is_string($sourceHash) || $sourceHash !== $dropinHash || !is_array($runtime)) {
+            throw new RuntimeException('cache_runtime_files_write_failed');
+        }
+        $defaults = array('object-kind'=>false, 'object-host'=>'localhost', 'object-port'=>11211, 'object-db_id'=>0, 'object-persistent'=>true);
+        foreach ($defaults as $key=>$default) {
+            $effective = ols_wpanel_inventory_cache_setting_value($key, ols_wpanel_inventory_cache_value($key, $default));
+            if (!array_key_exists($key, $runtime) || ols_wpanel_inventory_cache_setting_value($key, $runtime[$key]) !== $effective) {
+                throw new RuntimeException('cache_runtime_files_write_failed');
+            }
+        }
+    }
 }
 
 function ols_wpanel_inventory_retire_optimizer(): void

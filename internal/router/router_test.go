@@ -212,14 +212,21 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range [][]byte{
-		[]byte(`grid grid-cols-1 md:grid-cols-2 gap-6 items-start mb-6`),
+		[]byte(`@click="setSection('updates')"`),
+		[]byte(`x-show="activeSection === 'updates'"`),
+		[]byte(`id="system-updates" x-data="systemUpdate()" x-init="init()"`),
 		[]byte(`listOpen: false`),
+		[]byte(`x-show="listOpen"`),
 		[]byte(`style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;"`),
 		[]byte(`x-for="pkg in filteredPackages"`),
 		[]byte(`filter === 'security'`),
 		[]byte(`filter === 'regular'`),
 		[]byte(`@click="listOpen = !listOpen"`),
 		[]byte(`@click="check(true)"`),
+		[]byte(`@click="doUpdate()"`),
+		[]byte(`api('/system/updates' + (fresh ? '?fresh=1' : ''))`),
+		[]byte(`api('/system/updates/status')`),
+		[]byte(`api('/system/updates/do', { method: 'POST' })`),
 		[]byte(`this.resume(true)`),
 		[]byte(`x-show="lastMessage && !msg"`),
 		[]byte(`setTimeout(() => this.dismissStatus(), 10000)`),
@@ -625,26 +632,56 @@ func TestWPFleetOverviewPanelIsIsolatedAndWired(t *testing.T) {
 	}
 }
 
-func TestWebsiteListShowsSeparateMonitoringColumns(t *testing.T) {
+func TestWebsiteListShowsDistinctMonitoringStatesInCompactColumns(t *testing.T) {
 	websites, err := os.ReadFile("../../web/templates/websites.html")
 	if err != nil {
 		t.Fatal(err)
 	}
+	header := regexp.MustCompile(`(?s)<thead>(.*?)</thead>`).FindSubmatch(websites)
+	if len(header) != 2 || bytes.Count(header[1], []byte(`scope="col"`)) != 7 {
+		t.Fatal("website list must keep seven labeled columns")
+	}
+	row := regexp.MustCompile(`(?s)<template x-for="site in websites"[^>]*>(.*?)</template>`).FindSubmatch(websites)
+	if len(row) != 2 {
+		t.Fatal("website list is missing its site row")
+	}
+	cells := regexp.MustCompile(`(?s)<td\b[^>]*>(.*?)</td>`).FindAllSubmatch(row[1], -1)
+	if len(cells) != 7 {
+		t.Fatalf("website row cell count = %d, want 7", len(cells))
+	}
 	for _, required := range [][]byte{
 		[]byte(`{{t .Lang "website.online_monitoring"}}`),
 		[]byte(`{{t .Lang "website.anomaly_monitoring"}}`),
+		[]byte(`site.monitoring_enabled`),
 		[]byte(`site.anomaly_monitoring_applicable`),
 		[]byte(`site.anomaly_monitoring_enabled`),
 		[]byte(`t('website.not_applicable')`),
-		[]byte(`colspan="12"`),
-		[]byte(`transition-colors hover:bg-gray-700/40`),
 	} {
-		if !bytes.Contains(websites, required) {
-			t.Fatalf("websites template missing %q", required)
+		if !bytes.Contains(cells[3][1], required) {
+			t.Fatalf("compact monitoring cell missing distinct state %q", required)
 		}
 	}
-	if bytes.Contains(websites, []byte(`{{t .Lang "website.monitoring"}}`)) {
-		t.Fatal("website list still uses the ambiguous combined monitoring heading")
+	for _, required := range [][]byte{
+		[]byte(`{{t .Lang "website.list_monitoring"}}`),
+		[]byte(`{{t .Lang "website.server_page_cache"}}`),
+		[]byte(`colspan="7"`),
+		[]byte(`x-show="loading && !loaded"`),
+		[]byte(`x-show="loaded && !loading && !loadError && websites.length === 0"`),
+		[]byte(`@click="openMore($event, site)"`),
+		[]byte(`x-teleport="body"`),
+	} {
+		if !bytes.Contains(websites, required) {
+			t.Fatalf("compact website list missing %q", required)
+		}
+	}
+	for _, required := range [][]byte{
+		[]byte(`/websites/' + site.id`),
+		[]byte(`/files?site_id=' + site.id`),
+	} {
+		// Details and files remain directly reachable beside the more menu.
+		if !bytes.Contains(cells[6][1], required) {
+			t.Fatalf("primary website action missing %q", required)
+		}
 	}
 }
 
@@ -1612,10 +1649,46 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	monitoring := bytes.Index(source, []byte(`website.site_monitoring`))
-	ssl := bytes.Index(source, []byte(`website.ssl_management`))
-	if monitoring < 0 || ssl < 0 || monitoring >= ssl {
-		t.Fatalf("runtime configuration order = monitoring:%d ssl:%d", monitoring, ssl)
+	overviewStart := bytes.Index(source, []byte(`<div id="site-overview"`))
+	cacheStart := bytes.Index(source, []byte(`<div id="site-performance"`))
+	securityStart := bytes.Index(source, []byte(`<section id="site-security"`))
+	logsStart := bytes.Index(source, []byte(`<div id="site-logs"`))
+	if overviewStart < 0 || cacheStart <= overviewStart || securityStart <= cacheStart || logsStart <= securityStart {
+		t.Fatalf("website workspaces missing or out of order: overview=%d cache=%d security=%d logs=%d", overviewStart, cacheStart, securityStart, logsStart)
+	}
+	overview := source[overviewStart:cacheStart]
+	if !bytes.Contains(overview, []byte(`id="site-ssl"`)) || !bytes.Contains(overview, []byte(`website.ssl_management`)) {
+		t.Fatal("runtime overview is missing its SSL management card")
+	}
+	if bytes.Contains(overview, []byte(`website.site_monitoring`)) {
+		t.Fatal("monitoring controls must live in the independent website security workspace")
+	}
+	security := source[securityStart:logsStart]
+	previous := -1
+	for _, card := range [][]byte{
+		[]byte(`website.security_status_title`),
+		[]byte(`website.security_wp_policy`),
+		[]byte(`website.site_monitoring`),
+		[]byte(`website.security_recovery`),
+		[]byte(`id="site-protection"`),
+	} {
+		position := bytes.Index(security, card)
+		if position <= previous {
+			t.Fatalf("website security card %s is missing or out of order", card)
+		}
+		previous = position
+	}
+	for _, required := range [][]byte{
+		[]byte(`x-show="detailTab === 'security'"`),
+		[]byte(`@click="fetchSiteSecurityStatus()"`),
+		[]byte(`@click="saveSiteSecurityPolicy()"`),
+		[]byte(`@click="saveMonitoring()"`),
+		[]byte(`@click="openSiteSSLSettings()"`),
+		[]byte(`/databases/' + site.id`),
+	} {
+		if !bytes.Contains(security, required) {
+			t.Fatalf("website security workspace missing control %q", required)
+		}
 	}
 	if bytes.Contains(source, []byte(`website.openlitespeed_custom_config`)) {
 		t.Fatal("website detail still exposes the disabled OpenLiteSpeed custom configuration card")
@@ -1624,8 +1697,13 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 		t.Fatal("website detail is missing the direct database management link")
 	}
 	for _, required := range [][]byte{
+		[]byte(`@click="setDetailTab('overview')"`),
+		[]byte(`@click="setDetailTab('cache')"`),
+		[]byte(`@click="setDetailTab('security')"`),
+		[]byte(`@click="setDetailTab('logs')"`),
 		[]byte(`x-show="detailTab === 'cache'"`),
 		[]byte(`x-show="detailTab === 'security' && site.site_type === 'wordpress'"`),
+		[]byte(`api('/websites/' + siteID + '/security-status'`),
 	} {
 		if !bytes.Contains(source, required) {
 			t.Fatalf("website detail tab layout is missing %q", required)

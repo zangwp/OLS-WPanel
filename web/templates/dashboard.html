@@ -266,8 +266,12 @@ function dashboardStats() {
 
     // Expose for Alpine button clicks
     window.fetchMetrics = fetchMetrics;
-    // Canvas is already in DOM since script runs after template render
-    initChart();
+    // Deferred app and Chart scripts finish before DOMContentLoaded.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initChart, { once: true });
+    } else {
+        initChart();
+    }
 })();
 
 function siteResources() {

@@ -126,6 +126,7 @@ $table_prefix = '%s';
  * 如需启用，改为 true。
  */
 define('WP_DEBUG', false);
+define('WP_DEBUG_DISPLAY', false);
 
 /* Add any custom values between this line and the "stop editing" line. */
 

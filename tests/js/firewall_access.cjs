@@ -5,6 +5,7 @@ const ctx = {t:x=>x, showToast:()=>{}, confirmModal:async()=>true, setTimeout:()
 vm.createContext(ctx);vm.runInContext(source,ctx);
 (async()=>{
  const p=ctx.firewallManager('ports');
+ p.resetAccessRows();assert(!p.accessRows.some(r=>r.port===8443),'an unread panel port must not invent a panel listener');
  p.portStatus={ssh_port:2222,panel_port:9443,current_management_ip:'203.0.113.9',listeners:[],rules:[]};p.resetAccessRows();
  const payload=p.accessPayload();assert.equal(payload.length,4);assert(payload.every(r=>r.source===''));
  for(const port of [2222,9443,80,443])assert(payload.some(r=>r.protocol==='tcp'&&r.port===port));
@@ -26,5 +27,10 @@ vm.createContext(ctx);vm.runInContext(source,ctx);
  assert.equal(p.accessToken,'test');assert(!calls.some(x=>x.endsWith('/confirm')),'must not auto-confirm');
  await p.confirmAccess();assert(!calls.some(x=>x.endsWith('/confirm')),'requires explicit connection verification');
  p.accessChecked=true;await p.confirmAccess();assert(calls.some(x=>x.endsWith('/confirm')));assert.equal(p.accessToken,'');
+ p.portStatus={backend:'nftables',input_policy:'drop',ssh_port:2222,panel_port:7543,current_management_ip:'203.0.113.9',access_enabled:true,access_rules:[{protocol:'tcp',port:7543,source:'203.0.113.9/32'},{protocol:'tcp',port:8443,source:'2001:db8::1/128'}],rules:[{protocol:'tcp',port:8443,description:'OLS WPanel'}],listeners:[{protocol:'tcp',port:8080,process:'lshttpd',bind_scope:'network'}]};p.resetAccessRows();
+ assert.equal(p.accessRows.find(r=>r.port===7543).label,'OLS WPanel');assert.equal(p.accessRows.find(r=>r.port===8443).label,'','old panel rules are preserved as custom services');assert.equal(p.accessRows.find(r=>r.port===8443).sources,'2001:db8::1/128');assert.equal(p.accessRows.find(r=>r.port===8080).process,'lshttpd');
+ assert.equal(p.firewallBackendLabel(),'Nftables');assert.equal(p.firewallPolicyLabel(),'firewall.access_policy_restricted');p.portStatus.access_enabled=false;assert.equal(p.firewallPolicyLabel(),'firewall.policy_drop');p.portStatus.input_policy='accept';assert.equal(p.firewallPolicyLabel(),'firewall.policy_accept');
+ assert.equal(p.serviceDisplayName('lshttpd'),'OpenLiteSpeed');assert.equal(p.serviceDisplayName('redis-server'),'Redis');assert.equal(p.serviceDisplayName('mysqld'),'MariaDB');assert.equal(p.serviceDisplayName('https'),'HTTPS');assert.equal(p.serviceDisplayName('My App'),'My App');
+ const panelPreset=p.portPresets.find(r=>r.key==='panel');p.applyPortPreset(panelPreset);assert.equal(p.portForm.port,7543);p.portStatus.panel_port=0;p.portForm.port=9000;p.applyPortPreset(panelPreset);assert.equal(p.portForm.port,9000,'missing panel endpoint must not replace the draft with 8443');
  console.log('Firewall custom-port validation, preview failures, draft protection and verified save passed');
 })().catch(e=>{console.error(e);process.exit(1)});

@@ -315,6 +315,10 @@ func executeCreateSite(task *Task) TaskResult {
 			log.Printf("生成 wp-config.php 失败: %v", err)
 			return TaskResult{Success: false, Message: "生成 wp-config.php 失败"}
 		}
+		if err := ConfigureWPLoginFailureLogging(webRoot, logDir, systemUser); err != nil {
+			rollback()
+			return taskFailure("配置 WordPress 登录防爆破审计失败", err)
+		}
 	}
 	if err := HardenSiteSensitivePermissions(domain, webRoot, systemUser); err != nil {
 		rollback()
@@ -974,6 +978,8 @@ var reloadPrimaryDomainOLS = func() error {
 	return nil
 }
 
+var reloadPrimaryDomainFail2ban = ReloadFail2ban
+
 func updateWebsitePrimaryDomain(siteID int, fromDomain string, site *models.Website) error {
 	result, err := database.GetDB().Exec(`UPDATE websites SET domain = ?, aliases = ?, alias_redirect_mode = ?, web_root = ?, log_dir = ?,
 		ols_vhost_config_path = ?, lsphp_socket_path = ?, ssl_cert_path = ?, ssl_key_path = ?,
@@ -1176,6 +1182,16 @@ func executeUpdateDomains(task *Task) TaskResult {
 			return os.Rename(newLogDir, oldLogDir)
 		}})
 
+		if site.SiteType != "php" {
+			restoreAudit, err := migrateWPLoginFailureLogging(newWebRoot, newLogDir, site.SystemUser)
+			if restoreAudit != nil {
+				rollbacks = append(rollbacks, rollbackStep{"恢复 WordPress 登录审计配置", restoreAudit})
+			}
+			if err != nil {
+				return domainUpdateFailure("迁移 WordPress 登录审计配置失败", err, rollbacks)
+			}
+		}
+
 		// 插件身份目录仍随面板主域名管理，但插件通过 OpenLiteSpeed LSPHP
 		// 外部应用注入的明确路径读取，
 		// 不再依赖 WordPress home URL。目标目录存在时拒绝覆盖，避免误删其他身份。
@@ -1272,6 +1288,10 @@ func executeUpdateDomains(task *Task) TaskResult {
 		if err := WriteSiteLogrotateConfig(newDomain, newLogDir, site.LogRetentionDays); err != nil {
 			log.Printf("site logrotate config skipped after domain update: %v", err)
 		}
+		if err := reloadPrimaryDomainFail2ban(); err != nil {
+			log.Printf("Fail2ban reload failed after domain update site=%d: %v", site.ID, err)
+			msg += "。登录防爆破日志监控重新加载失败，请检查 Fail2ban 状态"
+		}
 
 		if payload.NewWPSiteURL != "" || payload.NewWPHomeURL != "" {
 			GoSafe(func() { ClearWPSiteRuntimeCaches(site.ID, newDomain, newWebRoot) })
@@ -1354,7 +1374,8 @@ func ReinstallWordPress(ctx context.Context, webRoot, dbName, dbUser, systemUser
 	cleanDefaults, removeThemes, enableRedisCache bool) error {
 	var siteID int64
 	var fileLockEnabled bool
-	if err := database.GetDB().QueryRowContext(ctx, `SELECT id,file_lock_enabled FROM websites WHERE web_root=? AND system_user=?`, webRoot, systemUser).Scan(&siteID, &fileLockEnabled); err != nil {
+	var domain, logDir string
+	if err := database.GetDB().QueryRowContext(ctx, `SELECT id,file_lock_enabled,domain,log_dir FROM websites WHERE web_root=? AND system_user=?`, webRoot, systemUser).Scan(&siteID, &fileLockEnabled, &domain, &logDir); err != nil {
 		return fmt.Errorf("检查 AI 开发授权失败: %w", err)
 	}
 	if fileLockEnabled {
@@ -1391,8 +1412,11 @@ func ReinstallWordPress(ctx context.Context, webRoot, dbName, dbUser, systemUser
 		return fmt.Errorf("重建数据库失败: %w", err)
 	}
 
-	if err := generateWPConfig(tmpWebRoot, filepath.Base(webRoot), dbName, dbUser, dbPassword); err != nil {
+	if err := generateWPConfig(tmpWebRoot, domain, dbName, dbUser, dbPassword); err != nil {
 		return fmt.Errorf("生成 wp-config.php 失败: %w", err)
+	}
+	if err := ConfigureWPLoginFailureLogging(tmpWebRoot, logDir, systemUser); err != nil {
+		return fmt.Errorf("配置 WordPress 登录防爆破审计失败: %w", err)
 	}
 
 	if _, err := executeCommand("chown", "-R", siteOwner(systemUser), tmpWebRoot); err != nil {

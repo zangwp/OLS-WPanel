@@ -88,12 +88,7 @@ func inspectVPSCLIPortsWithoutDatabase(ctx context.Context, cfg *config.Config) 
 		warning += " 访问策略读取失败。"
 	}
 	status := FirewallPortStatus{Backend: "nftables", Warning: warning, InputPolicy: policy, SSHPort: detectSSHPort(ctx, listeners), AccessEnabled: accessEnabled, AccessRules: accessRules, Listeners: listeners, Rules: []FirewallPortRule{}}
-	if cfg != nil {
-		status.PanelPort = cfg.Panel.Port
-		if cfg.Panel.TLSPort > 0 && cfg.Panel.TLSCertPath != "" && cfg.Panel.TLSKeyPath != "" {
-			status.PanelPort = cfg.Panel.TLSPort
-		}
-	}
+	status.PanelPort, _ = PanelListenEndpoint(cfg)
 	for i := range status.Listeners {
 		l := &status.Listeners[i]
 		if l.BindScope == "local" {

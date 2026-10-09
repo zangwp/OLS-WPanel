@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.20.0 — 2026-10-09
+
+- Adds a dedicated Website security workspace with 14 independently reported checks. Saved settings remain distinct from verified enforcement; unavailable files, services or evidence never imply that protection is active. Harmless loopback HEAD checks verify sensitive-file, upload-PHP and disabled XML-RPC rules without generating login failures or SQL attack requests.
+- Connects XML-RPC settings and narrow URL/query SQL-injection protection to native OpenLiteSpeed rules before redirects and WordPress rewrites. Preserves ACME challenges and normal core searches, retains minimal security logging when ordinary access logging is disabled, and uses server-generated denial markers for SQLi Fail2ban matching.
+- Records real WordPress authentication failures through a bounded native hook and dedicated log, without recording usernames or passwords. Installs the hook for new, reinstalled and upgraded sites; preserves it through domain migration and rollback, and verifies that the running login jail monitors the exact site log before reporting confirmed protection.
+- Separates access, login and legacy security-log ingestion cursors, committing events and positions atomically. Handles rotation, truncation, partial records and retries; rejects unsafe log files and parent directories, preserves the original connection peer, and excludes only trusted local verification requests from security events.
+- Reads LiteSpeed Cache page-cache and Redis object-cache settings from the active WordPress configuration instead of stale panel flags. Distinguishes unsupported, unconfigured and failed checks, and preserves legitimate WP_CACHE changes while migrating old panel overrides.
+- Simplifies website tables into grouped status columns and Details/Files/More actions. Adds keyboard-accessible overflow menus and mobile positioning, clearer security controls, consistent bilingual labels, and deferred page scripts without an artificial navigation delay.
+- Repairs panel HTTP-01 challenge routing through a public OpenLiteSpeed document root without exposing private configuration directories. Improves DNS/reachability error messages, certificate controls and settings layout, and shares the actual panel listening port with access-policy and terminal inspection.
+
+Upgrade notes: back up the panel database, configuration and separate MFA encryption key before updating. Startup installs the WordPress login-audit baseline and rebuilds managed virtual hosts. Confirm results in Website security after the update; configured rules without reliable live evidence remain unverified. SQLi protection covers narrow URL/query patterns, not POST/JSON request bodies or a complete WAF. The matching signed GitHub Release must be verified before deploying the short installation entry.
+
 ## v1.19.0 — 2026-10-08
 
 - Adds a locally generated QR code to TOTP enrollment while retaining manual secret entry. Restores a centered login form with a dark background and translucent card, and removes quotation text from login success messages.

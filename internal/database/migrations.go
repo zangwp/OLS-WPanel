@@ -688,6 +688,10 @@ var migrations = append([]string{
 		FOREIGN KEY (site_id) REFERENCES websites(id) ON DELETE CASCADE
 	)`,
 
+	// Each audit producer has its own cursor. Reusing the legacy cursor for
+	// access and authentication logs would silently skip unrelated events.
+	wpSecuritySourcePositionsSchema,
+
 	// ============================================================
 	// 方案 D 阶段四：WordPress 安全探测告警开关，默认关闭；
 	// 阈值与统计窗口可配置（审核优化项 3.1）

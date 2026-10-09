@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/zangwp/OLS-WPanel/internal/config"
@@ -20,6 +19,7 @@ type LiteSpeedCacheRuntimeStatus struct {
 	PluginStatus               string `json:"plugin_status"`
 	PluginVersion              string `json:"plugin_version,omitempty"`
 	PageCacheEnabled           bool   `json:"page_cache_enabled"`
+	ServerPageCacheEnabled     bool   `json:"server_page_cache_enabled"`
 	RedisObjectCacheConfigured bool   `json:"redis_object_cache_configured"`
 	RedisHost                  string `json:"redis_host,omitempty"`
 	RedisPort                  int    `json:"redis_port,omitempty"`
@@ -42,9 +42,8 @@ func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInvento
 		return status
 	}
 	content, _ := os.ReadFile(filepath.Join(site.WebRoot, "wp-config.php"))
-	status.OverridesPresent = strings.Contains(string(content), "LITESPEED_CONF__OBJECT")
-	status.PageCacheEnabled = site.LSCacheEnabled
-	status.RedisHost, status.RedisPort, status.RedisDatabase, status.RedisObjectCacheConfigured = readLiteSpeedObjectCacheConfig(site.WebRoot)
+	status.OverridesPresent = wpConfigBoolConstant(string(content), "LITESPEED_CONF") && strings.Contains(string(content), "LITESPEED_CONF__OBJECT")
+	status.ServerPageCacheEnabled = site.LSCacheEnabled
 	if site.SiteType != "wordpress" || site.Status != models.StatusActive {
 		return status
 	}
@@ -78,38 +77,14 @@ func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInvento
 		cache := result.Inventory.Cache
 		status.StatusKnown = true
 		active := status.PluginStatus == "active"
-		status.PageCacheEnabled = active && site.LSCacheEnabled && cache.PageEnabled
+		status.PageCacheEnabled = active && cache.PageEnabled
 		status.RedisObjectCacheConfigured = active && cache.ObjectEnabled
 		status.RedisHost, status.RedisPort, status.RedisDatabase = cache.Host, cache.Port, cache.Database
 	}
 	return status
 }
 
-func readLiteSpeedObjectCacheConfig(webRoot string) (string, int, int, bool) {
-	data, err := os.ReadFile(filepath.Join(webRoot, "wp-config.php"))
-	if err != nil {
-		return "", 0, 0, false
-	}
-	content := string(data)
-	host := extractWPConfigStringConstant(content, "LITESPEED_CONF__OBJECT__HOST")
-	port := extractWPConfigIntConstant(content, "LITESPEED_CONF__OBJECT__PORT")
-	database := extractWPConfigIntConstant(content, "LITESPEED_CONF__OBJECT__DB_ID")
-	configured := wpConfigBoolConstant(content, "LITESPEED_CONF__OBJECT") &&
-		wpConfigBoolConstant(content, "LITESPEED_CONF__OBJECT__KIND") && host != "" && port > 0
-	return host, port, database, configured
-}
-
 func wpConfigBoolConstant(content, name string) bool {
 	re := regexp.MustCompile(`(?im)^\s*define\s*\(\s*['"]` + regexp.QuoteMeta(name) + `['"]\s*,\s*true\s*\)\s*;`)
 	return re.MatchString(content)
-}
-
-func extractWPConfigIntConstant(content, name string) int {
-	re := regexp.MustCompile(`(?im)^\s*define\s*\(\s*['"]` + regexp.QuoteMeta(name) + `['"]\s*,\s*([0-9]+)\s*\)\s*;`)
-	matches := re.FindStringSubmatch(content)
-	if len(matches) != 2 {
-		return 0
-	}
-	value, _ := strconv.Atoi(strings.TrimSpace(matches[1]))
-	return value
 }

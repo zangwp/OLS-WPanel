@@ -143,12 +143,14 @@ function api(path, options = {}) {
                 err.status = resp.status;
                 if (data.error_code) err.code = data.error_code;
                 if (data.conflicts) err.conflicts = data.conflicts;
+                if (data.details && typeof data.details === 'object') err.details = data.details;
                 throw err;
             }
             if (!data.success) {
                 const err = new Error(data.message || t('common.operation_failed'));
                 if (data.error_code) err.code = data.error_code;
                 if (data.conflicts) err.conflicts = data.conflicts;
+                if (data.details && typeof data.details === 'object') err.details = data.details;
                 throw err;
             }
             return data;
@@ -163,6 +165,7 @@ function api(path, options = {}) {
             const displayErr = message === err.message ? err : new Error(message);
             if (err.conflicts) displayErr.conflicts = err.conflicts;
             if (err.code) displayErr.code = err.code;
+            if (err.details) displayErr.details = err.details;
             if (Number.isInteger(err.status)) displayErr.status = err.status;
             if (message !== t('auth.session_expired') && !displayErr.conflicts && !silent && !suppressToast) {
                 console.error('Fetch failed:', err.message, 'URL:', url);

@@ -12,12 +12,12 @@
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/theme.css?v={{.AssetVersion}}">
     <link rel="stylesheet" href="{{.AssetPrefix}}/css/overview.css?v={{.AssetVersion}}">
     {{if eq .Active "security"}}<link rel="stylesheet" href="{{.AssetPrefix}}/css/security.css?v={{.AssetVersion}}">{{end}}
-    <script defer src="{{.AssetPrefix}}/js/alpine.min.js?v={{.AssetVersion}}"></script>
-    <script src="{{.AssetPrefix}}/js/chart.min.js?v={{.AssetVersion}}"></script>
     <script>
         window.OLS_WPANEL_I18N = { lang: "{{.Lang}}", messages: {{.MessagesJSON}} };
     </script>
-    <script src="{{.AssetPrefix}}/js/app.js?v={{.AssetVersion}}"></script>
+    <script defer src="{{.AssetPrefix}}/js/app.js?v={{.AssetVersion}}"></script>
+    {{if eq .Active "dashboard"}}<script defer src="{{.AssetPrefix}}/js/chart.min.js?v={{.AssetVersion}}"></script>{{end}}
+    <script defer src="{{.AssetPrefix}}/js/alpine.min.js?v={{.AssetVersion}}"></script>
     <style>
         [x-cloak] { display: none !important; }
     </style>

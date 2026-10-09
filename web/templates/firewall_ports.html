@@ -2,11 +2,11 @@
 <div x-data="firewallManager('ports')" @ssh-port-changed.window="fetchPortStatus()">
     <div x-show="activeTab === 'ports'" x-cloak class="space-y-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.firewall_backend"}}</p><p class="text-lg text-white mt-1" x-text="portStatus.backend || '--'"></p></div>
+            <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.firewall_backend"}}</p><p class="text-lg text-white mt-1" x-text="firewallBackendLabel()"></p></div>
             <div class="card py-4">
                 <p class="text-xs text-gray-500">{{t .Lang "firewall.input_policy"}}</p>
-                <p class="text-lg mt-1" :class="(portStatus.access_enabled || portStatus.input_policy === 'drop') ? 'text-green-400' : 'text-yellow-400'" x-text="portStatus.access_enabled ? t('firewall.access_active') : (portStatus.input_policy || '--')"></p>
-                <p class="text-xs text-gray-500 mt-1" x-text="t('firewall.core_ports_summary', { ssh: portStatus.ssh_port || 22, panel: portStatus.panel_port || 8443 })"></p>
+                <p class="text-lg mt-1" :class="(portStatus.access_enabled || portStatus.input_policy === 'drop') ? 'text-green-400' : 'text-yellow-400'" x-text="firewallPolicyLabel()"></p>
+                <p class="text-xs text-gray-500 mt-1" x-text="t('firewall.core_ports_summary', { ssh: portStatus.ssh_port || '--', panel: portStatus.panel_port || '--' })"></p>
             </div>
             <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.managed_rule_count"}}</p><p class="text-lg text-white mt-1" x-text="(portStatus.managed_rule_count || 0) + (portStatus.access_rules || []).length"></p><p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.managed_rule_count_help"}}</p></div>
             <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "firewall.firewall_anomalies"}}</p><p class="text-lg mt-1" :class="(portStatus.anomaly_count || 0) > 0 ? 'text-yellow-400' : 'text-green-400'" x-text="portStatus.anomaly_count || 0"></p><p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.firewall_anomalies_help"}}</p></div>
@@ -120,7 +120,8 @@
                     <div class="rounded border p-3" :class="isSensitiveNetworkListener(listener) ? 'border-red-700 bg-red-950/10' : 'border-gray-700'">
                         <div class="flex items-center justify-between gap-2"><span class="font-mono text-white" x-text="listener.port + '/' + listener.protocol.toUpperCase()"></span><span class="text-xs" :class="listener.bind_scope === 'local' ? 'text-green-400' : 'text-yellow-400'" x-text="listener.bind_scope === 'local' ? t('firewall.local_only') : t('firewall.network_listening')"></span></div>
                         <span class="block text-xs text-gray-400 mt-1 font-mono" x-text="listener.address || '--'"></span>
-                        <span class="block text-xs text-gray-500 mt-1" x-text="listener.process || t('firewall.unknown_process')"></span>
+                        <span class="block text-xs text-gray-400 mt-1" x-text="serviceDisplayName(listener.process) || t('firewall.unknown_process')"></span>
+                        <span x-show="listener.process && serviceDisplayName(listener.process) !== listener.process" class="block text-xs text-gray-500 mt-1" x-text="listener.process"></span>
                         <span class="block text-xs mt-1" :class="listener.host_exposure === 'allowed_by_default' ? 'text-yellow-400' : 'text-gray-500'" x-text="listenerExposureLabel(listener)"></span>
                     </div>
                 </template>

@@ -2921,10 +2921,18 @@ if ! $REPAIR_MODE; then
 OLS_CONF_DIR="/usr/local/lsws/conf/ols-wpanel"
 OLS_MAIN_CONF="/usr/local/lsws/conf/httpd_config.conf"
 OLS_MANAGED_CONF="$OLS_CONF_DIR/sites.conf"
-OLS_DEFAULT_ROOT="$OLS_CONF_DIR/default-vhost-root"
+OLS_DEFAULT_ROOT="/usr/local/lsws/html/ols-wpanel-default"
 OLS_DEFAULT_CONF="$OLS_CONF_DIR/default-vhost.conf"
 install -d -o root -g root -m 0750 "$OLS_CONF_DIR"
 install -d -o root -g root -m 0750 "$OLS_CONF_DIR/sites-available" "$OLS_CONF_DIR/sites-enabled" "$OLS_CONF_DIR/lsphp-sites"
+# HTTP-01 files must be reachable by OLS workers; keep private configuration
+# permissions unchanged and use only the public static subtree.
+if [[ -L /usr/local/lsws/html || ( -e /usr/local/lsws/html && ! -d /usr/local/lsws/html ) || -L "$OLS_DEFAULT_ROOT" || ( -e "$OLS_DEFAULT_ROOT" && ! -d "$OLS_DEFAULT_ROOT" ) ]]; then
+    log_error "OpenLiteSpeed 公共验证目录不是安全目录"
+fi
+if [[ ! -d /usr/local/lsws/html ]]; then
+    install -d -o root -g root -m 0755 /usr/local/lsws/html
+fi
 if ! OLS_DEFAULT_UID="$(id -u www-data 2>/dev/null)" || ! OLS_DEFAULT_GID="$(id -g www-data 2>/dev/null)"; then
     log_error "OpenLiteSpeed 备用虚拟主机需要低权限 www-data 用户"
 fi
@@ -2943,7 +2951,7 @@ chmod 0600 "$OLS_CONF_DIR/default.key"
 chmod 0644 "$OLS_CONF_DIR/default.crt"
 
 cat > "$OLS_DEFAULT_CONF" << 'OLSDEFAULTVHOSTEOF'
-docRoot                 /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
+docRoot                 /usr/local/lsws/html/ols-wpanel-default/
 vhDomain                ols-wpanel.invalid
 adminEmails             root@localhost
 enableGzip              0
@@ -2955,12 +2963,12 @@ index {
 }
 
 context / {
-  location               /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
+  location               /usr/local/lsws/html/ols-wpanel-default/
   allowBrowse            0
   addDefaultCharset      off
 }
 context /.well-known/acme-challenge/ {
-  location               /usr/local/lsws/conf/ols-wpanel/default-vhost-root/.well-known/acme-challenge/
+  location               /usr/local/lsws/html/ols-wpanel-default/.well-known/acme-challenge/
   allowBrowse            1
   autoIndex              0
   addDefaultCharset      off
@@ -2971,7 +2979,7 @@ chmod 0640 "$OLS_DEFAULT_CONF"
 cat > "$OLS_MANAGED_CONF" << 'OLSMANAGEDEOF'
 # OLS WPanel managed OpenLiteSpeed registry. DO NOT EDIT.
 virtualHost olsw_default {
-  vhRoot                 /usr/local/lsws/conf/ols-wpanel/default-vhost-root/
+  vhRoot                 /usr/local/lsws/html/ols-wpanel-default/
   allowSymbolLink        0
   enableScript           0
   restrained             1

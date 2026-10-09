@@ -56,14 +56,20 @@ func TestAccessRulesIPv6AndIndependentDrop(t *testing.T) {
 }
 
 func TestAccessPreviewFingerprintRejectsChanges(t *testing.T) {
-	a := accessFingerprint("table inet filter { old allow }", accessTestRules())
-	if a == accessFingerprint("table inet filter { new allow }", accessTestRules()) {
+	a := accessFingerprint("table inet filter { old allow }", accessTestRules(), 22, 8443)
+	if a == accessFingerprint("table inet filter { new allow }", accessTestRules(), 22, 8443) {
 		t.Fatal("external rule change not detected")
 	}
 	rules := accessTestRules()
 	rules[2].Port = 80
-	if a == accessFingerprint("table inet filter { old allow }", rules) {
+	if a == accessFingerprint("table inet filter { old allow }", rules, 22, 8443) {
 		t.Fatal("selection change not detected")
+	}
+	if a == accessFingerprint("table inet filter { old allow }", accessTestRules(), 22, 9443) {
+		t.Fatal("panel endpoint change not detected")
+	}
+	if a == accessFingerprint("table inet filter { old allow }", accessTestRules(), 2222, 8443) {
+		t.Fatal("SSH endpoint change not detected")
 	}
 }
 

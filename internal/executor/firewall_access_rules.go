@@ -116,7 +116,10 @@ func accessRulesScript(rules []FirewallAccessRule, replace bool) string {
 	return b.String()
 }
 
-func accessFingerprint(ruleset string, rules []FirewallAccessRule) string {
+func accessFingerprint(ruleset string, rules []FirewallAccessRule, sshPort, panelPort int) string {
 	data, _ := json.Marshal(rules)
-	return fmt.Sprintf("%x", sha256.Sum256(append([]byte(ruleset+"\n"), data...)))
+	// A previously checked selection must not become valid after a management
+	// endpoint changes, even if it happened to include both old and new ports.
+	endpoints := fmt.Sprintf("\nssh=%d;panel=%d\n", sshPort, panelPort)
+	return fmt.Sprintf("%x", sha256.Sum256(append([]byte(ruleset+endpoints), data...)))
 }

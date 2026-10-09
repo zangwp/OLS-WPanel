@@ -79,6 +79,37 @@ func TestCoreRulesDoNotExposeManagementPortsGlobally(t *testing.T) {
 	}
 }
 
+func TestManagementCoreRulesRejectStalePortsAndSources(t *testing.T) {
+	old := portCommand
+	defer func() { portCommand = old }()
+	for _, tc := range []struct {
+		name   string
+		line   string
+		source string
+		port   string
+		match  bool
+	}{
+		{name: "current IPv4", line: `ip saddr 203.0.113.8 tcp dport 49173 ct state new counter packets 0 bytes 0 accept comment "ols-wpanel-core:panel" # handle 9`, source: "203.0.113.8/32", port: "49173", match: true},
+		{name: "current IPv6", line: `ip6 saddr 2001:db8::8 tcp dport 49173 ct state new counter packets 1 bytes 60 accept comment "ols-wpanel-core:panel"`, source: "2001:db8::8/128", port: "49173", match: true},
+		{name: "stale port", line: `ip saddr 203.0.113.8 tcp dport 8443 ct state new counter accept comment "ols-wpanel-core:panel"`, source: "203.0.113.8/32", port: "49173"},
+		{name: "different administrator", line: `ip saddr 203.0.113.9 tcp dport 49173 ct state new counter accept comment "ols-wpanel-core:panel"`, source: "203.0.113.8/32", port: "49173"},
+		{name: "public source", line: `tcp dport 49173 ct state new counter accept comment "ols-wpanel-core:panel"`, source: "203.0.113.8/32", port: "49173"},
+		{name: "unexpected condition", line: `ip saddr 203.0.113.8 tcp dport 49173 ct state invalid counter accept comment "ols-wpanel-core:panel"`, source: "203.0.113.8/32", port: "49173"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			portCommand = func(context.Context, string, ...string) (string, error) {
+				t.Fatal("existing management rule was silently widened or replaced")
+				return "", nil
+			}
+			expressions := append(sourceExpression(tc.source), "tcp", "dport", tc.port, "ct", "state", "new")
+			err := addCoreRuleIfMissing(context.Background(), "inet", "filter", "input", tc.line, "panel", expressions...)
+			if (err == nil) != tc.match {
+				t.Fatalf("existing management rule result = %v, want match %t", err, tc.match)
+			}
+		})
+	}
+}
+
 func TestManagedPortTagSeparatesRestrictedSources(t *testing.T) {
 	a := managedPortTag("tcp", 8443, "203.0.113.1/32")
 	b := managedPortTag("tcp", 8443, "203.0.113.2/32")
