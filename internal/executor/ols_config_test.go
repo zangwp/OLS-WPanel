@@ -63,11 +63,27 @@ func TestRenderOLSVHostIncludesLSPHPAndLiteSpeedCache(t *testing.T) {
 		"extUser                wp_example",
 		"autoLoadHtaccess       1",
 		"module cache {",
-		"enableCache            1",
+		"enableCache            0",
 		"expireInSeconds        7200",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("generated vhost missing %q\n%s", want, content)
+		}
+	}
+}
+
+func TestWordPressLegacyCacheFlagNeverEnablesDefaultPublicCache(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		data := testOLSVHostData(t.TempDir())
+		data.LSCacheEnabled = enabled
+		content := mustRenderOLSVHost(t, data)
+		for _, expected := range []string{"module cache {", "ls_enabled             1", "checkPublicCache       1", "storagePath            $VH_ROOT/.lscache", "enableCache            0"} {
+			if !strings.Contains(content, expected) {
+				t.Fatalf("legacy flag %t lost selective plugin cache support %q", enabled, expected)
+			}
+		}
+		if strings.Contains(content, "enableCache            1") {
+			t.Fatalf("legacy flag %t enables default public caching", enabled)
 		}
 	}
 }

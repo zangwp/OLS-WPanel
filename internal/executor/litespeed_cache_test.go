@@ -35,6 +35,10 @@ func TestUpdateSiteLiteSpeedCachePublishesBeforeSuccess(t *testing.T) {
 		if siteID != int(id) {
 			t.Fatalf("siteID=%d", siteID)
 		}
+		var publicDefault int
+		if err := database.GetDB().QueryRow(`SELECT litespeed_cache_enabled FROM websites WHERE id=?`, siteID).Scan(&publicDefault); err != nil || publicDefault != 0 {
+			t.Fatalf("WordPress must be normalized before publication: flag=%d err=%v", publicDefault, err)
+		}
 		return nil
 	}
 	t.Cleanup(func() { regenerateSiteOLSForCache = oldRegenerate })
@@ -46,8 +50,29 @@ func TestUpdateSiteLiteSpeedCachePublishesBeforeSuccess(t *testing.T) {
 	if err := database.GetDB().QueryRow(`SELECT litespeed_cache_enabled,litespeed_cache_ttl FROM websites WHERE id=?`, id).Scan(&enabled, &ttl); err != nil {
 		t.Fatal(err)
 	}
-	if enabled != 1 || ttl != 600 {
+	if enabled != 0 || ttl != 600 {
 		t.Fatalf("cache settings=(%d,%d)", enabled, ttl)
+	}
+}
+
+func TestUpdateSiteLiteSpeedCachePreservesNonWordPressLegacyControl(t *testing.T) {
+	openTestDB(t)
+	result, err := database.GetDB().Exec(`INSERT INTO websites
+		(name,domain,status,site_type,system_user,web_root,log_dir,db_name,db_user,lsphp_socket_path,ols_vhost_config_path,litespeed_cache_enabled,litespeed_cache_ttl)
+		VALUES ('site','cache.test','active','php','nobody','/tmp/cache.test','','','','','','0',300)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := result.LastInsertId()
+	oldRegenerate := regenerateSiteOLSForCache
+	regenerateSiteOLSForCache = func(int) error { return nil }
+	t.Cleanup(func() { regenerateSiteOLSForCache = oldRegenerate })
+	if err := UpdateSiteLiteSpeedCache(int(id), 1, 600); err != nil {
+		t.Fatal(err)
+	}
+	var enabled, ttl int
+	if err := database.GetDB().QueryRow(`SELECT litespeed_cache_enabled,litespeed_cache_ttl FROM websites WHERE id=?`, id).Scan(&enabled, &ttl); err != nil || enabled != 1 || ttl != 600 {
+		t.Fatalf("non-WordPress legacy control changed: flag=%d ttl=%d err=%v", enabled, ttl, err)
 	}
 }
 

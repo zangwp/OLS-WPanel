@@ -91,6 +91,49 @@ func TestSaveWPOptimizationsPreservesDisplayWhenFieldIsMissing(t *testing.T) {
 	}
 }
 
+func TestSaveWPOptimizationsNormalizesLegacyWordPressPolicyAndPreservesOmittedPHPControl(t *testing.T) {
+	for _, tc := range []struct {
+		name, siteType, body    string
+		wantFlag, wantPublishes int
+	}{
+		{"new WordPress client omits removed controls", "wordpress", `{}`, 0, 1},
+		{"old WordPress client asks for blanket caching", "wordpress", `{"litespeed_cache_enabled":true}`, 0, 1},
+		{"PHP client omits existing cache control", "php", `{}`, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupWebsiteOptimizationsTestDB(t)
+			db := database.GetDB()
+			if _, err := db.Exec(`UPDATE websites SET site_type=?, litespeed_cache_enabled=1, litespeed_cache_ttl=7200 WHERE id=1`, tc.siteType); err != nil {
+				t.Fatal(err)
+			}
+			oldPublish := publishSiteOLSWithCacheRollback
+			publishes := 0
+			publishSiteOLSWithCacheRollback = func(id, oldFlag, oldTTL int) error {
+				publishes++
+				var actual int
+				if err := db.QueryRow(`SELECT litespeed_cache_enabled FROM websites WHERE id=?`, id).Scan(&actual); err != nil || actual != tc.wantFlag || oldFlag != 1 || oldTTL != 7200 {
+					t.Fatalf("unsafe/incorrect policy at publish: actual=%d old=%d/%d err=%v", actual, oldFlag, oldTTL, err)
+				}
+				return nil
+			}
+			t.Cleanup(func() { publishSiteOLSWithCacheRollback = oldPublish })
+			router := gin.New()
+			router.PUT("/api/websites/:id/wp-optimizations", (&WebsiteHandler{}).SaveWPOptimizations)
+			req := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-optimizations", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+			}
+			var flag, ttl int
+			if err := db.QueryRow(`SELECT litespeed_cache_enabled,litespeed_cache_ttl FROM websites WHERE id=1`).Scan(&flag, &ttl); err != nil || flag != tc.wantFlag || ttl != 7200 || publishes != tc.wantPublishes {
+				t.Fatalf("flag=%d ttl=%d publishes=%d err=%v", flag, ttl, publishes, err)
+			}
+		})
+	}
+}
+
 func TestSaveWPOptimizationsDoesNotUpdateDatabaseWhenWPConfigWriteFails(t *testing.T) {
 	setupWebsiteOptimizationsTestDB(t)
 	var webRoot string
@@ -278,8 +321,8 @@ func TestPluginOptimizationFileLockSafeOnlyUpdatesCacheFields(t *testing.T) {
 	if err := db.QueryRow(`SELECT litespeed_cache_enabled, litespeed_cache_ttl, disable_wp_updates, disable_file_editing, wp_debug_enabled, wp_post_revisions, wp_memory_limit FROM websites WHERE id=1`).Scan(&cacheEnabled, &ttl, &noUpdates, &noEdit, &debugEnabled, &revisions, &memoryLimit); err != nil {
 		t.Fatal(err)
 	}
-	if cacheEnabled != 1 || ttl != 600 {
-		t.Fatalf("cache fields=(%d,%d), want (1,600)", cacheEnabled, ttl)
+	if cacheEnabled != 0 || ttl != 600 {
+		t.Fatalf("WordPress public policy=(%d,%d), want plugin managed (0,600)", cacheEnabled, ttl)
 	}
 	if noUpdates != 1 || noEdit != 1 || debugEnabled != 1 || revisions != 5 || memoryLimit != "128M" {
 		t.Fatalf("protected fields changed: updates=%d edit=%d debug=%d revisions=%d memory=%q", noUpdates, noEdit, debugEnabled, revisions, memoryLimit)

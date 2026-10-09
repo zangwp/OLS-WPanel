@@ -244,7 +244,7 @@
 
             <hr class="my-4 border-gray-700">
 
-            <div id="system-updates" x-data="systemUpdate()" x-init="init()" class="scroll-mt-4">
+            <div id="system-updates" x-data="systemUpdate()" class="scroll-mt-4">
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-sm text-gray-400">{{t .Lang "settings.system_updates"}}</span>
                     <span class="text-sm text-white font-mono" x-show="checked && count > 0" x-text="t('settings.available_count', { count })"></span>
@@ -371,7 +371,7 @@
 
 	</div>
 
-    <div id="panel-backups" x-show="activeSection === 'backups'" x-cloak class="card mb-6" x-data="dbBackup()" x-init="init()">
+    <div id="panel-backups" x-show="activeSection === 'backups'" x-cloak class="card mb-6" x-data="dbBackup()">
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "settings.panel_db_backup"}}</h3>
             <div class="flex items-center space-x-2">

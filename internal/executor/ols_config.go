@@ -362,7 +362,10 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 
 	if data.SiteType != "php" {
 		cacheEnabled := 0
-		if data.LSCacheEnabled {
+		// WordPress decides which responses are public/cacheable through the
+		// official plugin. enableCache is the server's default public policy,
+		// not the cache module switch; a legacy DB flag must not cache all URLs.
+		if data.SiteType != "wordpress" && data.LSCacheEnabled {
 			cacheEnabled = 1
 		}
 		cacheTTL := data.LSCacheTTL
