@@ -55,9 +55,14 @@ test('unavailable checks, loading and parallel verification never issue a reques
     const { page, calls } = setup(); page.securityStatusLoading = true; await page.verifySummaryCheck('https'); page.securityStatusLoading = false; page.securityStatus.checks[0].can_verify = false; await page.verifySummaryCheck('https'); page.site = null; await page.verifySummaryCheck('https'); assert.equal(calls.length, 0);
 });
 
-test('settings and log actions use explicit section anchors and managed panel paths', () => {
-    const { page, navigation } = setup(); page.openSummarySettings('https'); assert.equal(navigation.pop(), 'ssl');
-    page.securityStatus.checks = [check('configured', { action: 'wp-policy' })]; page.openSummarySettings('https'); assert.deepEqual(navigation.splice(0), ['security', 'site-wp-policy']);
-    page.securityStatus.checks[0].action = 'protection'; page.openSummarySettings('https'); assert.equal(navigation.pop(), '/panel/security#settings');
+test('stopped sites cannot start a verification even if the previous observation allowed it', async () => {
+    const { page, calls } = setup(); page.site.status = 'stopped';
+    const previous = page.securityStatus;
+    await page.verifySummaryCheck('https');
+    assert.equal(calls.length, 0); assert.equal(page.verifyingKey, ''); assert.equal(page.securityStatus, previous);
+});
+
+test('log actions open the applicable site log without an unrelated settings navigation', () => {
+    const { page, navigation } = setup();
     page.openSummaryLogs(); assert.deepEqual(navigation.splice(0), ['logs', 'security']); page.site.site_type = 'php'; page.openSummaryLogs(); assert.deepEqual(navigation.splice(0), ['logs', 'error']);
 });

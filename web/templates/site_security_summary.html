@@ -1,29 +1,45 @@
 {{define "site_security_summary"}}
-<section id="site-security" x-show="detailTab === 'security'" x-data="siteSecuritySummary()" class="card site-security-controls" :aria-busy="securityStatusLoading || !!verifyingKey">
-    <div class="site-security-summary"><div><h3>{{t .Lang "website.security_status_title"}}</h3><p>{{t .Lang "site_security.summary_help"}}</p></div><button type="button" @click="fetchSiteSecurityStatus()" :disabled="securityStatusLoading || !!verifyingKey" class="btn-secondary" x-text="securityStatusLoading ? t('website.security_checking') : t('website.security_refresh')"></button></div>
-    <p x-show="securityStatusError || verificationError" x-cloak role="alert" class="text-sm text-red-400 mb-4" x-text="securityStatusError || verificationError"></p>
-    <div class="site-security-groups">
+<section id="site-security" x-show="detailTab === 'security'" x-data="siteSecuritySummary()" class="card site-security-controls site-security-board" :aria-busy="securityStatusLoading || !!verifyingKey">
+    <div class="site-security-board-header">
+        <div><h3>{{t .Lang "website.security_status_title"}}</h3><p>{{t .Lang "site_security.summary_compact_help"}}</p></div>
+        <button type="button" @click="fetchSiteSecurityStatus()" :disabled="securityStatusLoading || !!verifyingKey" class="btn-secondary" x-text="securityStatusLoading ? t('website.security_checking') : t('website.security_refresh')"></button>
+    </div>
+    <p x-show="securityStatusError || verificationError" x-cloak role="alert" class="site-security-error" x-text="securityStatusError || verificationError"></p>
+    <div class="site-security-list">
         <template x-for="group in siteSecurityGroups" :key="group.id">
-            <div class="site-security-group" x-show="group.id !== 'wordpress' || site.site_type === 'wordpress'">
+            <div class="site-security-section" x-show="group.id !== 'wordpress' || site.site_type === 'wordpress'">
                 <h4 x-text="t(group.title)"></h4>
                 <template x-for="key in group.keys" :key="key">
-                    <div class="site-security-check">
-                        <div class="site-security-check-heading"><span x-text="siteSecurityTitle(key)"></span><span :class="summaryStateClass(key)" x-text="summaryStateText(key)"></span></div>
-                        <p x-text="summaryReason(key)"></p>
-                        <p class="text-xs mt-2" x-show="summaryCheck(key).evidence_source"><span x-text="t('site_security.evidence') + ': ' + summarySource(key)"></span><span x-show="summaryCheck(key).evidence_at" x-text="' · ' + summaryTime(summaryCheck(key).evidence_at)"></span></p>
-                        <p class="text-xs mt-1" x-show="summaryCheck(key).recent_event_at" x-text="t('site_security.recent_event') + ': ' + summaryTime(summaryCheck(key).recent_event_at)"></p>
-                        <p class="text-xs mt-1" x-show="summaryCheck(key).details?.expires_at" x-text="t('site_security.certificate_expiry') + ': ' + summaryTime(summaryCheck(key).details?.expires_at)"></p>
-                        <div class="flex flex-wrap gap-2 mt-3">
-                            <button type="button" class="btn-secondary text-xs" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" x-text="verifyingKey === key ? t('site_security.verifying') : t('site_security.verify')"></button>
-                            <button type="button" class="btn-secondary text-xs" x-show="summaryCheck(key).action && summaryCheck(key).action !== 'logs' && summaryCheck(key).state !== 'unsupported'" @click="openSummarySettings(key)" x-text="t('site_security.settings')"></button>
-                            <button type="button" class="btn-secondary text-xs" x-show="['login_protection','sql_injection','sensitive_files','uploads_php'].includes(key)" @click="openSummaryLogs()" x-text="t('website.security_view_logs')"></button>
+                    <div class="site-security-row" :data-check="key" :data-state="summaryCheck(key).state">
+                        <details class="site-security-row-details" name="site-security-evidence">
+                            <summary class="site-security-row-summary">
+                                <span class="site-security-row-title" x-text="siteSecurityTitle(key)"></span>
+                                <span class="site-security-row-state" :class="summaryStateClass(key)" x-text="summaryStateText(key)"></span>
+                                <span class="site-security-row-disclosure" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" focusable="false"><path d="m9 5 7 7-7 7"/></svg></span>
+                                <span class="sr-only">{{t .Lang "site_security.details"}}</span>
+                            </summary>
+                            <div class="site-security-row-evidence">
+                                <p class="site-security-row-reason" x-text="summaryReason(key)"></p>
+                                <dl class="site-security-row-metadata">
+                                    <div x-show="summaryCheck(key).evidence_source"><dt>{{t .Lang "site_security.evidence"}}</dt><dd><span x-text="summarySource(key)"></span><time x-show="summaryCheck(key).evidence_at" :datetime="summaryCheck(key).evidence_at" x-text="summaryTime(summaryCheck(key).evidence_at)"></time></dd></div>
+                                    <div x-show="summaryCheck(key).recent_event_at"><dt>{{t .Lang "site_security.recent_event"}}</dt><dd><time :datetime="summaryCheck(key).recent_event_at" x-text="summaryTime(summaryCheck(key).recent_event_at)"></time></dd></div>
+                                    <div x-show="summaryCheck(key).details?.expires_at"><dt>{{t .Lang "site_security.certificate_expiry"}}</dt><dd><time :datetime="summaryCheck(key).details?.expires_at" x-text="summaryTime(summaryCheck(key).details?.expires_at)"></time></dd></div>
+                                </dl>
+                                <button type="button" class="site-security-log-link" x-show="['login_protection','sql_injection','sensitive_files','uploads_php'].includes(key)" @click="openSummaryLogs()" x-text="t('website.security_view_logs')"></button>
+                            </div>
+                        </details>
+                        <div class="site-security-row-actions" x-show="summaryCheck(key).can_verify">
+                            <button type="button" class="site-security-action" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" :aria-label="siteSecurityTitle(key) + ': ' + t('site_security.verify')" x-text="verifyingKey === key ? t('site_security.verifying') : t('site_security.verify_short')"></button>
                         </div>
                     </div>
                 </template>
             </div>
         </template>
     </div>
-    <p class="site-security-checked-at" x-show="securityStatus?.checked_at" x-text="t('site_security.collected_at') + ': ' + siteSecurityCheckedAt()"></p>
+    <div class="site-security-board-footer">
+        <details class="site-security-status-guide"><summary>{{t .Lang "site_security.status_guide"}}</summary><p>{{t .Lang "site_security.summary_help"}}</p></details>
+        <p class="site-security-board-collected" x-show="securityStatus?.checked_at"><span>{{t .Lang "site_security.collected_at"}}</span><time :datetime="securityStatus?.checked_at" x-text="siteSecurityCheckedAt()"></time></p>
+    </div>
 </section>
 {{end}}
 {{define "site_security_summary_script"}}
@@ -59,7 +75,7 @@ function siteSecuritySummary() {
         },
         summaryTime(value) { const date = new Date(value); return value && Number.isFinite(date.getTime()) ? date.toLocaleString(currentLocale()) : '—'; },
         async verifySummaryCheck(key) {
-            if (!this.site || this.verifyingKey || this.securityStatusLoading || !this.summaryCheck(key).can_verify) return;
+            if (!this.site || this.site.status !== 'active' || this.verifyingKey || this.securityStatusLoading || !this.summaryCheck(key).can_verify) return;
             const siteID = this.site.id, generation = ++this.securityStatusGeneration;
             this.verifyingKey = key; this.verificationError = '';
             try {
@@ -71,17 +87,6 @@ function siteSecuritySummary() {
             } finally { this.verifyingKey = ''; }
         },
         openSummaryLogs() { this.setDetailTab('logs'); this.selectLogType(this.site.site_type === 'wordpress' ? 'security' : 'error'); },
-        openSummarySettings(key) {
-            const action = this.summaryCheck(key).action;
-            if (action === 'ssl') { this.openSiteSSLSettings(); return; }
-            if (action === 'protection') { window.location.assign('/{{.RandomSuffix}}/security#settings'); return; }
-            if (action === 'backups') { window.location.assign('/{{.RandomSuffix}}/backups'); return; }
-            const destinations = {'wp-policy':['security','site-wp-policy'],'file-editing':['security','site-file-editing'],'cache':['cache','site-wp-advanced'],'wp-updates':['cache','site-wp-advanced'],'file-lock':['security','site-protection'],'monitor':['security','site-monitoring'],'anomaly':['security','site-wp-anomaly']};
-            const destination = destinations[action];
-            if (!destination) { this.openSummaryLogs(); return; }
-            this.setDetailTab(destination[0]);
-            this.$nextTick(() => document.getElementById(destination[1])?.scrollIntoView({block:'start',behavior:'smooth'}));
-        },
     };
 }
 </script>

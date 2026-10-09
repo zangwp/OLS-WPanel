@@ -90,9 +90,9 @@ function api(path, options = {}) {
         fetchOptions.signal = controller.signal;
         if (externalSignal) {
             if (externalSignal.aborted) {
-                controller.abort();
+                controller.abort(externalSignal.reason);
             } else {
-                externalAbortHandler = () => controller.abort();
+                externalAbortHandler = () => controller.abort(externalSignal.reason);
                 externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
             }
         }
@@ -119,8 +119,10 @@ function api(path, options = {}) {
 
     return fetch(url, { ...fetchOptions, headers })
         .then(async (resp) => {
+            if (fetchOptions.signal?.aborted) throw fetchOptions.signal.reason || cancelledAPIRequest();
             const contentType = resp.headers.get('content-type') || '';
             const data = contentType.includes('application/json') ? await resp.json() : null;
+            if (fetchOptions.signal?.aborted) throw fetchOptions.signal.reason || cancelledAPIRequest();
             // A wrong step-up credential is recoverable in the current form.
             // Missing/expired sessions still redirect even when opted in.
             const stepUpFailure = allowAuthFailure && ['mfa_invalid_code', 'mfa_invalid_password'].includes(data?.error_code);
@@ -161,8 +163,14 @@ function api(path, options = {}) {
             return data;
         })
         .catch(err => {
-            if (timedOut) {
+            // A caller deliberately leaving a view is not a failed request.
+            // Match the rejection to the aborted signal, rather than treating
+            // every error near a cancellation as an abort (or a timeout).
+            const aborted = fetchOptions.signal?.aborted && (err === fetchOptions.signal.reason || err?.name === 'AbortError');
+            if (aborted && !timedOut) throw cancelledAPIRequest();
+            if (aborted && timedOut) {
                 err = new Error(t('common.request_timeout'));
+                err.code = 'request_timeout';
             }
             const securityKey = err.code ? 'account_security.' + err.code : '';
             const localizedSecurityError = securityKey ? t(securityKey) : '';
@@ -182,6 +190,14 @@ function api(path, options = {}) {
             if (timeoutID) clearTimeout(timeoutID);
             if (externalAbortHandler && externalSignal) externalSignal.removeEventListener('abort', externalAbortHandler);
         });
+}
+
+function cancelledAPIRequest() {
+    const error = new Error(t('common.request_cancelled'));
+    error.name = 'AbortError';
+    error.code = 'request_cancelled';
+    error.cancelled = true;
+    return error;
 }
 
 const __apiGetCache = new Map();
@@ -232,7 +248,7 @@ function friendlyAPIError(err) {
     if (/Load failed|Failed to fetch|NetworkError|Network request failed|fetch failed/i.test(message)) {
         return t('common.network_error');
     }
-    if (/AbortError|The operation was aborted/i.test(message)) {
+    if (err?.name === 'AbortError' || /AbortError|The operation was aborted/i.test(message)) {
         return t('common.request_cancelled');
     }
     return message || t('common.request_failed');
