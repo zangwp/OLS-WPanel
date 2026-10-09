@@ -214,7 +214,7 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 	for _, expected := range [][]byte{
 		[]byte(`@click="setSection('updates')"`),
 		[]byte(`x-show="activeSection === 'updates'"`),
-		[]byte(`id="system-updates" x-data="systemUpdate()" x-init="init()"`),
+		[]byte(`id="system-updates" x-data="systemUpdate()"`),
 		[]byte(`listOpen: false`),
 		[]byte(`x-show="listOpen"`),
 		[]byte(`style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;"`),
@@ -235,6 +235,10 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 		if !bytes.Contains(settings, expected) {
 			t.Fatalf("compact system update panel is missing %q", expected)
 		}
+	}
+	component := regexp.MustCompile(`<[^>]+\bid="system-updates"[^>]*>`).Find(settings)
+	if bytes.Contains(component, []byte(`x-init=`)) {
+		t.Fatal("system update component must use Alpine auto init without a second explicit initialization")
 	}
 	if bytes.Contains(settings, []byte(`space-y-2 max-h-80 overflow-y-auto`)) {
 		t.Fatal("system update list still depends on an uncompiled max-h-80 utility")
