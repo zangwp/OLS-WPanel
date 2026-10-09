@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,6 +23,24 @@ var liteSpeedPanelConstants = map[string]string{
 
 func liteSpeedConfigMigration(content string) (string, map[string]any, error) {
 	patch := map[string]any{}
+	// A setting-specific constant is inert unless LiteSpeed's master switch is
+	// enabled. Copying inert values into the database would activate settings
+	// that the administrator never enabled. Only migrate a literal, unambiguous
+	// master declaration; the runner also checks its actual runtime value.
+	master := regexp.MustCompile(`(?m)^\s*define\s*\(\s*(?:'LITESPEED_CONF'|"LITESPEED_CONF")\s*,\s*(true|false)\s*\)\s*;`)
+	masters := master.FindAllStringSubmatch(content, -1)
+	if len(masters) > 1 {
+		return "", nil, fmt.Errorf("duplicate cache override: LITESPEED_CONF")
+	}
+	if len(masters) == 0 {
+		if regexp.MustCompile(`(?m)^\s*define\s*\(\s*['"]LITESPEED_CONF['"]`).MatchString(content) {
+			return "", nil, fmt.Errorf("unsupported cache override: LITESPEED_CONF")
+		}
+		return content, patch, nil
+	}
+	if masters[0][1] != "true" {
+		return content, patch, nil
+	}
 	for name, key := range liteSpeedPanelConstants {
 		re := regexp.MustCompile(`(?m)^\s*define\s*\(\s*['"]` + regexp.QuoteMeta(name) + `['"]\s*,\s*(true|false|[0-9]+|'[^'\r\n]*'|"[^"\r\n]*")\s*\)\s*;`)
 		match := re.FindStringSubmatch(content)
@@ -64,6 +83,43 @@ func liteSpeedConfigMigration(content string) (string, map[string]any, error) {
 	return content, patch, nil
 }
 
+// LiteSpeed's save API may reconcile WP_CACHE while persisting object-cache
+// settings. Accept only the exact insertion/removal emitted by v7.9.1's
+// Activation::manage_wp_cache_const; any other wp-config edit remains a conflict.
+// Reapply the same migration to the current file so that a legitimate WP_CACHE
+// reconciliation is retained instead of overwriting it with the earlier bytes.
+func liteSpeedConfigAfterMigration(before, current []byte, patch map[string]any) ([]byte, error) {
+	if !liteSpeedWPConfigSaveChange(before, current) {
+		return nil, errWPConfigChanged
+	}
+	next, currentPatch, err := liteSpeedConfigMigration(string(current))
+	if err != nil || !reflect.DeepEqual(patch, currentPatch) {
+		return nil, errWPConfigChanged
+	}
+	return []byte(next), nil
+}
+
+func liteSpeedWPConfigSaveChange(before, current []byte) bool {
+	if bytes.Equal(before, current) {
+		return true
+	}
+	// Deliberately narrower than the plugin's word-value expression: dynamic
+	// definitions cannot be proven safe from source text and remain conflicts.
+	cache := regexp.MustCompile(`define\(\s*(?:'WP_CACHE'|"WP_CACHE")\s*,\s*(true|false)\s*\)\s*;`)
+	if len(cache.FindAll(before, -1)) > 1 {
+		return false
+	}
+	without := cache.ReplaceAll(before, nil)
+	if !bytes.Equal(before, without) && bytes.Equal(without, current) {
+		return true
+	}
+	if !bytes.HasPrefix(without, []byte("<?php")) {
+		return false
+	}
+	enabled := append([]byte("<?php\ndefine( 'WP_CACHE', true );"), without[len("<?php"):]...)
+	return bytes.Equal(enabled, current)
+}
+
 // The caller owns the shared site-operation lock. Persist the effective values
 // first; remove overrides only after the isolated runner verifies the write.
 func MigrateLiteSpeedCacheSettings(ctx context.Context, cfg *config.Config, site *models.Website) error {
@@ -75,7 +131,7 @@ func MigrateLiteSpeedCacheSettings(ctx context.Context, cfg *config.Config, site
 	if err != nil {
 		return err
 	}
-	next, patch, err := liteSpeedConfigMigration(string(before))
+	_, patch, err := liteSpeedConfigMigration(string(before))
 	if err != nil {
 		return err
 	}
@@ -94,8 +150,9 @@ func MigrateLiteSpeedCacheSettings(ctx context.Context, cfg *config.Config, site
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(before, current) {
-		return errWPConfigChanged
+	next, err := liteSpeedConfigAfterMigration(before, current, patch)
+	if err != nil {
+		return err
 	}
-	return writeWPConfig(path, []byte(next))
+	return writeWPConfig(path, next)
 }

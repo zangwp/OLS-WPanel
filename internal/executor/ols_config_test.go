@@ -114,6 +114,109 @@ func TestRenderOLSVHostTemporaryAliasRedirectWithoutSSL(t *testing.T) {
 	}
 }
 
+func TestRenderOLSVHostLoadsGlobalSQLiPolicyAtEveryRender(t *testing.T) {
+	old := loadOLSSQLiProtectionSettings
+	t.Cleanup(func() { loadOLSSQLiProtectionSettings = old })
+	for _, enabled := range []bool{true, false} {
+		loadOLSSQLiProtectionSettings = func() (bool, bool) { return enabled, false }
+		data := testOLSVHostData(t.TempDir())
+		// A caller's obsolete booleans must not override the current global policy.
+		data.SQLiBlockEnabled, data.SQLiAutoBanLog = !enabled, true
+		content := mustRenderOLSVHost(t, data)
+		expected := *data
+		expected.SQLiBlockEnabled, expected.SQLiAutoBanLog = enabled, false
+		if !OLSVHostSecurityRulesMatch(content, &expected) {
+			t.Fatalf("render did not use current global SQLi policy enabled=%v", enabled)
+		}
+		if data.SQLiBlockEnabled != !enabled || !data.SQLiAutoBanLog {
+			t.Fatal("render mutated the caller's vhost data")
+		}
+	}
+}
+
+func TestRenderOLSVHostDeniesBeforeRedirectAndRetainsHtaccess(t *testing.T) {
+	data := testOLSVHostData(t.TempDir())
+	data.AliasRedirectMode, data.UseSSL = AliasRedirectPermanent, true
+	data.SSLCertPath, data.SSLKeyPath = filepath.Join(t.TempDir(), "cert.pem"), filepath.Join(t.TempDir(), "key.pem")
+	content := mustRenderOLSVHost(t, data)
+	deny := strings.Index(content, "E=OLS_WPANEL_SECURITY:uploads_php")
+	redirect := strings.Index(content, "RewriteCond %{HTTP_HOST}")
+	if deny < 0 || redirect <= deny {
+		t.Fatal("security rules must run before canonical/HTTPS redirects")
+	}
+	if strings.Count(content, "rules                  <<<END_rules") != 1 || !strings.Contains(content, "autoLoadHtaccess       1") {
+		t.Fatal("security and redirects must share one vhost rewrite block and preserve WordPress .htaccess")
+	}
+}
+
+func TestRenderOLSVHostSecurityLoggingMinimizesDisabledAccessLogs(t *testing.T) {
+	for _, mode := range []string{"off", "error_only", "", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			data := testOLSVHostData(t.TempDir())
+			data.AccessLogMode = mode
+			content := mustRenderOLSVHost(t, data)
+			if strings.Count(content, "accesslog ") != 1 {
+				t.Fatal("WordPress security logging must use exactly one access log")
+			}
+			if !strings.Contains(content, `ols_security=\"%{OLS_WPANEL_SECURITY}e\" ols_autoban=\"%{OLS_WPANEL_SQLI_AUTOBAN}e\"`) {
+				t.Fatal("trusted terminal environment markers missing")
+			}
+			if mode == "full" {
+				if !strings.Contains(content, `%r`) || !strings.Contains(content, `%{User-Agent}i`) {
+					t.Fatal("full access logging must retain request and user agent")
+				}
+			} else if strings.Contains(content, "%r") || strings.Contains(content, "%{Referer}i") || strings.Contains(content, "%{User-Agent}i") || !strings.Contains(content, `%m %U %H`) {
+				t.Fatal("minimal security logging must omit query/referrer/user-agent data")
+			}
+		})
+	}
+	data := testOLSVHostData(t.TempDir())
+	data.SiteType, data.AccessLogMode = "php", "off"
+	if strings.Contains(mustRenderOLSVHost(t, data), "accesslog ") {
+		t.Fatal("generic PHP access logging must remain disabled")
+	}
+}
+
+func TestOLSVHostSecurityRulesMatchRejectsIncompleteOrStalePolicy(t *testing.T) {
+	old := loadOLSSQLiProtectionSettings
+	loadOLSSQLiProtectionSettings = func() (bool, bool) { return true, true }
+	t.Cleanup(func() { loadOLSSQLiProtectionSettings = old })
+	data := testOLSVHostData(t.TempDir())
+	data.SQLiBlockEnabled, data.SQLiAutoBanLog = true, true
+	content := mustRenderOLSVHost(t, data)
+	if !OLSVHostSecurityRulesMatch(content, data) {
+		t.Fatal("current complete policy was rejected")
+	}
+	for _, tampered := range []string{
+		olsSiteSecurityBegin + olsSiteSecurityEnd,
+		strings.ReplaceAll(content, "E=OLS_WPANEL_SECURITY:sqli", "E=OLS_WPANEL_SECURITY:none"),
+		strings.ReplaceAll(content, `%{OLS_WPANEL_SECURITY}e`, `%{OLS_WPANEL_SECURITY}i`),
+		strings.ReplaceAll(content, "autoLoadHtaccess       1", "autoLoadHtaccess       0"),
+	} {
+		if OLSVHostSecurityRulesMatch(tampered, data) {
+			t.Fatal("incomplete or untrusted security configuration accepted")
+		}
+	}
+	expected := *data
+	expected.XMLRPCEnabled = true
+	if OLSVHostSecurityRulesMatch(content, &expected) {
+		t.Fatal("stale XML-RPC policy accepted")
+	}
+}
+
+func TestRenderOLSVHostAllowsOnlyOwnSiteLogDirectoryInPHP(t *testing.T) {
+	data := testOLSVHostData(t.TempDir())
+	content := mustRenderOLSVHost(t, data)
+	want := sitePHPOpenBaseDir(data.WebRoot, data.Domain) + ":" + data.LogDir
+	if !strings.Contains(content, `open_basedir "`+want+`"`) {
+		t.Fatal("WordPress login hook must have access to only its own site's log directory")
+	}
+	data.SiteType = "php"
+	if strings.Contains(mustRenderOLSVHost(t, data), `open_basedir "`+want+`"`) {
+		t.Fatal("generic PHP site must not gain the WordPress security-log permission")
+	}
+}
+
 func TestNormalizeAliasRedirectModeRejectsUnknownValue(t *testing.T) {
 	if _, err := NormalizeAliasRedirectMode("javascript"); err == nil {
 		t.Fatal("unknown alias redirect mode accepted")
@@ -132,6 +235,7 @@ func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
 	}
 	old := config.AppConfig
 	config.AppConfig = &config.Config{Paths: config.PathsConfig{
+		OLSRoot:          root,
 		OLSManagedConfig: managed,
 		OLSListenerCert:  filepath.Join(root, "default.crt"),
 		OLSListenerKey:   filepath.Join(root, "default.key"),

@@ -46,8 +46,8 @@ var googlebotHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // fail2banFilterConfig 只负责全站洪泛/探测信号（429 限流、敏感文件 404 探测）。
 // 登录/XML-RPC 认证爆破信号已经拆分到 fail2banLoginFilterConfig + olswpanel-login
-// jail，读取的是 OpenLiteSpeed 基于规范化 $uri 单独生成的 wp-login-security.log，不再
-// 从这里的 access.log 里用 $request 原始文本匹配——避免同一次登录失败被两个
+// jail，读取的是 WordPress wp_login_failed 写入的 wp-login-security.log，不再
+// 从这里的 access.log 里用响应状态推测登录失败——避免同一次登录失败被两个
 // jail 分别计数、触发两次独立封禁。
 const fail2banSensitive404Regex = `(?i)^<HOST> - - \[.*\] "(?:GET|POST) .*(?:\.env(?:\.[^/?\s"]+)?|\.git|config\.bak|wp-config\.php|secrets\.(?:json|ya?ml)|settings\.py|application\.properties|config\.toml|\.sql|\.tar|\.gz|\.zip|\.old|\.swp|\.save|\.ds_store)(?:[/?\s"]|$).*" 404 .*$`
 
@@ -58,29 +58,23 @@ failregex = ^<HOST> .* ".*" 429 .*$
 ignoreregex =
 `
 
-// fail2banLoginFilterConfig 承载 wp-login.php 登录失败（200）和被禁用的
-// xmlrpc.php 认证请求（403）两类信号。这两类事件能不能进入 wp-login-security.log，
-// 已经由 OpenLiteSpeed 侧的 $wp_login_attempt_loggable map（基于规范化后的 $uri，而不是
-// 客户端原始 $request 文本）判断完毕，所以这里的 failregex 只做轻量结构校验
-// （POST + 状态码），不再要求路径斜杠数量——防止模板被误改导致这个文件意外
-// 写入无关请求时被 Fail2ban 全部当成攻击，但不会重新引入"单斜杠才算数"的老问题。
-//
-// ignoreregex 是从旧 fail2banFilterConfig 原样搬过来的，用于放行
-// lostpassword/register/logout 等合法 WordPress 核心 action；这段正则专门处理了
-// 重复 action 参数时 WordPress/PHP 取最后一个、而非第一个的语义（已用局域网实测
-// 确认 OpenLiteSpeed 的 $arg_action 取的是第一个，两者不一致，所以这段判断必须留在
-// Fail2ban 侧解析完整 $request 文本，不能挪到 OpenLiteSpeed map 里用 $arg_action 做）。
+// Consume only real WordPress authentication failures. A login form returned
+// with HTTP 200, a password-reset request, or disabled XML-RPC's HTTP 403 is not
+// evidence of a failed password. The timestamp is optional here because
+// Fail2ban removes a recognized date before applying failregex.
 const fail2banLoginFilterConfig = `# OLS WPanel Generated — DO NOT EDIT MANUALLY
 [Definition]
-failregex = ^<HOST> .* "POST [^"]*" 200 .*$
-            ^<HOST> .* "POST [^"]*" 403 .*$
+datepattern = %%Y-%%m-%%dT%%H:%%M:%%S%%z
+failregex = ^<HOST> \[(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)?\] OLS_WPANEL_LOGIN_FAILED$
 ignoreregex =
-              ^<HOST> .* "POST /wp-login\.php\?(?:[A-Za-z0-9_.~-]+=[^&"]*&)*action=(?:confirm_admin_email|postpass|logout|lostpassword|retrievepassword|resetpass|rp|register|checkemail|confirmaction|entered_recovery_mode)(?:&(?!action=)[A-Za-z0-9_.~-]+=[^&"]*)* HTTP/[^"]+" 200 .*$
 `
 
+// The markers are appended by OpenLiteSpeed from server-set rewrite
+// environment variables. Anchor the fixed suffix so user-controlled request
+// headers/query strings cannot masquerade as a block/auto-ban decision.
 const fail2banSQLiFilterConfig = `# OLS WPanel Generated — DO NOT EDIT MANUALLY
 [Definition]
-failregex = ^<HOST> .* "[A-Z]+ [^"]*" 403 .*$
+failregex = ^<HOST> \S+ \S+ \[[^\]]*\] "[A-Z]+ [^"]*" 403 [0-9]+(?: "[^"]*" "[^"]*")?(?: peer=(?:-|[0-9a-fA-F:.]+))? ols_security="sqli" ols_autoban="1"$
 ignoreregex =
 `
 
@@ -99,6 +93,10 @@ type fail2banConfigBackup struct {
 }
 
 func deployFail2ban(webWhitelistIPs, sshWhitelistIPs string, maxRetry, findTime, banTime, sqliMaxRetry, sqliFindTime int) error {
+	logRoot, err := fail2banWebsiteLogRoot()
+	if err != nil {
+		return err
+	}
 	jailDir := "/etc/fail2ban/jail.d"
 	filterDir := "/etc/fail2ban/filter.d"
 	actionDir := "/etc/fail2ban/action.d"
@@ -106,7 +104,7 @@ func deployFail2ban(webWhitelistIPs, sshWhitelistIPs string, maxRetry, findTime,
 	os.MkdirAll(filterDir, 0755)
 	os.MkdirAll(actionDir, 0755)
 
-	ensureLogFiles()
+	ensureLogFiles(logRoot)
 	jailPath := filepath.Join(jailDir, "olswpanel.conf")
 	localPath := "/etc/fail2ban/fail2ban.local"
 	recordActionPath := filepath.Join(actionDir, "olswpanel-record.conf")
@@ -221,7 +219,7 @@ enabled = true
 filter = olswpanel-sqli
 action = nftables-multiport[name=olswpanel-sqli, port="http,https"]
          olswpanel-record[name=olswpanel-sqli]
-logpath = /www/wwwlogs/*/wp-sqli-security.log
+logpath = /www/wwwlogs/*/access.log
 maxretry = %d
 findtime = %d
 bantime = %d
@@ -231,6 +229,10 @@ bantime.maxtime = 7d
 bantime.overalljails = false
 ignoreip = %s
 `, sqliMaxRetry, sqliFindTime, banTime, webIgnoreIPs)
+	jailConfig, err = renderFail2banWebsiteLogPaths(jailConfig, logRoot)
+	if err != nil {
+		return err
+	}
 	if err := validateGeneratedFail2banJailConfig(jailConfig); err != nil {
 		return err
 	}
@@ -456,33 +458,26 @@ func buildFail2banIgnoreIPs(whitelistIPs string) (string, error) {
 	return ignoreIPs, nil
 }
 
-func ensureLogFiles() {
+func ensureLogFiles(logRoot string) {
 	hasLogs := false
-	entries, err := os.ReadDir("/www/wwwlogs")
+	entries, err := os.ReadDir(logRoot)
 	if err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
-			touch("/www/wwwlogs/" + e.Name() + "/access.log")
-			touch("/www/wwwlogs/" + e.Name() + "/error.log")
-			touch("/www/wwwlogs/" + e.Name() + "/wp-security.log")
-			touch("/www/wwwlogs/" + e.Name() + "/wp-login-security.log")
-			touch("/www/wwwlogs/" + e.Name() + "/wp-sqli-security.log")
-			touch("/www/wwwlogs/" + e.Name() + "/php-error.log")
-			touch("/www/wwwlogs/" + e.Name() + "/php-slow.log")
+			for _, name := range []string{"access.log", "error.log", "wp-security.log", "wp-login-security.log", "wp-sqli-security.log", "php-error.log", "php-slow.log"} {
+				touch(filepath.Join(logRoot, e.Name(), name))
+			}
 			hasLogs = true
 		}
 	}
 	if !hasLogs {
-		os.MkdirAll("/www/wwwlogs/_panel_placeholder", 0755)
-		touch("/www/wwwlogs/_panel_placeholder/access.log")
-		touch("/www/wwwlogs/_panel_placeholder/error.log")
-		touch("/www/wwwlogs/_panel_placeholder/wp-security.log")
-		touch("/www/wwwlogs/_panel_placeholder/wp-login-security.log")
-		touch("/www/wwwlogs/_panel_placeholder/wp-sqli-security.log")
-		touch("/www/wwwlogs/_panel_placeholder/php-error.log")
-		touch("/www/wwwlogs/_panel_placeholder/php-slow.log")
+		placeholder := filepath.Join(logRoot, "_panel_placeholder")
+		os.MkdirAll(placeholder, 0755)
+		for _, name := range []string{"access.log", "error.log", "wp-security.log", "wp-login-security.log", "wp-sqli-security.log", "php-error.log", "php-slow.log"} {
+			touch(filepath.Join(placeholder, name))
+		}
 	}
 	touch("/var/log/auth.log")
 }

@@ -31,6 +31,14 @@ Recovery codes solve loss of the authenticator, not loss of the encryption key. 
 
 Do not run a pre-v1.18.0 binary against an MFA-enabled account as a transparent rollback: that binary does not enforce the new authentication checks. Use a compatible build, and preserve the paired database and key when recovering. Restoring an older database also restores its old account settings and recovery-code usage state; review the MFA state and regenerate recovery codes after restoration.
 
+## Website security in v1.20.0
+
+The update adds schema migration `1.0.74` for independent security-log source positions. Startup installs the native WordPress login-failure audit block and rebuilds managed OpenLiteSpeed virtual hosts. Existing site settings determine XML-RPC and URL/query SQLi enforcement; the update does not enable every optional security feature automatically.
+
+After the update and background configuration rebuild finish, refresh **Website details → Website security**. A saved setting or generated configuration is not proof of active protection: live denial responses, trusted recent audit evidence and the exact running login jail are checked separately. Without reliable evidence, the page reports configured or unverified rather than protected. The SQLi rules are narrow URL/query guards, not a complete WAF or request-body inspection.
+
+LiteSpeed Cache remains the authority for WordPress cache settings. Refresh the site's cache status to read page-cache and Redis object-cache configuration; failed or unsupported checks do not imply the cache is disabled. The panel domain continues to use its configured listening port, while HTTP-01 certificate validation requires the dedicated domain to reach this server on port 80.
+
 ## Release and installation entry
 
 GitHub publication and the Cloudflare short-entry deployment are separate operations. A new GitHub Release does not change the deployed installer endpoint by itself. Until the endpoint is updated, use the explicit signed version in the [verified installation guide](verified-install.md) for a reproducible install or repair. Never replace versioned assets with mutable branch downloads.

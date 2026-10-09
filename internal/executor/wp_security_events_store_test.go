@@ -91,6 +91,116 @@ func TestIngestWPSecurityEventsOnlyProcessesNewLines(t *testing.T) {
 	}
 }
 
+func TestIngestWPSecuritySourcesHaveIndependentCursorsAndRealEventTypes(t *testing.T) {
+	openTestDB(t)
+	dir := t.TempDir()
+	seedWPSecurityEventSite(t, dir)
+	legacy := `203.0.113.1 - - [15/Jan/2026:10:00:00 +0800] "GET /?id=1%20UNION%20SELECT%201%20FROM%20users HTTP/1.1" 403 0 "-" "curl"` + "\n"
+	access := `203.0.113.2 - - [15/Jan/2026:10:00:00 +0800] "GET / HTTP/1.1" 403 0 "-" "-" ols_security="sqli" ols_autoban="1"` + "\n"
+	login := "203.0.113.3 [2026-10-09T10:00:00Z] OLS_WPANEL_LOGIN_FAILED\n"
+	for source, content := range map[string]string{wpSecurityLegacyLog: legacy, wpSecurityAccessLog: access, wpSecurityLoginLog: login} {
+		if err := os.WriteFile(filepath.Join(dir, source), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 3 {
+		t.Fatalf("first multisource ingest=(%d,%v), want3", count, err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 0 {
+		t.Fatalf("unchanged multisource ingest=(%d,%v), want0", count, err)
+	}
+	for ip, want := range map[string]string{"203.0.113.1": SecurityEventSQLiProbe, "203.0.113.2": SecurityEventSQLiBlocked, "203.0.113.3": SecurityEventWPLoginFailed} {
+		var eventType string
+		if err := database.GetDB().QueryRow("SELECT event_type FROM wp_security_events WHERE ip_address=?", ip).Scan(&eventType); err != nil || eventType != want {
+			t.Fatalf("ip=%s event=%s/%v, want %s", ip, eventType, err, want)
+		}
+	}
+	var method, path string
+	var status int
+	if err := database.GetDB().QueryRow("SELECT method,path,status FROM wp_security_events WHERE event_type=?", SecurityEventWPLoginFailed).Scan(&method, &path, &status); err != nil {
+		t.Fatal(err)
+	}
+	if method != "AUTH" || path != "WordPress authentication" || status != 0 {
+		t.Fatalf("login evidence falsely describes HTTP: %s %s %d", method, path, status)
+	}
+	if pos := getWPSecurityLogPosition(database.GetDB(), 1); pos.byteOffset != int64(len(legacy)) {
+		t.Fatalf("legacy cursor changed by another source: %+v", pos)
+	}
+	for source, size := range map[string]int{wpSecurityAccessLog: len(access), wpSecurityLoginLog: len(login)} {
+		pos, err := getWPSecuritySourceLogPosition(database.GetDB(), 1, source)
+		if err != nil || pos.byteOffset != int64(size) {
+			t.Fatalf("source %s position=(%+v,%v), want %d", source, pos, err, size)
+		}
+	}
+	// A trailing login frame stays pending even while another source advances.
+	partial := strings.TrimSuffix(login, "\n")
+	if err := os.WriteFile(filepath.Join(dir, wpSecurityLoginLog), []byte(login+partial), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 0 {
+		t.Fatalf("unfinished authentication frame=(%d,%v), want0", count, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, wpSecurityLoginLog), []byte(login+partial+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 1 {
+		t.Fatalf("finished authentication frame=(%d,%v), want1", count, err)
+	}
+}
+
+func TestIngestWPSecurityCursorFailureRollsBackEventsForRetry(t *testing.T) {
+	openTestDB(t)
+	dir := t.TempDir()
+	seedWPSecurityEventSite(t, dir)
+	line := `203.0.113.2 - - [15/Jan/2026:10:00:00 +0800] "GET / HTTP/1.1" 403 0 "-" "-" ols_security="sqli" ols_autoban="0"` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, wpSecurityAccessLog), []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.GetDB().Exec(`CREATE TRIGGER reject_security_cursor BEFORE INSERT ON wp_security_log_source_positions BEGIN SELECT RAISE(FAIL,'cursor write rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 0 {
+		t.Fatalf("failed cursor ingest=(%d,%v), want0", count, err)
+	}
+	var count int
+	if err := database.GetDB().QueryRow("SELECT COUNT(*) FROM wp_security_events").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("event escaped transaction after failed cursor: %d/%v", count, err)
+	}
+	if _, err := database.GetDB().Exec("DROP TRIGGER reject_security_cursor"); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 1 {
+		t.Fatalf("cursor-write recovery retry=(%d,%v), want1", count, err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 0 {
+		t.Fatalf("successful retry duplicated event=(%d,%v)", count, err)
+	}
+}
+
+func TestIngestWPSecurityBoundedRowsAndBatchPreserveNextEvents(t *testing.T) {
+	openTestDB(t)
+	dir := t.TempDir()
+	seedWPSecurityEventSite(t, dir)
+	valid := "203.0.113.3 [2026-10-09T10:00:00Z] OLS_WPANEL_LOGIN_FAILED\n"
+	// An oversized but complete line is ignored without accumulating its body;
+	// an unfinished trailing row cannot advance the durable cursor.
+	oversized := strings.Repeat("x", wpSecurityMaxLineBytes+1) + "\n"
+	content := oversized + strings.Repeat("unclassified\n", wpSecurityMaxBatchLines) + valid
+	if err := os.WriteFile(filepath.Join(dir, wpSecurityLoginLog), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 0 {
+		t.Fatalf("first bounded batch=(%d,%v), want0", count, err)
+	}
+	pos, err := getWPSecuritySourceLogPosition(database.GetDB(), 1, wpSecurityLoginLog)
+	if err != nil || pos.byteOffset <= 0 || pos.byteOffset >= int64(len(content)) {
+		t.Fatalf("batch failed to preserve pending events: position=%+v err=%v", pos, err)
+	}
+	if count, err := IngestWPSecurityEvents(); err != nil || count != 1 {
+		t.Fatalf("second bounded batch=(%d,%v), want1", count, err)
+	}
+}
+
 func TestIngestWPSecurityEventsSkipsUnclassifiedEvents(t *testing.T) {
 	openTestDB(t)
 	logDir := t.TempDir()

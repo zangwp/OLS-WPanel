@@ -230,6 +230,12 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Every creation, migration, SSL and regeneration path reaches this renderer.
+	// Read the global policy here so hand-built vhost data cannot silently omit it.
+	securityData := *data
+	if data.SiteType == "wordpress" {
+		securityData.SQLiBlockEnabled, securityData.SQLiAutoBanLog = loadOLSSQLiProtectionSettings()
+	}
 
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s1\n", olsMetadataFormatPrefix)
@@ -254,10 +260,17 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	out.WriteString("  keepDays               14\n")
 	out.WriteString("  compressArchive        1\n")
 	out.WriteString("}\n\n")
-	if data.AccessLogMode != "off" {
+	if data.AccessLogMode != "off" || data.SiteType == "wordpress" {
 		fmt.Fprintf(&out, "accesslog %s/access.log {\n", logDir)
 		out.WriteString("  useServer              0\n")
-		out.WriteString("  logFormat              \"%h %l %u %t \\\"%r\\\" %>s %b \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\"\n")
+		logFormat := `%h %l %u %t "%r" %>s %b "%{Referer}i" "%{User-Agent}i"`
+		if data.SiteType == "wordpress" && (data.AccessLogMode == "off" || data.AccessLogMode == "error_only" || data.AccessLogMode == "") {
+			// Security evidence remains available without logging query strings,
+			// referrers or user agents when full access logging is disabled.
+			logFormat = `%h %l %u %t "%m %U %H" %>s %b "-" "-"`
+		}
+		logFormat += " " + olsSecurityLogFields
+		fmt.Fprintf(&out, "  logFormat              \"%s\"\n", strings.ReplaceAll(logFormat, `"`, `\"`))
 		out.WriteString("  logHeaders             5\n")
 		out.WriteString("  rollingSize            20M\n")
 		out.WriteString("  keepDays               14\n")
@@ -297,7 +310,12 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	out.WriteString("}\n\n")
 
 	out.WriteString("phpIniOverride {\n")
-	fmt.Fprintf(&out, "  php_admin_value open_basedir \"%s\"\n", sitePHPOpenBaseDir(docRoot, domains[0]))
+	openBaseDir := sitePHPOpenBaseDir(docRoot, domains[0])
+	if data.SiteType == "wordpress" {
+		// The WordPress login-failure hook can write only its own site's log.
+		openBaseDir += ":" + logDir
+	}
+	fmt.Fprintf(&out, "  php_admin_value open_basedir \"%s\"\n", openBaseDir)
 	fmt.Fprintf(&out, "  php_admin_value upload_max_filesize %s\n", phpCfg.UploadMaxFilesize)
 	fmt.Fprintf(&out, "  php_admin_value post_max_size %s\n", phpCfg.PostMaxSize)
 	fmt.Fprintf(&out, "  php_admin_value max_execution_time %s\n", phpCfg.MaxExecutionTime)
@@ -318,8 +336,9 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	out.WriteString("rewrite {\n")
 	out.WriteString("  enable                 1\n")
 	out.WriteString("  autoLoadHtaccess       1\n")
+	out.WriteString("  rules                  <<<END_rules\n")
+	out.WriteString(olsSiteSecurityRewriteRules(&securityData))
 	if len(domains) > 1 && aliasRedirectMode != AliasRedirectServe {
-		out.WriteString("  rules                  <<<END_rules\n")
 		aliases := make([]string, 0, len(domains)-1)
 		for _, alias := range domains[1:] {
 			aliases = append(aliases, regexp.QuoteMeta(alias))
@@ -333,14 +352,12 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 		if data.UseSSL {
 			writeHTTPSRedirectRule(&out, domains[0])
 		}
-		out.WriteString("END_rules\n")
 	} else if data.UseSSL {
-		out.WriteString("  rules                  <<<END_rules\n")
 		for _, domain := range domains {
 			writeHTTPSRedirectRule(&out, domain)
 		}
-		out.WriteString("END_rules\n")
 	}
+	out.WriteString("END_rules\n")
 	out.WriteString("}\n")
 
 	if data.SiteType != "php" {
@@ -554,7 +571,7 @@ func renderOLSManagedRegistry(enabledDir string) (string, error) {
 
 func olsDefaultVHostPaths(paths olsRuntimePaths) (string, string) {
 	base := filepath.Dir(paths.managed)
-	return filepath.Join(base, "default-vhost-root"), filepath.Join(base, "default-vhost.conf")
+	return filepath.Join(paths.root, "html", "ols-wpanel-default"), filepath.Join(base, "default-vhost.conf")
 }
 
 func ensureOLSDefaultVHost(paths olsRuntimePaths) error {
@@ -571,7 +588,7 @@ func ensureOLSDefaultVHost(paths olsRuntimePaths) error {
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(root, 0755); err != nil {
+	if err := ensurePanelACMEPublicRoot(paths); err != nil {
 		return fmt.Errorf("创建 OpenLiteSpeed 默认虚拟主机根目录失败: %w", err)
 	}
 	account, err := lookupOLSDefaultVHostUser("www-data")

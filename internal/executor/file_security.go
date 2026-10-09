@@ -272,7 +272,7 @@ func importSiteRuntimePHPAccessEvents(db *sql.DB, site fileSecuritySite) (int, e
 	}
 
 	aggregates := map[string]fileSecurityRecord{}
-	for _, line := range tailLogLines(filepath.Join(site.LogDir, "wp-security.log"), 2000) {
+	for _, line := range tailLogLines(filepath.Join(site.LogDir, "wp-security.log"), 2000, fileSecurityLogDirAllowed) {
 		m := fileSecurityCombinedLogRe.FindStringSubmatch(line)
 		if len(m) != 7 {
 			continue

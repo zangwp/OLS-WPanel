@@ -22,12 +22,15 @@ type FirewallAccessPreview struct {
 	Fingerprint   string               `json:"fingerprint"`
 	Script        string               `json:"script"`
 	ExistingRules string               `json:"existing_rules"`
+	SSHPort       int                  `json:"ssh_port"`
+	PanelPort     int                  `json:"panel_port"`
 }
 
 // Protected by portRulesMu. The independent systemd timer survives panel exit.
 var pendingAccess struct {
 	token, rollback, dir, expected string
 	deadline                       time.Time
+	sshPort, panelPort             int
 }
 var accessCommentRE = regexp.MustCompile(`comment "ols-access:(tcp|udp):(\d+):([0-9a-fA-F:./]*)"`)
 
@@ -64,10 +67,7 @@ func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (F
 	}
 	listeners := detectListeners(ctx)
 	ssh := detectSSHPort(ctx, listeners)
-	panel := 8443
-	if config.AppConfig != nil && config.AppConfig.Panel.TLSPort > 0 {
-		panel = config.AppConfig.Panel.TLSPort
-	}
+	panel, _ := PanelListenEndpoint(config.AppConfig)
 	if !hasTCPListener(listeners, ssh) || !hasTCPListener(listeners, panel) {
 		return FirewallAccessPreview{}, errors.New("未检测到 SSH 或面板监听，请先检查服务")
 	}
@@ -83,7 +83,7 @@ func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (F
 	if err != nil {
 		return FirewallAccessPreview{}, err
 	}
-	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(out, rules), Script: accessRulesScript(rules, exists), ExistingRules: out}, nil
+	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(out, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel}, nil
 }
 
 func PreviewFirewallAccess(req FirewallAccessRequest, ip string) (FirewallAccessPreview, error) {
@@ -180,6 +180,8 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	pendingAccess.dir = dir
 	pendingAccess.expected = expected
 	pendingAccess.deadline = rollbackStarted.Add(85 * time.Second)
+	pendingAccess.sshPort = preview.SSHPort
+	pendingAccess.panelPort = preview.PanelPort
 	recordOperationLog("firewall_access_apply", accessTable, "success", "waiting for manual confirmation")
 	return FirewallProtectionResult{ConfirmationToken: token, Deadline: pendingAccess.deadline.Add(-15 * time.Second)}, nil
 }
@@ -194,6 +196,12 @@ func ConfirmFirewallAccess(token string) error {
 	defer cancel()
 	if sshMoveActive(ctx) {
 		return errors.New("SSH 端口变更尚未完成，请先确认或等待恢复")
+	}
+	listeners := detectListeners(ctx)
+	panelPort, _ := PanelListenEndpoint(config.AppConfig)
+	if panelPort == 0 || panelPort != pendingAccess.panelPort || detectSSHPort(ctx, listeners) != pendingAccess.sshPort ||
+		!hasTCPListener(listeners, pendingAccess.sshPort) || !hasTCPListener(listeners, panelPort) {
+		return errors.New("SSH 或面板入口已变化，不能确认；请等待自动回退后重新预览")
 	}
 	current, err := portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
 	if err != nil || current != pendingAccess.expected {

@@ -1,24 +1,41 @@
 {{define "firewall_access"}}
-<div class="card">
+<style>
+.firewall-access-policy .access-introduction { max-width: 78ch; color: var(--panel-muted); font-size: 13px; line-height: 1.8; }
+.firewall-access-policy .access-workflow { margin: 14px 0 20px; padding: 11px 14px; color: var(--panel-accent); background: var(--panel-accent-soft); border-left: 3px solid var(--panel-accent-border); font-size: 13px; line-height: 1.7; }
+.firewall-access-policy .access-rules { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
+.firewall-access-policy .access-rule-head, .firewall-access-policy .access-rule { grid-template-columns: minmax(150px, 1.1fr) minmax(180px, 1fr) minmax(220px, 1.65fr); }
+.firewall-access-policy .access-rule-head { padding: 12px 16px; background: var(--panel-surface-muted); font-weight: 550; }
+.firewall-access-policy .access-rule { padding: 17px 16px; }
+.firewall-access-policy .access-rule:last-child { border-bottom: 0; }
+.firewall-access-policy .access-service-name { display: block; color: var(--panel-heading); font-size: 14px; font-weight: 600; }
+.firewall-access-policy .access-service-meta { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 4px; font-size: 12px; color: var(--panel-muted); font-variant-numeric: tabular-nums; }
+.firewall-access-policy .access-service-process { display: block; margin-top: 3px; font-size: 11px; color: var(--panel-muted); overflow-wrap: anywhere; }
+.firewall-access-policy .access-add-row { display: grid; grid-template-columns: 110px minmax(120px, 180px) auto; gap: 12px; align-items: end; padding-top: 18px; }
+.firewall-access-policy .access-add-row button { justify-self: start; }
+.firewall-access-policy .access-action-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--panel-border); }
+@media (max-width: 850px) { .firewall-access-policy .access-rule { grid-template-columns: minmax(0, 1fr); gap: 12px; } .firewall-access-policy .access-rule-head { display: none; } .firewall-access-policy .access-field-label { position: static; width: auto; height: auto; padding: 0; overflow: visible; clip: auto; white-space: normal; } }
+@media (max-width: 520px) { .firewall-access-policy .access-add-row { grid-template-columns: 100px minmax(0, 1fr); } .firewall-access-policy .access-add-row button { grid-column: 1 / -1; width: 100%; } }
+</style>
+<div class="card firewall-access-policy">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 class="text-lg font-semibold text-white">{{t .Lang "firewall.access_title"}}</h3>
         <span class="text-sm" :class="accessDirty || accessToken ? 'text-yellow-400' : (portStatus.access_enabled ? 'text-green-400' : 'text-gray-400')" x-text="accessToken ? t('firewall.access_pending') : (accessDirty ? t('firewall.access_unsaved') : (portStatus.access_enabled ? t('firewall.access_active') : t('firewall.access_draft')))"></span>
     </div>
-    <p class="text-sm text-gray-400 mb-4">{{t .Lang "firewall.access_help"}}</p>
-    <p class="text-sm text-blue-300 mb-4">{{t .Lang "firewall.access_steps"}}</p>
+    <p class="access-introduction">{{t .Lang "firewall.access_help"}}</p>
+    <p class="access-workflow">{{t .Lang "firewall.access_steps"}}</p>
     <fieldset :disabled="accessBusy || !!accessToken || !portStatus.access_available" @change="markAccessDirty()">
         <div class="access-rules"><div class="access-rule-head text-xs text-gray-400"><span>{{t .Lang "firewall.service_preset"}}</span><span>{{t .Lang "firewall.access_scope"}}</span><span>{{t .Lang "firewall.source_scope"}}</span></div>
             <template x-for="row in accessRows" :key="row.key">
                 <div class="access-rule">
-                    <div><strong class="text-white" x-text="row.label || t('firewall.custom_service')"></strong><p class="text-xs text-gray-400" x-text="row.port + '/' + row.protocol.toUpperCase() + ' · ' + (row.listening ? t('firewall.access_listening') : t('firewall.access_not_listening'))"></p></div>
+                    <div><strong class="access-service-name" x-text="serviceDisplayName(row.label) || t('firewall.custom_service')"></strong><p class="access-service-meta"><span x-text="row.port + ' / ' + row.protocol.toUpperCase()"></span><span x-text="row.listening ? t('firewall.access_listening') : t('firewall.access_not_listening')"></span></p><span x-show="row.process" class="access-service-process" x-text="row.process"></span></div>
                     <div><label class="label access-field-label" :for="'access-scope-'+row.key">{{t .Lang "firewall.access_scope"}}</label><select class="input-field text-sm" :id="'access-scope-'+row.key" x-model="row.scope"><option value="closed" x-text="[3306,6379].includes(row.port) ? t('firewall.access_local') : t('firewall.access_closed')"></option><option value="specific">{{t .Lang "firewall.scope_specific"}}</option><option value="public" :disabled="accessSensitive(row)">{{t .Lang "firewall.access_everyone"}}</option></select></div>
                     <div><label class="label access-field-label" :for="'access-source-'+row.key">{{t .Lang "firewall.source_scope"}}</label><input class="input-field text-sm" :id="'access-source-'+row.key" x-show="row.scope==='specific'" x-model.trim="row.sources" @input="markAccessDirty()" :disabled="row.scope!=='specific'" :placeholder="row.scope==='specific' ? t('firewall.access_sources_hint') : '—'"><p x-show="row.scope!=='specific'" class="text-sm text-gray-400 py-2" x-text="row.scope==='public' ? t('firewall.access_public') : t('firewall.access_loopback')"></p></div>
                 </div>
             </template>
         </div>
-        <div class="access-custom mt-4"><select class="input-field" x-model="accessCustomProtocol" aria-label="{{t .Lang "firewall.protocol"}}"><option value="tcp">TCP</option><option value="udp">UDP</option></select><input type="number" class="input-field" min="1" max="65535" x-model="accessCustomPort" placeholder="{{t .Lang "firewall.port"}}" aria-label="{{t .Lang "firewall.port"}}"><button class="btn-secondary text-sm" @click="addAccessRow()">{{t .Lang "firewall.access_add"}}</button></div>
+        <div class="access-add-row"><div><label class="label" for="access-custom-protocol">{{t .Lang "firewall.protocol"}}</label><select id="access-custom-protocol" class="input-field text-sm" x-model="accessCustomProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div><div><label class="label" for="access-custom-port">{{t .Lang "firewall.port"}}</label><input id="access-custom-port" type="number" class="input-field text-sm" min="1" max="65535" x-model="accessCustomPort" placeholder="1–65535"></div><button class="btn-secondary text-sm" @click="addAccessRow()">{{t .Lang "firewall.access_add"}}</button></div>
         <p class="text-xs text-gray-400 mt-4">{{t .Lang "firewall.access_preserve"}}</p>
-        <div class="flex flex-wrap gap-3 mt-4"><button class="btn-primary" @click="previewAccess()">{{t .Lang "firewall.access_preview"}}</button><button class="btn-secondary" @click="refreshAccess()">{{t .Lang "firewall.refresh"}}</button></div>
+        <div class="access-action-row"><button class="btn-primary" @click="previewAccess()">{{t .Lang "firewall.access_preview"}}</button><button class="btn-secondary" @click="refreshAccess()">{{t .Lang "firewall.refresh"}}</button></div>
     </fieldset>
     <p x-show="accessDirty && !accessToken" class="text-xs text-yellow-300 mt-3">{{t .Lang "firewall.access_draft_help"}}</p>
     <p x-show="accessError" class="text-sm text-red-400 mt-3" role="alert" x-text="accessError"></p>

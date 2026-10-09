@@ -786,6 +786,7 @@ var upgrades = []Upgrade{
 		},
 	},
 	{Version: "1.0.73", Description: "网站独立证书续期设置", SQL: []string{siteSSLRenewalSchema}},
+	{Version: "1.0.74", Description: "网站访问与真实认证失败日志独立增量位置", SQL: []string{wpSecuritySourcePositionsSchema}},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

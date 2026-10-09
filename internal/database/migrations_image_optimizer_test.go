@@ -43,9 +43,7 @@ func TestUpgradeAddsImageOptimizerSchemaFrom1048(t *testing.T) {
 		t.Fatalf("second RunUpgrades() error = %v", err)
 	}
 
-	if got := LatestVersion(); got != "1.0.73" {
-		t.Fatalf("LatestVersion() = %q, want 1.0.73", got)
-	}
+	assertDatabaseUpgradedToLatest(t)
 
 	var hasSkippedFiles int
 	if err := DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('site_image_optimization_jobs') WHERE name = 'skipped_files'`).Scan(&hasSkippedFiles); err != nil || hasSkippedFiles != 1 {

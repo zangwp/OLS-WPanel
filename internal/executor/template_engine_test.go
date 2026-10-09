@@ -1,11 +1,42 @@
 package executor
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zangwp/OLS-WPanel/internal/database"
 )
+
+func TestGetSQLiProtectionSettingsReadsExplicitGlobalSwitches(t *testing.T) {
+	old := database.DB
+	t.Cleanup(func() { database.DB = old })
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	database.DB = db
+	if _, err := db.Exec("CREATE TABLE security_settings (skey TEXT PRIMARY KEY, svalue TEXT NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	if block, ban := GetSQLiProtectionSettings(); !block || !ban {
+		t.Fatalf("missing global settings must use defaults; block=%v ban=%v", block, ban)
+	}
+	for _, tt := range []struct{ block, ban bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		for key, value := range map[string]bool{"wp_sqli_block_enabled": tt.block, "wp_sqli_autoban_enabled": tt.ban} {
+			if _, err := db.Exec("INSERT OR REPLACE INTO security_settings(skey,svalue) VALUES (?,?)", key, fmt.Sprint(value)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if block, ban := GetSQLiProtectionSettings(); block != tt.block || ban != tt.ban {
+			t.Fatalf("global SQLi settings=(%v,%v), want (%v,%v)", block, ban, tt.block, tt.ban)
+		}
+	}
+}
 
 func TestCleanupOLSVHostConfigBackupsKeepsNewestForTargetOnly(t *testing.T) {
 	dir := t.TempDir()

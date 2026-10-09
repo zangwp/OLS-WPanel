@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,16 +18,23 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
 
-// 方案 D 阶段三：把 classifySecurityEvent() 识别出的明确类型事件持久化到
-// wp_security_events 表，配合 wp_security_log_positions 做增量读取（按字节偏移），
-// 解决 BuildWPSecurityReport() 仅读取日志尾部 512KB/1000 行、在 logrotate 按天轮转后
-// 历史数据丢失的问题。只持久化 4 类明确分类的事件，通用的"WordPress 异常路径访问"
-// 兜底事件不入库，避免表无限增长。
+// Persist only classified security events. Each producer has its own cursor;
+// the legacy wp-security.log cursor remains compatible with existing installs.
 
 const wpSecurityEventRetentionDays = 90
 
+const (
+	wpSecurityMaxLineBytes  = 64 * 1024
+	wpSecurityMaxBatchBytes = 2 * 1024 * 1024
+	wpSecurityMaxBatchLines = 5000
+)
+
+var wpSecurityIngestCycleMu sync.Mutex
+
 // IngestWPSecurityEvents 对所有 WordPress 站点做一次增量日志摄取，返回新入库的事件数。
 func IngestWPSecurityEvents() (int, error) {
+	wpSecurityIngestCycleMu.Lock()
+	defer wpSecurityIngestCycleMu.Unlock()
 	db := database.GetDB()
 	if db == nil {
 		return 0, fmt.Errorf("database is nil")
@@ -43,42 +49,66 @@ func IngestWPSecurityEvents() (int, error) {
 	total := 0
 	for _, site := range sites {
 		n, err := ingestSiteSecurityEvents(db, site, checker)
+		total += n
 		if err != nil {
 			log.Printf("wp security event ingest skipped for %s: %v", site.Domain, err)
 			continue
 		}
-		total += n
 	}
 	return total, nil
 }
 
-// ingestSiteSecurityEvents 从上次记录的字节偏移继续读取该站点的 wp-security.log，
-// 只处理自上次以来新增的、以换行符结尾的完整行；文件被 copytruncate 轮转导致体积
-// 变小或文件首行变化时视为已轮转，从头开始读取新内容。
 func ingestSiteSecurityEvents(db *sql.DB, site wpSecuritySite, checker *searchBotIPChecker) (int, error) {
 	if !wpSecurityLogDirAllowed(site.LogDir) {
 		return 0, nil
 	}
 
-	path := filepath.Join(site.LogDir, "wp-security.log")
-	f, err := os.Open(path)
+	total := 0
+	var firstErr error
+	for _, source := range []string{wpSecurityLegacyLog, wpSecurityAccessLog, wpSecurityLoginLog} {
+		count, err := ingestSiteSecuritySource(db, site, source, checker)
+		total += count
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return total, firstErr
+}
+
+// A source commits its events and complete-line cursor in one transaction.
+// Failed inserts retain the failed line for retry; failed cursor writes roll
+// back the events, avoiding duplicates on the next cycle.
+func ingestSiteSecuritySource(db *sql.DB, site wpSecuritySite, source string, checker *searchBotIPChecker) (int, error) {
+	path := filepath.Join(site.LogDir, source)
+	f, err := openSafeWPSecurityLog(path, wpSecurityLogDirAllowed)
 	if err != nil {
-		return 0, nil
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 
-	storedPosition := getWPSecurityLogPosition(db, site.ID)
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	storedPosition, err := getWPSecuritySourceLogPosition(tx, site.ID, source)
+	if err != nil {
+		return 0, err
+	}
 	offset := storedPosition.byteOffset
 	firstLineHash := firstCompleteLineHash(f)
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return 0, err
 	}
-	if info.Size() < offset || (storedPosition.firstLineHash != "" && firstLineHash != "" && storedPosition.firstLineHash != firstLineHash) {
+	if offset < 0 || info.Size() < offset || (storedPosition.firstLineHash != "" && firstLineHash != "" && storedPosition.firstLineHash != firstLineHash) {
 		// 文件比记录的偏移还小，说明已被 copytruncate 轮转，从头重新读取新内容。
 		// 高流量站点轮转后文件可能很快增长到超过旧偏移，首行指纹可覆盖这个场景。
 		offset = 0
@@ -89,75 +119,69 @@ func ingestSiteSecurityEvents(db *sql.DB, site wpSecuritySite, checker *searchBo
 		}
 	}
 
-	reader := bufio.NewReaderSize(f, 64*1024)
+	reader := bufio.NewReaderSize(io.LimitReader(f, wpSecurityMaxBatchBytes), wpSecurityMaxLineBytes)
 	var consumed int64
 	count := 0
-	for {
-		lineBytes, readErr := reader.ReadBytes('\n')
+	var ingestErr error
+	for lines := 0; lines < wpSecurityMaxBatchLines; lines++ {
+		lineBytes, byteCount, oversized, readErr := readBoundedWPSecurityLine(reader)
 		if readErr == nil {
 			// 只有以换行符结尾的完整行才计入已消费字节；
 			// 末尾还没写完的半行留到下一轮再读，避免把偏移记到半行中间。
-			consumed += int64(len(lineBytes))
+			if oversized {
+				consumed += byteCount
+				continue
+			}
 			line := strings.TrimRight(string(lineBytes), "\r\n")
-			inserted, err := ingestSecurityLogLine(db, site, line, checker)
+			inserted, err := ingestSecuritySourceLogLine(tx, site, line, source, checker)
 			if err != nil {
-				if consumed > int64(len(lineBytes)) {
-					consumed -= int64(len(lineBytes))
-				} else {
-					consumed = 0
-				}
+				ingestErr = err
 				break
 			}
+			consumed += byteCount
 			if inserted {
 				count++
 			}
 		}
 		if readErr != nil {
+			if readErr != io.EOF {
+				ingestErr = readErr
+			}
 			break
 		}
 	}
 
 	newOffset := offset + consumed
-	if newOffset != storedPosition.byteOffset || firstLineHash != storedPosition.firstLineHash {
-		if err := setWPSecurityLogPosition(db, site.ID, newOffset, firstLineHash); err != nil {
-			return count, err
-		}
+	if err := setWPSecuritySourceLogPosition(tx, site.ID, source, newOffset, firstLineHash); err != nil {
+		return 0, err
 	}
-	return count, nil
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, ingestErr
 }
 
 func ingestSecurityLogLine(db *sql.DB, site wpSecuritySite, line string, checker *searchBotIPChecker) (bool, error) {
-	m := combinedLogRe.FindStringSubmatch(line)
-	if len(m) != 7 {
-		return false, nil
-	}
+	return ingestSecuritySourceLogLine(db, site, line, wpSecurityLegacyLog, checker)
+}
 
-	status, _ := strconv.Atoi(m[5])
-	occurred := parseWebAccessTime(m[2])
-	if occurred.IsZero() {
-		occurred = time.Now().UTC()
-	}
-	uri := normalizeLoggedURI(m[4])
-	ua := strings.TrimSpace(m[6])
-	ip := strings.TrimSpace(m[1])
-	method := m[3]
+type wpSecuritySQLStore interface {
+	Exec(string, ...any) (sql.Result, error)
+	QueryRow(string, ...any) *sql.Row
+}
 
-	eventType, risk, message := "", "", ""
-	if peer := accessLogPeer(line); suspiciousClientIPAttribution(ip, peer) {
-		eventType, risk, message = "client_ip_spoof", "high", "客户端 IP Header 归属异常"
-	} else {
-		eventType, risk, message = classifySecurityEvent(method, uri, ua, ip, status, checker)
-	}
-	if eventType == "" {
+func ingestSecuritySourceLogLine(db wpSecuritySQLStore, site wpSecuritySite, line, source string, checker *searchBotIPChecker) (bool, error) {
+	evidence, ok := parseWPSecurityLogEvidence(line, source, checker)
+	if !ok || evidence.eventType == "" {
 		return false, nil
 	}
 
 	_, err := db.Exec(`INSERT INTO wp_security_events
 		(site_id, domain, ip_address, event_type, risk_level, method, path, user_agent, status, message, occurred_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		site.ID, site.Domain, ip, eventType, risk, method,
-		truncateRunes(uri, 512), truncateRunes(ua, 256), status, message,
-		occurred.UTC().Format("2006-01-02 15:04:05"),
+		site.ID, site.Domain, evidence.ip, evidence.eventType, evidence.risk, evidence.method,
+		truncateRunes(evidence.uri, 512), truncateRunes(evidence.userAgent, 256), evidence.status, evidence.message,
+		evidence.occurred.UTC().Format("2006-01-02 15:04:05"),
 	)
 	if err != nil {
 		log.Printf("wp security event insert failed for %s: %v", site.Domain, err)
@@ -172,26 +196,72 @@ type wpSecurityLogPosition struct {
 }
 
 func getWPSecurityLogPosition(db *sql.DB, siteID int) wpSecurityLogPosition {
-	var pos wpSecurityLogPosition
-	_ = db.QueryRow(`SELECT byte_offset, first_line_hash FROM wp_security_log_positions WHERE site_id = ?`, siteID).Scan(&pos.byteOffset, &pos.firstLineHash)
+	pos, _ := getWPSecuritySourceLogPosition(db, siteID, wpSecurityLegacyLog)
 	return pos
 }
 
 func setWPSecurityLogPosition(db *sql.DB, siteID int, offset int64, firstLineHash string) error {
-	_, err := db.Exec(`INSERT INTO wp_security_log_positions (site_id, byte_offset, first_line_hash, updated_at)
+	return setWPSecuritySourceLogPosition(db, siteID, wpSecurityLegacyLog, offset, firstLineHash)
+}
+
+func getWPSecuritySourceLogPosition(db wpSecuritySQLStore, siteID int, source string) (wpSecurityLogPosition, error) {
+	var pos wpSecurityLogPosition
+	var err error
+	if source == wpSecurityLegacyLog {
+		err = db.QueryRow(`SELECT byte_offset, first_line_hash FROM wp_security_log_positions WHERE site_id = ?`, siteID).Scan(&pos.byteOffset, &pos.firstLineHash)
+	} else {
+		err = db.QueryRow(`SELECT byte_offset, first_line_hash FROM wp_security_log_source_positions WHERE site_id = ? AND source = ?`, siteID, source).Scan(&pos.byteOffset, &pos.firstLineHash)
+	}
+	if err == sql.ErrNoRows {
+		err = nil
+	}
+	return pos, err
+}
+
+func setWPSecuritySourceLogPosition(db wpSecuritySQLStore, siteID int, source string, offset int64, firstLineHash string) error {
+	if source == wpSecurityLegacyLog {
+		_, err := db.Exec(`INSERT INTO wp_security_log_positions (site_id, byte_offset, first_line_hash, updated_at)
 		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(site_id) DO UPDATE SET byte_offset = excluded.byte_offset, first_line_hash = excluded.first_line_hash, updated_at = excluded.updated_at`,
-		siteID, offset, firstLineHash)
+			siteID, offset, firstLineHash)
+		return err
+	}
+	_, err := db.Exec(`INSERT INTO wp_security_log_source_positions (site_id, source, byte_offset, first_line_hash, updated_at)
+		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(site_id,source) DO UPDATE SET byte_offset = excluded.byte_offset, first_line_hash = excluded.first_line_hash, updated_at = excluded.updated_at`,
+		siteID, source, offset, firstLineHash)
 	return err
+}
+
+// ReadSlice keeps memory bounded even for an oversized malicious log row. Only
+// a complete newline-terminated row can advance the cursor. A batch boundary or
+// unfinished trailing row is retried on the next cycle.
+func readBoundedWPSecurityLine(reader *bufio.Reader) ([]byte, int64, bool, error) {
+	var line []byte
+	var bytes int64
+	oversized := false
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		bytes += int64(len(fragment))
+		if !oversized && bytes <= wpSecurityMaxLineBytes {
+			line = append(line, fragment...)
+		} else {
+			line, oversized = nil, true
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return line, bytes, oversized, err
+	}
 }
 
 func firstCompleteLineHash(f *os.File) string {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return ""
 	}
-	reader := bufio.NewReaderSize(f, 64*1024)
-	lineBytes, err := reader.ReadBytes('\n')
-	if err != nil {
+	reader := bufio.NewReaderSize(io.LimitReader(f, wpSecurityMaxLineBytes), wpSecurityMaxLineBytes)
+	lineBytes, _, oversized, err := readBoundedWPSecurityLine(reader)
+	if err != nil || oversized {
 		return ""
 	}
 	line := strings.TrimRight(string(lineBytes), "\r\n")
