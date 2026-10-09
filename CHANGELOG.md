@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.21.1 — 2026-10-09
+
+- Refines website list column widths, labels file locks and file actions explicitly, and centers the More menu arrow. Section menus scroll with page content, while the dashboard introduction uses the available desktop width and wraps on smaller screens.
+- Opens the detected WordPress login or installation address in a new tab from the main access action. Removes duplicate login buttons and the manual-address input, retains custom login suffixes, and keeps optional authorized sign-in inside advanced settings. Existing manual overrides remain effective until an explicitly confirmed settings save clears them.
+- Shows healthy cache configuration states in green without conflating saved configuration with actual cache hits or Redis connectivity. Replaces tall website-security cards with compact grouped rows, expandable evidence and a single per-item verification action.
+- Separates port access policy, listening details and legacy compatibility rules. Preserves unsaved policy drafts during background refreshes, rechecks compatibility operations after confirmation, and prevents overlapping submissions. Active main policies leave compatibility rules read-only; manual connection verification and rollback remain required.
+- Treats deliberately canceled requests as normal navigation instead of displaying raw AbortError messages. Cancels obsolete log reads, prevents stale responses from replacing the current log, and displays distinct loading and failure states.
+- Clarifies that performance inputs show current configuration values, with recommendations available separately. Backup retention defaults and the initial AI diagnosis categories are unchanged.
+
+Upgrade notes: update through the signed installer or panel update flow. No database migration or retention change is introduced. Existing WordPress access protections and password/MFA confirmations remain in place; preserve configuration, database and MFA-key backups.
+
 ## v1.21.0 — 2026-10-09
 
 - Rebuilds the website registry with readable site identities, five grouped columns, search and status filters, responsive layouts and accessible Manage/Files/More actions. Keeps disabled and hovered action labels readable.

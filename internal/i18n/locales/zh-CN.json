@@ -1216,7 +1216,8 @@
     "tool_check_failed": "检测失败",
     "tool_partial": "组件不完整",
     "tool_status_help": "检测失败表示已找到程序但无法读取版本；组件不完整表示 Node.js 或 npm 缺失。请检查程序及依赖后刷新，面板不会自动覆盖。",
-    "refresh_tools": "刷新工具状态"
+    "refresh_tools": "刷新工具状态",
+    "current_values_help": "以下显示配置文件中的值；无法读取时显示默认值。初始值包含固定默认值和按服务器资源生成的建议。“查看配置建议”可重新评估；填写并保存后才会修改配置。"
   },
   "log_analysis": {
     "description": "完整扫描指定时间段的网站日志，生成本地统计和异常判断，并可进入 AI 诊断持续排查",
@@ -1828,7 +1829,7 @@
     "source_panel": "面板",
     "source_scan": "扫描防御",
     "source_manual": "手动封禁",
-    "source_nftables": "Nftables 持久",
+    "source_nftables": "nftables 持久",
     "confirm_unban": "确认解封 {{ip}}？",
     "unbanned": "已解封",
     "confirm_permanent_ban": "确认将 {{ip}} 永久封禁？",
@@ -2042,7 +2043,17 @@
     "access_draft_help": "添加端口只修改草稿。请继续预览并应用，验证后点击保存；放行端口不会自动启动服务。",
     "access_invalid_port": "请输入 1–65535 之间的整数端口。",
     "access_duplicate_port": "该协议与端口已在列表中，请直接修改对应行的访问范围。",
-    "access_discard": "刷新会丢弃尚未应用的端口草稿，是否继续？"
+    "access_discard": "刷新会丢弃尚未应用的端口草稿，是否继续？",
+    "access_views": "访问控制视图",
+    "listener_view": "监听详情",
+    "legacy_view": "兼容规则",
+    "legacy_help": "这里保留旧版放行规则的记录和管理。日常端口设置请使用“端口访问策略”；删除兼容规则不一定会关闭该端口。",
+    "legacy_policy_active": "端口访问策略已启用，旧规则仅供查看。其他防火墙链可能仍依赖这些规则；请通过主策略管理端口，暂不在这里新增或删除。",
+    "legacy_create": "旧版放行入口（兼容与临时访问）",
+    "remove_legacy_rule": "删除规则",
+    "confirm_remove_legacy": "删除 {{protocol}}/{{port}} 的这条兼容放行规则？主策略和其他规则保持有效，端口不一定会关闭。",
+    "legacy_removed": "兼容规则已删除。",
+    "access_other_filters": "首次应用请逐项确认已有自定义端口。这里的允许规则仍受其他防火墙规则及云安全组限制。"
   },
   "database": {
     "list_help": "数据库与网站一一绑定，不支持单独添加或删除。创建网站时会自动创建对应的数据库和数据库用户；删除网站时会同时删除对应的数据库和数据库用户，但已有备份文件不会自动删除。",
@@ -2774,7 +2785,9 @@
     "cache_verify_reason_request_timeout": "源站验证超时或已取消，当前状态未知。",
     "cache_verify_reason_origin_unreachable": "无法连接本机网站源站，当前状态未知。",
     "cache_verify_source_local_origin": "源站首页验证，不包含 CDN 边缘缓存。",
-    "redis_connection_not_checked": "仅显示插件的 Redis 配置；尚未测试连接。"
+    "redis_connection_not_checked": "仅显示插件的 Redis 配置；尚未测试连接。",
+    "registry_file_lock": "文件锁",
+    "registry_files": "文件"
   },
   "help": {
     "intro": "遇到问题或有建议？请通过 GitHub Issues 反馈。",
@@ -3578,7 +3591,7 @@
     "ticket_notice": "使用所选管理员身份登录：需确认面板身份，授权有效期为 60 秒且只能使用一次。不会修改或保存网站密码。",
     "authorize_login": "确认并登录",
     "authorizing": "正在授权…",
-    "settings_title": "登录地址与授权设置",
+    "settings_title": "登录后缀与授权设置",
     "manual_url": "手动登录地址（可留空）",
     "manual_help": "留空使用自动检测地址。填写后只调整面板按钮的跳转地址，不会修改网站登录路径；仅接受本站地址。",
     "custom_suffix": "面板管理的登录后缀（可留空）",
@@ -3627,7 +3640,9 @@
     "reason_broker_unavailable": "一次性登录服务暂不可用，普通登录仍可使用。",
     "reason_sso_disabled": "一次性登录默认关闭，需管理员明确授权。",
     "reason_bridge_unavailable": "受管登录桥接插件尚未安装或与当前设置不一致。",
-    "reason_administrator_not_found": "未读取到有效 WordPress 管理员，请先检查网站账户。"
+    "reason_administrator_not_found": "未读取到有效 WordPress 管理员，请先检查网站账户。",
+    "legacy_manual_notice": "当前仍使用此前手动登录地址；保存后将改为自动识别登录地址。",
+    "authorization_title": "高级后台授权"
   },
   "cache_status": {
     "server_title": "OpenLiteSpeed 缓存配置",
@@ -3735,6 +3750,10 @@
     "site_not_active": "网站当前未运行，不能执行运行验证。",
     "rate_limited": "验证过于频繁，请等待 3 秒后重试。",
     "site_busy": "网站正在执行其他操作，请稍后验证。",
-    "verification_failed": "暂时无法完成验证，请稍后重试。"
+    "verification_failed": "暂时无法完成验证，请稍后重试。",
+    "summary_compact_help": "刷新核对当前状态；使用“验证”检查单项效果，展开项目查看依据。",
+    "details": "详情",
+    "status_guide": "如何理解这些状态",
+    "verify_short": "验证"
   }
 }

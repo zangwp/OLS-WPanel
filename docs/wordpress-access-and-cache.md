@@ -4,11 +4,11 @@ The Website details page separates saved options from evidence of actual behavio
 
 ## Administrator access
 
-The **Overview** tab shows the current WordPress login URL and its source. Detection uses WordPress’s own login URL, including active login plugins. A manual URL changes only the panel button destination and must remain on this website. It does not rename a WordPress endpoint.
+The **Overview** tab shows the current WordPress login URL and its source. Detection uses WordPress’s own login URL, including active login plugins. The main access action opens that address in a new tab. The manual-address input has been removed; an existing manual override remains effective until a confirmed access-settings save clears it. The optional login suffix below changes the actual entry point.
 
 WordPress setup is preserved. Before setup is complete, the panel links to the installation wizard; users still choose their site title, administrator account and password there.
 
-Panel-authorized administrator sign-in is off by default. Enable it deliberately, then confirm the current panel password and configured panel MFA each time. Select an existing WordPress administrator; the panel does not create users or retain website passwords. Authorization is random, expires after 60 seconds, is usable once, and travels in an HTTPS POST rather than a URL. Redemption binds it to the originating panel session, website, PHP user, settings generation and unchanged WordPress administrator identity.
+Panel-authorized administrator sign-in is off by default and is available under advanced access settings. Enable it deliberately, then confirm the current panel password and configured panel MFA each time. Select an existing WordPress administrator; the panel does not create users or retain website passwords. Authorization is random, expires after 60 seconds, is usable once, and travels in an HTTPS POST rather than a URL. Redemption binds it to the originating panel session, website, PHP user, settings generation and unchanged WordPress administrator identity.
 
 This feature requires website HTTPS, the site PHP cURL extension with Unix socket support, and the panel’s local broker. Recognized MFA/authentication plugins and detected authentication hooks disable authorized sign-in. This feature replaces the ordinary WordPress sign-in flow with panel authorization; compatibility with arbitrary plugins that register only during browser login cannot be guaranteed. Keep it disabled for unverified custom authentication systems and use ordinary WordPress login. Existing hidden-login rules may also disable it. Logging out of the panel, revoking pending authorizations or changing access settings invalidates unused authorization. An already established WordPress session remains governed by WordPress.
 
@@ -24,7 +24,7 @@ The status cards show three separate facts: the managed OLS configuration, saved
 
 ## Website security verification
 
-Each item gives its reason, evidence source, collection time and relevant setting shortcut. The states have different scopes:
+The compact summary groups related items and shows each state alongside its verification action, when available. Expand an item to read its reason, evidence source and collection time. Refresh collects current status; per-item verification runs the corresponding check. The states have different scopes:
 
 - **Configuration checked** means that settings or rules exist; request enforcement has not been established.
 - **Runtime components ready** means that required components, such as the site’s Fail2ban log monitor, were checked. No artificial failed login or attack is generated.

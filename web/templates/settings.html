@@ -23,7 +23,7 @@
 .settings-page .settings-certificate-status { margin-top: 16px; padding: 16px; border: 1px solid var(--panel-border); border-radius: 7px; background: var(--panel-surface-muted); }
 .settings-page .settings-certificate-status a { overflow-wrap: anywhere; }
 @media (max-width: 850px) { .settings-page .settings-account-grid, .settings-page .settings-server-fields { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 520px) { .settings-page .settings-section-nav { position: static; } .settings-page .settings-credentials { padding: 17px; } .settings-page .settings-field-pair { grid-template-columns: minmax(0, 1fr); gap: 0; } .settings-page .settings-domain-actions > button { flex: 1 1 auto; } }
+@media (max-width: 520px) { .settings-page .settings-credentials { padding: 17px; } .settings-page .settings-field-pair { grid-template-columns: minmax(0, 1fr); gap: 0; } .settings-page .settings-domain-actions > button { flex: 1 1 auto; } }
 </style>
 <div class="settings-page" x-data="panelSettings()" x-init="initPage()">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
@@ -33,7 +33,7 @@
         </div>
     </div>
 
-    <nav class="settings-section-nav card mb-6 p-2 sticky top-0 z-20" aria-label="{{t .Lang "settings.section_navigation"}}">
+    <nav class="settings-section-nav card mb-6 p-2" aria-label="{{t .Lang "settings.section_navigation"}}">
         <div class="flex flex-wrap gap-2">
             <button type="button" @click="setSection('general')" :class="sectionButtonClass('general')">{{t .Lang "settings.section_general"}}</button>
             <button type="button" @click="setSection('updates')" :class="sectionButtonClass('updates')">{{t .Lang "settings.section_updates"}}</button>
