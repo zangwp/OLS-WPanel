@@ -19,7 +19,7 @@ func cacheStatusTestSite(t *testing.T) *models.Website {
 	if err := os.WriteFile(filepath.Join(pluginDir, "litespeed-cache.php"), []byte("<?php"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	return &models.Website{WebRoot: root, SiteType: "wordpress", Status: models.StatusActive}
+	return &models.Website{Domain: "example.com", WebRoot: root, SiteType: "wordpress", Status: models.StatusActive}
 }
 
 func TestObserveLiteSpeedCacheStatusSeparatesPluginPageAndRedisStates(t *testing.T) {
@@ -53,7 +53,7 @@ func TestObserveLiteSpeedCacheStatusSeparatesPluginPageAndRedisStates(t *testing
 			if !status.StatusKnown || status.PluginStatus != wantPlugin || status.PluginVersion != "7.9.1" {
 				t.Fatalf("plugin status = %#v", status)
 			}
-			if status.ServerPageCacheEnabled != tc.server || status.PageCacheEnabled != (tc.active && tc.page) || status.RedisObjectCacheConfigured != (tc.active && tc.redis) {
+			if status.ServerCacheState != "unknown" || status.ServerCacheConfigured != nil || status.PageCacheEnabled != (tc.active && tc.page) || status.RedisObjectCacheConfigured != (tc.active && tc.redis) {
 				t.Fatalf("independent cache states = %#v", status)
 			}
 			if status.RedisHost != "localhost" || status.RedisPort != 6379 || status.RedisDatabase != 0 || status.OverridesPresent {
@@ -83,8 +83,8 @@ func TestObserveLiteSpeedCacheStatusDoesNotGuessWhenCollectionFails(t *testing.T
 			if status.StatusKnown || status.PageCacheEnabled || status.RedisObjectCacheConfigured || status.RedisHost != "" || status.RedisPort != 0 {
 				t.Fatalf("failed collection must not report guessed state: %#v", status)
 			}
-			if !status.ServerPageCacheEnabled {
-				t.Fatalf("stored server setting was lost: %#v", status)
+			if status.ServerCacheState != "unknown" || status.ServerCacheConfigured != nil || status.RedisConnectionState != "not_checked" {
+				t.Fatalf("stored DB flag is not configuration or connection evidence: %#v", status)
 			}
 		})
 	}

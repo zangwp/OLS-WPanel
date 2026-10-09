@@ -500,8 +500,14 @@ func NewAPIKey() string {
 func UpdateSiteLiteSpeedCache(siteID, enabled, ttl int) error {
 	db := database.GetDB()
 	var oldEnabled, oldTTL int
-	if err := db.QueryRow(`SELECT litespeed_cache_enabled, litespeed_cache_ttl FROM websites WHERE id=?`, siteID).Scan(&oldEnabled, &oldTTL); err != nil {
+	var siteType string
+	if err := db.QueryRow(`SELECT litespeed_cache_enabled, litespeed_cache_ttl, site_type FROM websites WHERE id=?`, siteID).Scan(&oldEnabled, &oldTTL, &siteType); err != nil {
 		return fmt.Errorf("读取原缓存设置失败: %w", err)
+	}
+	if siteType == "wordpress" {
+		// Legacy clients may still send the old server-cache switch. WordPress
+		// uses the plugin's response policy, never blanket public caching.
+		enabled = 0
 	}
 	result, err := db.Exec(`UPDATE websites SET litespeed_cache_enabled=?, litespeed_cache_ttl=? WHERE id=?`, enabled, ttl, siteID)
 	if err != nil {

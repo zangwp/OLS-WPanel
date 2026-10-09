@@ -148,3 +148,27 @@ func TestHasRecentWPSecurityEvidenceRequiresObservedRecentEvents(t *testing.T) {
 		t.Fatal("evidence must satisfy the caller's configuration-activation cutoff")
 	}
 }
+
+func TestRecentWPSecurityEvidenceReturnsNewestTrustedCompleteEvent(t *testing.T) {
+	old := wpSecurityLogDirAllowed
+	wpSecurityLogDirAllowed = func(string) bool { return true }
+	t.Cleanup(func() { wpSecurityLogDirAllowed = old })
+	dir := t.TempDir()
+	older := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	newer := older.Add(time.Hour)
+	line := func(at time.Time) string {
+		return "203.0.113.10 [" + at.Format(time.RFC3339) + "] OLS_WPANEL_LOGIN_FAILED\n"
+	}
+	// File order can differ from occurrence order; a partial newest line proves nothing.
+	content := line(newer) + line(older) + strings.TrimSuffix(line(newer.Add(time.Minute)), "\n")
+	if err := os.WriteFile(filepath.Join(dir, wpSecurityLoginLog), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	observed, ok := RecentWPSecurityEvidenceTime(dir, "login", older)
+	if !ok || !observed.Equal(newer) {
+		t.Fatalf("newest evidence=%v,%t want %v", observed, ok, newer)
+	}
+	if _, ok := RecentWPSecurityEvidenceTime(dir, "login", newer.Add(time.Second)); ok {
+		t.Fatal("older event accepted after policy cutoff")
+	}
+}

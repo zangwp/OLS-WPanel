@@ -56,7 +56,10 @@ test('a read started before a policy change cannot restore stale protection clai
 });
 
 test('website security tab loads on demand and remains available to PHP sites', async () => {
-    const {page,calls}=setup();page.site.site_type='php';page.setDetailTab('overview');assert.equal(calls.length,0);
+    const {page,calls}=setup();page.site.site_type='php';
+    // Overview has its own lazy reads; this test measures only the security tab.
+    page.loadSSLRenewal=async()=>{};page.fetchAIDevelopment=async()=>{};page.fetchPHPRuntimes=async()=>{};
+    page.setDetailTab('overview');assert.equal(calls.length,0);
     page.setDetailTab('security');assert.equal(page.detailTab,'security');await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,1);
     page.setDetailTab('overview');page.setDetailTab('security');assert.equal(calls.length,1);
     page.securityStatus={checks:[{key:'xmlrpc',state:'unsupported',effective:null,configured:null}]};assert.equal(page.siteSecurityStateText('xmlrpc'),'website.security_state_unsupported');
@@ -80,5 +83,15 @@ test('saving cache settings never applies unsaved security tab edits', async () 
     const {page,context,calls}=setup();context.api=async(url,options)=>{calls.push({url,options});return {success:true};};
     page.xmlrpcEnabled=true;page.disableApplicationPasswords=false;page.lscacheEnabled=true;
     await page.saveWPOptimizations();const body=calls[0].options.body;
-    assert.equal(body.xmlrpc_enabled,false);assert.equal(body.disable_application_passwords,true);assert.equal(body.litespeed_cache_enabled,true);assert.equal(page.xmlrpcEnabled,true);assert.equal(page.disableApplicationPasswords,false);
+    assert.equal(body.xmlrpc_enabled,false);assert.equal(body.disable_application_passwords,true);assert.equal(Object.hasOwn(body,'litespeed_cache_enabled'),false);assert.equal(page.xmlrpcEnabled,true);assert.equal(page.disableApplicationPasswords,false);
+});
+
+test('component readiness and isolated core evidence never become verified request protection', () => {
+    const {page}=setup();
+    page.securityStatus={checks:[{key:'login_protection',state:'ready',configured:true,runtime_ready:true,effective:null},{key:'application_passwords',state:'runtime_verified',configured:true,runtime_ready:true,effective:null}]};
+    assert.equal(page.siteSecurityStateText('login_protection'),'site_security.state_ready');
+    assert.equal(page.siteSecurityStateText('application_passwords'),'site_security.state_runtime_verified');
+    assert.notEqual(page.siteSecurityClass('login_protection'),'badge-success');
+    page.securityStatus.checks[0].runtime_ready=false;
+    assert.equal(page.siteSecurityStateText('login_protection'),'website.security_state_unknown');
 });

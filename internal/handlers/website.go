@@ -48,6 +48,7 @@ var (
 	publishSiteOLSWithCacheRollback = executor.PublishSiteOLSWithCacheRollback
 	clearSiteCache                  = executor.ClearSiteCache
 	observeLiteSpeedCacheStatus     = executor.ObserveLiteSpeedCacheStatus
+	verifyLiteSpeedPageCache        = executor.VerifyLiteSpeedPageCache
 	ensureLiteSpeedCachePlugin      = executor.EnsureLiteSpeedCachePlugin
 	configureLiteSpeedObjectCache   = executor.ConfigureLiteSpeedObjectCacheReversible
 	clearWPRedisObjectCache         = executor.ClearWPRedisObjectCache
@@ -2436,6 +2437,29 @@ func (h *WebsiteHandler) LiteSpeedCacheStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 
+func (h *WebsiteHandler) VerifyLiteSpeedPageCache(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "website.invalid_site_id")))
+		return
+	}
+	if !executor.TryAcquireSiteOpLock(id, "litespeed_cache_verify") {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "maintenance.operation_unavailable")))
+		return
+	}
+	defer executor.ReleaseSiteOpLock(id)
+	site := getWebsiteByID(id)
+	if site == nil || site.SiteType != "wordpress" {
+		c.JSON(http.StatusNotFound, models.ErrorResponse(i18n.TE(c.Request, "website.not_found")))
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 9*time.Second)
+	defer cancel()
+	result := verifyLiteSpeedPageCache(ctx, config.AppConfig, site)
+	c.JSON(http.StatusOK, models.SuccessResponse(result))
+}
+
 func (h *WebsiteHandler) ApplyRecommendedLiteSpeedCache(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -2476,7 +2500,7 @@ func (h *WebsiteHandler) ApplyRecommendedLiteSpeedCache(c *gin.Context) {
 	if ttl < 10 || ttl > 86400 {
 		ttl = 300
 	}
-	if err := updateSiteLiteSpeedCache(id, 1, ttl); err != nil {
+	if err := updateSiteLiteSpeedCache(id, 0, ttl); err != nil {
 		if rollbackErr := rollbackConfig(); rollbackErr != nil {
 			log.Printf("回滚 LiteSpeed Cache WordPress 配置失败 site=%d: %v", id, rollbackErr)
 		}
@@ -2484,11 +2508,11 @@ func (h *WebsiteHandler) ApplyRecommendedLiteSpeedCache(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.litespeed_recommended_failed")))
 		return
 	}
-	recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "success", fmt.Sprintf("本次安装官方插件=%t 页面缓存=开启 Redis对象缓存=已配置 TTL=%d", installed, ttl))
+	recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "success", fmt.Sprintf("本次安装官方插件=%t 页面缓存由插件管理 Redis对象缓存=已配置 TTL=%d", installed, ttl))
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"message":                       i18n.TE(c.Request, "website.litespeed_recommended_applied"),
 		"plugin_installed":              installed,
-		"page_cache_enabled":            true,
+		"page_cache_managed_by":         "plugin",
 		"redis_object_cache_configured": true,
 		"ttl":                           ttl,
 	}))
@@ -2544,7 +2568,7 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	}
 
 	var req struct {
-		LSCacheEnabled              bool   `json:"litespeed_cache_enabled"`
+		LSCacheEnabled              *bool  `json:"litespeed_cache_enabled"`
 		LSCacheTTL                  int    `json:"litespeed_cache_ttl"`
 		DisableWPUpdates            bool   `json:"disable_wp_updates"`
 		ExpectedWPUpdates           *bool  `json:"expected_disable_wp_updates"`
@@ -2559,6 +2583,11 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("参数错误"))
 		return
+	}
+	if req.LSCacheTTL == 0 {
+		// The WordPress cache controls are no longer in this form. Preserve a
+		// legacy/default TTL when a new client omits it, including PHP clients.
+		req.LSCacheTTL = site.LSCacheTTL
 	}
 	if req.LSCacheTTL < 10 {
 		req.LSCacheTTL = 300
@@ -2581,9 +2610,14 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 		return
 	}
 
-	fcEnabled := 0
-	if req.LSCacheEnabled {
-		fcEnabled = 1
+	fcEnabled := oldLSCacheEnabled
+	if site.SiteType == "wordpress" {
+		fcEnabled = 0
+	} else if req.LSCacheEnabled != nil {
+		fcEnabled = 0
+		if *req.LSCacheEnabled {
+			fcEnabled = 1
+		}
 	}
 	disableUpdates := 0
 	if req.DisableWPUpdates {
@@ -2673,7 +2707,7 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 		}
 	}
 	if domain != "" {
-		recordHandlerOperationLog("wp_optimizations", domain, "success", wpOptimizationsLogMessage(req.LSCacheEnabled, req.LSCacheTTL, req.DisableWPUpdates, req.DisableFileEditing, req.XMLRPCEnabled, req.DisableApplicationPasswords, req.WPDebugEnabled, wpDebugDisplay, req.WPPostRevisions, req.WPMemoryLimit))
+		recordHandlerOperationLog("wp_optimizations", domain, "success", wpOptimizationsLogMessage(fcEnabled == 1, req.LSCacheTTL, req.DisableWPUpdates, req.DisableFileEditing, req.XMLRPCEnabled, req.DisableApplicationPasswords, req.WPDebugEnabled, wpDebugDisplay, req.WPPostRevisions, req.WPMemoryLimit))
 	}
 	if site.FileLockEnabled && site.FileLockApplyStatus == executor.FileLockApplyStatusReady {
 		executor.RefreshWPCodeIntegrityBaselineBestEffort(id, "WordPress 优化设置保存成功")
@@ -3394,7 +3428,7 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 		Scan(&oldLSCacheEnabled, &oldLSCacheTTL)
 
 	fcEnabled := 0
-	if req.Enabled {
+	if req.Enabled && site.SiteType != "wordpress" {
 		fcEnabled = 1
 	}
 	if req.FileLockSafeOnly {
@@ -3414,7 +3448,7 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 				return
 			}
 		}
-		recordHandlerOperationLog("wp_optimizations", req.Domain, "success", fmt.Sprintf("文件保护期间保存可用设置：LiteSpeed缓存=%t, TTL=%d秒", req.Enabled, req.TTL))
+		recordHandlerOperationLog("wp_optimizations", req.Domain, "success", fmt.Sprintf("文件保护期间保存可用设置：默认公共缓存=%t, TTL=%d秒", fcEnabled == 1, req.TTL))
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "可用设置已保存，受文件保护的设置保持不变"}))
 		return
 	}
@@ -3467,7 +3501,7 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 			return
 		}
 	}
-	recordHandlerOperationLog("wp_optimizations", req.Domain, "success", wpOptimizationsLogMessage(req.Enabled, req.TTL, req.DisableWPUpdates, req.DisableFileEditing, false, false, req.WPDebugEnabled, wpDebugDisplay, req.WPPostRevisions, req.WPMemoryLimit))
+	recordHandlerOperationLog("wp_optimizations", req.Domain, "success", wpOptimizationsLogMessage(fcEnabled == 1, req.TTL, req.DisableWPUpdates, req.DisableFileEditing, false, false, req.WPDebugEnabled, wpDebugDisplay, req.WPPostRevisions, req.WPMemoryLimit))
 	if site.FileLockEnabled && site.FileLockApplyStatus == executor.FileLockApplyStatusReady {
 		executor.RefreshWPCodeIntegrityBaselineBestEffort(site.ID, "WordPress 优化设置保存成功")
 	}
@@ -3483,7 +3517,7 @@ func wpOptimizationsLogMessage(lscacheEnabled bool, lscacheTTL int, disableUpdat
 		return "关闭"
 	}
 	parts := []string{
-		"LiteSpeed缓存=" + state(lscacheEnabled),
+		"默认公共缓存=" + state(lscacheEnabled),
 		fmt.Sprintf("缓存TTL=%d", lscacheTTL),
 		"禁止更新=" + state(disableUpdates),
 		"禁止文件编辑=" + state(disableEditing),

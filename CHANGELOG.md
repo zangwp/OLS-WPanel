@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.21.0 — 2026-10-09
+
+- Rebuilds the website registry with readable site identities, five grouped columns, search and status filters, responsive layouts and accessible Manage/Files/More actions. Keeps disabled and hovered action labels readable.
+- Removes the extra WordPress server-cache switch. The plugin owns page-cache policy; the panel separately reports managed OpenLiteSpeed configuration, plugin options, Redis configuration and anonymous origin cache-hit evidence. Legacy cache flags cannot enable indiscriminate WordPress public caching.
+- Adds per-item website security verification, setting shortcuts and dated evidence. Distinguishes runtime component readiness, isolated WordPress core policy checks and verified requests; failed checks clear stale success claims.
+- Adds opt-in WordPress administrator sign-in using 60-second single-use authorization, panel password/MFA confirmation, session and site binding, and a Unix-socket broker. Detects actual plugin-managed login URLs, supports same-site manual button destinations and optional custom login suffixes with verification and rollback. Preserves the initial WordPress setup wizard and declines conflicting authentication plugins.
+
+- Removes duplicate Alpine initialization and background reads for unopened website tabs. Renders the static navigation shell immediately, precomputes page-specific translations and reuses versioned public assets; maintenance polling pauses outside its tab and canceled reads cannot restore hidden passwords.
+- Bounds WordPress inspection and sign-in operations, removes a redundant security-status probe round, and requires real PHP regressions in both native architectures before publication.
+
+Upgrade notes: WordPress authorized sign-in remains disabled by default and requires deliberate configuration and panel password/MFA confirmation. Use ordinary login for unverified custom authentication plugins. Review the [access and cache guide](docs/wordpress-access-and-cache.md); preserve existing configuration, database and MFA-key backups.
+
 ## v1.20.0 — 2026-10-09
 
 - Adds a dedicated Website security workspace with 14 independently reported checks. Saved settings remain distinct from verified enforcement; unavailable files, services or evidence never imply that protection is active. Harmless loopback HEAD checks verify sensitive-file, upload-PHP and disabled XML-RPC rules without generating login failures or SQL attack requests.

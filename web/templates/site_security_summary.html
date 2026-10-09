@@ -1,0 +1,88 @@
+{{define "site_security_summary"}}
+<section id="site-security" x-show="detailTab === 'security'" x-data="siteSecuritySummary()" class="card site-security-controls" :aria-busy="securityStatusLoading || !!verifyingKey">
+    <div class="site-security-summary"><div><h3>{{t .Lang "website.security_status_title"}}</h3><p>{{t .Lang "site_security.summary_help"}}</p></div><button type="button" @click="fetchSiteSecurityStatus()" :disabled="securityStatusLoading || !!verifyingKey" class="btn-secondary" x-text="securityStatusLoading ? t('website.security_checking') : t('website.security_refresh')"></button></div>
+    <p x-show="securityStatusError || verificationError" x-cloak role="alert" class="text-sm text-red-400 mb-4" x-text="securityStatusError || verificationError"></p>
+    <div class="site-security-groups">
+        <template x-for="group in siteSecurityGroups" :key="group.id">
+            <div class="site-security-group" x-show="group.id !== 'wordpress' || site.site_type === 'wordpress'">
+                <h4 x-text="t(group.title)"></h4>
+                <template x-for="key in group.keys" :key="key">
+                    <div class="site-security-check">
+                        <div class="site-security-check-heading"><span x-text="siteSecurityTitle(key)"></span><span :class="summaryStateClass(key)" x-text="summaryStateText(key)"></span></div>
+                        <p x-text="summaryReason(key)"></p>
+                        <p class="text-xs mt-2" x-show="summaryCheck(key).evidence_source"><span x-text="t('site_security.evidence') + ': ' + summarySource(key)"></span><span x-show="summaryCheck(key).evidence_at" x-text="' · ' + summaryTime(summaryCheck(key).evidence_at)"></span></p>
+                        <p class="text-xs mt-1" x-show="summaryCheck(key).recent_event_at" x-text="t('site_security.recent_event') + ': ' + summaryTime(summaryCheck(key).recent_event_at)"></p>
+                        <p class="text-xs mt-1" x-show="summaryCheck(key).details?.expires_at" x-text="t('site_security.certificate_expiry') + ': ' + summaryTime(summaryCheck(key).details?.expires_at)"></p>
+                        <div class="flex flex-wrap gap-2 mt-3">
+                            <button type="button" class="btn-secondary text-xs" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" x-text="verifyingKey === key ? t('site_security.verifying') : t('site_security.verify')"></button>
+                            <button type="button" class="btn-secondary text-xs" x-show="summaryCheck(key).action && summaryCheck(key).action !== 'logs' && summaryCheck(key).state !== 'unsupported'" @click="openSummarySettings(key)" x-text="t('site_security.settings')"></button>
+                            <button type="button" class="btn-secondary text-xs" x-show="['login_protection','sql_injection','sensitive_files','uploads_php'].includes(key)" @click="openSummaryLogs()" x-text="t('website.security_view_logs')"></button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+    <p class="site-security-checked-at" x-show="securityStatus?.checked_at" x-text="t('site_security.collected_at') + ': ' + siteSecurityCheckedAt()"></p>
+</section>
+{{end}}
+{{define "site_security_summary_script"}}
+<script>
+function siteSecuritySummary() {
+    return {
+        verifyingKey: '', verificationError: '',
+        summaryCheck(key) {
+            const value = this.securityStatus?.checks?.find(check => check?.key === key);
+            if (!value || !['effective','runtime_verified','ready','configured','disabled','unsupported','error','unknown'].includes(value.state)) return {state:'unknown',reason_code:'not_checked'};
+            if ((value.state === 'effective' && value.effective !== true) || (['ready','runtime_verified'].includes(value.state) && value.runtime_ready !== true) || (['effective','configured','ready','runtime_verified'].includes(value.state) && value.configured !== true)) return {state:'unknown',reason_code:'not_checked'};
+            return value;
+        },
+        summaryStateText(key) {
+            if (this.securityStatusLoading) return t('website.security_checking');
+            const state = this.summaryCheck(key).state;
+            return ['ready','runtime_verified'].includes(state) ? t('site_security.state_' + state) : t('website.security_state_' + state);
+        },
+        summaryStateClass(key) {
+            if (this.securityStatusLoading) return 'badge-info';
+            const state = this.summaryCheck(key).state;
+            return state === 'effective' ? 'badge-success' : ['error','configured'].includes(state) ? 'badge-warning' : 'badge-info';
+        },
+        summaryReason(key) {
+            const code = this.summaryCheck(key).reason_code || 'not_checked';
+            const value = t('site_security.reason_' + code);
+            return value === 'site_security.reason_' + code ? t('site_security.reason_not_checked') : value;
+        },
+        summarySource(key) {
+            const source = this.summaryCheck(key).evidence_source || 'saved_configuration';
+            const value = t('site_security.source_' + source);
+            return value === 'site_security.source_' + source ? t('site_security.source_saved_configuration') : value;
+        },
+        summaryTime(value) { const date = new Date(value); return value && Number.isFinite(date.getTime()) ? date.toLocaleString(currentLocale()) : '—'; },
+        async verifySummaryCheck(key) {
+            if (!this.site || this.verifyingKey || this.securityStatusLoading || !this.summaryCheck(key).can_verify) return;
+            const siteID = this.site.id, generation = ++this.securityStatusGeneration;
+            this.verifyingKey = key; this.verificationError = '';
+            try {
+                const response = await api('/websites/' + siteID + '/security-verify', {method:'POST',body:{key},silent:true,cache:'no-store',timeout:20000});
+                if (!response.success || Number(response.data?.site_id) !== Number(siteID) || !Array.isArray(response.data?.checks)) throw new Error(t('site_security.verification_failed'));
+                if (generation === this.securityStatusGeneration && this.site?.id === siteID) this.securityStatus = response.data;
+            } catch(error) {
+                if (generation === this.securityStatusGeneration && this.site?.id === siteID) this.verificationError = error.message || t('site_security.verification_failed');
+            } finally { this.verifyingKey = ''; }
+        },
+        openSummaryLogs() { this.setDetailTab('logs'); this.selectLogType(this.site.site_type === 'wordpress' ? 'security' : 'error'); },
+        openSummarySettings(key) {
+            const action = this.summaryCheck(key).action;
+            if (action === 'ssl') { this.openSiteSSLSettings(); return; }
+            if (action === 'protection') { window.location.assign('/{{.RandomSuffix}}/security#settings'); return; }
+            if (action === 'backups') { window.location.assign('/{{.RandomSuffix}}/backups'); return; }
+            const destinations = {'wp-policy':['security','site-wp-policy'],'file-editing':['security','site-file-editing'],'cache':['cache','site-wp-advanced'],'wp-updates':['cache','site-wp-advanced'],'file-lock':['security','site-protection'],'monitor':['security','site-monitoring'],'anomaly':['security','site-wp-anomaly']};
+            const destination = destinations[action];
+            if (!destination) { this.openSummaryLogs(); return; }
+            this.setDetailTab(destination[0]);
+            this.$nextTick(() => document.getElementById(destination[1])?.scrollIntoView({block:'start',behavior:'smooth'}));
+        },
+    };
+}
+</script>
+{{end}}

@@ -38,11 +38,18 @@ func (h *WebsiteHandler) SecurityStatus(c *gin.Context) {
 		return
 	}
 	report := executor.CollectWebsiteSecurityStatus(ctx, site)
+	completeWebsiteSecuritySettings(ctx, db, site, &report)
+	c.JSON(http.StatusOK, models.SuccessResponse(report))
+}
+
+// Add inexpensive database settings to the existing observation rather than
+// repeating its HTTP probes and log inspection after an explicit verification.
+func completeWebsiteSecuritySettings(ctx context.Context, db *sql.DB, site *models.Website, report *models.WebsiteSecurityStatus) {
 	setSetting := func(key, query string) {
 		var enabled int
-		err := db.QueryRowContext(ctx, query, id).Scan(&enabled)
+		err := db.QueryRowContext(ctx, query, site.ID).Scan(&enabled)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			executor.SetWebsiteSecurityCheck(&report, key, "unknown", nil, nil)
+			executor.SetWebsiteSecurityCheck(report, key, "unknown", nil, nil)
 			return
 		}
 		configured := enabled == 1
@@ -50,11 +57,10 @@ func (h *WebsiteHandler) SecurityStatus(c *gin.Context) {
 		if configured {
 			state = "configured"
 		}
-		executor.SetWebsiteSecurityCheck(&report, key, state, &configured, nil)
+		executor.SetWebsiteSecurityCheck(report, key, state, &configured, nil)
 	}
 	setSetting("backup", "SELECT enabled FROM backup_settings WHERE site_id=?")
 	if site.SiteType == "wordpress" {
 		setSetting("anomaly_monitor", "SELECT enabled FROM site_wp_anomaly_state WHERE site_id=?")
 	}
-	c.JSON(http.StatusOK, models.SuccessResponse(report))
 }

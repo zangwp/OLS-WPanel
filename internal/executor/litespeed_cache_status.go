@@ -19,7 +19,10 @@ type LiteSpeedCacheRuntimeStatus struct {
 	PluginStatus               string `json:"plugin_status"`
 	PluginVersion              string `json:"plugin_version,omitempty"`
 	PageCacheEnabled           bool   `json:"page_cache_enabled"`
-	ServerPageCacheEnabled     bool   `json:"server_page_cache_enabled"`
+	ServerCacheState           string `json:"server_cache_state"`
+	ServerCacheReason          string `json:"server_cache_reason"`
+	ServerCacheConfigured      *bool  `json:"server_cache_configured"`
+	RedisConnectionState       string `json:"redis_connection_state"`
 	RedisObjectCacheConfigured bool   `json:"redis_object_cache_configured"`
 	RedisHost                  string `json:"redis_host,omitempty"`
 	RedisPort                  int    `json:"redis_port,omitempty"`
@@ -27,23 +30,24 @@ type LiteSpeedCacheRuntimeStatus struct {
 }
 
 func ObserveLiteSpeedCacheStatus(ctx context.Context, cfg *config.Config, site *models.Website) LiteSpeedCacheRuntimeStatus {
-	return observeLiteSpeedCacheStatus(site, func() (WPInventoryRunResult, error) {
+	status := observeLiteSpeedCacheStatus(site, func() (WPInventoryRunResult, error) {
 		runner, err := NewWPInventoryRunner()
 		if err != nil {
 			return WPInventoryRunResult{}, err
 		}
 		return runner.Collect(ctx, cfg, site, false)
 	})
+	status.ServerCacheState, status.ServerCacheReason, status.ServerCacheConfigured = observeLiteSpeedServerCache(cfg, site)
+	return status
 }
 
 func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInventoryRunResult, error)) LiteSpeedCacheRuntimeStatus {
-	status := LiteSpeedCacheRuntimeStatus{PluginStatus: "unknown"}
+	status := LiteSpeedCacheRuntimeStatus{PluginStatus: "unknown", ServerCacheState: "unknown", ServerCacheReason: "config_unavailable", RedisConnectionState: "not_checked"}
 	if site == nil {
 		return status
 	}
-	content, _ := os.ReadFile(filepath.Join(site.WebRoot, "wp-config.php"))
+	content, _ := readSiteSecurityFile(site.WebRoot, filepath.Join(site.WebRoot, "wp-config.php"), 1024*1024)
 	status.OverridesPresent = wpConfigBoolConstant(string(content), "LITESPEED_CONF") && strings.Contains(string(content), "LITESPEED_CONF__OBJECT")
-	status.ServerPageCacheEnabled = site.LSCacheEnabled
 	if site.SiteType != "wordpress" || site.Status != models.StatusActive {
 		return status
 	}
@@ -56,6 +60,9 @@ func observeLiteSpeedCacheStatus(site *models.Website, collect func() (WPInvento
 		return status
 	}
 	if err != nil || !info.Mode().IsRegular() {
+		return status
+	}
+	if collect == nil {
 		return status
 	}
 	result, err := collect()

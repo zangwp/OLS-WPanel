@@ -47,6 +47,22 @@ test('loading and failed reads never become a false empty website result; retry 
     assert.equal(page.loaded, true); assert.equal(page.loadError, '');
 });
 
+test('site search and status filters compose without extra requests or changing the registry', () => {
+    const {page, calls} = setup();
+    const sites = [{id:1,domain:'Studio.Example.com',name:'Studio',aliases:'www.studio.example.com',site_type:'wordpress',status:'active'}, {id:2,domain:'preview.example.com',name:'Preview',aliases:'staging.example.com',site_type:'php',status:'paused'}];
+    page.websites = sites;
+    page.query = '  STAGING  ';
+    assert.deepEqual(Array.from(page.filteredWebsites, s=>s.id), [2]);
+    page.statusFilter = 'active';
+    assert.equal(page.filteredWebsites.length, 0);
+    page.query = 'wordpress';
+    assert.deepEqual(Array.from(page.filteredWebsites, s=>s.id), [1]);
+    page.query = ''; page.statusFilter = 'all';
+    assert.equal(page.filteredWebsites.length, 2);
+    assert.equal(page.websites, sites);
+    assert.equal(calls.length, 0);
+});
+
 test('malformed list refresh keeps the last known rows and exposes a retry error', async () => {
     const {page, context} = setup(); const site={id:1,domain:'example.test'};
     page.websites=[site]; page.loaded=true;

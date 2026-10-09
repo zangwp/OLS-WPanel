@@ -84,8 +84,8 @@ function api(path, options = {}) {
     let timeoutID = null;
     let externalAbortHandler = null;
     let timedOut = false;
+    const externalSignal = fetchOptions.signal;
     if (timeout > 0) {
-        const externalSignal = fetchOptions.signal;
         const controller = new AbortController();
         fetchOptions.signal = controller.signal;
         if (externalSignal) {
@@ -96,10 +96,15 @@ function api(path, options = {}) {
                 externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
             }
         }
-        timeoutID = setTimeout(() => {
-            timedOut = true;
-            controller.abort();
-        }, timeout);
+        if (!controller.signal.aborted) {
+            timeoutID = setTimeout(() => {
+                // Leaving a page/tab wins over a later timeout; do not report
+                // a caller cancellation as a server timeout.
+                if (controller.signal.aborted) return;
+                timedOut = true;
+                controller.abort();
+            }, timeout);
+        }
     }
 
     const headers = {
@@ -175,7 +180,7 @@ function api(path, options = {}) {
         })
         .finally(() => {
             if (timeoutID) clearTimeout(timeoutID);
-            if (externalAbortHandler && options.signal) options.signal.removeEventListener('abort', externalAbortHandler);
+            if (externalAbortHandler && externalSignal) externalSignal.removeEventListener('abort', externalAbortHandler);
         });
 }
 

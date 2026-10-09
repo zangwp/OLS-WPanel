@@ -24,6 +24,7 @@ permissions:
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
   RELEASE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.release_commit || github.sha }}
+  OLS_WPANEL_REQUIRE_PHP_TESTS: '1'
 
 concurrency:
   # Serialize tag pushes and manual recovery runs for the same logical release.
@@ -147,6 +148,16 @@ jobs:
           bash -n internal/executor/panel_cli.sh
           python3 internal/executor/panel_cli_render_test.py
           python3 internal/executor/panel_cli_behavior_test.py
+
+      - name: Require PHP regression runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v php >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends php-cli
+          fi
+          php -n -r 'exit(PHP_VERSION_ID >= 80000 && function_exists("json_encode") ? 0 : 1);'
 
       - name: Test
         shell: bash
@@ -409,6 +420,16 @@ jobs:
           go-version: '1.26.8'
           check-latest: false
           cache: true
+
+      - name: Require PHP regression runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v php >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends php-cli
+          fi
+          php -n -r 'exit(PHP_VERSION_ID >= 80000 && function_exists("json_encode") ? 0 : 1);'
 
       - name: Test and execute natively on ARM64
         shell: bash

@@ -2,7 +2,7 @@
 {{define "websites_content"}}
 <div class="websites-page" x-data="websiteList()" x-init="fetchList()" @keydown.escape.window="closeMore()" @resize.window="closeMore(false)" @scroll.window.capture="if ($event.target !== $refs.moreMenu) closeMore(false)">
     <div class="overview-heading websites-heading">
-        <h1 class="page-title">{{t .Lang "nav.websites"}}</h1>
+        <div><h1 class="page-title">{{t .Lang "nav.websites"}}</h1><p class="websites-introduction">{{t .Lang "website.registry_intro"}}</p></div>
 		<div class="websites-heading-actions">
             <button type="button" @click="fetchList()" :disabled="loading || Object.keys(actionBusy).length > 0" class="btn-secondary" x-text="loading ? t('website.loading') : t('website.refresh')"></button>
 			<a href="/{{.RandomSuffix}}/websites/new" class="btn-primary website-create-action">
@@ -17,48 +17,55 @@
     <div x-show="loadError" x-cloak role="alert" class="website-list-error"><span x-text="loadError"></span><button type="button" @click="fetchList()" :disabled="loading" class="btn-secondary">{{t .Lang "common.retry"}}</button></div>
 
     <div class="card websites-sheet" :aria-busy="loading">
+        <div class="website-list-toolbar">
+            <div class="website-list-search">
+                <label for="website-search" class="sr-only">{{t .Lang "website.search_sites"}}</label>
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10.5" cy="10.5" r="6.5" stroke-width="1.7"/><path d="m16 16 4.5 4.5" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <input id="website-search" type="search" x-model="query" @input="closeMore(false)" class="input-field" placeholder="{{t .Lang "website.search_sites"}}" autocomplete="off" spellcheck="false">
+            </div>
+            <label class="website-list-filter"><span class="sr-only">{{t .Lang "website.filter_status"}}</span><select x-model="statusFilter" @change="closeMore(false)" class="input-field">
+                <option value="all">{{t .Lang "website.all_statuses"}}</option><option value="active">{{t .Lang "website.status_running"}}</option><option value="paused">{{t .Lang "website.status_paused"}}</option><option value="migrated">{{t .Lang "website.status_migrated"}}</option><option value="error">{{t .Lang "website.registry_status_error"}}</option><option value="creating">{{t .Lang "website.registry_status_creating"}}</option><option value="deleting">{{t .Lang "website.status_deleting"}}</option>
+            </select></label>
+            <p class="website-list-count" role="status" x-show="loaded" x-text="t('website.registry_count', {count: filteredWebsites.length, total: websites.length})"></p>
+        </div>
         <div class="websites-scroll" tabindex="0" role="region" aria-label="{{t .Lang "website.list_tab"}}">
             <table class="websites-table w-full">
                 <thead><tr>
-                    <th class="table-header website-col-domain" scope="col">{{t .Lang "website.domain"}}</th>
-                    <th class="table-header" scope="col">{{t .Lang "website.status"}}</th>
-                    <th class="table-header" scope="col">{{t .Lang "website.list_security"}}</th>
-                    <th class="table-header" scope="col">{{t .Lang "website.list_monitoring"}}</th>
-                    <th class="table-header" scope="col">{{t .Lang "website.list_policies"}}</th>
-                    <th class="table-header" scope="col">{{t .Lang "website.list_dates"}}</th>
+                    <th class="table-header website-col-domain" scope="col">{{t .Lang "website.registry_site"}}</th>
+                    <th class="table-header website-col-connection" scope="col">{{t .Lang "website.registry_connection"}}</th>
+                    <th class="table-header website-col-monitoring" scope="col">{{t .Lang "website.registry_monitoring"}}</th>
+                    <th class="table-header website-col-expiry" scope="col">{{t .Lang "website.list_dates"}}</th>
                     <th class="table-header website-col-actions" scope="col">{{t .Lang "website.actions"}}</th>
                 </tr></thead>
                 <tbody>
-                    <template x-for="site in websites" :key="site.id">
+                    <template x-for="site in filteredWebsites" :key="site.id">
                         <tr class="website-row" :class="site.ai_development_enabled ? 'website-row-development' : ''">
                             <td class="table-cell website-col-domain">
-                                <a :href="(site.ssl_enabled ? 'https://' : 'http://') + site.domain" target="_blank" rel="noopener noreferrer" class="website-domain-link" :title="site.domain" x-text="site.domain"></a>
-                                <div class="website-domain-meta"><span x-text="site.site_type === 'wordpress' ? 'WordPress' : 'PHP'"></span><span x-show="site.ai_development_enabled" class="badge-info">{{t .Lang "ai_development.active_badge"}}</span></div>
+                                <div class="website-identity">
+                                    <span class="website-identity-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9" stroke-width="1.4"/><ellipse cx="12" cy="12" rx="4" ry="9" stroke-width="1.4"/><path d="M3 12h18M5 7h14M5 17h14" stroke-width="1.4"/></svg></span>
+                                    <div class="website-identity-copy"><a :href="'/{{$.RandomSuffix}}/websites/' + site.id" class="website-domain-link" x-text="site.domain"></a><div class="website-domain-meta"><span x-text="site.site_type === 'wordpress' ? 'WordPress' : 'PHP'"></span><span :class="statusClass(site.status)" x-text="statusText(site.status)"></span><span x-show="site.ai_development_enabled" class="badge-info">{{t .Lang "ai_development.active_badge"}}</span></div></div>
+                                </div>
                             </td>
-                            <td class="table-cell"><span :class="site.status === 'active' ? 'badge-success' : 'badge-warning'" x-text="statusText(site.status)"></span></td>
-                            <td class="table-cell"><div class="website-status-stack">
-                                <span :class="site.ssl_enabled ? 'badge-success' : site.ssl_last_error ? 'badge-warning' : 'badge-info'" :title="site.ssl_last_error || ''" x-text="site.ssl_enabled ? t('website.ssl_enabled') : site.ssl_last_error ? t('website.ssl_pending') : t('website.ssl_not_enabled')"></span>
-                                <span :class="site.file_lock_enabled ? 'badge-warning' : 'badge-info'" x-text="site.file_lock_enabled ? t('website.file_locked') : t('website.file_unlocked')"></span>
+                            <td class="table-cell website-col-connection" data-label="{{t .Lang "website.registry_connection"}}"><div class="website-detail-lines">
+                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id + '#overview'" class="website-detail-line" :class="!site.ssl_enabled ? 'website-detail-attention' : ''"><span class="website-state-dot" :class="site.ssl_enabled ? 'is-enabled' : 'is-off'" aria-hidden="true"></span><span x-text="site.ssl_enabled ? t('website.registry_https_configured') : site.ssl_last_error ? t('website.ssl_pending') : t('website.registry_https_missing')"></span></a>
+                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id + '#site-security'" class="website-detail-line"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3" stroke-width="1.7" stroke-linejoin="round"/></svg><span x-text="site.file_lock_enabled ? t('website.file_locked') : t('website.file_unlocked')"></span></a>
                             </div></td>
-                            <td class="table-cell"><div class="website-policy-stack">
-                                <span><span class="website-value-label">{{t .Lang "website.online_monitoring"}}</span><span :class="site.monitoring_enabled ? 'website-value-on' : ''" x-text="site.monitoring_enabled ? t('website.enabled') : t('website.disabled')"></span></span>
-                                <span><span class="website-value-label">{{t .Lang "website.anomaly_monitoring"}}</span><span :class="site.anomaly_monitoring_enabled ? 'website-value-on' : ''" x-text="!site.anomaly_monitoring_applicable ? t('website.not_applicable') : site.anomaly_monitoring_enabled ? t('website.enabled') : t('website.disabled')"></span></span>
+                            <td class="table-cell website-col-monitoring" data-label="{{t .Lang "website.registry_monitoring"}}"><div class="website-detail-lines">
+                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id + '#site-security'" class="website-detail-line"><span class="website-value-label">{{t .Lang "website.online_monitoring"}}</span><span :class="site.monitoring_enabled ? 'website-value-on' : ''" x-text="site.monitoring_enabled ? t('website.enabled') : t('website.disabled')"></span></a>
+                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id + '#site-security'" class="website-detail-line"><span class="website-value-label">{{t .Lang "website.anomaly_monitoring"}}</span><span :class="site.anomaly_monitoring_enabled ? 'website-value-on' : ''" x-text="!site.anomaly_monitoring_applicable ? t('website.not_applicable') : site.anomaly_monitoring_enabled ? t('website.enabled') : t('website.disabled')"></span></a>
+                                <a :href="'/{{$.RandomSuffix}}/databases/' + site.id" class="website-detail-line"><span class="website-value-label">{{t .Lang "website.db_backup"}}</span><span :class="site.backup_enabled ? 'website-value-on' : ''" x-text="site.backup_enabled ? t('website.enabled') : t('website.disabled')"></span></a>
                             </div></td>
-                            <td class="table-cell"><div class="website-policy-stack">
-                                <span><span class="website-value-label">{{t .Lang "website.server_page_cache"}}</span><span x-text="site.litespeed_cache_enabled ? t('website.enabled') : t('website.disabled')"></span></span>
-                                <span><span class="website-value-label">{{t .Lang "website.logs"}}</span><span x-text="site.access_log_mode === 'full' ? t('website.access_log_full') : site.access_log_mode === 'error_only' ? t('website.access_log_error_only') : t('website.access_log_off')"></span></span>
-                                <a :href="'/{{$.RandomSuffix}}/databases/' + site.id"><span class="website-value-label">{{t .Lang "website.db_backup"}}</span><span x-text="site.backup_enabled ? t('website.enabled') : t('website.disabled')"></span></a>
-                            </div></td>
-                            <td class="table-cell"><div class="website-policy-stack"><span x-text="site.expires_at ? formatDate(site.expires_at) : t('website.never_expires')"></span><span class="website-date-created" x-text="t('website.created_at') + ': ' + formatDate(site.created_at)"></span></div></td>
+                            <td class="table-cell website-col-expiry" data-label="{{t .Lang "website.list_dates"}}"><div class="website-date-summary" :class="isExpired(site) ? 'website-detail-attention' : ''"><span x-text="site.expires_at ? formatDate(site.expires_at) : t('website.never_expires')"></span><span x-show="isExpired(site)" class="website-expired-note">{{t .Lang "website.registry_expired"}}</span><span class="website-date-created" x-text="t('website.created_at') + ' ' + formatDate(site.created_at)"></span></div></td>
                             <td class="table-cell website-col-actions"><div class="website-actions">
-                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id" class="btn-secondary">{{t .Lang "website.details"}}</a>
-                                <a :href="'/{{$.RandomSuffix}}/files?site_id=' + site.id" class="btn-secondary">{{t .Lang "website.file_short"}}</a>
+                                <a :href="'/{{$.RandomSuffix}}/websites/' + site.id" class="btn-primary website-manage-action">{{t .Lang "website.registry_manage"}}</a>
+                                <a :href="'/{{$.RandomSuffix}}/files?site_id=' + site.id" class="btn-secondary website-file-action" :aria-label="t('website.registry_files_for', {domain:site.domain})" title="{{t .Lang "website.file_manage"}}"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="sr-only">{{t .Lang "website.file_manage"}}</span></a>
                                 <button type="button" @click="openMore($event, site)" @keydown.arrow-down.prevent="openMore($event, site)" :disabled="siteBusy(site)" :aria-expanded="moreSite?.id === site.id" aria-haspopup="menu" :aria-label="t('website.more_actions_for', {domain: site.domain})" class="btn-secondary website-more-trigger">{{t .Lang "website.more_actions"}}<span aria-hidden="true">⌄</span></button>
                             </div></td>
                         </tr>
                     </template>
-                    <tr x-show="loading && !loaded"><td colspan="7" class="table-cell website-empty-cell"><div class="website-empty-state" role="status">{{t .Lang "website.loading"}}</div></td></tr>
-                    <tr x-show="loaded && !loading && !loadError && websites.length === 0"><td colspan="7" class="table-cell website-empty-cell"><div class="website-empty-state">{{t .Lang "website.no_websites"}}</div></td></tr>
+                    <tr x-show="loading && !loaded"><td colspan="5" class="table-cell website-empty-cell"><div class="website-empty-state" role="status">{{t .Lang "website.loading"}}</div></td></tr>
+                    <tr x-show="loaded && !loading && !loadError && websites.length === 0"><td colspan="5" class="table-cell website-empty-cell"><div class="website-empty-state"><p>{{t .Lang "website.no_websites"}}</p><a href="/{{.RandomSuffix}}/websites/new" class="btn-primary">{{t .Lang "website.create_site"}}</a></div></td></tr>
+                    <tr x-show="loaded && !loading && !loadError && websites.length > 0 && filteredWebsites.length === 0"><td colspan="5" class="table-cell website-empty-cell"><div class="website-empty-state"><p>{{t .Lang "website.registry_no_matches"}}</p><button type="button" @click="query = ''; statusFilter = 'all'" class="btn-secondary">{{t .Lang "website.registry_clear_filters"}}</button></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -82,6 +89,12 @@ function websiteList() {
         loading: false,
         loaded: false,
         loadError: '',
+        query: '',
+        statusFilter: 'all',
+        get filteredWebsites() {
+            const query = this.query.trim().toLocaleLowerCase();
+            return this.websites.filter(site => (this.statusFilter === 'all' || site.status === this.statusFilter) && (!query || [site.domain, site.name, site.aliases, site.site_type].some(value => String(value || '').toLocaleLowerCase().includes(query))));
+        },
         actionBusy: {},
         moreSite: null,
         moreStyle: '',
@@ -151,8 +164,12 @@ function websiteList() {
             if (status === 'migrated') return t('website.status_migrated');
             if (status === 'deleting') return t('website.status_deleting');
             if (status === 'paused') return t('website.status_paused');
+            if (status === 'error') return t('website.registry_status_error');
+            if (status === 'creating') return t('website.registry_status_creating');
             return status || t('common.none');
         },
+        statusClass(status) { return status === 'active' ? 'website-running-state' : status === 'error' ? 'badge-danger' : 'badge-info'; },
+        isExpired(site) { return !!site.expires_at && Number.isFinite(Date.parse(site.expires_at)) && Date.parse(site.expires_at) <= Date.now(); },
         async toggleStatus(site) {
             return this.withSiteAction(site, async () => {
                 const action = site.status === 'active' ? 'pause' : 'enable';

@@ -132,8 +132,15 @@ func isWPSecurityReadOnlyProbe(evidence wpSecurityLogEvidence) bool {
 // based on an empty file. SQLi evidence requires this panel's native OLS marker;
 // login evidence requires the dedicated WordPress authentication-failure format.
 func HasRecentWPSecurityEvidence(logDir, kind string, since ...time.Time) bool {
+	_, ok := RecentWPSecurityEvidenceTime(logDir, kind, since...)
+	return ok
+}
+
+// Return the newest trusted record so the UI can distinguish service readiness
+// from a recent observed request. An empty event history is not a service fault.
+func RecentWPSecurityEvidenceTime(logDir, kind string, since ...time.Time) (time.Time, bool) {
 	if !wpSecurityLogDirAllowed(logDir) {
-		return false
+		return time.Time{}, false
 	}
 	source, eventType := "", ""
 	switch kind {
@@ -142,7 +149,7 @@ func HasRecentWPSecurityEvidence(logDir, kind string, since ...time.Time) bool {
 	case "login":
 		source, eventType = wpSecurityLoginLog, SecurityEventWPLoginFailed
 	default:
-		return false
+		return time.Time{}, false
 	}
 	now := time.Now().UTC()
 	earliest := now.Add(-24 * time.Hour)
@@ -151,13 +158,16 @@ func HasRecentWPSecurityEvidence(logDir, kind string, since ...time.Time) bool {
 			earliest = minimum
 		}
 	}
+	var newest time.Time
 	for _, line := range tailCompleteWPSecurityEvidenceLines(filepath.Join(logDir, source), 1000) {
 		evidence, ok := parseWPSecurityLogEvidence(line, source, nil)
 		if ok && evidence.eventType == eventType && !evidence.occurred.Before(earliest) && !evidence.occurred.After(now.Add(time.Minute)) {
-			return true
+			if evidence.occurred.After(newest) {
+				newest = evidence.occurred
+			}
 		}
 	}
-	return false
+	return newest, !newest.IsZero()
 }
 
 func tailCompleteWPSecurityEvidenceLines(path string, maxLines int) []string {

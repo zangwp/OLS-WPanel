@@ -10,7 +10,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The Cloudflare entry serves a fixed, deployed stable Release. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
 
-GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v1.20.0`; its assets must exist on GitHub before it can be used.
+GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v1.21.0`; its assets must exist on GitHub before it can be used.
 
 ## First login and server maintenance
 
@@ -45,7 +45,7 @@ workdir="$(mktemp -d /tmp/ols-wpanel-install.XXXXXXXXXX)"
 trap 'rm -rf -- "$workdir"' EXIT
 cd "$workdir"
 
-version='v1.20.0'
+version='v1.21.0'
 base="https://github.com/zangwp/OLS-WPanel/releases/download/${version}"
 wget --no-config --https-only --no-hsts \
   "$base/install.sh" \

@@ -214,7 +214,7 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 	for _, expected := range [][]byte{
 		[]byte(`@click="setSection('updates')"`),
 		[]byte(`x-show="activeSection === 'updates'"`),
-		[]byte(`id="system-updates" x-data="systemUpdate()" x-init="init()"`),
+		[]byte(`id="system-updates" x-data="systemUpdate()"`),
 		[]byte(`listOpen: false`),
 		[]byte(`x-show="listOpen"`),
 		[]byte(`style="max-height: 22rem; overflow-y: auto; overscroll-behavior: contain;"`),
@@ -235,6 +235,10 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 		if !bytes.Contains(settings, expected) {
 			t.Fatalf("compact system update panel is missing %q", expected)
 		}
+	}
+	component := regexp.MustCompile(`<[^>]+\bid="system-updates"[^>]*>`).Find(settings)
+	if bytes.Contains(component, []byte(`x-init=`)) {
+		t.Fatal("system update component must use Alpine auto init without a second explicit initialization")
 	}
 	if bytes.Contains(settings, []byte(`space-y-2 max-h-80 overflow-y-auto`)) {
 		t.Fatal("system update list still depends on an uncompiled max-h-80 utility")
@@ -638,16 +642,16 @@ func TestWebsiteListShowsDistinctMonitoringStatesInCompactColumns(t *testing.T) 
 		t.Fatal(err)
 	}
 	header := regexp.MustCompile(`(?s)<thead>(.*?)</thead>`).FindSubmatch(websites)
-	if len(header) != 2 || bytes.Count(header[1], []byte(`scope="col"`)) != 7 {
-		t.Fatal("website list must keep seven labeled columns")
+	if len(header) != 2 || bytes.Count(header[1], []byte(`scope="col"`)) != 5 {
+		t.Fatal("website registry must keep five labeled columns")
 	}
-	row := regexp.MustCompile(`(?s)<template x-for="site in websites"[^>]*>(.*?)</template>`).FindSubmatch(websites)
+	row := regexp.MustCompile(`(?s)<template x-for="site in filteredWebsites"[^>]*>(.*?)</template>`).FindSubmatch(websites)
 	if len(row) != 2 {
 		t.Fatal("website list is missing its site row")
 	}
 	cells := regexp.MustCompile(`(?s)<td\b[^>]*>(.*?)</td>`).FindAllSubmatch(row[1], -1)
-	if len(cells) != 7 {
-		t.Fatalf("website row cell count = %d, want 7", len(cells))
+	if len(cells) != 5 {
+		t.Fatalf("website row cell count = %d, want 5", len(cells))
 	}
 	for _, required := range [][]byte{
 		[]byte(`{{t .Lang "website.online_monitoring"}}`),
@@ -657,14 +661,16 @@ func TestWebsiteListShowsDistinctMonitoringStatesInCompactColumns(t *testing.T) 
 		[]byte(`site.anomaly_monitoring_enabled`),
 		[]byte(`t('website.not_applicable')`),
 	} {
-		if !bytes.Contains(cells[3][1], required) {
+		if !bytes.Contains(cells[2][1], required) {
 			t.Fatalf("compact monitoring cell missing distinct state %q", required)
 		}
 	}
 	for _, required := range [][]byte{
-		[]byte(`{{t .Lang "website.list_monitoring"}}`),
-		[]byte(`{{t .Lang "website.server_page_cache"}}`),
-		[]byte(`colspan="7"`),
+		[]byte(`{{t .Lang "website.registry_monitoring"}}`),
+		[]byte(`site.backup_enabled`),
+		[]byte(`colspan="5"`),
+		[]byte(`x-model="query"`),
+		[]byte(`x-model="statusFilter"`),
 		[]byte(`x-show="loading && !loaded"`),
 		[]byte(`x-show="loaded && !loading && !loadError && websites.length === 0"`),
 		[]byte(`@click="openMore($event, site)"`),
@@ -679,9 +685,12 @@ func TestWebsiteListShowsDistinctMonitoringStatesInCompactColumns(t *testing.T) 
 		[]byte(`/files?site_id=' + site.id`),
 	} {
 		// Details and files remain directly reachable beside the more menu.
-		if !bytes.Contains(cells[6][1], required) {
+		if !bytes.Contains(cells[4][1], required) {
 			t.Fatalf("primary website action missing %q", required)
 		}
+	}
+	if bytes.Contains(websites, []byte(`site.litespeed_cache_enabled`)) {
+		t.Fatal("website registry must not label the legacy default cache policy as actual cache status")
 	}
 }
 
@@ -1649,6 +1658,13 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, partial := range []string{"site_security_summary", "wordpress_cache_status"} {
+		content, err := os.ReadFile("../../web/templates/" + partial + ".html")
+		if err != nil {
+			t.Fatal(err)
+		}
+		source = bytes.ReplaceAll(source, []byte(`{{template "`+partial+`" .}}`), content)
+	}
 	overviewStart := bytes.Index(source, []byte(`<div id="site-overview"`))
 	cacheStart := bytes.Index(source, []byte(`<div id="site-performance"`))
 	securityStart := bytes.Index(source, []byte(`<section id="site-security"`))
@@ -1683,7 +1699,7 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 		[]byte(`@click="fetchSiteSecurityStatus()"`),
 		[]byte(`@click="saveSiteSecurityPolicy()"`),
 		[]byte(`@click="saveMonitoring()"`),
-		[]byte(`@click="openSiteSSLSettings()"`),
+		[]byte(`@click="openSummarySettings(key)"`),
 		[]byte(`/databases/' + site.id`),
 	} {
 		if !bytes.Contains(security, required) {

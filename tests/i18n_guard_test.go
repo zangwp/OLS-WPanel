@@ -3,6 +3,7 @@ package tests
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 const (
@@ -35,7 +37,7 @@ func TestEnglishLocaleContainsNoUnexpectedChinese(t *testing.T) {
 
 func TestReferencedTranslationKeysExist(t *testing.T) {
 	zh, en := loadLocales(t)
-	references := collectTranslationReferences(t)
+	references := collectTranslationReferences(t, appendUnique(flattenedKeys(zh), flattenedKeys(en)...))
 	for source, keys := range references {
 		for _, key := range keys {
 			if lookup(zh, key) == nil {
@@ -49,8 +51,8 @@ func TestReferencedTranslationKeysExist(t *testing.T) {
 }
 
 func TestTemplateScriptKeysAreExposed(t *testing.T) {
-	loadLocales(t)
-	scriptKeys := collectScriptTranslationKeys(t)
+	zh, en := loadLocales(t)
+	scriptKeys := collectScriptTranslationKeys(t, appendUnique(flattenedKeys(zh), flattenedKeys(en)...))
 	if len(scriptKeys) == 0 {
 		return
 	}
@@ -151,7 +153,7 @@ func lookup(messages map[string]any, key string) any {
 	return current
 }
 
-func collectTranslationReferences(t *testing.T) map[string][]string {
+func collectTranslationReferences(t *testing.T, knownKeys []string) map[string][]string {
 	t.Helper()
 	references := map[string][]string{}
 	patterns := []*regexp.Regexp{
@@ -163,35 +165,111 @@ func collectTranslationReferences(t *testing.T) map[string][]string {
 			return
 		}
 		for _, pattern := range patterns {
-			for _, match := range pattern.FindAllSubmatch(content, -1) {
-				key := string(match[1])
-				if !strings.HasSuffix(key, ".") {
-					references[path] = appendUnique(references[path], key)
-				}
+			keys, err := translationKeysFromContent(content, pattern, knownKeys)
+			if err != nil {
+				t.Errorf("%s: %v", path, err)
 			}
+			references[path] = appendUnique(references[path], keys...)
 		}
 	})
-	for source, keys := range collectScriptTranslationKeys(t) {
+	for source, keys := range collectScriptTranslationKeys(t, knownKeys) {
 		references[source] = appendUnique(references[source], keys...)
 	}
 	return references
 }
 
-func collectScriptTranslationKeys(t *testing.T) map[string][]string {
+var scriptTranslationKeyPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_$])t\('([a-z][a-z0-9_.-]+)'`)
+
+// Only an explicit concatenation after the quoted literal creates a prefix.
+// A static unknown key, including one ending in an underscore or dot, must
+// remain a reference so the existence and exposure guards reject it.
+func translationKeysFromContent(content []byte, pattern *regexp.Regexp, knownKeys []string) ([]string, error) {
+	var keys []string
+	for _, match := range pattern.FindAllSubmatchIndex(content, -1) {
+		literal := string(content[match[2]:match[3]])
+		tail := strings.TrimLeftFunc(string(content[match[1]:]), unicode.IsSpace)
+		if !strings.HasPrefix(tail, "+") {
+			keys = appendUnique(keys, literal)
+			continue
+		}
+		var expanded []string
+		for _, key := range knownKeys {
+			if len(key) > len(literal) && strings.HasPrefix(key, literal) {
+				expanded = appendUnique(expanded, key)
+			}
+		}
+		if len(expanded) == 0 {
+			return nil, fmt.Errorf("dynamic translation prefix %q has no locale keys", literal)
+		}
+		keys = appendUnique(keys, expanded...)
+	}
+	return keys, nil
+}
+
+func TestTranslationReferencesExpandOnlyExplicitDynamicPrefixes(t *testing.T) {
+	known := []string{"common.confirm", "site_security.reason_first", "site_security.reason_second"}
+	goPattern := regexp.MustCompile(`i18n\.(?:TE|T)\([^,\n]+,\s*"([^"]+)"`)
+	for _, tc := range []struct {
+		name, source string
+		pattern      *regexp.Regexp
+		want         []string
+		wantError    bool
+	}{
+		{"JavaScript prefix expands every variant", `t('site_security.reason_' + check.message_code)`, scriptTranslationKeyPattern, []string{"site_security.reason_first", "site_security.reason_second"}, false},
+		{"multiline concatenation", "t('site_security.reason_'\n  + code)", scriptTranslationKeyPattern, []string{"site_security.reason_first", "site_security.reason_second"}, false},
+		{"Go prefix expands every variant", `i18n.T(lang, "site_security.reason_"+code)`, goPattern, []string{"site_security.reason_first", "site_security.reason_second"}, false},
+		{"ordinary literal remains exact", `t('common.confirm')`, scriptTranslationKeyPattern, []string{"common.confirm"}, false},
+		{"static unknown underscore remains invalid reference", `t('common.unknown_')`, scriptTranslationKeyPattern, []string{"common.unknown_"}, false},
+		{"static unknown dot remains invalid reference", `i18n.T(lang, "common.unknown.")`, goPattern, []string{"common.unknown."}, false},
+		{"concatenation outside call remains static", `t('common.unknown_') + suffix`, scriptTranslationKeyPattern, []string{"common.unknown_"}, false},
+		{"unknown JavaScript dynamic prefix rejected", `t('common.unknown_' + code)`, scriptTranslationKeyPattern, nil, true},
+		{"unknown Go dynamic prefix rejected", `i18n.T(lang, "common.unknown_"+code)`, goPattern, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := translationKeysFromContent([]byte(tc.source), tc.pattern, known)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("reference parse error=%v, expected error=%t", err, tc.wantError)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("reference keys=%v, expected %v", got, tc.want)
+			}
+		})
+	}
+	// Every expanded variant reaches the exposure guard. Exposing only the first
+	// dynamic result must not hide another result from the same locale prefix.
+	keys, err := translationKeysFromContent([]byte(`t('site_security.reason_' + code)`), scriptTranslationKeyPattern, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exposed := map[string]bool{"site_security.reason_first": true}
+	var missing []string
+	for _, key := range keys {
+		if !exposed[key] {
+			missing = append(missing, key)
+		}
+	}
+	if strings.Join(missing, ",") != "site_security.reason_second" {
+		t.Fatalf("unexposed dynamic references=%v, expected the second variant", missing)
+	}
+}
+
+func collectScriptTranslationKeys(t *testing.T, knownKeys []string) map[string][]string {
 	t.Helper()
 	keys := map[string][]string{}
-	keyPattern := regexp.MustCompile(`(?:^|[^A-Za-z0-9_$])t\('([a-z][a-z0-9_.-]+)'`)
+	collect := func(path string, content []byte) {
+		found, err := translationKeysFromContent(content, scriptTranslationKeyPattern, knownKeys)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+		keys[path] = appendUnique(keys[path], found...)
+	}
 
 	walkFiles(t, "../web/templates", func(path string, content []byte) {
-		for _, match := range keyPattern.FindAllSubmatch(content, -1) {
-			keys[path] = appendUnique(keys[path], string(match[1]))
-		}
+		collect(path, content)
 	})
 	content, err := os.ReadFile("../web/js/app.js")
 	if err == nil {
-		for _, match := range keyPattern.FindAllSubmatch(content, -1) {
-			keys["../web/js/app.js"] = appendUnique(keys["../web/js/app.js"], string(match[1]))
-		}
+		collect("../web/js/app.js", content)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}

@@ -39,6 +39,12 @@ After the update and background configuration rebuild finish, refresh **Website 
 
 LiteSpeed Cache remains the authority for WordPress cache settings. Refresh the site's cache status to read page-cache and Redis object-cache configuration; failed or unsupported checks do not imply the cache is disabled. The panel domain continues to use its configured listening port, while HTTP-01 certificate validation requires the dedicated domain to reach this server on port 80.
 
+## WordPress access and caching in v1.21.0
+
+WordPress administrator sign-in through the panel is optional and disabled by default. Each authorization requires the panel password and configured MFA, expires after 60 seconds and can be redeemed once. Existing website users and passwords remain unchanged; unfinished WordPress installations still open their setup wizard. Recognized conflicting authentication plugins disable the feature. Keep it off for unverified custom authentication systems.
+
+The panel no longer provides a second WordPress page-cache switch. It prepares selective OpenLiteSpeed cache support and reads the active LiteSpeed Cache plugin policy. The cache verification action reports anonymous requests to the local origin separately from plugin configuration; a successful setup does not imply every request is cached. See the [WordPress access and cache guide](wordpress-access-and-cache.md).
+
 ## Release and installation entry
 
 GitHub publication and the Cloudflare short-entry deployment are separate operations. A new GitHub Release does not change the deployed installer endpoint by itself. Until the endpoint is updated, use the explicit signed version in the [verified installation guide](verified-install.md) for a reproducible install or repair. Never replace versioned assets with mutable branch downloads.

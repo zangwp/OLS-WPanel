@@ -23,6 +23,7 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/database"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
+	"github.com/zangwp/OLS-WPanel/internal/handlers"
 	"github.com/zangwp/OLS-WPanel/internal/middleware"
 	"github.com/zangwp/OLS-WPanel/internal/router"
 	"github.com/zangwp/OLS-WPanel/web"
@@ -380,6 +381,14 @@ func main() {
 	if port == 0 {
 		log.Fatal("面板监听端口配置无效")
 	}
+	wpAccessContext, stopWPAccessBroker := context.WithCancel(context.Background())
+	defer stopWPAccessBroker()
+	wpAccessBroker, wpAccessErr := handlers.StartWPPanelAccessBroker(wpAccessContext)
+	if wpAccessErr != nil {
+		log.Printf("WordPress 授权登录不可用，普通登录仍可使用: %v", wpAccessErr)
+	} else {
+		defer wpAccessBroker.Close()
+	}
 	server := newPanelHTTPServer(fmt.Sprintf(":%d", port), r)
 	serverErr := make(chan error, 1)
 	go func() {
@@ -436,6 +445,12 @@ func main() {
 		}
 	}
 	executor.StopWPSecurityEventIngestor()
+	// Fatal exits skip deferred cleanup, so close the local authorization broker
+	// before checking serveErr as well as on normal function return.
+	stopWPAccessBroker()
+	if wpAccessBroker != nil {
+		_ = wpAccessBroker.Close()
+	}
 	if serveErr != nil {
 		log.Fatalf("面板服务启动失败: %v", serveErr)
 	}
