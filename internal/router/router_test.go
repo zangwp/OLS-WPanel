@@ -1699,12 +1699,16 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 		[]byte(`@click="fetchSiteSecurityStatus()"`),
 		[]byte(`@click="saveSiteSecurityPolicy()"`),
 		[]byte(`@click="saveMonitoring()"`),
-		[]byte(`@click="openSummarySettings(key)"`),
+		[]byte(`@click="verifySummaryCheck(key)"`),
+		[]byte(`name="site-security-evidence"`),
 		[]byte(`/databases/' + site.id`),
 	} {
 		if !bytes.Contains(security, required) {
 			t.Fatalf("website security workspace missing control %q", required)
 		}
+	}
+	if bytes.Contains(security, []byte(`openSummarySettings`)) {
+		t.Fatal("compact security summary must not restore duplicate settings actions")
 	}
 	if bytes.Contains(source, []byte(`website.openlitespeed_custom_config`)) {
 		t.Fatal("website detail still exposes the disabled OpenLiteSpeed custom configuration card")
