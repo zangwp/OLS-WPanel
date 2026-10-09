@@ -1,6 +1,6 @@
 {{template "base" .}}
 {{define "websites_detail_content"}}
-<div x-data="websiteDetail()">
+<div x-data="websiteDetail()" @wordpress-access-observed="acceptWordPressAccessStatus($event.detail)">
 
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
@@ -53,7 +53,7 @@
                 </div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.https_policy"}}</dt><dd class="text-white" x-text="site.ssl_enabled ? t('website.https_forced') : t('website.https_requires_ssl')"></dd></div>
                 <div class="pt-2 flex flex-wrap gap-2">
-                    <button type="button" x-show="site.site_type === 'wordpress'" @click="document.getElementById('site-wordpress-access')?.scrollIntoView({block:'start',behavior:'smooth'})" class="btn-primary text-sm">{{t .Lang "wp_access.title"}}</button>
+                    <a x-show="site.site_type === 'wordpress'" :href="wordpressAdminURL() || '#'" :aria-disabled="!wordpressAdminURL()" :tabindex="wordpressAdminURL() ? 0 : -1" @click="if (!wordpressAdminURL()) $event.preventDefault()" target="_blank" rel="noopener noreferrer" class="btn-primary text-sm" x-text="wpAccessStatus?.installed === false ? t('wp_access.open_install') : t('wp_access.title')"></a>
                     <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "website.edit_domain"}}</button>
                     <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "nav.files"}}</a>
                     <a :href="(document.body.dataset.panelPrefix || '') + '/databases/' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "nav.databases"}}</a>
@@ -465,7 +465,7 @@
                 <button @click="selectLogType('error')" :class="logType === 'error' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.error_log"}}</button>
                 <button x-show="site.site_type === 'wordpress'" @click="selectLogType('security')" :class="logType === 'security' ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-white'" class="px-3 py-1 text-sm font-medium">{{t .Lang "website.security_log"}}</button>
                 <button @click="fetchLogs()" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.refresh"}}</button>
-                <button @click="clearLogs()" class="text-sm py-1 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">{{t .Lang "website.clear"}}</button>
+                <button @click="clearLogs()" :disabled="logClearing" class="text-sm py-1 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">{{t .Lang "website.clear"}}</button>
                 <button @click="logFullscreen = true" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.fullscreen"}}</button>
                 <button @click="downloadLogFile(currentLogFilename())" class="text-sm py-1 px-3 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.download_current_full_log"}}</button>
 				<a :href="(document.body.dataset.panelPrefix || '') + '/log-analysis?site_id=' + site.id" class="text-sm py-1 px-3 rounded inline-block" style="background-color: var(--panel-success-soft); color: var(--panel-success);">{{t .Lang "website.analyze_logs"}}</a>
@@ -486,13 +486,17 @@
                 </div>
             </div>
             <p class="text-xs text-gray-500 mb-3">{{t .Lang "website.log_preview_help"}}</p>
-            <pre x-text="logContent" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-muted); max-height: 400px; white-space: pre-wrap; word-break: break-all;"></pre>
+            <p x-show="logContentLoading" role="status" class="text-sm text-gray-400 py-3">{{t .Lang "common.loading"}}</p>
+            <p x-show="logContentError" role="alert" class="text-sm text-red-400 py-3" x-text="logContentError"></p>
+            <pre x-show="logContentLoaded && !logContentError" x-text="logContent" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-muted); max-height: 400px; white-space: pre-wrap; word-break: break-all;"></pre>
             <div class="mt-4">
                 <div class="flex items-center justify-between mb-2">
                     <h4 class="text-sm font-medium text-white">{{t .Lang "website.history_log_download"}}</h4>
                     <button @click="fetchLogFiles()" class="text-xs py-1 px-2 rounded text-gray-400 hover:text-white" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">{{t .Lang "website.refresh_list"}}</button>
                 </div>
-                <div class="overflow-x-auto">
+                <p x-show="logFilesLoading" role="status" class="text-sm text-gray-400 py-3">{{t .Lang "common.loading"}}</p>
+                <p x-show="logFilesError" role="alert" class="text-sm text-red-400 py-3" x-text="logFilesError"></p>
+                <div x-show="logFilesLoaded && !logFilesError" class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
                             <tr>
@@ -546,7 +550,9 @@
             </div>
             <button @click="logFullscreen = false" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
         </div>
-        <pre x-text="logContent" class="flex-1 w-full p-6 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-soft); color: var(--panel-muted); white-space: pre-wrap; word-break: break-all;"></pre>
+        <p x-show="logContentLoading" role="status" class="text-sm text-gray-400 p-6">{{t .Lang "common.loading"}}</p>
+        <p x-show="logContentError" role="alert" class="text-sm text-red-400 p-6" x-text="logContentError"></p>
+        <pre x-show="logContentLoaded && !logContentError" x-text="logContent" class="flex-1 w-full p-6 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-soft); color: var(--panel-muted); white-space: pre-wrap; word-break: break-all;"></pre>
     </div>
 
     <!-- ============================================================ -->
@@ -818,6 +824,23 @@ function websiteDetail() {
         },
         detailTab: 'overview',
         site: null,
+        wpAccessStatus: null,
+        acceptWordPressAccessStatus(detail) {
+            if (!this.site || Number(detail?.site_id) !== Number(this.site.id)) return;
+            this.wpAccessStatus = null;
+            if (typeof detail.installed !== 'boolean') return;
+            const raw = detail.installed ? detail.login_url : detail.install_url;
+            try {
+                if (typeof raw !== 'string' || raw.length > 2048) return;
+                const url = new URL(raw), expected = new URL((this.site.ssl_enabled ? 'https://' : 'http://') + this.site.domain);
+                if (url.origin !== expected.origin || url.username || url.password || url.hash || !['http:', 'https:'].includes(url.protocol)) return;
+                this.wpAccessStatus = {site_id:this.site.id, installed:detail.installed, address:url.href};
+            } catch (_) {}
+        },
+        wordpressAdminURL() {
+            if (!this.site || this.site.site_type !== 'wordpress' || this.wpAccessStatus?.site_id !== this.site.id) return '';
+            return this.wpAccessStatus.address || '';
+        },
 		maintenance: { state: 'unknown', window_id: '' },
 		maintenanceEnabled: false,
 		maintenanceMinutes: 5,
@@ -898,6 +921,7 @@ function websiteDetail() {
             if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
             if (this.hashChangeHandler) window.removeEventListener('hashchange', this.hashChangeHandler);
             this.cancelMaintenanceReads();
+            this.cancelLogReads();
         },
         loading: true,
         detailLoading: false, detailInitialized: false, detailDestroyed: false, siteLoadError: '', hashChangeHandler: null,
@@ -915,6 +939,12 @@ function websiteDetail() {
         logFiles: [],
         logsLoaded: false,
         logsLoading: false,
+        logContentLoaded: false, logFilesLoaded: false,
+        logContentLoading: false, logFilesLoading: false,
+        logContentError: '', logFilesError: '',
+        logContentController: null, logFilesController: null,
+        logContentGeneration: 0, logFilesGeneration: 0,
+        logViewGeneration: 0, logClearing: false,
         logFullscreen: false,
         lscacheEnabled: false,
         lscacheTTL: 300,
@@ -1114,13 +1144,14 @@ function websiteDetail() {
         },
         async loadDetailTab(tab, force = false) {
             if (!this.site || this.detailDestroyed) return;
+            if (tab !== 'logs') { this.cancelLogReads(); this.logFullscreen = false; }
             if (tab !== 'security') {
                 if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
                 this.maintenanceTimer = null;
                 if (this.site.site_type === 'wordpress') this.tabLoads.security.loaded = false;
                 this.cancelMaintenanceReads();
             }
-            if (tab === 'logs') { await this.loadLogs(); return; }
+            if (tab === 'logs') { await this.loadLogs(force); return; }
             const state = this.tabLoads[tab];
             if (!state) return;
             if (state.loading) { if (tab === 'security') state.pending = true; return; }
@@ -1163,6 +1194,7 @@ function websiteDetail() {
                 const r = await api('/websites/' + id);
                 if (!r.success || !r.data || Number(r.data.id) !== Number(id) || !['wordpress','php'].includes(r.data.site_type)) throw new Error(t('common.operation_failed'));
                 if (this.detailDestroyed) return;
+                if (this.site?.id !== r.data.id) { this.wpAccessStatus = null; this.cancelLogReads(); }
                 this.site = r.data;
                 this.lscacheEnabled = r.data.litespeed_cache_enabled;
                 this.lscacheTTL = r.data.litespeed_cache_ttl || 300;
@@ -1518,16 +1550,6 @@ function websiteDetail() {
                 this.wpURLsLoading = false;
             }
         },
-        wordpressAdminURL() {
-            if (!this.site || this.site.site_type !== 'wordpress') return '';
-            try {
-                const fallback = (this.site.ssl_enabled ? 'https://' : 'http://') + this.site.domain;
-                const url = new URL(this.site.wordpress_admin_url || fallback);
-                if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return '';
-                if (!this.site.wordpress_admin_url) url.pathname = '/wp-admin/';
-                return url.href;
-            } catch (_) { return ''; }
-        },
         aliasModeLabel(mode) {
             if (mode === '301') return t('website.alias_redirect_301');
             if (mode === '302') return t('website.alias_redirect_302');
@@ -1629,42 +1651,78 @@ function websiteDetail() {
             } catch(e) { showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
             this.documentRootSaving = false;
         },
+        syncLogLoading() {
+            this.logsLoading = this.logContentLoading || this.logFilesLoading;
+            this.logsLoaded = this.logContentLoaded && this.logFilesLoaded;
+        },
+        cancelLogReads() {
+            this.logViewGeneration++;
+            this.logContentGeneration++; this.logFilesGeneration++;
+            this.logContentController?.abort(); this.logFilesController?.abort();
+            this.logContentController = null; this.logFilesController = null;
+            this.logContentLoaded = false; this.logFilesLoaded = false;
+            this.logContentLoading = false; this.logFilesLoading = false;
+            this.logContentError = ''; this.logFilesError = '';
+            this.syncLogLoading();
+        },
         async fetchLogs() {
-            if (!this.site) return;
+            if (!this.site || this.detailTab !== 'logs' || this.detailDestroyed) return false;
+            this.logContentController?.abort();
+            const controller = new AbortController(); this.logContentController = controller;
+            const generation = ++this.logContentGeneration, siteID = this.site.id, type = this.logType, lines = this.logLineLimit || 200;
+            const current = () => !controller.signal.aborted && generation === this.logContentGeneration && this.site?.id === siteID && this.logType === type && (this.logLineLimit || 200) === lines && this.detailTab === 'logs' && !this.detailDestroyed;
+            this.logContentLoading = true; this.logContentLoaded = false; this.logContentError = ''; this.syncLogLoading();
             try {
-                let url = '/websites/' + this.site.id + '/logs?type=' + this.logType + '&lines=' + encodeURIComponent(this.logLineLimit || 200);
-                const r = await api(url);
-                if (r.success) {
-                    this.logContent = r.data.content;
-                }
-            } catch(e) { showToast(t('website.load_logs_failed', { error: e.message }), 'error'); }
+                const url = '/websites/' + siteID + '/logs?type=' + type + '&lines=' + encodeURIComponent(lines);
+                const r = await api(url, {signal:controller.signal, timeout:20000, cache:'no-store', silent:true});
+                if (!current()) return false;
+                if (!r.success || typeof r.data?.content !== 'string') throw new Error(t('common.operation_failed'));
+                this.logContent = r.data.content; this.logContentLoaded = true;
+                return true;
+            } catch(e) {
+                if (!current()) return false;
+                this.logContentError = t('website.load_logs_failed', { error: e.message });
+                showToast(this.logContentError, 'error');
+                return false;
+            } finally {
+                if (this.logContentController === controller) { this.logContentController = null; this.logContentLoading = false; this.syncLogLoading(); }
+            }
         },
         async fetchLogFiles() {
-            if (!this.site) return;
+            if (!this.site || this.detailTab !== 'logs' || this.detailDestroyed) return false;
+            this.logFilesController?.abort();
+            const controller = new AbortController(); this.logFilesController = controller;
+            const generation = ++this.logFilesGeneration, siteID = this.site.id, type = this.logType;
+            const current = () => !controller.signal.aborted && generation === this.logFilesGeneration && this.site?.id === siteID && this.logType === type && this.detailTab === 'logs' && !this.detailDestroyed;
+            this.logFilesLoading = true; this.logFilesLoaded = false; this.logFilesError = ''; this.syncLogLoading();
             try {
-                const r = await api('/websites/' + this.site.id + '/log-files?type=' + this.logType);
-                if (r.success) {
-                    this.logFiles = r.data.files || [];
-                }
-            } catch(e) { showToast(t('website.load_log_files_failed', { error: e.message }), 'error'); }
-        },
-        async loadLogs() {
-            if (this.logsLoaded || this.logsLoading) return;
-            this.logsLoading = true;
-            try {
-                await Promise.all([this.fetchLogs(), this.fetchLogFiles()]);
-                this.logsLoaded = true;
+                const r = await api('/websites/' + siteID + '/log-files?type=' + type, {signal:controller.signal, timeout:20000, cache:'no-store', silent:true});
+                if (!current()) return false;
+                if (!r.success || !Array.isArray(r.data?.files)) throw new Error(t('common.operation_failed'));
+                this.logFiles = r.data.files; this.logFilesLoaded = true;
+                return true;
+            } catch(e) {
+                if (!current()) return false;
+                this.logFilesError = t('website.load_log_files_failed', { error: e.message });
+                showToast(this.logFilesError, 'error');
+                return false;
             } finally {
-                this.logsLoading = false;
+                if (this.logFilesController === controller) { this.logFilesController = null; this.logFilesLoading = false; this.syncLogLoading(); }
             }
+        },
+        async loadLogs(force = false) {
+            if (!this.site || this.detailTab !== 'logs' || this.detailDestroyed || (this.logsLoaded && !force) || this.logsLoading) return;
+            await Promise.all([this.fetchLogs(), this.fetchLogFiles()]);
         },
         openLogs() {
             this.setDetailTab('logs');
         },
         selectLogType(type) {
+            if (!['access','error','security'].includes(type) || (type === 'security' && this.site?.site_type !== 'wordpress')) return;
+            this.cancelLogReads();
             this.logType = type;
-            this.fetchLogs();
-            this.fetchLogFiles();
+            this.logContent = ''; this.logFiles = [];
+            this.loadLogs();
         },
         currentLogFilename() {
             if (this.logType === 'error') return 'error.log';
@@ -1677,30 +1735,44 @@ function websiteDetail() {
             window.open(prefix + '/api/websites/' + this.site.id + '/logs/download?type=' + encodeURIComponent(this.logType) + '&file=' + encodeURIComponent(filename));
         },
         async setAccessLogMode(mode) {
+            if (!this.site || this.detailDestroyed || !['off','error_only','full'].includes(mode)) return;
+            const siteID = this.site.id;
             try {
-                const r = await api('/websites/' + this.site.id + '/access-log', { method: 'PUT', body: { mode } });
+                const r = await api('/websites/' + siteID + '/access-log', { method: 'PUT', body: { mode }, silent:true, timeout:20000 });
+                if (this.site?.id !== siteID || this.detailDestroyed) return;
                 if (r.success) {
                     this.accessLogMode = mode;
-                    if (mode === 'off') {
-                        this.logContent = '';
+                    if (mode === 'off' && this.logType === 'access') {
+                        this.logContentGeneration++; this.logContentController?.abort(); this.logContentController = null;
+                        this.logContent = ''; this.logContentError = ''; this.logContentLoading = false; this.logContentLoaded = true; this.syncLogLoading();
                     }
                     showToast(r.data?.message, 'success');
                 } else {
                     showToast(r.data?.message || t('common.operation_failed'), 'error');
                 }
-            } catch(e) { showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
+            } catch(e) { if (this.site?.id === siteID && !this.detailDestroyed) showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
         },
         async clearLogs() {
-            const label = this.logType === 'error' ? t('website.log_type_error') : (this.logType === 'security' ? t('website.log_type_security') : t('website.log_type_access'));
-            if (!await confirmModal(t('website.confirm_clear_logs', { label }))) return;
+            if (!this.site || this.detailTab !== 'logs' || this.detailDestroyed || this.logClearing) return;
+            const siteID = this.site.id, type = this.logType;
+            let generation = this.logViewGeneration;
+            const current = () => generation === this.logViewGeneration && this.site?.id === siteID && this.logType === type && this.detailTab === 'logs' && !this.detailDestroyed;
+            const label = type === 'error' ? t('website.log_type_error') : (type === 'security' ? t('website.log_type_security') : t('website.log_type_access'));
+            this.logClearing = true;
             try {
-                const r = await api('/websites/' + this.site.id + '/logs?type=' + this.logType, { method: 'DELETE' });
+                if (!await confirmModal(t('website.confirm_clear_logs', { label })) || !current()) return;
+                this.cancelLogReads(); generation = this.logViewGeneration;
+                const r = await api('/websites/' + siteID + '/logs?type=' + type, { method: 'DELETE', silent:true, timeout:20000 });
+                if (!current()) return;
                 if (r.success) {
+                    this.cancelLogReads();
                     showToast(t('website.logs_cleared'), 'success');
                     this.logContent = t('website.log_empty_or_missing');
+                    this.logContentLoaded = true;
                     this.fetchLogFiles();
                 }
-            } catch(e) { showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
+            } catch(e) { if (current()) showToast(t('website.operation_failed_with_error', { error: e.message }), 'error'); }
+            finally { this.logClearing = false; }
         },
         async fetchPluginStatus() {
             if (!this.site || this.site.site_type !== 'wordpress' || this.pluginStatusLoading) return;

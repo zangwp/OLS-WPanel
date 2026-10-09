@@ -1216,7 +1216,8 @@
     "tool_check_failed": "Detection failed",
     "tool_partial": "Incomplete installation",
     "tool_status_help": "Detection failed means a program was found but its version could not be read. Incomplete means Node.js or npm is missing. Check the programs and dependencies, then refresh; existing files are not automatically replaced.",
-    "refresh_tools": "Refresh tool status"
+    "refresh_tools": "Refresh tool status",
+    "current_values_help": "Values come from configuration files, with defaults used when unavailable. Initial settings combine fixed defaults and resource-based recommendations. View Recommendations to reassess; edit and save values to change the configuration."
   },
   "log_analysis": {
     "description": "Scan website logs for a selected period, generate local findings, and optionally continue troubleshooting in AI Diagnostics",
@@ -1997,7 +1998,7 @@
     "source_404": "404 protection",
     "source_login": "Login protection",
     "source_manual": "Manual ban",
-    "source_nftables": "Persistent Nftables",
+    "source_nftables": "Persistent nftables",
     "source_persistent_firewall": "Persistent firewall",
     "source_panel": "Panel",
     "source_scan": "Scan protection",
@@ -2042,7 +2043,17 @@
     "access_draft_help": "Adding a port only changes the draft. Preview and apply it, then verify new connections and save. Allowing a port does not start its service.",
     "access_invalid_port": "Enter an integer port between 1 and 65535.",
     "access_duplicate_port": "This protocol and port already appear in the list. Change the access scope in that row.",
-    "access_discard": "Refreshing will discard unapplied changes to the port draft. Continue?"
+    "access_discard": "Refreshing will discard unapplied changes to the port draft. Continue?",
+    "access_views": "Access Control Views",
+    "listener_view": "Listening Services",
+    "legacy_view": "Compatibility Rules",
+    "legacy_help": "Review and manage earlier allow rules here. Use Port Access Policy for ongoing port settings. Removing a compatibility rule does not necessarily close its port.",
+    "legacy_policy_active": "Port Access Policy is active. Earlier rules are read-only because other firewall chains may still depend on them. Manage ports in the main policy; adding and removing compatibility rules is unavailable here.",
+    "legacy_create": "Legacy Allow Rules (Compatibility and Temporary Access)",
+    "remove_legacy_rule": "Remove Rule",
+    "confirm_remove_legacy": "Remove this compatibility allow rule for {{protocol}}/{{port}}? The main policy and other rules still apply, so the port may remain accessible.",
+    "legacy_removed": "Compatibility rule removed.",
+    "access_other_filters": "Before the first apply, review each existing custom port. Other firewall rules and cloud security groups can still restrict traffic allowed here."
   },
   "database": {
     "list_help": "Each database is tied to one website and cannot be added or deleted separately. Creating a website automatically creates its database and database user; deleting the website also deletes both, but existing backup files are retained.",
@@ -2774,7 +2785,9 @@
     "cache_verify_reason_request_timeout": "Origin verification timed out or was canceled. Its state is unknown.",
     "cache_verify_reason_origin_unreachable": "The local website origin could not be reached. Its state is unknown.",
     "cache_verify_source_local_origin": "Origin homepage verification; CDN edge caching is not measured.",
-    "redis_connection_not_checked": "Only the plugin's Redis configuration is shown. Connectivity has not been tested."
+    "redis_connection_not_checked": "Only the plugin's Redis configuration is shown. Connectivity has not been tested.",
+    "registry_file_lock": "File Lock",
+    "registry_files": "Files"
   },
   "help": {
     "intro": "Running into a problem or have a suggestion? Please use GitHub Issues.",
@@ -3578,7 +3591,7 @@
     "ticket_notice": "Sign in as the selected administrator after panel identity verification. Authorization expires in 60 seconds and can be used once. The website password is not changed or stored.",
     "authorize_login": "Confirm and Sign In",
     "authorizing": "Authorizing…",
-    "settings_title": "Login Address and Authorization Settings",
+    "settings_title": "Login Suffix and Authorization Settings",
     "manual_url": "Manual Login URL (optional)",
     "manual_help": "Leave empty to use the detected URL. This changes only the panel button destination, not the website login path. Only this website’s URLs are accepted.",
     "custom_suffix": "Panel-managed Login Suffix (optional)",
@@ -3627,7 +3640,9 @@
     "reason_broker_unavailable": "One-time login is temporarily unavailable. Ordinary login still works.",
     "reason_sso_disabled": "One-time login is disabled by default and requires explicit administrator authorization.",
     "reason_bridge_unavailable": "The managed login bridge is not installed or differs from the current settings.",
-    "reason_administrator_not_found": "No valid WordPress administrator was found. Check the website accounts first."
+    "reason_administrator_not_found": "No valid WordPress administrator was found. Check the website accounts first.",
+    "legacy_manual_notice": "The previous manual login address is still active. Saving switches to the detected login address.",
+    "authorization_title": "Advanced Administrator Authorization"
   },
   "cache_status": {
     "server_title": "OpenLiteSpeed Cache Configuration",
@@ -3735,6 +3750,10 @@
     "site_not_active": "The website is not active. Runtime verification cannot run.",
     "rate_limited": "Verification is too frequent. Wait 3 seconds and try again.",
     "site_busy": "Another operation is running for this site. Verify again later.",
-    "verification_failed": "Verification could not complete. Try again later."
+    "verification_failed": "Verification could not complete. Try again later.",
+    "summary_compact_help": "Refresh to review current status. Verify an individual check, or expand it for evidence.",
+    "details": "Details",
+    "status_guide": "Understanding These States",
+    "verify_short": "Verify"
   }
 }

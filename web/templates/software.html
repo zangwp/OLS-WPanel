@@ -124,6 +124,7 @@
     </section>
 
     <section x-show="activeSection === 'tuning'" x-cloak>
+    <p class="text-sm text-gray-500 mb-5">{{t .Lang "software.current_values_help"}}</p>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <template x-for="sw in configurableSoftware()" :key="sw.name">
             <div class="card self-start">

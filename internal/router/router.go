@@ -24,6 +24,27 @@ import (
 var panelVersion string
 
 var i18nKeys = []string{
+	"website.registry_file_lock",
+	"website.registry_files",
+	"wp_access.legacy_manual_notice",
+	"wp_access.authorization_title",
+
+	"firewall.access_views",
+	"firewall.listener_view",
+	"firewall.legacy_view",
+	"firewall.legacy_help",
+	"firewall.legacy_policy_active",
+	"firewall.legacy_create",
+	"firewall.remove_legacy_rule",
+	"firewall.confirm_remove_legacy",
+	"firewall.legacy_removed",
+	"firewall.access_other_filters",
+	"site_security.summary_compact_help",
+	"site_security.details",
+	"site_security.status_guide",
+	"site_security.verify_short",
+	"software.current_values_help",
+
 	"auth.login",
 	"auth.workspace_login",
 	"auth.workspace_prompt",
