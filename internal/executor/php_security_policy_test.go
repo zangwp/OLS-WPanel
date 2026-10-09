@@ -43,7 +43,7 @@ func TestRenderOLSVHostUsesSharedSecurityPolicy(t *testing.T) {
 	}
 
 	wantLines := []string{
-		"php_admin_value open_basedir \"" + sitePHPOpenBaseDir("/www/wwwroot/example.com", "example.com") + "\"",
+		"php_admin_value open_basedir \"" + sitePHPOpenBaseDir("/www/wwwroot/example.com", "example.com") + ":/www/wwwlogs/example.com\"",
 		"php_admin_value disable_functions \"" + sitePHPDisabledFunctions() + "\"",
 		"php_admin_flag allow_url_include Off",
 	}

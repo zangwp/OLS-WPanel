@@ -27,7 +27,7 @@
     <nav class="card py-2 px-3 mb-6 flex flex-wrap items-center gap-1" aria-label="{{t .Lang "website.detail_title"}}">
         <button type="button" @click="setDetailTab('overview')" :class="detailTab === 'overview' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_overview"}}</button>
         <button type="button" @click="setDetailTab('cache')" :class="detailTab === 'cache' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_cache"}}</button>
-        <button type="button" x-show="site.site_type === 'wordpress'" @click="setDetailTab('security')" :class="detailTab === 'security' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_protection"}}</button>
+        <button type="button" @click="setDetailTab('security')" :class="detailTab === 'security' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_security"}}</button>
         <button type="button" @click="setDetailTab('logs')" :class="detailTab === 'logs' ? 'bg-blue-600 text-white' : 'bg-gray-900/40 text-gray-300 hover:text-white hover:bg-gray-700'" class="text-sm px-3 py-2 rounded">{{t .Lang "website.detail_nav_logs"}}</button>
     </nav>
 
@@ -137,27 +137,7 @@
             </div>
             <p class="text-xs text-gray-500 mb-5">{{t .Lang "website.php_runtime_switch_help"}}</p>
 
-            <h4 class="text-base font-medium text-white mb-3">{{t .Lang "website.site_monitoring"}}</h4>
-            <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
-                <input type="checkbox" x-model="monitoringEnabled">
-                <span>{{t .Lang "website.enable_site_monitoring"}}</span>
-            </label>
-            <div x-show="monitoringEnabled" class="flex items-center space-x-2 mb-4">
-                <span class="text-xs text-gray-500">{{t .Lang "website.check_interval"}}</span>
-                <select x-model="monitoringInterval" class="input-field w-24 text-sm py-1">
-                    <option value="1">{{t .Lang "website.minute_1"}}</option>
-                    <option value="5">{{t .Lang "website.minute_5"}}</option>
-                    <option value="10">{{t .Lang "website.minute_10"}}</option>
-                    <option value="30">{{t .Lang "website.minute_30"}}</option>
-                </select>
-            </div>
-            <button @click="saveMonitoring()" :disabled="monitoringSaving" class="btn-primary text-sm" x-text="monitoringSaving ? t('common.saving') : t('website.save_settings')"></button>
-            <p x-show="monitoringEnabled" class="text-xs text-gray-500 mt-3">{{t .Lang "website.monitoring_enabled_help"}}</p>
-            <p x-show="!monitoringEnabled" class="text-xs text-gray-600 mt-3">{{t .Lang "website.monitoring_disabled_help"}}</p>
-
-            <hr class="my-5 border-gray-700">
-
-            <h4 class="text-base font-medium text-white mb-3">{{t .Lang "website.ssl_management"}}</h4>
+            <h4 id="site-ssl" class="text-base font-medium text-white mb-3 scroll-mt-4">{{t .Lang "website.ssl_management"}}</h4>
             <div class="mb-3">
                 <span :class="site.ssl_enabled ? 'badge-success' : site.ssl_last_error ? 'badge-warning' : 'badge-info'" class="text-sm" x-text="site.ssl_enabled ? t('website.ssl_enabled') : site.ssl_last_error ? t('website.ssl_pending') : t('website.ssl_not_enabled')"></span>
             </div>
@@ -212,18 +192,19 @@
             <div x-show="site.site_type === 'wordpress'" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                 <div class="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
                     <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.litespeed_plugin"}}</p>
-                    <p class="text-sm font-medium" :class="cacheRuntime.plugin_status === 'active' ? 'text-green-400' : (cacheRuntime.plugin_status === 'unknown' ? 'text-gray-400' : 'text-yellow-300')" x-text="liteSpeedPluginStatusText()"></p>
-                    <p x-show="cacheRuntime.plugin_version" class="text-xs text-gray-500 mt-1" x-text="'v' + cacheRuntime.plugin_version"></p>
+                    <p class="text-sm font-medium" :class="cacheStatusFailed || cacheRuntime.plugin_status === 'unknown' ? 'text-gray-400' : (cacheRuntime.plugin_status === 'active' ? 'text-green-400' : 'text-yellow-300')" x-text="liteSpeedPluginStatusText()"></p>
+                    <p x-show="!cacheStatusFailed && cacheRuntime.plugin_version" class="text-xs text-gray-500 mt-1" x-text="'v' + cacheRuntime.plugin_version"></p>
                 </div>
                 <div class="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
-                    <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.page_cache"}}</p>
-                    <p class="text-sm font-medium" :class="cacheRuntime.status_known && cacheRuntime.page_cache_enabled ? 'text-green-400' : 'text-yellow-300'" x-text="!cacheRuntime.status_known ? t('website.cache_status_unknown') : (cacheRuntime.page_cache_enabled ? t('website.enabled') : t('website.disabled'))"></p>
+                    <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.plugin_page_cache"}}</p>
+                    <p class="text-sm font-medium" :class="cacheRuntime.status_known && cacheRuntime.page_cache_enabled ? 'text-green-400' : 'text-yellow-300'" x-text="cacheStatusFailed ? t('website.cache_status_failed') : !cacheRuntime.status_known ? t('website.cache_status_unknown') : (cacheRuntime.page_cache_enabled ? t('website.enabled') : t('website.disabled'))"></p>
                     <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.page_cache_help"}}</p>
+                    <p x-show="cacheRuntime.status_known" class="text-xs mt-1" :class="cacheRuntime.server_page_cache_enabled ? 'text-gray-500' : 'text-yellow-300'" x-text="t('website.server_page_cache') + ': ' + (cacheRuntime.server_page_cache_enabled ? t('website.enabled') : t('website.disabled'))"></p>
                 </div>
                 <div class="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
                     <p class="text-xs text-gray-400 mb-1">{{t .Lang "website.redis_object_cache"}}</p>
-                    <p class="text-sm font-medium" :class="cacheRuntime.redis_object_cache_configured ? 'text-green-400' : 'text-yellow-300'" x-text="!cacheRuntime.status_known ? t('website.cache_status_unknown') : cacheRuntime.redis_object_cache_configured ? t('website.configured') : t('website.not_configured')"></p>
-                    <p x-show="cacheRuntime.redis_object_cache_configured" class="text-xs text-gray-500 mt-1" x-text="(cacheRuntime.redis_host || '127.0.0.1') + ':' + (cacheRuntime.redis_port || 6379) + ' · DB ' + (cacheRuntime.redis_database || 0)"></p>
+                    <p class="text-sm font-medium" :class="cacheRuntime.status_known && cacheRuntime.redis_object_cache_configured ? 'text-green-400' : 'text-yellow-300'" x-text="cacheStatusFailed ? t('website.cache_status_failed') : !cacheRuntime.status_known ? t('website.cache_status_unknown') : cacheRuntime.redis_object_cache_configured ? t('website.configured') : t('website.not_configured')"></p>
+                    <p x-show="cacheRuntime.status_known && cacheRuntime.redis_object_cache_configured" class="text-xs text-gray-500 mt-1" x-text="redisCacheEndpointText()"></p>
                 </div>
             </div>
 
@@ -235,6 +216,14 @@
             </div>
 
             <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.wordpress_cache_owner_notice"}}</p>
+
+            <div x-show="site.site_type === 'wordpress'" class="rounded-lg border border-gray-700 bg-gray-900/30 p-3 my-4">
+                <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
+                    <input type="checkbox" x-model="lscacheEnabled" :disabled="optimizationSaving || fileEditingSaving || site.file_lock_enabled">
+                    <span>{{t .Lang "website.enable_server_page_cache"}}</span>
+                </label>
+                <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.wordpress_server_cache_help"}}</p>
+            </div>
 
             <div x-show="site.site_type === 'php'" class="rounded-lg border border-gray-700 bg-gray-900/30 p-3 mb-4">
                 <p class="text-sm font-medium text-white mb-2">{{t .Lang "website.server_page_cache"}}</p>
@@ -285,25 +274,12 @@
  <span x-show="wpMemoryLimit" class="text-xs text-gray-400" x-text="wpMemoryLimit"></span>
  <button x-show="wpMemoryLimit" @click="wpMemoryLimit = ''" type="button" class="text-xs text-blue-400 ml-2">{{t .Lang "website.inherit_php_memory"}}</button>
 </div>
-            <div class="mb-4 space-y-2" x-show="site.site_type === 'wordpress'">
-                <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
-                    <input type="checkbox" x-model="xmlrpcEnabled">
-                    <span>{{t .Lang "website.allow_xmlrpc"}}</span>
-                </label>
-                <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.xmlrpc_help"}}</p>
-            </div>
-            <div class="mb-4 space-y-2" x-show="site.site_type === 'wordpress'">
-                <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
-                    <input type="checkbox" x-model="disableApplicationPasswords">
-                    <span>{{t .Lang "website.disable_application_passwords"}}</span>
-                </label>
-                <p class="text-xs text-gray-400 mt-2 leading-relaxed">{{t .Lang "website.disable_application_passwords_help"}}</p>
-            </div>
+
             </details>
             <div class="flex items-center space-x-3 mb-3">
                 <button @click="saveWPOptimizations()" :disabled="optimizationSaving || site.file_lock_enabled" class="btn-primary text-sm" x-text="optimizationSaving ? t('common.saving') : t('website.save_settings')"></button>
                 <button x-show="lscacheEnabled" @click="clearLSCache()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);">{{t .Lang "website.clear_page_cache"}}</button>
-                <button x-show="site.site_type === 'wordpress' && cacheRuntime.redis_object_cache_configured" @click="clearRedisObjectCache()" :disabled="redisCacheClearing" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);" x-text="redisCacheClearing ? t('website.clearing_redis_cache') : t('website.clear_redis_cache')"></button>
+                <button x-show="site.site_type === 'wordpress' && cacheRuntime.status_known && cacheRuntime.redis_object_cache_configured" @click="clearRedisObjectCache()" :disabled="redisCacheClearing" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-danger-soft); color: var(--panel-danger);" x-text="redisCacheClearing ? t('website.clearing_redis_cache') : t('website.clear_redis_cache')"></button>
             </div>
             <div x-show="site.site_type === 'wordpress'" class="mb-4 space-y-2">
 
@@ -321,9 +297,50 @@
                     <li x-show="site.site_type === 'php'">{{t .Lang "website.litespeed_cache_point_php_skip"}}</li>
                 </ul>
             </details>
-            {{template "wp_anomaly_panel" .}}
+
         </div>
 
+
+        <section id="site-security" x-show="detailTab === 'security'" class="card site-security-controls" :aria-busy="securityStatusLoading">
+            <div class="site-security-summary"><div><h3>{{t .Lang "website.security_status_title"}}</h3><p>{{t .Lang "website.security_status_help"}}</p></div><button type="button" @click="fetchSiteSecurityStatus()" :disabled="securityStatusLoading" class="btn-secondary" x-text="securityStatusLoading ? t('website.security_checking') : t('website.security_refresh')"></button></div>
+            <p x-show="securityStatusError" x-cloak role="alert" class="text-sm text-red-400 mb-4" x-text="securityStatusError"></p>
+            <div class="site-security-groups">
+                <template x-for="group in siteSecurityGroups" :key="group.id">
+                    <div class="site-security-group" x-show="group.id !== 'wordpress' || site.site_type === 'wordpress'"><h4 x-text="t(group.title)"></h4><template x-for="key in group.keys" :key="key"><div class="site-security-check"><div class="site-security-check-heading"><span x-text="siteSecurityTitle(key)"></span><span :class="siteSecurityClass(key)" x-text="siteSecurityStateText(key)"></span></div><p x-text="siteSecurityHelp(key)"></p></div></template></div>
+                </template>
+            </div>
+            <p class="site-security-checked-at" x-show="securityStatus?.checked_at" x-text="t('website.security_checked_at') + ': ' + siteSecurityCheckedAt()"></p>
+            <div class="site-security-actions"><button type="button" @click="openSiteSSLSettings()" class="btn-secondary">{{t .Lang "website.ssl_management"}}</button><a href="/{{.RandomSuffix}}/security#settings" class="btn-secondary">{{t .Lang "website.security_login_settings"}}</a><a href="/{{.RandomSuffix}}/security#ports" class="btn-secondary">{{t .Lang "website.security_access_settings"}}</a><button type="button" @click="setDetailTab('logs'); selectLogType(site.site_type === 'wordpress' ? 'security' : 'error')" class="btn-secondary">{{t .Lang "website.security_view_logs"}}</button></div>
+        </section>
+        <section x-show="detailTab === 'security' && site.site_type === 'wordpress'" class="card site-security-controls">
+            <h3>{{t .Lang "website.security_wp_policy"}}</h3><p>{{t .Lang "website.security_wp_policy_help"}}</p>
+            <div class="site-security-policy">
+                <div><label><input type="checkbox" x-model="xmlrpcEnabled" :disabled="optimizationSaving || site.file_lock_enabled"><span>{{t .Lang "website.allow_xmlrpc"}}</span></label><p>{{t .Lang "website.xmlrpc_help"}}</p></div>
+                <div><label><input type="checkbox" x-model="disableApplicationPasswords" :disabled="optimizationSaving || site.file_lock_enabled"><span>{{t .Lang "website.disable_application_passwords"}}</span></label><p>{{t .Lang "website.disable_application_passwords_help"}}</p></div>
+            </div>
+            <button type="button" @click="saveSiteSecurityPolicy()" :disabled="optimizationSaving || fileEditingSaving || site.file_lock_enabled || !siteSecurityPolicyReady()" class="btn-primary" x-text="optimizationSaving ? t('common.saving') : t('website.save_settings')"></button><p x-show="site.file_lock_enabled" class="text-xs text-yellow-300 mt-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
+        </section>
+        <section x-show="detailTab === 'security'" class="card site-security-controls">
+            <h4 class="text-base font-medium text-white mb-3">{{t .Lang "website.site_monitoring"}}</h4>
+            <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer mb-3">
+                <input type="checkbox" x-model="monitoringEnabled">
+                <span>{{t .Lang "website.enable_site_monitoring"}}</span>
+            </label>
+            <div x-show="monitoringEnabled" class="flex items-center space-x-2 mb-4">
+                <span class="text-xs text-gray-500">{{t .Lang "website.check_interval"}}</span>
+                <select x-model="monitoringInterval" class="input-field w-24 text-sm py-1">
+                    <option value="1">{{t .Lang "website.minute_1"}}</option>
+                    <option value="5">{{t .Lang "website.minute_5"}}</option>
+                    <option value="10">{{t .Lang "website.minute_10"}}</option>
+                    <option value="30">{{t .Lang "website.minute_30"}}</option>
+                </select>
+            </div>
+            <button @click="saveMonitoring()" :disabled="monitoringSaving" class="btn-primary text-sm" x-text="monitoringSaving ? t('common.saving') : t('website.save_settings')"></button>
+            <p x-show="monitoringEnabled" class="text-xs text-gray-500 mt-3">{{t .Lang "website.monitoring_enabled_help"}}</p>
+            <p x-show="!monitoringEnabled" class="text-xs text-gray-600 mt-3">{{t .Lang "website.monitoring_disabled_help"}}</p>
+            <template x-if="detailTab === 'security' && site.site_type === 'wordpress'"><div>{{template "wp_anomaly_panel" .}}</div></template>
+        </section>
+        <section x-show="detailTab === 'security'" class="card site-security-controls"><h3>{{t .Lang "website.security_recovery"}}</h3><p>{{t .Lang "website.security_recovery_help"}}</p><div class="site-security-actions"><a x-show="site.site_type === 'wordpress'" :href="'/{{.RandomSuffix}}/websites/' + site.id + '/wordpress'" class="btn-secondary">{{t .Lang "website.security_wp_updates"}}</a><a :href="'/{{.RandomSuffix}}/databases/' + site.id" class="btn-secondary">{{t .Lang "website.security_database_backups"}}</a><a href="/{{.RandomSuffix}}/backups" class="btn-secondary">{{t .Lang "website.security_file_backups"}}</a><a href="/{{.RandomSuffix}}/alert" class="btn-secondary">{{t .Lang "website.security_alerts"}}</a></div></section>
 
         <section x-show="detailTab === 'security' && site.site_type === 'wordpress'" class="card">
             <h3 class="text-lg font-semibold text-white mb-2">{{t .Lang "website.scheduled_wp"}}</h3>
@@ -352,7 +369,7 @@
                 <div>
                     <div class="flex items-center gap-2 mb-1">
                         <h3 class="text-lg font-semibold text-white">{{t .Lang "website.file_lock"}}</h3>
-                        <span class="text-xs px-2 py-0.5 rounded" :class="fileLockApplyIncomplete() ? 'bg-red-900/50 text-red-200 border border-red-700' : (site.file_lock_enabled ? 'bg-green-950/50 text-green-200 border border-green-800' : 'bg-yellow-950/40 text-yellow-200 border border-yellow-800')" x-text="fileLockStatusText()"></span>
+                        <span :class="fileLockApplyIncomplete() ? 'badge-warning' : siteSecurityClass('file_lock')" x-text="fileLockApplyIncomplete() ? fileLockStatusText() : siteSecurityStateText('file_lock')"></span>
                     </div>
                     <p class="text-sm text-gray-400">{{t .Lang "website.file_lock_help"}}</p>
                     <details class="mt-2 text-xs">
@@ -437,14 +454,14 @@
             </section>
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <label class="flex items-start space-x-2 text-sm text-gray-300" :class="site.file_lock_enabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'">
-                    <input type="checkbox" :checked="site.file_lock_enabled || disableFileEditing" @change="disableFileEditing = $event.target.checked" :disabled="site.file_lock_enabled || fileEditingSaving" class="mt-0.5">
+                    <input type="checkbox" :checked="site.file_lock_enabled || disableFileEditing" @change="disableFileEditing = $event.target.checked" :disabled="site.file_lock_enabled || fileEditingSaving || optimizationSaving" class="mt-0.5">
                     <span>
                         <span class="block">{{t .Lang "website.disable_file_editing"}}</span>
                         <span class="block text-xs text-gray-500 mt-1">{{t .Lang "website.disable_file_editing_help"}}</span>
-                        <span x-show="site.file_lock_enabled" class="block text-xs text-green-400 mt-1">{{t .Lang "website.disable_file_editing_managed"}}</span>
+                        <span x-show="site.file_lock_enabled" class="block text-xs text-gray-500 mt-1">{{t .Lang "website.disable_file_editing_managed"}}</span>
                     </span>
                 </label>
-                <button x-show="!site.file_lock_enabled" @click="saveFileEditingProtection()" :disabled="fileEditingSaving" class="btn-secondary text-sm whitespace-nowrap" x-text="fileEditingSaving ? t('common.saving') : t('website.save_file_editing')"></button>
+                <button x-show="!site.file_lock_enabled" @click="saveFileEditingProtection()" :disabled="fileEditingSaving || optimizationSaving" class="btn-secondary text-sm whitespace-nowrap" x-text="fileEditingSaving ? t('common.saving') : t('website.save_file_editing')"></button>
             </div>
 
             <hr class="my-5 border-gray-700">
@@ -923,7 +940,8 @@ function websiteDetail() {
         pluginStatus: 'unknown',
         pluginStatusLoading: false,
         pluginInstalling: false,
-        cacheRuntime: { plugin_status: 'unknown', plugin_version: '', page_cache_enabled: false, redis_object_cache_configured: false, redis_host: '', redis_port: 0, redis_database: 0 },
+        cacheRuntime: { status_known: false, plugin_status: 'unknown', plugin_version: '', page_cache_enabled: false, server_page_cache_enabled: false, redis_object_cache_configured: false, redis_host: '', redis_port: 0, redis_database: 0 },
+        cacheStatusFailed: false,
         cacheStatusLoading: false,
         cacheApplying: false,
         redisCacheClearing: false,
@@ -960,6 +978,99 @@ function websiteDetail() {
         aiCredentialPackage: null,
         aiCredentialDownloaded: false,
         aiAccess: { loading: true, enabled: false, status: 'disabled', busy: false, stage: '', installWPCLI: true, installNodeJS: false, confirmDomain: '', tools: [] },
+        securityStatus: null,
+        securityStatusLoading: false,
+        securityStatusAttempted: false,
+        securityStatusError: '',
+        securityStatusGeneration: 0,
+        siteSecurityGroups: [
+            {id:'requests', title:'website.security_group_requests', keys:['https','login_protection','sensitive_files','uploads_php','sql_injection']},
+            {id:'wordpress', title:'website.security_group_wordpress', keys:['xmlrpc','application_passwords','file_editing','file_lock','debug_display']},
+            {id:'operations', title:'website.security_group_operations', keys:['uptime_monitor','anomaly_monitor','wp_updates','backup']},
+        ],
+        siteSecurityCheck(key) {
+            if (this.securityStatusLoading) return {state:'unknown'};
+            if (this.securityStatusError) return {state:'error'};
+            const check = this.securityStatus?.checks?.find(item => item && item.key === key);
+            if (!check || !['effective','configured','disabled','unsupported','error','unknown'].includes(check.state)) return {state:'unknown'};
+            if (check.state === 'effective' && check.effective !== true) return {state:'unknown'};
+            if (check.state === 'configured' && check.configured !== true) return {state:'unknown'};
+            return check;
+        },
+        siteSecurityTitle(key) { const textKey = 'website.security_check_' + key; return t(textKey); },
+        siteSecurityHelp(key) { const textKey = 'website.security_help_' + key; return t(textKey); },
+        siteSecurityStateText(key) {
+            if (this.securityStatusLoading) return t('website.security_checking');
+            const textKey = 'website.security_state_' + this.siteSecurityCheck(key).state;
+            return t(textKey);
+        },
+        siteSecurityClass(key) {
+            const state = this.siteSecurityCheck(key).state;
+            return state === 'effective' ? 'badge-success' : state === 'configured' || state === 'error' ? 'badge-warning' : 'badge-info';
+        },
+        siteSecurityCheckedAt() {
+            const value = this.securityStatus?.checked_at;
+            const date = new Date(value);
+            return value && Number.isFinite(date.getTime()) ? date.toLocaleString(currentLocale()) : '—';
+        },
+        async fetchSiteSecurityStatus() {
+            if (!this.site || this.securityStatusLoading) return;
+            const siteID = this.site.id;
+            const generation = ++this.securityStatusGeneration;
+            this.securityStatusLoading = true; this.securityStatusError = ''; this.securityStatus = null;
+            try {
+                const response = await api('/websites/' + siteID + '/security-status', {silent:true,cache:'no-store',timeout:20000});
+                if (!response.success || !response.data || Number(response.data.site_id) !== Number(siteID) || !Array.isArray(response.data.checks)) throw new Error(t('website.security_load_failed'));
+                if (generation !== this.securityStatusGeneration || this.site?.id !== siteID) return;
+                this.securityStatus = response.data;
+            } catch (error) {
+                if (generation !== this.securityStatusGeneration || this.site?.id !== siteID) return;
+                this.securityStatus = null;
+                this.securityStatusError = error.message || t('website.security_load_failed');
+            } finally {
+                if (generation === this.securityStatusGeneration) { this.securityStatusLoading = false; this.securityStatusAttempted = true; }
+            }
+        },
+        refreshSiteSecurityAfterChange() {
+            this.securityStatusGeneration++;
+            this.securityStatus = null; this.securityStatusAttempted = false; this.securityStatusLoading = false; this.securityStatusError = '';
+            if (this.detailTab === 'security') this.fetchSiteSecurityStatus();
+        },
+        openSiteSSLSettings() {
+            this.setDetailTab('overview');
+            this.$nextTick(() => document.getElementById('site-ssl')?.scrollIntoView({block:'start'}));
+        },
+        siteSecurityPolicyReady() {
+            const site = this.site;
+            return !!site && site.site_type === 'wordpress' &&
+                ['litespeed_cache_enabled','disable_wp_updates','disable_file_editing','xmlrpc_enabled','disable_application_passwords','wp_debug_enabled','wp_debug_display','file_lock_enabled'].every(key => typeof site[key] === 'boolean') &&
+                Number.isInteger(site.litespeed_cache_ttl) && Number.isInteger(site.wp_post_revisions) && typeof site.wp_memory_limit === 'string';
+        },
+        async saveSiteSecurityPolicy() {
+            if (!this.siteSecurityPolicyReady() || this.optimizationSaving || this.fileEditingSaving || this.site.file_lock_enabled) return;
+            const site = this.site;
+            const snapshot = {xmlrpc_enabled:!!this.xmlrpcEnabled, disable_application_passwords:!!this.disableApplicationPasswords};
+            this.optimizationSaving = true;
+            try {
+                const response = await api('/websites/' + site.id + '/wp-optimizations', {method:'PUT',body:{
+                    litespeed_cache_enabled:!!site.litespeed_cache_enabled,
+                    litespeed_cache_ttl:site.litespeed_cache_ttl || 300,
+                    disable_wp_updates:!!site.disable_wp_updates,
+                    expected_disable_wp_updates:!!site.disable_wp_updates,
+                    disable_file_editing:!!site.disable_file_editing,
+                    wp_debug_enabled:!!site.wp_debug_enabled,
+                    wp_debug_display:!!site.wp_debug_enabled && !!site.wp_debug_display,
+                    wp_post_revisions:site.wp_post_revisions ?? -1,
+                    wp_memory_limit:site.wp_memory_limit || '',
+                    ...snapshot,
+                }});
+                if (!response.success) throw new Error(response.message || t('website.security_save_failed'));
+                Object.assign(site, snapshot);
+                showToast(t('website.security_policy_saved'), 'success');
+                this.refreshSiteSecurityAfterChange();
+            } catch (error) { showToast(error.message || t('website.security_save_failed'), 'error'); }
+            finally { this.optimizationSaving = false; }
+        },
         init() {
             this.applyDetailHash(false);
             window.addEventListener('hashchange', () => this.applyDetailHash());
@@ -969,7 +1080,7 @@ function websiteDetail() {
             return {
                 overview: 'overview',
                 cache: 'cache-performance',
-                security: 'security-maintenance',
+                security: 'site-security',
                 logs: 'logs'
             }[tab] || 'overview';
         },
@@ -980,6 +1091,7 @@ function websiteDetail() {
                 'site-overview': 'overview',
                 'cache-performance': 'cache',
                 'site-performance': 'cache',
+                'site-security': 'security',
                 'security-maintenance': 'security',
                 'site-protection': 'security',
                 logs: 'logs',
@@ -987,15 +1099,16 @@ function websiteDetail() {
             }[hash] || 'overview';
             this.detailTab = tab;
             if (loadContent && tab === 'logs') this.loadLogs();
+            if (loadContent && tab === 'security' && !this.securityStatusAttempted) this.fetchSiteSecurityStatus();
         },
         setDetailTab(tab, updateURL = true) {
-            if (tab === 'security' && this.site?.site_type !== 'wordpress') tab = 'overview';
             this.detailTab = tab;
             if (updateURL) {
                 const hash = this.detailTabHash(tab);
                 window.history.replaceState({}, '', window.location.pathname + window.location.search + '#' + hash);
             }
             if (tab === 'logs') this.loadLogs();
+            if (tab === 'security' && !this.securityStatusAttempted) this.fetchSiteSecurityStatus();
         },
         async fetchDetail() {
             const id = window.location.pathname.split('/').filter(Boolean).pop();
@@ -1033,7 +1146,7 @@ function websiteDetail() {
                     this.sslExportEnabled = r.data.ssl_export_enabled || false;
                     this.fileLockMode = r.data.file_lock_mode === 'strict' ? 'strict' : 'standard';
                     this.fileLockPreview = null;
-                    if (this.detailTab === 'security' && r.data.site_type !== 'wordpress') this.setDetailTab('overview');
+                    if (this.detailTab === 'security') this.fetchSiteSecurityStatus();
                     if (this.detailTab === 'logs') this.loadLogs();
                 }
             } catch(e) { showToast(t('website.load_failed_with_error', { error: e.message }), 'error'); }
@@ -1582,18 +1695,25 @@ function websiteDetail() {
             if (!this.site || this.site.site_type !== 'wordpress' || this.cacheStatusLoading) return;
             this.cacheStatusLoading = true;
             try {
-                const r = await api('/websites/' + this.site.id + '/litespeed-cache/status', { timeout: 30000 });
+                const r = await api('/websites/' + this.site.id + '/litespeed-cache/status', { timeout: 30000, cache: 'no-store' });
                 if (r.success && r.data) {
-                    this.cacheRuntime = { ...this.cacheRuntime, ...r.data };
-                    this.lscacheEnabled = !!r.data.page_cache_enabled;
+                    this.cacheRuntime = { status_known: false, plugin_status: 'unknown', plugin_version: '', page_cache_enabled: false, server_page_cache_enabled: false, redis_object_cache_configured: false, redis_host: '', redis_port: 0, redis_database: 0, ...r.data };
+                    this.cacheStatusFailed = !this.cacheRuntime.status_known;
+                } else {
+                    this.resetLiteSpeedCacheStatus();
                 }
             } catch (_) {
-                this.cacheRuntime = { ...this.cacheRuntime, plugin_status: 'unknown' };
+                this.resetLiteSpeedCacheStatus();
             } finally {
                 this.cacheStatusLoading = false;
             }
         },
+        resetLiteSpeedCacheStatus() {
+            this.cacheRuntime = { status_known: false, plugin_status: 'unknown', plugin_version: '', page_cache_enabled: false, server_page_cache_enabled: false, redis_object_cache_configured: false, redis_host: '', redis_port: 0, redis_database: 0 };
+            this.cacheStatusFailed = true;
+        },
         liteSpeedPluginStatusText() {
+            if (this.cacheStatusFailed) return t('website.cache_status_failed');
             const key = {
                 active: 'website.litespeed_plugin_active',
                 inactive: 'website.litespeed_plugin_inactive',
@@ -1601,6 +1721,11 @@ function websiteDetail() {
                 unknown: 'website.cache_status_unknown'
             }[this.cacheRuntime.plugin_status] || 'website.cache_status_unknown';
             return t(key);
+        },
+        redisCacheEndpointText() {
+            const { redis_host: host, redis_port: port, redis_database: database } = this.cacheRuntime;
+            const address = port === 0 ? host : (host.includes(':') && !host.startsWith('[') ? '[' + host + ']' : host) + ':' + port;
+            return address + ' · DB ' + database;
         },
         liteSpeedCacheAdminURL() {
             if (!this.site) return '#';
@@ -1612,8 +1737,6 @@ function websiteDetail() {
             this.cacheApplying = true;
             try {
                 const r = await api('/websites/' + this.site.id + '/litespeed-cache/migrate', { method: 'POST', timeout: 120000 });
-                this.lscacheEnabled = true;
-                this.lscacheTTL = r.data?.ttl || this.lscacheTTL || 300;
                 showToast(r.data?.message || t('website.cache_settings_migrated'), 'success');
                 await this.fetchLiteSpeedCacheStatus();
             } catch (e) {
@@ -1688,6 +1811,7 @@ function websiteDetail() {
                 this.site.file_lock_enabled = r.data?.file_lock_enabled ?? enabled;
                 this.site.file_lock_mode = r.data?.file_lock_mode || '';
                 this.site.file_lock_apply_status = r.data?.file_lock_apply_status || '';
+                this.refreshSiteSecurityAfterChange();
                 showToast(r.data?.message || (enabled ? t('website.file_lock_enabled') : t('website.file_lock_disabled')), 'success');
             } catch(e) {
                 const selectedMode = this.fileLockMode;
@@ -1704,6 +1828,9 @@ function websiteDetail() {
                     method: 'PUT',
                     body: { enabled: this.monitoringEnabled, interval: parseInt(this.monitoringInterval) || 5 }
                 });
+                this.site.monitoring_enabled = !!this.monitoringEnabled;
+                this.site.monitoring_interval = parseInt(this.monitoringInterval) || 5;
+                this.refreshSiteSecurityAfterChange();
                 showToast(t('website.monitoring_saved'), 'success');
             } catch(e) { showToast(t('website.save_failed_with_error', { error: e.message }), 'error'); }
             this.monitoringSaving = false;
@@ -1722,31 +1849,33 @@ function websiteDetail() {
             this.expirySaving = false;
         },
         async saveWPOptimizations() {
+            if (!this.site || this.optimizationSaving || this.fileEditingSaving || this.site.file_lock_enabled) return;
+            const body = {
+                litespeed_cache_enabled:!!this.lscacheEnabled,
+                litespeed_cache_ttl:parseInt(this.lscacheTTL) || 300,
+                disable_wp_updates:!!this.disableWPUpdates,
+                expected_disable_wp_updates:this.savedDisableWPUpdates,
+                disable_file_editing:!!this.site.disable_file_editing,
+                xmlrpc_enabled:!!this.site.xmlrpc_enabled,
+                disable_application_passwords:!!this.site.disable_application_passwords,
+                wp_debug_enabled:!!this.wpDebug,
+                wp_debug_display:!!this.wpDebug && !!this.wpDebugDisplay,
+                wp_post_revisions:this.wpPostRevisions,
+                wp_memory_limit:this.wpMemoryLimit,
+            };
             this.optimizationSaving = true;
             try {
-                await api('/websites/' + this.site.id + '/wp-optimizations', {
-                    method: 'PUT',
-                    body: {
-                        litespeed_cache_enabled: this.lscacheEnabled,
-                        litespeed_cache_ttl: parseInt(this.lscacheTTL) || 300,
-                        disable_wp_updates: this.disableWPUpdates,
-                        expected_disable_wp_updates: this.savedDisableWPUpdates,
-                        disable_file_editing: this.disableFileEditing,
-                        xmlrpc_enabled: this.xmlrpcEnabled,
-                        disable_application_passwords: this.disableApplicationPasswords,
-                        wp_debug_enabled: this.wpDebug,
-                        wp_debug_display: this.wpDebug && this.wpDebugDisplay,
-                        wp_post_revisions: this.wpPostRevisions,
-                        wp_memory_limit: this.wpMemoryLimit
-                    }
-                });
-                this.savedDisableWPUpdates = this.disableWPUpdates;
+                await api('/websites/' + this.site.id + '/wp-optimizations', {method:'PUT',body});
+                this.savedDisableWPUpdates = body.disable_wp_updates;
+                Object.assign(this.site, body);
+                this.cacheRuntime.server_page_cache_enabled = body.litespeed_cache_enabled;
+                this.refreshSiteSecurityAfterChange();
                 showToast(t('website.optimization_saved'), 'success');
-            } catch(e) { showToast(t('website.save_failed_with_error', { error: e.message }), 'error'); }
-            this.optimizationSaving = false;
+            } catch(e) { showToast(t('website.save_failed_with_error', { error:e.message }), 'error'); }
+            finally { this.optimizationSaving = false; }
         },
         async saveFileEditingProtection() {
-            if (this.site.file_lock_enabled) return;
+            if (!this.site || this.site.file_lock_enabled || this.fileEditingSaving || this.optimizationSaving) return;
             this.fileEditingSaving = true;
             try {
                 const r = await api('/websites/' + this.site.id + '/file-editor', {
@@ -1755,6 +1884,8 @@ function websiteDetail() {
                 });
                 this.disableFileEditing = r.data?.disable_file_editing ?? this.disableFileEditing;
                 this.savedDisableFileEditing = this.disableFileEditing;
+                this.site.disable_file_editing = !!this.disableFileEditing;
+                this.refreshSiteSecurityAfterChange();
                 showToast(r.data?.message || t('website.file_editing_saved'), 'success');
             } catch(e) {
                 this.disableFileEditing = this.savedDisableFileEditing;
@@ -1770,6 +1901,8 @@ function websiteDetail() {
                     body: { mode: this.passwordResetMode }
                 });
                 this.passwordResetMode = r.data?.password_reset_mode ?? this.passwordResetMode;
+                this.site.password_reset_mode = this.passwordResetMode;
+                this.refreshSiteSecurityAfterChange();
                 showToast(r.data?.message || t('website.password_reset_saved'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
             this.passwordResetSaving = false;

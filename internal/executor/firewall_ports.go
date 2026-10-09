@@ -438,10 +438,7 @@ func GetFirewallPortStatus() (FirewallPortStatus, error) {
 		}
 	}
 	anomalies += dangerousListeners
-	panelPort := 8443
-	if config.AppConfig != nil && config.AppConfig.Panel.TLSPort > 0 {
-		panelPort = config.AppConfig.Panel.TLSPort
-	}
+	panelPort, _ := PanelListenEndpoint(config.AppConfig)
 	pending, deadline := firewallProtectionPending()
 	accessEnabled, accessRules, accessErr := readAccessState(ctx)
 	if accessEnabled {
@@ -614,6 +611,9 @@ func sourceExpression(source string) []string {
 func addCoreRuleIfMissing(ctx context.Context, family, table, chain, chainOutput, name string, expressions ...string) error {
 	tag := managedCoreCommentPrefix + name
 	if strings.Contains(chainOutput, tag) {
+		if (name == "ssh" || name == "panel") && !managementCoreRuleMatches(chainOutput, tag, expressions) {
+			return errors.New("原有 SSH 或面板放行规则与当前入口不一致，未修改入站策略；请在端口访问策略中重新预览")
+		}
 		return nil
 	}
 	args := coreRuleArgs(family, table, chain, name, expressions...)
@@ -625,6 +625,47 @@ func addCoreRuleIfMissing(ctx context.Context, family, table, chain, chainOutput
 		return fmt.Errorf("核心放行规则应用失败 (%s): %s", name, strings.TrimSpace(out))
 	}
 	return nil
+}
+
+// Old core comments identify a service but not its port or source. Reusing an
+// old marker after either changes can lock out the current administrator when
+// the default policy becomes drop. Require the actual existing condition to
+// match; never replace a different administrator's source restriction here.
+func managementCoreRuleMatches(chainOutput, tag string, expressions []string) bool {
+	comment := regexp.MustCompile(`\bcounter(?: packets \d+ bytes \d+)? accept comment "?` + regexp.QuoteMeta(tag) + `"?(?:\s+# handle \d+)?\s*$`)
+	want := canonicalCoreCondition(expressions)
+	matched := false
+	for _, line := range strings.Split(chainOutput, "\n") {
+		if !strings.Contains(line, tag) {
+			continue
+		}
+		loc := comment.FindStringIndex(line)
+		if loc == nil || canonicalCoreCondition(strings.Fields(line[:loc[0]])) != want {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
+func canonicalCoreCondition(tokens []string) string {
+	copyTokens := append([]string(nil), tokens...)
+	for i := 0; i+2 < len(copyTokens); i++ {
+		if (copyTokens[i] != "ip" && copyTokens[i] != "ip6") || copyTokens[i+1] != "saddr" {
+			continue
+		}
+		address := copyTokens[i+2]
+		if ip := net.ParseIP(address); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				bits = 32
+			}
+			copyTokens[i+2] = fmt.Sprintf("%s/%d", ip.String(), bits)
+		} else if _, network, err := net.ParseCIDR(address); err == nil {
+			copyTokens[i+2] = network.String()
+		}
+	}
+	return strings.Join(copyTokens, " ")
 }
 
 func hasTCPListener(listeners []FirewallListener, port int) bool {
@@ -712,10 +753,7 @@ func EnableFirewallProtection(managementIP string) (FirewallProtectionResult, er
 	}
 	listeners := detectListeners(ctx)
 	sshPort := detectSSHPort(ctx, listeners)
-	panelPort := 8443
-	if config.AppConfig != nil && config.AppConfig.Panel.TLSPort > 0 {
-		panelPort = config.AppConfig.Panel.TLSPort
-	}
+	panelPort, _ := PanelListenEndpoint(config.AppConfig)
 	if !hasTCPListener(listeners, sshPort) || !hasTCPListener(listeners, panelPort) {
 		return FirewallProtectionResult{}, errors.New("SSH 或面板监听状态未通过预检，未修改防火墙")
 	}

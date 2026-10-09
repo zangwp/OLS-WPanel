@@ -1,6 +1,31 @@
 {{template "base" .}}
 {{define "settings_content"}}
-<div x-data="panelSettings()" x-init="initPage()">
+<style>
+.settings-page .settings-general-layout { display: grid; gap: 24px; margin-bottom: 24px; }
+.settings-page .settings-account-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; margin-bottom: 20px; }
+.settings-page .settings-account-grid, .settings-page .settings-server-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.settings-page .settings-credentials { display: flex; flex-direction: column; min-width: 0; padding: 22px; border: 1px solid var(--panel-border); border-radius: 9px; background: var(--panel-surface-muted); }
+.settings-page .settings-credentials h4 { font-size: 15px; font-weight: 650; margin-bottom: 5px; }
+.settings-page .settings-credentials-description { color: var(--panel-muted); font-size: 13px; line-height: 1.7; margin-bottom: 20px; }
+.settings-page .settings-field { min-width: 0; margin-bottom: 16px; }
+.settings-page .settings-field > label { display: block; font-size: 13px; color: var(--panel-text); font-weight: 550; margin-bottom: 6px; }
+.settings-page .settings-field-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.settings-page .settings-verification { margin-top: 2px; padding-top: 18px; border-top: 1px solid var(--panel-border); }
+.settings-page .settings-account-action { margin-top: auto; padding-top: 4px; }
+.settings-page .settings-account-action button { width: 100%; }
+.settings-page .settings-label-help { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.settings-page .settings-label-help .label, .settings-page .settings-label-help h3 { margin: 0; }
+.settings-page .settings-label-help .help-tip { margin: 0; }
+.settings-page .settings-server-time { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 10px; font-size: 12px; }
+.settings-page .settings-server-time time { display: block; color: var(--panel-text); font-variant-numeric: tabular-nums; margin-top: 3px; }
+.settings-page .settings-certificate { margin-top: 8px; padding-top: 24px; border-top: 1px solid var(--panel-border); }
+.settings-page .settings-domain-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.settings-page .settings-certificate-status { margin-top: 16px; padding: 16px; border: 1px solid var(--panel-border); border-radius: 7px; background: var(--panel-surface-muted); }
+.settings-page .settings-certificate-status a { overflow-wrap: anywhere; }
+@media (max-width: 850px) { .settings-page .settings-account-grid, .settings-page .settings-server-fields { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .settings-page .settings-section-nav { position: static; } .settings-page .settings-credentials { padding: 17px; } .settings-page .settings-field-pair { grid-template-columns: minmax(0, 1fr); gap: 0; } .settings-page .settings-domain-actions > button { flex: 1 1 auto; } }
+</style>
+<div class="settings-page" x-data="panelSettings()" x-init="initPage()">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
             <h1 class="page-title">{{t .Lang "nav.settings"}}</h1>
@@ -18,54 +43,51 @@
         </div>
     </nav>
 
-    <div x-show="activeSection === 'general' || activeSection === 'updates'" x-cloak class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start mb-6">
+    <div x-show="activeSection === 'general' || activeSection === 'updates'" x-cloak class="settings-general-layout">
         <div x-show="activeSection === 'general'" class="card">
-            <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "settings.account_security"}}</h3>
-            <a class="text-sm text-blue-400 hover:underline block mb-4" href="/{{.RandomSuffix}}/security#account">{{t .Lang "settings.security_center_link"}}</a>
-            <div x-show="accountLoadError" x-cloak role="alert" class="text-sm text-red-400 mb-4"><span x-text="accountLoadError"></span> <button type="button" class="underline" @click="fetchSettings()">{{t .Lang "common.retry"}}</button></div>
-
-            <div class="mb-4 p-4 rounded" style="background-color: var(--panel-surface-muted);">
-                <p class="text-xs text-blue-400 font-medium mb-2">{{t .Lang "settings.basic_auth_title"}}</p>
-                <p class="text-xs text-gray-500 mb-3">{{t .Lang "settings.basic_auth_desc"}}</p>
-                <div class="mb-3">
-                    <label class="text-xs text-gray-400">{{t .Lang "auth.username"}}</label>
-                    <input type="text" x-model="basicAuthUser" class="input-field text-sm py-1.5 mt-1">
-                </div>
-                <div>
-                    <label class="text-xs text-gray-400">{{t .Lang "settings.password_keep"}}</label>
-                    <input type="password" x-model="pw.basic" class="input-field text-sm py-1.5 mt-1" placeholder="{{t .Lang "settings.leave_unchanged_placeholder"}}" autocomplete="new-password">
-                </div>
-                <div class="mt-3"><label for="basic-current-password" class="text-xs text-gray-400">{{t .Lang "settings.current_web_password"}}</label><input id="basic-current-password" type="password" x-model="pw.basicCurrent" class="input-field text-sm mt-1" autocomplete="current-password"></div>
-                <div class="mt-3"><label for="basic-security-code" class="text-xs text-gray-400">{{t .Lang "settings.mfa_code_optional"}}</label><input id="basic-security-code" type="text" x-model="pw.basicCode" class="input-field text-sm mt-1" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false"></div>
-                <button @click="saveBasicAuth" :disabled="accountSaving || !accountLoaded" class="btn-primary w-full mt-4" x-text="accountSaving ? t('settings.saving') : t('settings.save_basic_auth')"></button>
+            <div class="settings-account-heading">
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "settings.account_security"}}</h3>
+                <a class="text-sm text-blue-400 hover:underline" href="/{{.RandomSuffix}}/security#account">{{t .Lang "settings.security_center_link"}}</a>
             </div>
-
-            <div class="p-4 rounded" style="background-color: var(--panel-surface-muted);">
-                <p class="text-xs text-green-400 font-medium mb-2">{{t .Lang "settings.web_login_title"}}</p>
-                <p class="text-xs text-gray-500 mb-3">{{t .Lang "settings.web_login_desc"}}</p>
-                <div class="mb-3">
-                    <label class="text-xs text-gray-400">{{t .Lang "auth.username"}}</label>
-                    <input type="text" x-model="username" class="input-field text-sm py-1.5 mt-1">
-                </div>
-                <div>
-                    <label class="text-xs text-gray-400">{{t .Lang "settings.password_keep"}}</label>
-                    <input type="password" x-model="pw.old" class="input-field text-sm py-1.5 mt-1" placeholder="{{t .Lang "settings.current_password_placeholder"}}" autocomplete="current-password">
-                    <div class="flex space-x-2 mt-2">
-                        <input type="password" x-model="pw.new1" class="input-field flex-1 text-sm py-1.5" placeholder="{{t .Lang "settings.new_password_placeholder"}}" autocomplete="new-password">
-                        <input type="password" x-model="pw.new2" class="input-field flex-1 text-sm py-1.5" placeholder="{{t .Lang "settings.confirm_new_password_placeholder"}}">
+            <div x-show="accountLoadError" x-cloak role="alert" class="text-sm text-red-400 mb-4"><span x-text="accountLoadError"></span> <button type="button" class="underline" @click="fetchSettings()">{{t .Lang "common.retry"}}</button></div>
+            <div class="settings-account-grid">
+                <form class="settings-credentials" aria-labelledby="basic-auth-heading" @submit.prevent="saveBasicAuth()">
+                    <h4 id="basic-auth-heading">{{t .Lang "settings.basic_auth_title"}}</h4>
+                    <p class="settings-credentials-description">{{t .Lang "settings.basic_auth_desc"}}</p>
+                    <div class="settings-field"><label for="basic-auth-username">{{t .Lang "auth.username"}}</label><input id="basic-auth-username" type="text" x-model="basicAuthUser" class="input-field text-sm" autocomplete="username"></div>
+                    <div class="settings-field"><label for="basic-new-password">{{t .Lang "settings.password_keep"}}</label><input id="basic-new-password" type="password" x-model="pw.basic" class="input-field text-sm" placeholder="{{t .Lang "settings.leave_unchanged_placeholder"}}" autocomplete="new-password"></div>
+                    <div class="settings-verification settings-field-pair">
+                        <div class="settings-field"><label for="basic-current-password">{{t .Lang "settings.current_web_password"}}</label><input id="basic-current-password" type="password" x-model="pw.basicCurrent" class="input-field text-sm" autocomplete="current-password"></div>
+                        <div class="settings-field"><label for="basic-security-code">{{t .Lang "settings.mfa_code_optional"}}</label><input id="basic-security-code" type="text" x-model="pw.basicCode" class="input-field text-sm" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false" aria-describedby="basic-security-code-help"></div>
                     </div>
-                </div>
-                <p class="text-xs text-yellow-400 mt-3" x-show="username !== originalUsername">{{t .Lang "settings.username_change_requires_password"}}</p>
-                <div class="mt-3"><label for="web-security-code" class="text-xs text-gray-400">{{t .Lang "settings.mfa_code_optional"}}</label><input id="web-security-code" type="text" x-model="pw.code" class="input-field text-sm mt-1" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false"></div>
-                <button @click="saveWebAccount" :disabled="accountSaving || !accountLoaded" class="btn-primary w-full mt-4" x-text="accountSaving ? t('settings.saving') : t('settings.save_web_account')"></button>
+                    <p id="basic-security-code-help" class="text-xs text-gray-500 mb-3">{{t .Lang "settings.mfa_code_help"}}</p>
+                    <div class="settings-account-action"><button type="submit" :disabled="accountSaving || !accountLoaded" class="btn-primary" x-text="accountSaving ? t('settings.saving') : t('settings.save_basic_auth')"></button></div>
+                </form>
+                <form class="settings-credentials" aria-labelledby="web-login-heading" @submit.prevent="saveWebAccount()">
+                    <h4 id="web-login-heading">{{t .Lang "settings.web_login_title"}}</h4>
+                    <p class="settings-credentials-description">{{t .Lang "settings.web_login_desc"}}</p>
+                    <div class="settings-field"><label for="web-login-username">{{t .Lang "auth.username"}}</label><input id="web-login-username" type="text" x-model="username" class="input-field text-sm" autocomplete="username"></div>
+                    <div class="settings-field-pair">
+                        <div class="settings-field"><label for="web-new-password">{{t .Lang "settings.new_password_placeholder"}}</label><input id="web-new-password" type="password" x-model="pw.new1" class="input-field text-sm" placeholder="{{t .Lang "settings.leave_unchanged_placeholder"}}" autocomplete="new-password"></div>
+                        <div class="settings-field"><label for="web-confirm-password">{{t .Lang "settings.confirm_new_password_placeholder"}}</label><input id="web-confirm-password" type="password" x-model="pw.new2" class="input-field text-sm" autocomplete="new-password"></div>
+                    </div>
+                    <p class="text-xs text-yellow-400 mb-3" x-show="username !== originalUsername">{{t .Lang "settings.username_change_requires_password"}}</p>
+                    <div class="settings-verification settings-field-pair">
+                        <div class="settings-field"><label for="web-current-password">{{t .Lang "settings.current_web_password"}}</label><input id="web-current-password" type="password" x-model="pw.old" class="input-field text-sm" autocomplete="current-password"></div>
+                        <div class="settings-field"><label for="web-security-code">{{t .Lang "settings.mfa_code_optional"}}</label><input id="web-security-code" type="text" x-model="pw.code" class="input-field text-sm" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false" aria-describedby="web-security-code-help"></div>
+                    </div>
+                    <p id="web-security-code-help" class="text-xs text-gray-500 mb-3">{{t .Lang "settings.mfa_code_help"}}</p>
+                    <div class="settings-account-action"><button type="submit" :disabled="accountSaving || !accountLoaded" class="btn-primary" x-text="accountSaving ? t('settings.saving') : t('settings.save_web_account')"></button></div>
+                </form>
             </div>
             <p class="text-xs text-yellow-400 mt-2" x-show="accountSaved">{{t .Lang "settings.account_saved_logout"}}</p>
         </div>
 
-        <div class="card" :class="activeSection === 'updates' ? 'md:col-span-2' : ''">
+        <div class="card">
             <h3 class="text-lg font-semibold text-white mb-4" x-text="activeSection === 'updates' ? t('settings.section_updates') : t('settings.server_settings')"></h3>
 
-            <div x-show="activeSection === 'general'">
+            <div x-show="activeSection === 'general'" class="settings-server-fields">
+            <div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "settings.panel_title"}}</label>
                 <div class="flex space-x-2">
@@ -73,10 +95,18 @@
                     <button @click="saveBasic" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
                 </div>
             </div>
+            <div class="mb-4">
+                <label class="label">{{t .Lang "settings.hostname"}}</label>
+                <div class="flex space-x-2">
+                    <input type="text" x-model="hostname" class="input-field flex-1">
+                    <button @click="saveServerSetting('hostname', hostname)" :disabled="!hostname" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
+                </div>
+            </div>
+            </div>
 
             <div class="mb-4">
-                <label class="label">{{t .Lang "settings.timezone"}}</label>
-                <select x-model="timezone" @change="saveServerSetting('timezone', timezone)" class="input-field">
+                <div class="settings-label-help"><label class="label" for="panel-timezone">{{t .Lang "settings.timezone"}}</label><details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.time_help"}}</span></details></div>
+                <select id="panel-timezone" x-model="timezone" @change="saveServerSetting('timezone', timezone)" class="input-field">
                     <option value="Asia/Shanghai">Asia/Shanghai (UTC+8)</option>
                     <option value="Asia/Tokyo">Asia/Tokyo (UTC+9)</option>
                     <option value="Asia/Singapore">Asia/Singapore (UTC+8)</option>
@@ -90,40 +120,39 @@
                     <option value="Australia/Sydney">Australia/Sydney (UTC+10)</option>
                     <option value="UTC">UTC</option>
                 </select>
-                <div class="flex items-center justify-between mt-1">
-                    <p class="text-xs text-gray-400">{{t .Lang "settings.server_time"}}<span x-text="serverTime" class="text-white font-mono"></span></p>
+                <div class="settings-server-time">
+                    <p class="text-gray-400">{{t .Lang "settings.server_time"}}<time x-text="serverTime"></time></p>
                     <div class="flex items-center space-x-2">
                         <span class="text-xs" :class="ntpSynced ? 'text-green-400' : 'text-yellow-400'" x-text="ntpSynced ? t('settings.ntp_synced') : (ntpEnabled ? t('settings.ntp_waiting') : t('settings.ntp_not_synced'))"></span>
                         <button @click="syncNTP()" :disabled="ntpSyncing" class="text-xs py-0.5 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);" x-text="ntpSyncing ? t('settings.ntp_starting') : t('settings.sync')"></button>
                     </div>
                 </div>
-                <details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.time_help"}}</span></details>
                 <p x-show="!ntpService" class="mt-1 text-xs text-yellow-300">{{t .Lang "settings.time_service_missing"}}</p>
             </div>
 
-            <div class="mb-4">
-                <label class="label">{{t .Lang "settings.hostname"}}</label>
-                <div class="flex space-x-2">
-                    <input type="text" x-model="hostname" class="input-field flex-1">
-                    <button @click="saveServerSetting('hostname', hostname)" :disabled="!hostname" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
-                </div>
-            </div>
             </div>
 
-            <section x-show="activeSection === 'general'" class="card mb-6" x-data="panelCertificateSettings()">
- <h3 class="text-white font-semibold mb-4">{{t .Lang "settings.panel_domain_https"}}</h3>
- <label class="label">{{t .Lang "settings.panel_domain"}}</label>
- <div class="flex flex-wrap gap-2">
-  <input x-model="domain" class="input-field flex-1" placeholder="panel.example.com" :disabled="status.running">
+            <section x-show="activeSection === 'general'" class="settings-certificate" x-data="panelCertificateSettings()">
+ <div class="settings-label-help mb-4"><h3 class="text-white font-semibold">{{t .Lang "settings.panel_domain_https"}}</h3><details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.panel_domain_help"}}</span></details></div>
+ <div class="settings-server-fields mb-4">
+  <div><p class="text-xs text-gray-400 mb-1">{{t .Lang "settings.panel_login_port"}}</p><p class="text-sm text-white" x-text="panelEndpointLabel()"></p><a href="/{{.RandomSuffix}}/security#ports" class="text-xs text-blue-400 hover:underline">{{t .Lang "settings.panel_access_policy"}}</a></div>
+  <div><p class="text-xs text-gray-400 mb-1">{{t .Lang "settings.panel_certificate_validation_port"}}</p><p class="text-sm text-white">80 / HTTP-01</p><p class="text-xs text-gray-400 mt-1">{{t .Lang "settings.panel_certificate_validation_help"}}</p></div>
+ </div>
+ <label class="label" for="panel-domain">{{t .Lang "settings.panel_domain"}}</label>
+ <input id="panel-domain" x-model="domain" @input="invalidateDomainVerification()" class="input-field" placeholder="panel.example.com" :disabled="starting || status.running" autocomplete="url" autocapitalize="none" spellcheck="false">
+ <div class="settings-domain-actions">
   <button @click="check()" :disabled="checking || status.running || !domain" class="btn-secondary">{{t .Lang "settings.check_domain"}}</button>
   <button @click="apply()" :disabled="starting || status.running || !domain" class="btn-primary">{{t .Lang "settings.apply_panel_certificate"}}</button>
  </div>
- <details class="help-tip mt-2"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.panel_domain_help"}}</span></details>
  <p x-show="status.running" class="text-sm text-blue-300 mt-3">{{t .Lang "settings.panel_certificate_running"}}</p>
  <p x-show="message" x-text="message" class="text-sm mt-3" :class="verified ? 'text-green-400' : 'text-red-400'"></p>
- <p x-show="status.error || status.renewal_error" x-text="status.error || status.renewal_error" class="text-sm text-red-400 mt-3"></p>
- <a x-show="status.login_url" :href="status.login_url" x-text="status.login_url" target="_blank" rel="noopener noreferrer" class="block text-blue-400 mt-3 break-all"></a>
- <p x-show="status.expires_at" class="text-xs text-gray-400 mt-2">{{t .Lang "settings.certificate_expiry"}} <span x-text="status.expires_at"></span></p>
+ <p x-show="!message && (status.error || status.renewal_error)" x-text="certificateErrorMessage()" class="text-sm text-red-400 mt-3" role="alert"></p>
+ <details x-show="certificateErrorDetails()" class="mt-3"><summary class="text-xs text-gray-400 cursor-pointer">{{t .Lang "settings.panel_certificate_error_details"}}</summary><pre class="access-code text-xs" x-text="certificateErrorDetails()"></pre></details>
+ <div x-show="status.login_url || status.expires_at" class="settings-certificate-status">
+  <a x-show="status.login_url" :href="status.login_url" x-text="status.login_url" target="_blank" rel="noopener noreferrer" class="block text-blue-400 text-sm"></a>
+  <p x-show="status.expires_at" class="text-xs text-gray-400 mt-2">{{t .Lang "settings.certificate_expiry"}} <time :datetime="status.expires_at" x-text="formatCertificateTime(status.expires_at)"></time></p>
+  <p x-show="status.certificate_source" class="text-xs text-gray-400 mt-1">{{t .Lang "settings.certificate_source"}} <span x-text="certificateSourceLabel()"></span></p>
+ </div>
 </section>
 
 <div x-show="activeSection === 'updates'" x-cloak>
@@ -1236,14 +1265,76 @@ function systemUpdate() {
 
 <script>
 function panelCertificateSettings() {
- return {
-  domain:'', status:{running:false}, timer:null, refreshing:false, checking:false, starting:false, message:'', verified:false,
-  async init(){await this.refresh();this.domain=this.status.domain || '';this.timer=setInterval(()=>{if(!document.hidden)this.refresh();},30000);},
-  destroy(){if(this.timer)clearInterval(this.timer);},
-  async refresh(){if(this.refreshing)return;this.refreshing=true;try{const r=await api('/settings/panel-certificate');this.status=r.data || {};}catch(e){this.message=e.message;this.verified=false;}finally{this.refreshing=false;}},
-  async check(){this.checking=true;this.message='';try{await api('/settings/panel-domain/check',{method:'POST',body:{domain:this.domain},timeout:45000});this.message=t('settings.panel_domain_verified');this.verified=true;}catch(e){this.message=e.message;this.verified=false;}finally{this.checking=false;}},
-  async apply(){if(!await confirmModal(t('settings.panel_certificate_confirm')))return;this.starting=true;this.message='';try{await api('/settings/panel-certificate',{method:'POST',body:{domain:this.domain}});await this.refresh();}catch(e){this.message=e.message;this.verified=false;}finally{this.starting=false;}}
- };
+    return {
+        domain: '', status: { running: false }, timer: null, refreshing: false,
+        checking: false, starting: false, message: '', verified: false, errorDetails: null, domainRevision: 0,
+        async init() {
+            const initialDomain = this.domain, initialRevision = this.domainRevision;
+            await this.refresh();
+            if (this.domain === initialDomain && this.domainRevision === initialRevision) this.domain = this.status.domain || '';
+            this.timer = setInterval(() => { if (!document.hidden) this.refresh(); }, 30000);
+        },
+        destroy() { if (this.timer) clearInterval(this.timer); },
+        invalidateDomainVerification() { this.domainRevision++; this.verified = false; this.message = ''; this.errorDetails = null; },
+        panelEndpointLabel() {
+            const port = Number(this.status.port);
+            return Number.isInteger(port) && port > 0 && port <= 65535 ? port + ' / ' + (this.status.uses_tls ? 'HTTPS' : 'HTTP') : '--';
+        },
+        formatCertificateTime(value) {
+            if (!value) return '--';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '--';
+            const locale = typeof currentLocale === 'function' ? currentLocale() : 'zh-CN';
+            return date.toLocaleString(locale, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+        },
+        certificateSourceLabel() {
+            return { self_signed: t('settings.certificate_source_self_signed'), lets_encrypt: t('settings.certificate_source_lets_encrypt'), custom: t('settings.certificate_source_custom') }[this.status.certificate_source] || this.status.certificate_source || '--';
+        },
+        certificateErrorText(code, fallback = '') {
+            const knownCodes = ['panel_domain_invalid', 'panel_domain_dns_failed', 'panel_domain_dns_empty', 'panel_domain_dns_not_public', 'panel_domain_route_unavailable', 'panel_domain_http_unreachable', 'panel_domain_http_redirect', 'panel_domain_http_status', 'panel_domain_challenge_mismatch', 'panel_certificate_failed', 'panel_certificate_running'];
+            const translationKey = 'settings.' + code;
+            return knownCodes.includes(code) ? t(translationKey) : fallback || t('settings.panel_certificate_failed');
+        },
+        certificateErrorMessage() {
+            return this.status.error ? this.certificateErrorText(this.status.error_code, this.status.error) : this.certificateErrorText(this.status.renewal_error_code, this.status.renewal_error);
+        },
+        certificateErrorDetails() {
+            const details = this.errorDetails || this.status.error_details || this.status.renewal_error_details;
+            if (!details) return '';
+            const labels = { domain: 'settings.panel_domain', address: 'settings.check_address', address_family: 'settings.check_address_family', http_status: 'settings.check_http_status', redirect_location: 'settings.check_redirect_location' };
+            return Object.entries(labels).filter(([key]) => details[key] !== undefined && details[key] !== null && details[key] !== '' && ['string', 'number'].includes(typeof details[key])).map(([key, label]) => t(label) + ': ' + String(details[key]).replace(/^ipv([46])$/i, 'IPv$1')).join('\n');
+        },
+        async refresh() {
+            if (this.refreshing) return;
+            this.refreshing = true;
+            try { const r = await api('/settings/panel-certificate', { silent: true }); this.status = r.data || {}; }
+            catch (e) { this.message = this.certificateErrorText(e.code, e.message); this.verified = false; }
+            finally { this.refreshing = false; }
+        },
+        async check() {
+            if (this.checking || this.status.running) return;
+            const domain = this.domain, revision = this.domainRevision;
+            this.checking = true; this.message = ''; this.errorDetails = null; this.verified = false;
+            try {
+                await api('/settings/panel-domain/check', { method: 'POST', body: { domain }, timeout: 45000, silent: true });
+                if (this.domain !== domain || this.domainRevision !== revision) return;
+                this.message = t('settings.panel_domain_verified'); this.verified = true;
+            } catch (e) { if (this.domain === domain && this.domainRevision === revision) { this.message = this.certificateErrorText(e.code, e.message); this.errorDetails = e.details || null; } }
+            finally { this.checking = false; }
+        },
+        async apply() {
+            if (this.starting || this.status.running) return;
+            const domain = this.domain, revision = this.domainRevision;
+            this.starting = true;
+            try {
+                if (!await confirmModal(t('settings.panel_certificate_confirm')) || this.domain !== domain || this.domainRevision !== revision) return;
+                this.message = ''; this.errorDetails = null; this.verified = false;
+                await api('/settings/panel-certificate', { method: 'POST', body: { domain }, silent: true });
+                await this.refresh();
+            } catch (e) { this.message = this.certificateErrorText(e.code, e.message); this.errorDetails = e.details || null; }
+            finally { this.starting = false; }
+        },
+    };
 }
 </script>
 

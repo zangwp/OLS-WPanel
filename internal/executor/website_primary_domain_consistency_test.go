@@ -21,6 +21,7 @@ func setupPrimaryDomainTest(t *testing.T) (*models.Website, string) {
 	oldApplyOpenLiteSpeed := applyPrimaryDomainOLSVHost
 	oldChange := changeWebsitePrimaryDomain
 	oldReloadOpenLiteSpeed := reloadPrimaryDomainOLS
+	oldReloadFail2ban := reloadPrimaryDomainFail2ban
 	oldUpdateURLs := updatePrimaryDomainWPSiteURLs
 	oldReadURLs := readPrimaryDomainWPSiteURLs
 	config.AppConfig = &config.Config{
@@ -38,6 +39,7 @@ func setupPrimaryDomainTest(t *testing.T) (*models.Website, string) {
 		applyPrimaryDomainOLSVHost = oldApplyOpenLiteSpeed
 		changeWebsitePrimaryDomain = oldChange
 		reloadPrimaryDomainOLS = oldReloadOpenLiteSpeed
+		reloadPrimaryDomainFail2ban = oldReloadFail2ban
 		updatePrimaryDomainWPSiteURLs = oldUpdateURLs
 		readPrimaryDomainWPSiteURLs = oldReadURLs
 	})
@@ -75,6 +77,7 @@ func setupPrimaryDomainTest(t *testing.T) (*models.Website, string) {
 		t.Fatal(err)
 	}
 	reloadPrimaryDomainOLS = func() error { return nil }
+	reloadPrimaryDomainFail2ban = func() error { return nil }
 	applyPrimaryDomainOLSVHost = func(_ *TemplateEngine, content, target, enabled string) error {
 		if err := os.WriteFile(target, []byte(content), 0644); err != nil {
 			return err

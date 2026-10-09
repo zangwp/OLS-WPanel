@@ -8,9 +8,18 @@ const code = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
     .map(match => match[1].replace(/{{[\s\S]*?}}/g, 'null')).join('\n');
 const pending = [];
 let chart;
+let ready;
 const context = {
     window: {}, console, t: key => key,
-    document: { getElementById: () => ({ getContext: () => ({}) }) },
+    document: {
+        readyState: 'loading',
+        getElementById: () => ({ getContext: () => ({}) }),
+        addEventListener: (event, callback, options) => {
+            assert.equal(event, 'DOMContentLoaded');
+            assert.equal(options.once, true);
+            ready = callback;
+        },
+    },
     api: url => new Promise(resolve => pending.push({ url, resolve })),
     Chart: function (_canvas, options) {
         chart = this;
@@ -22,6 +31,12 @@ const context = {
 const response = label => ({ success: true, data: { labels: [label], cpu: [1], memory: [2], load: [3] } });
 vm.createContext(context);
 vm.runInContext(code, context);
+assert.equal(chart, undefined, 'Chart must not start while deferred dependencies are still loading.');
+assert.equal(pending.length, 0, 'Metrics must wait for deferred dependencies.');
+assert.equal(typeof ready, 'function');
+context.document.readyState = 'interactive';
+ready();
+assert(chart, 'Chart starts once the parsed document and deferred dependencies are ready.');
 
 (async () => {
     const week = context.window.fetchMetrics('7d');

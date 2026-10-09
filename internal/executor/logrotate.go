@@ -71,15 +71,15 @@ func EnsureAllSiteLogrotateConfigs() {
 }
 
 func cleanSiteLogrotateLogDir(logDir string) (string, error) {
-	logDir = strings.TrimSpace(logDir)
-	if logDir == "" {
-		return "", fmt.Errorf("log directory is empty")
+	root, err := fail2banWebsiteLogRoot()
+	if err != nil {
+		return "", err
 	}
-	clean := path.Clean(logDir)
-	if clean == "." || !strings.HasPrefix(clean, "/") {
-		return "", fmt.Errorf("log directory must be absolute: %s", logDir)
+	clean, err := cleanFail2banWebsiteLogRoot(logDir)
+	if err != nil {
+		return "", err
 	}
-	if clean != siteLogRoot && !strings.HasPrefix(clean, siteLogRoot+"/") {
+	if clean != root && !strings.HasPrefix(clean, root+"/") {
 		return "", fmt.Errorf("log directory outside allowed root: %s", logDir)
 	}
 	return clean, nil

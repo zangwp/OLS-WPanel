@@ -77,8 +77,8 @@ func TestIsHighConfidenceSQLiUsesCombinedSignals(t *testing.T) {
 func TestClassifySecurityEventDistinguishesBlockedFromProbe(t *testing.T) {
 	blocked := "/?id=1%20UNION%20SELECT%201%20FROM%20users"
 	eventType, risk, message := classifySecurityEvent("GET", blocked, "curl", "203.0.113.10", 403, &searchBotIPChecker{})
-	if eventType != SecurityEventSQLiBlocked || risk != "high" || !strings.Contains(message, "PHP 前拒绝") {
-		t.Fatalf("blocked classification = (%q, %q, %q)", eventType, risk, message)
+	if eventType != SecurityEventSQLiProbe || risk != "high" || strings.Contains(message, "PHP 前") {
+		t.Fatalf("unmarked HTTP 403 classification = (%q, %q, %q), want probe without a blocking claim", eventType, risk, message)
 	}
 	eventType, _, _ = classifySecurityEvent("GET", blocked, "curl", "203.0.113.10", 200, &searchBotIPChecker{})
 	if eventType != SecurityEventSQLiProbe {
@@ -86,8 +86,8 @@ func TestClassifySecurityEventDistinguishesBlockedFromProbe(t *testing.T) {
 	}
 	repeatedSearch := "/?s=shoes&s=1%20UNION%20SELECT%201%20FROM%20users"
 	eventType, risk, _ = classifySecurityEvent("GET", repeatedSearch, "curl", "203.0.113.10", 403, &searchBotIPChecker{})
-	if eventType != SecurityEventSQLiBlocked || risk != "high" {
-		t.Fatalf("blocked repeated-search classification = (%q, %q), want blocked/high", eventType, risk)
+	if eventType != SecurityEventSQLiProbe || risk != "high" {
+		t.Fatalf("unmarked repeated-search classification = (%q, %q), want probe/high", eventType, risk)
 	}
 }
 
@@ -331,6 +331,43 @@ func TestBuildWPSecurityReportClassifiesEvents(t *testing.T) {
 	if legit, ok := byIP["203.0.113.6"]; ok {
 		if containsString(legit.Types, SecurityEventSQLiProbe) {
 			t.Fatalf("legit search query must not be classified as sqli_probe, got types %v", legit.Types)
+		}
+	}
+}
+
+func TestBuildWPSecurityReportReadsNativeBlockingAndAuthenticationFailures(t *testing.T) {
+	openTestDB(t)
+	dir := t.TempDir()
+	seedWPSecurityEventSite(t, dir)
+	access := `203.0.113.10 - - [15/Jan/2026:10:00:00 +0800] "GET / HTTP/1.1" 403 0 "-" "-" ols_security="sqli" ols_autoban="0"` + "\n"
+	// SQL syntax in a single core search parameter is normal application data.
+	access += `203.0.113.11 - - [15/Jan/2026:10:00:00 +0800] "GET /?s=union+select+from+users HTTP/1.1" 200 0 "-" "browser" ols_security="-" ols_autoban="0"` + "\n"
+	login := "203.0.113.12 [2026-10-09T10:00:00Z] OLS_WPANEL_LOGIN_FAILED\n"
+	for name, content := range map[string]string{wpSecurityAccessLog: access, wpSecurityLoginLog: login} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resetWPSecurityReportCache()
+	items, err := BuildWPSecurityReport(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("report must contain only two observed security events, got %+v", items)
+	}
+	for _, item := range items {
+		switch item.IPAddress {
+		case "203.0.113.10":
+			if !containsString(item.Types, SecurityEventSQLiBlocked) || !strings.Contains(strings.Join(item.Evidence, " "), "PHP 前") {
+				t.Fatalf("missing native blocking evidence: %+v", item)
+			}
+		case "203.0.113.12":
+			if !containsString(item.Types, SecurityEventWPLoginFailed) || !strings.Contains(strings.Join(item.SamplePaths, " "), "AUTH WordPress authentication") || strings.Contains(strings.Join(item.Evidence, " "), "HTTP") {
+				t.Fatalf("auth failure must not invent an HTTP response: %+v", item)
+			}
+		default:
+			t.Fatalf("ordinary search traffic leaked into security report: %+v", item)
 		}
 	}
 }

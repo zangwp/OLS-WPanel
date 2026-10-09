@@ -17,7 +17,7 @@ func TestLiteSpeedCacheStatusEndpointReportsIndependentLayers(t *testing.T) {
 	setupWebsiteOptimizationsTestDB(t)
 	oldObserve := observeLiteSpeedCacheStatus
 	observeLiteSpeedCacheStatus = func(context.Context, *config.Config, *models.Website) executor.LiteSpeedCacheRuntimeStatus {
-		return executor.LiteSpeedCacheRuntimeStatus{PluginStatus: "active", PluginVersion: "7.9.1", PageCacheEnabled: true, RedisObjectCacheConfigured: true, RedisHost: "127.0.0.1", RedisPort: 6379}
+		return executor.LiteSpeedCacheRuntimeStatus{StatusKnown: true, PluginStatus: "active", PluginVersion: "7.9.1", PageCacheEnabled: true, ServerPageCacheEnabled: false, RedisObjectCacheConfigured: true, RedisHost: "localhost", RedisPort: 6379}
 	}
 	t.Cleanup(func() { observeLiteSpeedCacheStatus = oldObserve })
 
@@ -28,7 +28,10 @@ func TestLiteSpeedCacheStatusEndpointReportsIndependentLayers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, expected := range []string{`"plugin_status":"active"`, `"page_cache_enabled":true`, `"redis_object_cache_configured":true`} {
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("live cache status must not be cached")
+	}
+	for _, expected := range []string{`"status_known":true`, `"plugin_status":"active"`, `"page_cache_enabled":true`, `"server_page_cache_enabled":false`, `"redis_object_cache_configured":true`, `"redis_host":"localhost"`, `"redis_database":0`} {
 		if !strings.Contains(rec.Body.String(), expected) {
 			t.Fatalf("response missing %s: %s", expected, rec.Body.String())
 		}

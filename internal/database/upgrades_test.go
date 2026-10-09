@@ -23,6 +23,17 @@ func openTempDB(t *testing.T) {
 	})
 }
 
+func assertDatabaseUpgradedToLatest(t *testing.T) {
+	t.Helper()
+	var recorded string
+	if err := DB.QueryRow("SELECT version FROM schema_version ORDER BY updated_at DESC, rowid DESC LIMIT 1").Scan(&recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded != LatestVersion() {
+		t.Fatalf("recorded schema = %q, want %q", recorded, LatestVersion())
+	}
+}
+
 func TestFreshInstallRunsMigrationsAndRecordsLatestVersion(t *testing.T) {
 	openTempDB(t)
 
@@ -400,9 +411,7 @@ func TestUpgradeAddsWPUpdateSchemaFrom1031(t *testing.T) {
 			t.Fatalf("table %s exists=%d err=%v", table, exists, err)
 		}
 	}
-	if got := LatestVersion(); got != "1.0.73" {
-		t.Fatalf("LatestVersion=%q", got)
-	}
+	assertDatabaseUpgradedToLatest(t)
 	for _, column := range []string{"database_backup_mode", "database_backup_source_id", "auto_rollback", "batch_id"} {
 		var exists int
 		if err := DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('wp_update_tasks') WHERE name=?`, column).Scan(&exists); err != nil || exists != 1 {

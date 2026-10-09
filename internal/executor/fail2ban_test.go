@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -377,67 +376,8 @@ func TestWriteFail2banLocalRemovesDuplicatePurgeSettings(t *testing.T) {
 	}
 }
 
-func TestFail2banLoginFilterAllowsQueriesAndIgnoresCoreNonLoginActions(t *testing.T) {
-	lines := strings.Split(fail2banLoginFilterConfig, "\n")
-	var failPattern, ignorePattern string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "failregex = ") {
-			failPattern = strings.TrimPrefix(trimmed, "failregex = ")
-		}
-		if strings.HasPrefix(trimmed, "^<HOST>") && strings.Contains(trimmed, "action=(?:") {
-			ignorePattern = trimmed
-		}
-	}
-	failRE := regexp.MustCompile(strings.ReplaceAll(failPattern, "<HOST>", `\S+`))
-	ignorePattern = strings.ReplaceAll(ignorePattern, "<HOST>", `\S+`)
-	pythonMatch := func(pattern, value string) bool {
-		t.Helper()
-		if _, err := exec.LookPath("python3"); err != nil {
-			t.Skip("python3 is required to validate Fail2ban-compatible regex")
-		}
-		cmd := exec.Command("python3", "-c", `import re,sys;sys.exit(0 if re.search(sys.argv[1],sys.argv[2]) else 1)`, pattern, value)
-		return cmd.Run() == nil
-	}
-	line := func(target, status string) string {
-		return `203.0.113.9 - - [14/Aug/2026:12:00:00 +0800] "POST ` + target + ` HTTP/2.0" ` + status + ` 123 "-" "test"`
-	}
-	for _, target := range []string{"/wp-login.php", "/wp-login.php?x=1", "/wp-login.php?action=login", "/wp-login.php?x=1&action=unknown"} {
-		if !failRE.MatchString(line(target, "200")) || pythonMatch(ignorePattern, line(target, "200")) {
-			t.Fatalf("login failure should be counted: %s", target)
-		}
-	}
-	if failRE.MatchString(line("/wp-login.php?x=1", "302")) {
-		t.Fatal("successful login response matched failure rule")
-	}
-	for _, target := range []string{"/wp-login.php?action=lostpassword", "/wp-login.php?x=1&action=register", "/wp-login.php?action=rp&key=abc&login=user"} {
-		if !failRE.MatchString(line(target, "200")) || !pythonMatch(ignorePattern, line(target, "200")) {
-			t.Fatalf("core non-login action should be ignored: %s", target)
-		}
-	}
-	for _, target := range []string{
-		"/wp-login.php?action=lostpassword&action=login",
-		"/wp-login.php?action=lostpassword&%61ction=login",
-		"/wp-login.php?action=lostpassword&action%5B%5D=login",
-	} {
-		if pythonMatch(ignorePattern, line(target, "200")) {
-			t.Fatalf("ambiguous action parameters must not be ignored: %s", target)
-		}
-	}
-	if !pythonMatch(ignorePattern, line("/wp-login.php?action=login&action=lostpassword", "200")) {
-		t.Fatal("the final safe action should be ignored")
-	}
-	if strings.Contains(fail2banLoginFilterConfig, " 444 ") {
-		t.Fatal("444 must not be included in Fail2ban filters")
-	}
-}
-
-// TestFail2banLoginFilterIsUriAgnostic 证明登录/XML-RPC 爆破 failregex 的判定
-// 只依赖状态码结构（POST ... 200/403），不要求路径斜杠数量——因为"是不是
-// wp-login.php/xmlrpc.php"这件事已经由 OpenLiteSpeed 侧基于规范化 $uri 的 map 判断完，
-// 写进 wp-login-security.log 的每一行本身就是候选事件，这里只做防御性结构校验。
-func TestFail2banLoginFilterIsUriAgnostic(t *testing.T) {
-	lines := strings.Split(fail2banLoginFilterConfig, "\n")
+func fail2banFilterPatterns(content string) []string {
+	lines := strings.Split(content, "\n")
 	var failPatterns []string
 	inFailregex := false
 	for _, line := range lines {
@@ -455,22 +395,67 @@ func TestFail2banLoginFilterIsUriAgnostic(t *testing.T) {
 			failPatterns = append(failPatterns, trimmed)
 		}
 	}
-	if len(failPatterns) != 2 {
-		t.Fatalf("expected exactly 2 failregex lines (200 + 403), got %d: %v", len(failPatterns), failPatterns)
+	return failPatterns
+}
+
+func TestFail2banLoginFilterOnlyCountsAuthenticationEvents(t *testing.T) {
+	patterns := fail2banFilterPatterns(fail2banLoginFilterConfig)
+	if len(patterns) != 1 {
+		t.Fatalf("expected one explicit authentication-event rule, got %v", patterns)
 	}
-	loginRE := regexp.MustCompile(strings.ReplaceAll(failPatterns[0], "<HOST>", `\S+`))
-	xmlrpcRE := regexp.MustCompile(strings.ReplaceAll(failPatterns[1], "<HOST>", `\S+`))
-	line := func(target, status string) string {
-		return `203.0.113.9 - - [14/Aug/2026:12:00:00 +0800] "POST ` + target + ` HTTP/2.0" ` + status + ` 123 "-" "test"`
-	}
-	for _, target := range []string{"/wp-login.php", "//wp-login.php", "///wp-login.php", "/%2Fwp-login.php"} {
-		if !loginRE.MatchString(line(target, "200")) {
-			t.Fatalf("login failregex should not care about slash count: %s", target)
+	re := regexp.MustCompile(strings.ReplaceAll(patterns[0], "<HOST>", `\S+`))
+	for _, event := range []string{
+		`203.0.113.9 [2026-10-09T12:34:56Z] OLS_WPANEL_LOGIN_FAILED`,
+		`2606:4700::1111 [2026-10-09T12:34:56Z] OLS_WPANEL_LOGIN_FAILED`,
+		`203.0.113.9 [] OLS_WPANEL_LOGIN_FAILED`, // Date removed by Fail2ban.
+	} {
+		if !re.MatchString(event) {
+			t.Fatalf("real authentication event rejected: %s", event)
 		}
 	}
-	for _, target := range []string{"/xmlrpc.php", "//xmlrpc.php", "///xmlrpc.php"} {
-		if !xmlrpcRE.MatchString(line(target, "403")) {
-			t.Fatalf("xmlrpc failregex should not care about slash count: %s", target)
+	for _, line := range []string{
+		`203.0.113.9 - - [14/Aug/2026:12:00:00 +0800] "POST /wp-login.php HTTP/2.0" 200 123 "-" "test"`,
+		`203.0.113.9 - - [14/Aug/2026:12:00:00 +0800] "POST /xmlrpc.php HTTP/2.0" 403 123 "-" "test"`,
+		`203.0.113.9 [2026-10-09T12:34:56Z] OLS_WPANEL_LOGIN_FAILED user=secret`,
+		`prefix 203.0.113.9 [2026-10-09T12:34:56Z] OLS_WPANEL_LOGIN_FAILED`,
+		`203.0.113.9 [invalid] OLS_WPANEL_LOGIN_FAILED`,
+	} {
+		if re.MatchString(line) {
+			t.Fatalf("non-authentication line matched: %s", line)
+		}
+	}
+}
+
+func TestFail2banSQLiFilterRequiresServerBlockAndAutoBanMarkers(t *testing.T) {
+	patterns := fail2banFilterPatterns(fail2banSQLiFilterConfig)
+	if len(patterns) != 1 {
+		t.Fatalf("unexpected SQLi patterns: %v", patterns)
+	}
+	re := regexp.MustCompile(strings.ReplaceAll(patterns[0], "<HOST>", `\S+`))
+	base := `203.0.113.9 - - [09/Oct/2026:12:34:56 +0000] "GET /?test=1 HTTP/1.1" `
+	for _, line := range []string{
+		base + `403 123 ols_security="sqli" ols_autoban="1"`,
+		base + `403 123 "-" "test" ols_security="sqli" ols_autoban="1"`,
+		base + `403 123 "-" "test" peer=- ols_security="sqli" ols_autoban="1"`,
+		base + `403 123 "-" "test" peer=203.0.113.9 ols_security="sqli" ols_autoban="1"`,
+		base + `403 123 "-" "test" peer=2001:db8::9 ols_security="sqli" ols_autoban="1"`,
+	} {
+		if !re.MatchString(line) {
+			t.Fatalf("explicit server-side SQLi block rejected: %s", line)
+		}
+	}
+	for _, line := range []string{
+		base + `200 123 ols_security="sqli" ols_autoban="1"`,
+		base + `403 123 ols_security="sqli" ols_autoban="0"`,
+		base + `403 123 ols_security="xmlrpc" ols_autoban="1"`,
+		base + `403 123 "-" "test"`,
+		base + `403 123 "-" "ols_security=\"sqli\" ols_autoban=\"1\"" ols_security="-" ols_autoban="-"`,
+		base + `403 123 ols_security="sqli" ols_autoban="1" forged_suffix`,
+		base + `403 123 "-" "test" peer=forged.example ols_security="sqli" ols_autoban="1"`,
+		base + `403 123 "-" "peer=203.0.113.9 ols_security=\"sqli\" ols_autoban=\"1\""`,
+	} {
+		if re.MatchString(line) {
+			t.Fatalf("unproven/user-forged SQLi block matched: %s", line)
 		}
 	}
 }

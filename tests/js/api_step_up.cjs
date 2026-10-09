@@ -19,5 +19,12 @@ const reply = (status, data) => ({status, ok: status < 400, headers: {get: () =>
   await assert.rejects(ctx.api('/auth/login', {silent: true})); assert.equal(ctx.window.location.href, '');
   response = reply(503, {success: false, error_code: 'mfa_unavailable', message: 'unavailable'});
   await assert.rejects(ctx.api('/auth/mfa', {silent: true}), error => error.code === 'mfa_unavailable');
+  const details = {address: '192.0.2.24', address_family: 'IPv4', http_status: 403};
+  ctx.friendlyAPIError = () => 'Localized verification failure';
+  for (const status of [400, 200]) {
+    response = reply(status, {success: false, error_code: 'panel_domain_http_status', message: 'HTTP verification failed', details});
+    await assert.rejects(ctx.api('/settings/panel-domain/check', {silent: true}), error => error.code === 'panel_domain_http_status' && error.details === details && error.message === 'Localized verification failure');
+  }
+  ctx.friendlyAPIError = error => error.message;
   console.log('PASS API: step-up errors preserve valid session, expired session redirects, opt-in stays out of fetch, typed errors retained');
 })().catch(error => {console.error(error); process.exit(1);});
