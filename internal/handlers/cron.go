@@ -482,19 +482,34 @@ func (h *CronHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("无效的任务ID"))
 		return
 	}
+	requireDisabled := false
+	if value, present := c.GetQuery("require_disabled"); present {
+		requireDisabled, err = strconv.ParseBool(value)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse("无效的任务状态条件"))
+			return
+		}
+	}
 
 	db := database.GetDB()
 	cronMutationMu.Lock()
 	defer cronMutationMu.Unlock()
 	var taskType string
-	var siteID, running int
-	err = db.QueryRow("SELECT task_type, COALESCE(site_id, 0), running FROM cron_jobs WHERE id = ?", id).Scan(&taskType, &siteID, &running)
+	var siteID, running, enabled int
+	err = db.QueryRow("SELECT task_type, COALESCE(site_id, 0), running, enabled FROM cron_jobs WHERE id = ?", id).Scan(&taskType, &siteID, &running, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("计划任务不存在"))
 		return
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取计划任务失败"))
+		return
+	}
+	// The disabled-task UI supplies this precondition so a task re-enabled in
+	// another tab cannot be deleted from a stale list. Existing API clients
+	// retain their explicit deletion behavior when the condition is absent.
+	if requireDisabled && enabled != 0 {
+		c.JSON(http.StatusConflict, models.ErrorResponse("任务已启用，请刷新列表后再操作"))
 		return
 	}
 	if running == 1 {

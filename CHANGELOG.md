@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.21.2 — 2026-10-10
+
+- Consolidates WordPress access into one section, distinguishes ordinary login from panel-authorized sign-in without a website password, and retains panel password/MFA confirmation and the initial setup wizard. Fixes single-administrator selection and cancels pending authorization when leaving the page.
+- Recognizes three specific LiteSpeed Cache login observers instead of treating them as authentication conflicts. Exact hook, class, method and plugin source checks preserve the refusal of unknown authentication and MFA handlers. Existing authorized sites must save their access settings again to refresh the managed bridge.
+- Refines website lists with green domain links, aligned labeled states and balanced action spacing. Gives security groups clearer headers and lets expanded evidence use the available width, while retaining mobile wrapping.
+- Links online and anomaly monitoring directly to their settings and results, and explains how availability failures, recovery and WordPress changes appear in Alerts.
+- Allows deletion of disabled panel WP-Cron schedules with confirmation and duplicate-submission protection. WordPress internal events and user-managed configuration remain intact.
+
 ## v1.21.1 — 2026-10-09
 
 - Refines website list column widths, labels file locks and file actions explicitly, and centers the More menu arrow. Section menus scroll with page content, while the dashboard introduction uses the available desktop width and wraps on smaller screens.

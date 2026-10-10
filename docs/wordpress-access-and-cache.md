@@ -4,15 +4,25 @@ The Website details page separates saved options from evidence of actual behavio
 
 ## Administrator access
 
-The **Overview** tab shows the current WordPress login URL and its source. Detection uses WordPress’s own login URL, including active login plugins. The main access action opens that address in a new tab. The manual-address input has been removed; an existing manual override remains effective until a confirmed access-settings save clears it. The optional login suffix below changes the actual entry point.
+The **Overview** tab keeps WordPress access in one place. The ordinary login URL opens in a new tab and requires the website password. Detection uses WordPress’s own login URL, including active login plugins. A separate authorization action signs in without the website password after panel identity verification. The manual-address input has been removed; an existing manual override remains effective until a confirmed access-settings save clears it. The optional login suffix below changes the actual entry point.
 
 WordPress setup is preserved. Before setup is complete, the panel links to the installation wizard; users still choose their site title, administrator account and password there.
 
-Panel-authorized administrator sign-in is off by default and is available under advanced access settings. Enable it deliberately, then confirm the current panel password and configured panel MFA each time. Select an existing WordPress administrator; the panel does not create users or retain website passwords. Authorization is random, expires after 60 seconds, is usable once, and travels in an HTTPS POST rather than a URL. Redemption binds it to the originating panel session, website, PHP user, settings generation and unchanged WordPress administrator identity.
+Panel-authorized administrator sign-in is off by default. Use **Set Up Authorized Sign-in** to enable it deliberately, then use the authorization action beside the ordinary address. Confirm the current OLS panel password and configured panel MFA each time; these are separate from the WordPress credentials. Select an existing WordPress administrator; the panel does not create users or retain website passwords. Authorization is random, expires after 60 seconds, is usable once, and travels in an HTTPS POST rather than a URL. Redemption binds it to the originating panel session, website, PHP user, settings generation and unchanged WordPress administrator identity.
 
 This feature requires website HTTPS, the site PHP cURL extension with Unix socket support, and the panel’s local broker. Recognized MFA/authentication plugins and detected authentication hooks disable authorized sign-in. This feature replaces the ordinary WordPress sign-in flow with panel authorization; compatibility with arbitrary plugins that register only during browser login cannot be guaranteed. Keep it disabled for unverified custom authentication systems and use ordinary WordPress login. Existing hidden-login rules may also disable it. Logging out of the panel, revoking pending authorizations or changing access settings invalidates unused authorization. An already established WordPress session remains governed by WordPress.
 
 The optional panel-managed login suffix changes the actual login entry through a named MU plugin. It requires WordPress permalinks and compatible OpenLiteSpeed rewrites, and refuses suffixes that conflict with existing files, directories, pages or routes. Before reporting success, the panel checks the new route at the local origin with certificate validation retained and restores the previous configuration on failure. Leave the suffix blank to restore the default. If recovery is necessary, rename the `ols-wpanel-access.php` file identified on the page over SSH; do not edit unrelated plugins.
+
+The three supported LiteSpeed Cache observers for login-cache tagging, purging and vary cookies are not authentication handlers. Compatibility is limited to their exact hook, class, method and active plugin source files; other login handlers still block authorized sign-in. When an upgrade changes the managed bridge, save access settings again to refresh it. The panel does not automatically enable authorization or replace a modified bridge.
+
+## Monitoring and scheduled tasks
+
+The website list links directly to online-monitoring and WordPress anomaly-monitoring settings. Online monitoring checks availability at the selected interval when the global website-availability alert rule is enabled. Two consecutive failures produce an alert, and recovery is recorded in Alerts. Email and webhook delivery require their respective notification configuration. The list's enabled label describes the setting, not the latest HTTP result or an uptime history.
+
+WordPress anomaly monitoring samples administrator accounts, application passwords, database objects, content and critical options hourly. Its section shows the latest successful sample and offers a manual check; detected changes appear in Alerts. An initial sample establishes a baseline and does not certify that a website is clean.
+
+Disabled panel WP-Cron schedules can be deleted after confirmation. This deletes the panel schedule, not WordPress internal events. Disabling the last active panel schedule already removes the panel-owned built-in WP-Cron restriction; deletion reconciles that state again. User-managed configuration is preserved.
 
 ## Page and object caches
 
