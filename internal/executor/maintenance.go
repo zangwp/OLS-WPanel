@@ -64,16 +64,18 @@ type maintenanceWindow struct {
 }
 
 type MaintenanceStatus struct {
-	State         string `json:"state"`
-	Enabled       bool   `json:"enabled"`
-	PasswordSet   bool   `json:"password_set"`
-	Minutes       int    `json:"minutes"`
-	WindowID      string `json:"window_id"`
-	ExpiresAt     int64  `json:"expires_at"`
-	VerifiedUntil int64  `json:"verified_until"`
-	Revision      int    `json:"revision"`
-	ServerTime    int64  `json:"server_time"`
-	Notice        string `json:"notice,omitempty"`
+	State               string `json:"state"`
+	Enabled             bool   `json:"enabled"`
+	FileLockEnabled     bool   `json:"file_lock_enabled"`
+	FileLockApplyStatus string `json:"file_lock_apply_status"`
+	PasswordSet         bool   `json:"password_set"`
+	Minutes             int    `json:"minutes"`
+	WindowID            string `json:"window_id"`
+	ExpiresAt           int64  `json:"expires_at"`
+	VerifiedUntil       int64  `json:"verified_until"`
+	Revision            int    `json:"revision"`
+	ServerTime          int64  `json:"server_time"`
+	Notice              string `json:"notice,omitempty"`
 }
 
 type MaintenanceRequest struct {
@@ -206,7 +208,7 @@ func (m *MaintenanceManager) Status(id int) (MaintenanceStatus, error) {
 	if err != nil {
 		return MaintenanceStatus{State: "unknown"}, ErrMaintenanceUnknown
 	}
-	out := MaintenanceStatus{State: "unlocked_permanent", Enabled: state.Enabled, PasswordSet: state.Hash != "", Minutes: state.Minutes, ServerTime: m.now().Unix()}
+	out := MaintenanceStatus{State: "unlocked_permanent", Enabled: state.Enabled, FileLockEnabled: site.FileLockEnabled, FileLockApplyStatus: site.FileLockApplyStatus, PasswordSet: state.Hash != "", Minutes: state.Minutes, ServerTime: m.now().Unix()}
 	if state.Window == nil {
 		out.Notice = state.ClosedReason
 	}

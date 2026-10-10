@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -137,6 +138,52 @@ func maintenanceUnlock(t *testing.T, m *MaintenanceManager, id int) MaintenanceS
 		t.Fatal(err)
 	}
 	return s
+}
+
+func TestMaintenanceStatusReturnsActualFileLockFlagsAcrossLifecycle(t *testing.T) {
+	db := openAlertTestDB(t)
+	mustExec(t, db, `CREATE TABLE websites (id INTEGER PRIMARY KEY, domain TEXT, web_root TEXT, system_user TEXT, site_type TEXT, status TEXT, file_lock_enabled INTEGER, file_lock_mode TEXT, file_lock_apply_status TEXT, maintenance_security TEXT, file_lock_enabled_at DATETIME, updated_at DATETIME)`)
+	state := maintenanceSecurity{Enabled: true, Minutes: 5, Hash: "private-test-value"}
+	serialized, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, raw := 1, string(serialized)
+	if _, err := db.Exec(`INSERT INTO websites (id,domain,web_root,system_user,site_type,status,file_lock_enabled,file_lock_mode,file_lock_apply_status,maintenance_security) VALUES (1,'site.example','/fixture','fixture','wordpress','active',1,'strict','ready',?)`, raw); err != nil {
+		t.Fatal(err)
+	}
+	m := &MaintenanceManager{db: db, now: time.Now}
+	check := func(wantState string, enabled bool, applyStatus string) {
+		t.Helper()
+		status, err := m.Status(id)
+		if err != nil || status.State != wantState || status.FileLockEnabled != enabled || status.FileLockApplyStatus != applyStatus || !status.Enabled {
+			t.Fatalf("actual file-lock flags confused with maintenance authorization: %+v %v", status, err)
+		}
+	}
+	check("locked", true, "ready")
+	state.Window = &maintenanceWindow{ID: "fixture-window", State: "unlocked", Mode: "strict", Expires: time.Now().Add(time.Minute).Unix()}
+	if err := m.save(id, state, &raw, "unlocked"); err != nil {
+		t.Fatal(err)
+	}
+	check("unlocked", false, "")
+	state.Window.State = "relocking"
+	if err := m.save(id, state, &raw, "relocking"); err != nil {
+		t.Fatal(err)
+	}
+	check("relocking", false, "applying")
+	state.Window.State = "relock_failed"
+	if err := m.save(id, state, &raw, "failed"); err != nil {
+		t.Fatal(err)
+	}
+	check("relock_failed", false, "failed")
+	if err := m.save(id, state, &raw, "locked"); err != nil {
+		t.Fatal(err)
+	}
+	check("locked", true, "ready")
+	if _, err := m.db.Exec(`UPDATE websites SET file_lock_enabled=0,file_lock_apply_status='' WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	check("unlocked_permanent", false, "")
 }
 
 func TestMaintenanceExtensionBoundariesAndIdempotency(t *testing.T) {

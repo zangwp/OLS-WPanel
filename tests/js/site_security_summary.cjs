@@ -14,7 +14,7 @@ function setup() {
     const calls = [], navigation = [];
     const context = { t: key => key, currentLocale: () => 'en-US', window: { location: { assign: url => navigation.push(url) } }, document: { getElementById: id => ({ scrollIntoView: () => navigation.push(id) }) }, api: async (url, options) => { calls.push({ url, options }); return response([]); } };
     vm.createContext(context); vm.runInContext(script, context);
-    const page = Object.assign(context.siteSecuritySummary(), { site: { id: 1, status: 'active', site_type: 'wordpress' }, securityStatus: { checks: [check('configured')] }, securityStatusLoading: false, securityStatusGeneration: 0, setDetailTab: tab => navigation.push(tab), selectLogType: type => navigation.push(type), openSiteSSLSettings: () => navigation.push('ssl'), $nextTick: callback => callback() });
+    const page = Object.assign(context.siteSecuritySummary(), { site: { id: 1, status: 'active', site_type: 'wordpress' }, securityStatus: { checks: [check('configured')] }, securityStatusLoading: false, securityStatusGeneration: 0, setDetailTab: tab => navigation.push(tab), selectLogType: type => navigation.push(type), openSiteSSLSettings: () => navigation.push('ssl'), scrollDetailAnchor: () => navigation.push(context.window.location.hash), $nextTick: callback => callback() });
     return { page, context, calls, navigation };
 }
 
@@ -65,4 +65,65 @@ test('stopped sites cannot start a verification even if the previous observation
 test('log actions open the applicable site log without an unrelated settings navigation', () => {
     const { page, navigation } = setup();
     page.openSummaryLogs(); assert.deepEqual(navigation.splice(0), ['logs', 'security']); page.site.site_type = 'php'; page.openSummaryLogs(); assert.deepEqual(navigation.splice(0), ['logs', 'error']);
+});
+
+test('non-verifiable configuration uses a neutral state and never asks for a nonexistent verification', async () => {
+    const {page,calls,context}=setup();
+    page.securityStatus.checks=[check('configured',{key:'backup',can_verify:false,reason_code:'configured_not_run'})];
+    assert.equal(page.summaryStateText('backup'),'site_security.state_configured');
+    assert.equal(page.summaryStateClass('backup'),'badge-info');
+    context.t=key=>key==='site_security.reason_configuration_saved' ? 'Saved configuration; view records' : key;
+    assert.equal(page.summaryReason('backup'),'Saved configuration; view records');
+    await page.verifySummaryCheck('backup');assert.equal(calls.length,0);
+    page.securityStatus.checks=[check('configured',{key:'anomaly_monitor',can_verify:false,reason_code:'anomaly_check_stale'})];
+    assert.equal(page.summaryStateText('anomaly_monitor'),'site_security.state_waiting_check');
+});
+
+test('file protection coverage and completed samples remain distinct from verified request protection',()=>{
+    const {page}=setup();
+    for(const [key,reason] of [['file_editing','file_editing_managed_by_file_lock'],['file_lock','file_lock_applied'],['uptime_monitor','uptime_check_succeeded'],['anomaly_monitor','anomaly_check_succeeded']]){
+        page.securityStatus.checks=[check('ready',{key,reason_code:reason,runtime_ready:true,can_verify:false})];
+        assert.equal(page.summaryStateText(key),'site_security.state_'+reason);
+        assert.equal(page.summaryStateClass(key),'badge-info');
+        page.securityStatus.checks[0].runtime_ready=false;
+        assert.equal(page.summaryCheck(key).state,'unknown');
+    }
+});
+
+test('maintenance and unknown operation evidence use translated explanations instead of a verification prompt',()=>{
+    const {page,context}=setup();
+    for (const locale of ['zh-CN','en-US']) {
+        const messages=JSON.parse(fs.readFileSync(path.join(__dirname,'../../internal/i18n/locales/'+locale+'.json'),'utf8'));
+        context.t=key=>key.split('.').reduce((value,part)=>value?.[part],messages)||key;
+        for (const [key,state,reason] of [['file_lock','configured','file_lock_temporarily_unlocked'],['file_lock','unknown','file_lock_state_unknown'],['anomaly_monitor','unknown','anomaly_state_unknown']]) {
+            page.securityStatus.checks=[check(state,{key,reason_code:reason,can_verify:false})];
+            assert.equal(page.summaryReason(key),messages.site_security['reason_'+reason]);
+            assert.notEqual(page.summaryReason(key),messages.site_security.reason_not_checked);
+            assert(!page.summaryReason(key).includes('site_security.'));
+            if (state==='configured') assert.equal(page.summaryStateText(key),messages.site_security.state_file_lock_temporarily_unlocked);
+        }
+    }
+});
+
+test('monitoring and protection actions lead to the real result or settings area without issuing verification',()=>{
+    const {page,navigation,calls}=setup();
+    for(const [key,target] of [['uptime_monitor','/panel/alert'],['backup','/panel/backups'],['anomaly_monitor','#site-wp-anomaly'],['file_lock','#site-protection'],['file_editing','#site-file-editing-control']]){
+        page.securityStatus.checks=[check('configured',{key,can_verify:false})];page.openSummarySettings(key);
+        assert.equal(navigation.pop(),target);
+    }
+    page.securityStatusLoading=true;page.openSummarySettings('uptime_monitor');assert.equal(navigation.length,0);
+    page.securityStatusLoading=false;page.securityStatus.checks=[check('unsupported',{key:'anomaly_monitor',can_verify:false})];
+    page.openSummarySettings('anomaly_monitor');assert.equal(navigation.length,0);assert.equal(calls.length,0);
+});
+
+test('a completed anomaly check refreshes the same website summary while failed checks do not publish new evidence',async()=>{
+    const anomalyHTML=fs.readFileSync(path.join(__dirname,'../../web/templates/wp_anomaly_panel.html'),'utf8');
+    const anomalyScript=anomalyHTML.match(/{{define "wp_anomaly_script"}}\s*<script>([\s\S]*?)<\/script>/)[1];
+    const events=[],context={t:key=>key,currentLocale:()=> 'en-US',showToast(){},api:async()=>({success:true,data:{enabled:true,threshold:5,last_success:1720000000}})};
+    vm.createContext(context);vm.runInContext(anomalyScript,context);
+    const monitor=context.wpAnomalyMonitor(1);monitor.$dispatch=(name,detail)=>events.push({name,siteID:detail.site_id});
+    await monitor.load();assert.equal(events.length,0);
+    await monitor.check();assert.deepEqual(events,[{name:'site-anomaly-updated',siteID:1}]);
+    events.length=0;context.api=async()=>{throw Error('site_busy');};await monitor.check();
+    assert.equal(events.length,0);assert.equal(monitor.error,'anomaly.site_busy');
 });

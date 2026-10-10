@@ -227,3 +227,67 @@ func TestWebsiteSecurityStatusPHPDoesNotClaimWordPressProtection(t *testing.T) {
 		}
 	}
 }
+
+func TestWebsiteSecurityAnomalySummaryUsesRealOutcomeAndGlobalGateIndependently(t *testing.T) {
+	setupWebsiteSecurityStatusDatabase(t, "wordpress")
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE websites SET status='active',monitoring_enabled=1 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE security_settings SET svalue='false' WHERE skey='alert_site'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO site_wp_anomaly_state(site_id,enabled,last_success,next_check) VALUES(1,1,?,?)`, time.Now().Unix()-60, time.Now().Unix()+3500); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ lastError, state, reason string }{
+		{"", "ready", "anomaly_check_succeeded"},
+		{"sample_failed", "error", "anomaly_check_failed"},
+	} {
+		if _, err := db.Exec(`UPDATE site_wp_anomaly_state SET last_error=? WHERE site_id=1`, tc.lastError); err != nil {
+			t.Fatal(err)
+		}
+		rec, body := requestWebsiteSecurityStatus(t, "1")
+		if rec.Code != http.StatusOK || !body.Success {
+			t.Fatalf("%s", rec.Body.String())
+		}
+		anomaly := securityCheckForTest(t, body.Data, "anomaly_monitor")
+		if anomaly.State != tc.state || anomaly.ReasonCode != tc.reason || anomaly.CanVerify || anomaly.Effective != nil {
+			t.Fatalf("outcome not reflected: %+v", anomaly)
+		}
+		uptime := securityCheckForTest(t, body.Data, "uptime_monitor")
+		if uptime.State != "configured" || uptime.ReasonCode != "uptime_alert_disabled" || uptime.RuntimeReady != nil {
+			t.Fatalf("global gate not reflected: %+v", uptime)
+		}
+	}
+}
+
+func TestWebsiteSecurityOperationalSummaryMissingFieldsRemainUnknown(t *testing.T) {
+	setupWebsiteSecurityStatusDatabase(t, "wordpress")
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE websites SET monitoring_enabled=1 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM security_settings WHERE skey='alert_site'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE site_wp_anomaly_state RENAME TO legacy_anomaly`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE site_wp_anomaly_state(site_id INTEGER PRIMARY KEY,enabled INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO site_wp_anomaly_state VALUES(1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	rec, body := requestWebsiteSecurityStatus(t, "1")
+	if rec.Code != http.StatusOK || !body.Success {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	for _, key := range []string{"uptime_monitor", "anomaly_monitor"} {
+		check := securityCheckForTest(t, body.Data, key)
+		if check.State != "unknown" || check.Configured != nil || check.RuntimeReady != nil || check.Effective != nil {
+			t.Fatalf("missing field invented evidence: %+v", check)
+		}
+	}
+}
