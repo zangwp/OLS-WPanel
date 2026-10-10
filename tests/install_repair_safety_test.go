@@ -96,6 +96,126 @@ func TestRepairReleaseDocumentationInventoryIncludesReleaseVersion(t *testing.T)
 	}
 }
 
+func TestRepairSnapshotPreservesPrivateCloudflareKey(t *testing.T) {
+	root, fixture := repairKeySnapshotFixture(t)
+	key := "01234567890123456789012345678901"
+	mustWriteTestFile(t, filepath.Join(root, "data", "cloudflare-security.key"), key, 0600)
+	mustWriteTestFile(t, filepath.Join(root, "data", "account-mfa.key"), "mfa-fixture-key", 0600)
+	modeChecks := `test "$(stat -c '%a' "$REPAIR_BACKUP_DIR")" = 700
+test "$(stat -c '%a' "$REPAIR_BACKUP_DIR/cloudflare-security.key")" = 600
+`
+	if runtime.GOOS == "windows" {
+		// NTFS/portable Bash cannot establish native Unix permissions. Linux
+		// still checks actual install/stat modes rather than emulating them.
+		modeChecks = ""
+		t.Log("Unix 0700/0600 modes require the native Linux regression")
+	}
+	out, err := lifecycleBash(t, fixture+"create_repair_backup\n"+modeChecks+`printf 'SNAPSHOT=%s\n' "$REPAIR_BACKUP_DIR"`+"\n")
+	if err != nil {
+		t.Fatalf("private repair key snapshot failed: %v\n%s", err, out)
+	}
+	backup := repairKeySnapshotPath(t, out)
+	assertTestFile(t, filepath.Join(backup, "cloudflare-security.key"), key)
+	assertTestFile(t, filepath.Join(backup, "account-mfa.key"), "mfa-fixture-key")
+	assertTestFile(t, filepath.Join(root, "data", "cloudflare-security.key"), key)
+	checksums, err := os.ReadFile(filepath.Join(backup, "SHA256SUMS"))
+	if err != nil || !strings.Contains(string(checksums), "cloudflare-security.key") {
+		t.Fatalf("repair snapshot checksum inventory omitted Cloudflare key: %v", err)
+	}
+}
+
+func TestRepairSnapshotDoesNotCreateMissingCloudflareKey(t *testing.T) {
+	root, fixture := repairKeySnapshotFixture(t)
+	out, err := lifecycleBash(t, fixture+`create_repair_backup
+test ! -e "$REPAIR_BACKUP_DIR/cloudflare-security.key"
+printf 'SNAPSHOT=%s\n' "$REPAIR_BACKUP_DIR"
+`)
+	if err != nil {
+		t.Fatalf("repair without Cloudflare key failed: %v\n%s", err, out)
+	}
+	for _, path := range []string{
+		filepath.Join(root, "data", "cloudflare-security.key"),
+		filepath.Join(repairKeySnapshotPath(t, out), "cloudflare-security.key"),
+	} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("repair created an absent key at %s: %v", path, err)
+		}
+	}
+}
+
+func TestRepairSnapshotRejectsNonregularCloudflareKey(t *testing.T) {
+	for _, kind := range []string{"directory", "symlink", "dangling symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			root, fixture := repairKeySnapshotFixture(t)
+			key := filepath.Join(root, "data", "cloudflare-security.key")
+			if kind == "directory" {
+				if err := os.MkdirAll(key, 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				target := filepath.Join(root, "target-key")
+				if kind == "symlink" {
+					mustWriteTestFile(t, target, "fixture-only-private-key", 0600)
+				}
+				// Bash creates and recognizes the same symlink type its production
+				// guard tests. MSYS may require explicit emulated symlink support.
+				setup := fmt.Sprintf("ln -s -- %s %s\n[[ -L %s ]] || exit 78\n", strconv.Quote(filepath.ToSlash(target)), strconv.Quote(filepath.ToSlash(key)), strconv.Quote(filepath.ToSlash(key)))
+				if out, err := lifecycleBash(t, setup); err != nil {
+					if runtime.GOOS == "windows" {
+						t.Skipf("Bash symlinks unavailable on this Windows runtime: %v %s", err, out)
+					}
+					t.Fatalf("create symlink fixture: %v\n%s", err, out)
+				}
+			}
+			out, err := lifecycleBash(t, fixture+"create_repair_backup\n")
+			if err == nil || !strings.Contains(string(out), "repair前Cloudflare凭据密钥不是安全常规文件") {
+				t.Fatalf("unsafe %s key accepted or wrong failure: %v\n%s", kind, err, out)
+			}
+			if files, err := filepath.Glob(filepath.Join(root, "install", "backups", "install-repair", "*", "cloudflare-security.key")); err != nil || len(files) != 0 {
+				t.Fatalf("unsafe key was copied into a snapshot: %v %v", files, err)
+			}
+		})
+	}
+}
+
+func repairKeySnapshotFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	mustWriteTestFile(t, filepath.Join(root, "config.json"), "{\"fixture\":true}\n", 0600)
+	if err := os.MkdirAll(filepath.Join(root, "data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	helper := extractShellFunction(t, readInstallScript(t, installScriptPath), "create_repair_backup", "prepare_repair_snapshot")
+	fixture := fmt.Sprintf(`INSTALL_DIR=%s
+CONFIG_FILE=%s
+DB_PATH=%s
+BIN_PATH=%s
+SERVICE_PATH=%s
+LICENSE_DOC_DIR=%s
+REPAIR_BIN_EXISTED=false
+REPAIR_UNIT_EXISTED=false
+REPAIR_DB_EXISTED=false
+REPAIR_TLS_EXISTED=false
+REPAIR_LICENSE_DIR_EXISTED=false
+log_error() { printf '%%s\n' "$*" >&2; exit 93; }
+sqlite3() { printf 'unexpected SQLite invocation\n' >&2; exit 94; }
+systemctl() { printf 'unexpected service invocation\n' >&2; exit 95; }
+%s
+`, strconv.Quote(filepath.ToSlash(filepath.Join(root, "install"))), strconv.Quote(filepath.ToSlash(filepath.Join(root, "config.json"))), strconv.Quote(filepath.ToSlash(filepath.Join(root, "data", "absent.db"))), strconv.Quote(filepath.ToSlash(filepath.Join(root, "absent-bin"))), strconv.Quote(filepath.ToSlash(filepath.Join(root, "absent-unit"))), strconv.Quote(filepath.ToSlash(filepath.Join(root, "absent-license"))), helper)
+	return root, fixture
+}
+
+func repairKeySnapshotPath(t *testing.T, out []byte) string {
+	t.Helper()
+	for _, line := range strings.Split(string(out), "\n") {
+		if path, ok := strings.CutPrefix(line, "SNAPSHOT="); ok {
+			return filepath.FromSlash(strings.TrimSpace(path))
+		}
+	}
+	t.Fatalf("repair snapshot path missing from output: %s", out)
+	return ""
+}
+
 func TestInstallFreshValidatesCronParentBeforeAPT(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 	freshCronCheck := requiredIndex(t, script, `fresh安装前cron父目录或现有cron文件身份不安全`)

@@ -76,3 +76,27 @@ test('CDN deletion snapshots target and locks before confirmation',async()=>{
 test('queued whitelist refresh is never reported as a completed list update',async()=>{
  const {m}=setup(async()=>ok({}));m.settingsLoaded=true;await m.refreshWhitelist();assert.equal(m.mutationNotice,'security_center.refresh_queued');
 });
+
+test('editing another CDN opens its form while built-in Cloudflare remains automatic',async()=>{
+ const {m}=setup(async()=>ok([]));m.cdnLoaded=true;
+ m.cdnGroups=[{id:1,provider:'cloudflare',builtin:true},{id:4,name:'Other CDN',provider:'custom',header_name:'X-Forwarded-For',ip_ranges:'192.0.2.0/24',enabled:true}];
+ assert.equal(m.cdnFormExpanded,false);assert.equal(m.cdnOtherGroups().length,1);
+ m.editCDNGroup(m.cdnGroups[0]);assert.equal(m.cdnFormExpanded,false);assert.equal(m.cdnGroupForm.id,null);
+ m.editCDNGroup(m.cdnGroups[1]);assert.equal(m.cdnFormExpanded,true);assert.equal(m.cdnGroupForm.id,4);assert.equal(m.cdnGroupForm.ip_ranges,'192.0.2.0/24');
+ m.resetCDNGroupForm();assert.equal(m.cdnFormExpanded,false);assert.equal(m.cdnGroupForm.id,null);
+});
+
+test('failed CDN save keeps the expanded draft and successful retry closes it',async()=>{
+ let fail=true;const {m}=setup(async(url,opt)=>{if(opt?.method){if(fail)throw Error('trusted proxy update failed');return ok({});}return ok(url.includes('groups')?[]:{});});
+ m.cdnLoaded=true;m.editCDNGroup({id:4,name:'Other CDN',provider:'custom',header_name:'X-Forwarded-For',ip_ranges:'192.0.2.0/24',enabled:true});
+ await m.saveCDNGroup();assert.equal(m.cdnFormExpanded,true);assert.equal(m.cdnGroupForm.id,4);assert.equal(m.cdnError,'trusted proxy update failed');
+ fail=false;await m.saveCDNGroup();assert.equal(m.cdnFormExpanded,false);assert.equal(m.cdnGroupForm.id,null);assert.equal(m.cdnError,'');
+});
+
+test('Cloudflare built-in status reports cache availability without inventing runtime verification',()=>{
+ const {m}=setup(async()=>ok({}),{t:(key,params)=>key+(params?.count?':'+params.count:'')});
+ m.settings={cloudflare_realip_ips:'192.0.2.0/24\n\n2001:db8::/32'};assert.equal(m.cdnBuiltinStatus(),'security.status_unknown');
+ m.settingsLoaded=true;assert.equal(m.cdnBuiltinStatus(),'security.cdn_builtin_cache_ready:2');
+ m.settings.cloudflare_realip_ips='';assert.equal(m.cdnBuiltinStatus(),'security.cdn_builtin_cache_missing');
+ m.settingsError='cache unreadable';assert.equal(m.cdnBuiltinStatus(),'security.status_unknown');
+});

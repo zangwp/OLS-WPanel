@@ -39,7 +39,7 @@ OLS WPanel also embeds or statically links these components:
   - Copyright 2007 Jakub Vrana
   - Distributed by OLS WPanel under Adminer's Apache License, Version 2.0,
     option.
-- Go 1.26.8 runtime and standard library — <https://go.dev/>
+- Go 1.26.9 runtime and standard library — <https://go.dev/>
   - Copyright 2009 The Go Authors. All rights reserved.
 
 The release asset `ols-wpanel-third-party-licenses.tar.gz` contains this notice,

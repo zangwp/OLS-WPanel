@@ -456,17 +456,162 @@ systemctl_wait_active_required() {
     log_error "${svc} 未能保持运行状态，请根据上方日志排查"
 }
 
+ols_ipv6_available() {
+    local ipv6_addresses="" ipv6_routes=""
+    local php_cli="/usr/local/lsws/lsphp85/bin/php"
+    command -v ip >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 && [[ -x "$php_cli" ]] || return 1
+    # Inspect local state only. A DNS AAAA record or a link-local address does
+    # not demonstrate that this VPS has usable public IPv6 connectivity.
+    ipv6_addresses=$(timeout 2s ip -6 -j addr show up scope global 2>/dev/null) || return 1
+    ipv6_routes=$(timeout 2s ip -6 -j route show default 2>/dev/null) || return 1
+    [[ ${#ipv6_addresses} -le 65536 && ${#ipv6_routes} -le 65536 ]] || return 1
+    timeout 2s "$php_cli" -n -r '
+try {
+    $addresses = json_decode($argv[1], true, 64, JSON_THROW_ON_ERROR);
+    $routes = json_decode($argv[2], true, 64, JSON_THROW_ON_ERROR);
+    if (!is_array($addresses) || !is_array($routes)) exit(1);
+    $ready = [];
+    foreach ($addresses as $interface) {
+        if (!is_array($interface)) continue;
+        $name = $interface["ifname"] ?? "";
+        $flags = $interface["flags"] ?? [];
+        if (!is_string($name) || $name === "" || !is_array($flags) || !in_array("UP", $flags, true) || in_array("LOOPBACK", $flags, true)) continue;
+        foreach (($interface["addr_info"] ?? []) as $address) {
+            if (!is_array($address) || ($address["family"] ?? "") !== "inet6" || ($address["scope"] ?? "") !== "global") continue;
+            $local = $address["local"] ?? "";
+            if (!is_string($local)) continue;
+            $packed = @inet_pton($local);
+            if ($packed === false || strlen($packed) !== 16 || ord($packed[0]) < 0x20 || ord($packed[0]) > 0x3f || substr(bin2hex($packed), 0, 8) === "20010db8") continue;
+            $usable = true;
+            $addressFlags = $address["flags"] ?? [];
+            if (!is_array($addressFlags)) continue;
+            foreach (["tentative", "dadfailed", "deprecated"] as $flag) {
+                if (($address[$flag] ?? false) === true || in_array($flag, $addressFlags, true)) $usable = false;
+            }
+            foreach (["preferred_life_time", "valid_life_time"] as $life) {
+                $value = $address[$life] ?? null;
+                if ((is_int($value) || is_float($value)) && $value == 0) $usable = false;
+            }
+            if ($usable) $ready[$name] = true;
+        }
+    }
+    foreach ($routes as $route) {
+        if (!is_array($route) || !in_array($route["dst"] ?? "", ["default", "::/0"], true) || !in_array($route["type"] ?? "", ["", "unicast"], true)) continue;
+        $device = $route["dev"] ?? "";
+        $flags = $route["flags"] ?? [];
+        if (!is_string($device) || !isset($ready[$device]) || !is_array($flags) || in_array("dead", $flags, true) || in_array("linkdown", $flags, true)) continue;
+        exit(0);
+    }
+} catch (Throwable $error) {}
+exit(1);
+' "$ipv6_addresses" "$ipv6_routes" >/dev/null 2>&1 || return 1
+    # Binding an ephemeral local socket sends no packets and also checks that
+    # the kernel actually supports IPv6; close it immediately after probing.
+    timeout 2s "$php_cli" -n -r '
+$socket = @stream_socket_server("tcp://[::]:0", $errno, $error, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN);
+if ($socket === false) exit(1);
+fclose($socket);
+' >/dev/null 2>&1
+}
+
+append_ols_ipv6_listeners() {
+    local conf="$1" http_port="$2" https_port="$3" vhost="$4" domains="$5" cert_dir="$6"
+    # Append after IPv4 listeners. OpenLiteSpeed retries an IPv6 wildcard bind
+    # with IPV6_V6ONLY when the earlier IPv4 listener already owns that port.
+    cat >> "$conf" << OLSIPV6EOF
+listener OLSWPanelHTTPIPv6 {
+  address                 [ANY]:$http_port
+  secure                  0
+  map                     $vhost $domains
+}
+listener OLSWPanelHTTPSIPv6 {
+  address                 [ANY]:$https_port
+  secure                  1
+  keyFile                 $cert_dir/default.key
+  certFile                $cert_dir/default.crt
+  certChain               0
+  sslProtocol             24
+  map                     $vhost $domains
+}
+OLSIPV6EOF
+}
+
+ols_listener_pid_is_ols() {
+    local pid="$1"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    # Compare the kernel's executable identity, not ss's configurable comm.
+    # Missing /proc access or another server owning the socket fails closed.
+    [[ -f /usr/local/lsws/bin/openlitespeed && -f "/proc/$pid/exe" && "/proc/$pid/exe" -ef /usr/local/lsws/bin/openlitespeed ]]
+}
+
+ols_listener_owned_by_ols() {
+    local line="$1" users="" char="" next="" pid=""
+    local i=0 end=0 owners=0 quoted=false
+    [[ "$line" == *'users:('* ]] || return 1
+    users="${line#*users:(}"
+    for ((i=0; i<${#users}; i++)); do
+        char="${users:i:1}"
+        if $quoted; then
+            if [[ "$char" == '\' ]]; then
+                i=$((i + 1))
+            elif [[ "$char" == '"' ]]; then
+                quoted=false
+            fi
+            continue
+        fi
+        if [[ "$char" == '"' ]]; then quoted=true; continue; fi
+        [[ "${users:i:5}" == ',pid=' ]] || continue
+        end=$((i + 5))
+        pid=""
+        while [[ "${users:end:1}" == [0-9] ]]; do
+            pid+="${users:end:1}"
+            end=$((end + 1))
+        done
+        next="${users:end:1}"
+        [[ -n "$pid" && ( "$next" == ',' || "$next" == ')' ) ]] || return 1
+        ols_listener_pid_is_ols "$pid" || return 1
+        owners=$((owners + 1))
+        i=$((end - 1))
+    done
+    [[ "$owners" -gt 0 && "$quoted" == false ]]
+}
+
+ols_owned_listener_addresses() {
+    local line=""
+    local fields=()
+    while IFS= read -r line; do
+        read -r -a fields <<< "$line"
+        [[ "${#fields[@]}" -ge 5 && "${fields[0]}" == LISTEN ]] || continue
+        ols_listener_owned_by_ols "$line" || continue
+        printf '%s\n' "${fields[3]}"
+    done
+}
+
 require_ols_listeners() {
     local attempt=""
-    local addresses=""
+    local failure_mode="${1:-fatal}"
+    local addresses="" ipv4_addresses="" ipv6_addresses=""
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
-        addresses=$(ss -lntH 2>/dev/null | awk '{print $4}')
-        if grep -Eq ':80$' <<< "$addresses" && grep -Eq ':443$' <<< "$addresses"; then
-            return 0
+        if [[ "${OLS_IPV6_ENABLED:-false}" == true ]]; then
+            # Family-specific wildcard sockets must be present. Loopback-only
+            # or one particular host address cannot satisfy a public listener.
+            ipv4_addresses=$(timeout 2s ss -H -l -t -n -p -4 2>/dev/null | ols_owned_listener_addresses) || ipv4_addresses=""
+            ipv6_addresses=$(timeout 2s ss -H -l -t -n -p -6 2>/dev/null | ols_owned_listener_addresses) || ipv6_addresses=""
+            if grep -Eq '^(0\.0\.0\.0|\*):80$' <<< "$ipv4_addresses" && grep -Eq '^(0\.0\.0\.0|\*):443$' <<< "$ipv4_addresses" && \
+               grep -Eq '^(\[::\]|::|\*):80$' <<< "$ipv6_addresses" && grep -Eq '^(\[::\]|::|\*):443$' <<< "$ipv6_addresses"; then
+                return 0
+            fi
+        else
+            addresses=$(timeout 2s ss -H -l -t -n -p -4 2>/dev/null | ols_owned_listener_addresses) || addresses=""
+            if grep -Eq '^(0\.0\.0\.0|\*):80$' <<< "$addresses" && grep -Eq '^(0\.0\.0\.0|\*):443$' <<< "$addresses"; then return 0; fi
         fi
         sleep 1
     done
-    log_error "OpenLiteSpeed 未同时监听 80/443 端口"
+    [[ "$failure_mode" != return ]] || return 1
+    if [[ "${OLS_IPV6_ENABLED:-false}" == true ]]; then
+        log_error "未确认实际 OpenLiteSpeed 进程同时在 IPv4 和 IPv6 监听 80/443 端口"
+    fi
+    log_error "未确认实际 OpenLiteSpeed 进程同时监听 80/443 端口"
 }
 
 # ============================================================
@@ -657,6 +802,107 @@ download_file() {
         rm -f "$output"
     fi
     rm -f "$output"
+    return 1
+}
+
+download_official_wordpress_archive() {
+    local output="$1"
+    local php_cli="/usr/local/lsws/lsphp85/bin/php"
+    rm -f -- "$output"
+    # Follow only HTTPS redirects to WordPress-controlled package hosts. This
+    # receipt records our download source, not official checksum authentication.
+    if timeout 60s "$php_cli" -r '
+$output = $argv[1];
+$limit = (int) $argv[2];
+$url = "https://wordpress.org/latest.zip";
+for ($redirects = 0; $redirects <= 5; $redirects++) {
+    $parts = parse_url($url);
+    if (!$parts || ($parts["scheme"] ?? "") !== "https" ||
+        !in_array(strtolower($parts["host"] ?? ""), array("wordpress.org", "downloads.wordpress.org"), true) ||
+        isset($parts["user"]) || isset($parts["pass"]) || (isset($parts["port"]) && $parts["port"] !== 443)) { exit(1); }
+    $file = fopen($output, "wb");
+    if (!$file) { exit(1); }
+    $location = ""; $bytes = 0;
+    $curl = curl_init($url);
+    curl_setopt_array($curl, array(CURLOPT_FOLLOWLOCATION => false, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+        CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2, CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_TIMEOUT => 60, CURLOPT_FAILONERROR => true,
+        CURLOPT_HEADERFUNCTION => static function ($curl, $header) use (&$location) {
+            if (stripos($header, "HTTP/") === 0) { $location = ""; }
+            if (stripos($header, "Location:") === 0) {
+                if (strlen($header) > 4096) { return 0; }
+                $location = trim(substr($header, 9));
+            }
+            return strlen($header);
+        },
+        CURLOPT_WRITEFUNCTION => static function ($curl, $data) use ($file, &$bytes, $limit) {
+            $bytes += strlen($data);
+            return $bytes <= $limit ? fwrite($file, $data) : 0;
+        }));
+    $ok = curl_exec($curl); $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+    curl_close($curl); fclose($file);
+    if (!$ok) { exit(1); }
+    if ($status === 200) { exit($bytes > 0 ? 0 : 1); }
+    if (!in_array($status, array(301, 302, 303, 307, 308), true) || !$location || preg_match("/[\\x00-\\x20\\x7f]/", $location)) { exit(1); }
+    if (strpos($location, "//") === 0) { $url = "https:" . $location; }
+    elseif (strpos($location, "/") === 0) { $url = "https://" . $parts["host"] . $location; }
+    elseif (parse_url($location, PHP_URL_SCHEME) !== null) { $url = $location; }
+    else { $url = "https://" . $parts["host"] . rtrim(dirname($parts["path"] ?? "/"), "/") . "/" . $location; }
+}
+exit(1);
+' "$output" "$WORDPRESS_ZIP_MAX_BYTES" && file_size_within_limit "$output" "$WORDPRESS_ZIP_MAX_BYTES"; then
+        return 0
+    fi
+    rm -f -- "$output"
+    return 1
+}
+
+validate_installer_wordpress_archive() {
+    local archive="$1"
+    local php_cli="/usr/local/lsws/lsphp85/bin/php"
+    file_size_within_limit "$archive" "$WORDPRESS_ZIP_MAX_BYTES" || return 1
+    timeout 15s "$php_cli" -r '
+$zip = new ZipArchive();
+if ($zip->open($argv[1], ZipArchive::CHECKCONS) !== true || $zip->numFiles < 5 || $zip->numFiles > 20000) { exit(1); }
+$required = array_fill_keys(array("wordpress/wp-includes/version.php", "wordpress/wp-settings.php", "wordpress/wp-load.php", "wordpress/wp-admin/index.php", "wordpress/wp-includes/load.php"), false);
+$expanded = 0;
+for ($index = 0; $index < $zip->numFiles; $index++) {
+    $entry = $zip->statIndex($index); $name = $entry["name"] ?? "";
+    if (!$name || strpos($name, "\\") !== false || strpos($name, "\0") !== false ||
+        ($name !== "wordpress/" && strpos($name, "wordpress/") !== 0) ||
+        preg_match("~(?:^|/)(?:\\.\\.?)(?:/|$)~", $name) || strpos($name, "//") !== false) { exit(1); }
+    $expanded += $entry["size"];
+    if ($expanded > 1024 * 1024 * 1024 || $entry["size"] > 64 * 1024 * 1024) { exit(1); }
+    $system = 0; $attributes = 0;
+    if (!$zip->getExternalAttributesIndex($index, $system, $attributes)) { exit(1); }
+    $type = ($attributes >> 16) & 0170000;
+    if ($system === ZipArchive::OPSYS_UNIX && !in_array($type, array(0, 0040000, 0100000), true)) { exit(1); }
+    if (isset($required[$name])) {
+        if (substr($name, -1) === "/" || $type === 0040000) { exit(1); }
+        $required[$name] = true;
+    }
+}
+if (in_array(false, $required, true)) { exit(1); }
+$version = $zip->getFromName("wordpress/wp-includes/version.php", 65537);
+if (!is_string($version) || strlen($version) > 65536 || !preg_match("~[\\x24]wp_version\\s*=\\s*[\\x27\\x22][0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?[\\x27\\x22]\\s*;~", $version)) { exit(1); }
+$zip->close();
+' "$archive"
+}
+
+write_wordpress_origin_receipt() {
+    local archive="$1"
+    local receipt_stage=""
+    local php_cli="/usr/local/lsws/lsphp85/bin/php"
+    [[ -f "$archive" && ! -L "$archive" ]] || return 1
+    receipt_stage=$(mktemp "${archive}.origin.json.XXXXXXXX") || return 1
+    if chmod 0600 "$receipt_stage" && timeout 15s "$php_cli" -r '
+$sha = hash_file("sha256", $argv[1]); $bytes = filesize($argv[1]);
+if (!is_string($sha) || !preg_match("/^[0-9a-f]{64}$/D", $sha) || !is_int($bytes) || $bytes <= 0) { exit(1); }
+echo json_encode(array("source_url" => "https://wordpress.org/latest.zip", "sha256" => $sha, "archive_bytes" => $bytes), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), "\n";
+' "$archive" > "$receipt_stage" && mv -fT -- "$receipt_stage" "${archive}.origin.json"; then
+        return 0
+    fi
+    rm -f -- "$receipt_stage"
     return 1
 }
 
@@ -1170,6 +1416,14 @@ create_repair_backup() {
         [[ -f "$account_mfa_key" ]] && [[ ! -L "$account_mfa_key" ]] || \
             log_error "repair前双因素认证密钥不是安全常规文件"
         install -m 0600 "$account_mfa_key" "$REPAIR_BACKUP_DIR/account-mfa.key"
+    fi
+    # Website API credentials use a separate key too. Include it in the
+    # private repair snapshot; the downloadable SQLite backup excludes keys.
+    local cloudflare_security_key="${DB_PATH%/*}/cloudflare-security.key"
+    if [[ -e "$cloudflare_security_key" ]] || [[ -L "$cloudflare_security_key" ]]; then
+        [[ -f "$cloudflare_security_key" ]] && [[ ! -L "$cloudflare_security_key" ]] || \
+            log_error "repair前Cloudflare凭据密钥不是安全常规文件"
+        install -m 0600 "$cloudflare_security_key" "$REPAIR_BACKUP_DIR/cloudflare-security.key"
     fi
     if [[ -f "$DB_PATH" ]]; then
         sqlite3 "$DB_PATH" ".timeout 10000" ".backup $REPAIR_BACKUP_DIR/panel.db"
@@ -2402,7 +2656,7 @@ vhssl {
   keyFile                $OLS_CHECK_ROOT/default.key
   certFile               $OLS_CHECK_ROOT/default.crt
   certChain              0
-  sslProtocol            30
+  sslProtocol            24
 }
 OLSCHECKVHOSTEOF
     cat > /usr/local/lsws/conf/httpd_config.conf << OLSCHECKMAINEOF
@@ -2450,10 +2704,13 @@ listener OLSWPanelHTTPS {
   keyFile                $OLS_CHECK_ROOT/default.key
   certFile               $OLS_CHECK_ROOT/default.crt
   certChain              0
-  sslProtocol            30
+  sslProtocol            24
   map                    olsw_example example.test
 }
 OLSCHECKMAINEOF
+    # Parse both listener families in the disposable package probe without
+    # starting a web server or changing production IPv6/network settings.
+    append_ols_ipv6_listeners /usr/local/lsws/conf/httpd_config.conf 8080 8443 olsw_example example.test "$OLS_CHECK_ROOT"
     /usr/local/lsws/bin/openlitespeed -t
     log_info "OpenLiteSpeed/LSPHP 软件包检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH}"
     trap - EXIT
@@ -2997,10 +3254,20 @@ listener OLSWPanelHTTPS {
   keyFile                 /usr/local/lsws/conf/ols-wpanel/default.key
   certFile                /usr/local/lsws/conf/ols-wpanel/default.crt
   certChain               0
-  sslProtocol             30
+  sslProtocol             24
   map                     olsw_default *
 }
 OLSMANAGEDEOF
+OLS_IPV6_ENABLED=false
+if ols_ipv6_available; then
+    OLS_IPV4_REGISTRY="$INSTALL_WORKDIR/ols-ipv4-sites.conf"
+    cp -- "$OLS_MANAGED_CONF" "$OLS_IPV4_REGISTRY" || log_error "无法保留 OpenLiteSpeed IPv4 备用配置"
+    append_ols_ipv6_listeners "$OLS_MANAGED_CONF" 80 443 olsw_default '*' "$OLS_CONF_DIR"
+    OLS_IPV6_ENABLED=true
+    log_info "检测到可用 VPS IPv6，OpenLiteSpeed 将同时监听 IPv4 和 IPv6 的 80/443 端口"
+else
+    log_info "未检测到可用 VPS IPv6，保留 OpenLiteSpeed IPv4 监听"
+fi
 chmod 0640 "$OLS_MANAGED_CONF"
 
 if [[ -f "$OLS_MAIN_CONF" ]]; then
@@ -3138,11 +3405,31 @@ chown root:root "$OLS_DEFAULT_CONF"
 chmod 0640 "$OLS_MAIN_CONF" "$OLS_MANAGED_CONF" "$OLS_DEFAULT_CONF"
 mkdir -p /tmp/lshttpd/swap
 chown -R nobody:nogroup /tmp/lshttpd
-/usr/local/lsws/bin/openlitespeed -t || log_error "OpenLiteSpeed 基础配置检查失败"
-systemctl reset-failed lshttpd 2>/dev/null || true
-systemctl restart lshttpd || log_error "OpenLiteSpeed 重启失败"
-systemctl_wait_active_required lshttpd
-require_ols_listeners
+OLS_READY=false
+if [[ "$OLS_IPV6_ENABLED" == true ]]; then
+    # IPv6 is an automatic addition to the known-good IPv4 configuration. If
+    # OLS cannot parse, start or retain both families, restore only the exact
+    # registry saved before this installer appended the IPv6 listeners.
+    systemctl reset-failed lshttpd 2>/dev/null || true
+    if /usr/local/lsws/bin/openlitespeed -t && systemctl restart lshttpd && \
+       require_ols_listeners return && systemctl is-active --quiet lshttpd; then
+        OLS_READY=true
+    else
+        [[ -f "$OLS_IPV4_REGISTRY" && ! -L "$OLS_IPV4_REGISTRY" ]] || log_error "OpenLiteSpeed IPv4 备用配置不可用，拒绝继续"
+        cp -- "$OLS_IPV4_REGISTRY" "$OLS_MANAGED_CONF" || log_error "OpenLiteSpeed IPv4 配置恢复失败"
+        chown root:root "$OLS_MANAGED_CONF"
+        chmod 0640 "$OLS_MANAGED_CONF"
+        OLS_IPV6_ENABLED=false
+        log_warn "OpenLiteSpeed 双栈启动未通过验证，已回退到原有 IPv4 配置"
+    fi
+fi
+if ! $OLS_READY; then
+    /usr/local/lsws/bin/openlitespeed -t || log_error "OpenLiteSpeed 基础配置检查失败"
+    systemctl reset-failed lshttpd 2>/dev/null || true
+    systemctl restart lshttpd || log_error "OpenLiteSpeed 重启失败"
+    systemctl_wait_active_required lshttpd
+    require_ols_listeners
+fi
 log_info "OpenLiteSpeed 基础配置完成（WebAdmin 已禁用，站点由面板管理）"
 else
     log_info "repair模式不改写或重载 OpenLiteSpeed 配置"
@@ -3268,13 +3555,18 @@ WP_ZIP_TMP="$INSTALL_WORKDIR/wordpress.zip"
 if $REPAIR_MODE && file_size_within_limit "$WP_ZIP" "$WORDPRESS_ZIP_MAX_BYTES"; then
     log_info "repair模式保留现有WordPress备用包"
 else
+    rm -f -- "${WP_ZIP}.origin.json" 2>/dev/null || true
     if [[ -e "$WP_ZIP" ]] || [[ -L "$WP_ZIP" ]]; then
         log_warn "现有WordPress备用包不是安全常规文件或超过大小上限，正在替换"
         rm -f -- "$WP_ZIP"
     fi
     for i in 1 2 3; do
-        if download_file "https://wordpress.org/latest.zip" "$WP_ZIP_TMP" 60 "$WORDPRESS_ZIP_MAX_BYTES"; then
-            mv "$WP_ZIP_TMP" "$WP_ZIP"
+        if download_official_wordpress_archive "$WP_ZIP_TMP" && validate_installer_wordpress_archive "$WP_ZIP_TMP"; then
+            mv -fT -- "$WP_ZIP_TMP" "$WP_ZIP"
+            if ! write_wordpress_origin_receipt "$WP_ZIP"; then
+                rm -f -- "${WP_ZIP}.origin.json" 2>/dev/null || true
+                log_warn "WordPress 来源记录未保存，新网站将保留默认内容"
+            fi
             log_info "WordPress 下载完成"
             break
         fi

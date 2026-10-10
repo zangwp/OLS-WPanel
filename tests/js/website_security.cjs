@@ -18,6 +18,31 @@ function setup() {
     return {page,context,calls,notices};
 }
 
+test('monitoring save records the sent snapshot and preserves later edits without another write',async()=>{
+    const {page,context,calls,notices}=setup(),saving=deferred();
+    page.site.monitoring_enabled=false;page.site.monitoring_interval=5;page.monitoringEnabled=true;page.monitoringInterval=5;
+    page.refreshSiteSecurityAfterChange=()=>{};
+    context.api=async(url,options)=>{calls.push({url,options});return saving.promise;};
+    const pending=page.saveMonitoring();page.monitoringEnabled=false;page.monitoringInterval=10;await page.saveMonitoring();
+    assert.equal(calls.length,1);assert.equal(calls[0].options.body.enabled,true);assert.equal(calls[0].options.body.interval,5);
+    saving.resolve({success:true,data:{}});await pending;
+    assert.equal(page.site.monitoring_enabled,true);assert.equal(page.site.monitoring_interval,5);
+    assert.equal(page.monitoringEnabled,false);assert.equal(page.monitoringInterval,10);assert.equal(page.monitoringSaving,false);
+    assert.equal(notices.filter(n=>n[0]==='website.monitoring_saved').length,1);
+});
+
+test('failed or stale monitoring save cannot replace observed settings or claim success',async()=>{
+    const {page,context,notices}=setup();page.site.monitoring_enabled=false;page.site.monitoring_interval=5;
+    page.monitoringEnabled=true;page.monitoringInterval=10;
+    context.api=async()=>{throw Error('monitoring not saved');};await page.saveMonitoring();
+    assert.equal(page.site.monitoring_enabled,false);assert.equal(page.site.monitoring_interval,5);assert.equal(page.monitoringSaving,false);
+    assert.equal(notices.some(n=>n[0]==='website.monitoring_saved'),false);
+    const saving=deferred();context.api=()=>saving.promise;const pending=page.saveMonitoring();
+    page.site={id:2,monitoring_enabled:false,monitoring_interval:15};saving.resolve({success:true,data:{}});await pending;
+    assert.equal(page.site.monitoring_enabled,false);assert.equal(page.site.monitoring_interval,15);assert.equal(page.monitoringSaving,false);
+    assert.equal(notices.some(n=>n[0]==='website.monitoring_saved'),false);
+});
+
 test('unknown and configured checks never claim verified protection; only reliable true evidence is green', () => {
     const {page}=setup(); assert.equal(page.siteSecurityClass('https'),'badge-info');
     page.securityStatus={checks:[{key:'https',state:'configured',configured:true,effective:null},{key:'file_lock',state:'effective',effective:null},null,{key:'xmlrpc',state:'effective',effective:true}]};

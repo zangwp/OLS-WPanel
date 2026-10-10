@@ -26,6 +26,24 @@ func TestScanDefenseAllowsCommonProbePathWithoutBan(t *testing.T) {
 	}
 }
 
+func TestScanDefenseStillBansAfterWordPressLoginBan(t *testing.T) {
+	db := newScanDefenseTestDB(t)
+	tracker := &LoginAttemptTracker{DB: db}
+	insertTestBan(t, tracker, "203.0.113.10", "olswpanel-login")
+	router := newScanDefenseTestRouter(t, db)
+	performScanDefenseRequest(router, http.MethodGet, "/wp-config.php", "curl/8.0", "")
+	if banned, err := tracker.IsBanned("203.0.113.10"); err != nil || !banned {
+		t.Fatalf("panel scan remains unblocked after WordPress ban: banned=%t err=%v", banned, err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE source_jail='panel_scan'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("panel scan ban count=%d, want 1", count)
+	}
+}
+
 func TestScanDefenseAllowsBasicAuthHeaderWithoutBan(t *testing.T) {
 	db := newScanDefenseTestDB(t)
 	router := newScanDefenseTestRouter(t, db)

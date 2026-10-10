@@ -81,6 +81,9 @@ func RunMigrations() error {
 	if err := accountsecurity.InitAuditSchema(DB); err != nil {
 		return fmt.Errorf("account audit migration failed: %w", err)
 	}
+	if err := ensureCloudflareSecurityCoverageSchema(); err != nil {
+		return fmt.Errorf("Cloudflare website security migration failed: %w", err)
+	}
 	return nil
 }
 

@@ -3,8 +3,10 @@ package executor
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -24,20 +26,34 @@ const (
 	olsMetadataDomainsPrefix = "# OLS-WPanel-Domains: "
 	olsMetadataRootPrefix    = "# OLS-WPanel-VHRoot: "
 	olsDefaultVHostName      = "olsw_default"
-	AliasRedirectServe       = "serve"
-	AliasRedirectPermanent   = "301"
-	AliasRedirectTemporary   = "302"
+	// OpenLiteSpeed protocol bits: TLS 1.2 = 8, TLS 1.3 = 16.
+	olsTLSProtocols        = 24
+	AliasRedirectServe     = "serve"
+	AliasRedirectPermanent = "301"
+	AliasRedirectTemporary = "302"
 )
 
 var (
 	olsSafeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	olsSafeUserPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 	runOLSCommand      = func(name string, args ...string) ([]byte, error) {
-		return exec.Command(name, args...).CombinedOutput()
+		return runOLSCommandBounded(60*time.Second, name, args...)
 	}
 	lookupOLSDefaultVHostUser = user.Lookup
 	chownOLSDefaultVHostRoot  = os.Chown
 )
+
+func runOLSCommandBounded(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, name, args...)
+	command.WaitDelay = time.Second
+	output, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("%s 命令执行超时: %w", name, ctx.Err())
+	}
+	return output, err
+}
 
 type olsRuntimePaths struct {
 	root         string
@@ -277,7 +293,7 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 		out.WriteString("  compressArchive        1\n")
 		out.WriteString("}\n\n")
 	}
-	out.WriteString("index {\n  useServer              0\n  indexFiles             index.php,index.html,index.htm\n}\n\n")
+	out.WriteString("index {\n  useServer              0\n  indexFiles             index.php,index.html\n}\n\n")
 	out.WriteString("scripthandler {\n")
 	fmt.Fprintf(&out, "  add                    lsapi:%s php\n", handlerName)
 	out.WriteString("}\n\n")
@@ -400,7 +416,7 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&out, "\nvhssl {\n  keyFile                %s\n  certFile               %s\n  certChain              1\n  sslProtocol            30\n}\n", key, cert)
+		fmt.Fprintf(&out, "\nvhssl {\n  keyFile                %s\n  certFile               %s\n  certChain              1\n  sslProtocol            %d\n}\n", key, cert, olsTLSProtocols)
 	}
 
 	return out.String(), nil
@@ -468,6 +484,10 @@ func validateOLSVHostContent(content, targetPath string) error {
 }
 
 func renderOLSManagedRegistry(enabledDir string) (string, error) {
+	return renderOLSManagedRegistryWithIPv6(enabledDir, olsIPv6Available())
+}
+
+func renderOLSManagedRegistryWithIPv6(enabledDir string, ipv6 bool) (string, error) {
 	entries, err := os.ReadDir(enabledDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -554,21 +574,28 @@ func renderOLSManagedRegistry(enabledDir string) (string, error) {
 		fmt.Fprintf(&out, "  configFile             %s\n", filepath.ToSlash(meta.configFile))
 		out.WriteString("}\n\n")
 	}
-	out.WriteString("listener OLSWPanelHTTP {\n  address                 *:80\n  secure                  0\n")
-	for _, meta := range metas {
-		fmt.Fprintf(&out, "  map                    %s %s\n", meta.name, strings.Join(meta.domains, ","))
+	writeListener := func(name, address string, secure bool) {
+		fmt.Fprintf(&out, "listener %s {\n  address                 %s\n", name, address)
+		if secure {
+			out.WriteString("  secure                  1\n")
+			fmt.Fprintf(&out, "  keyFile                 %s\n", filepath.ToSlash(paths.listenerKey))
+			fmt.Fprintf(&out, "  certFile                %s\n", filepath.ToSlash(paths.listenerCert))
+			fmt.Fprintf(&out, "  certChain               0\n  sslProtocol             %d\n", olsTLSProtocols)
+		} else {
+			out.WriteString("  secure                  0\n")
+		}
+		for _, meta := range metas {
+			fmt.Fprintf(&out, "  map                    %s %s\n", meta.name, strings.Join(meta.domains, ","))
+		}
+		fmt.Fprintf(&out, "  map                    %s *\n", olsDefaultVHostName)
+		out.WriteString("}\n\n")
 	}
-	fmt.Fprintf(&out, "  map                    %s *\n", olsDefaultVHostName)
-	out.WriteString("}\n\n")
-	out.WriteString("listener OLSWPanelHTTPS {\n  address                 *:443\n  secure                  1\n")
-	fmt.Fprintf(&out, "  keyFile                 %s\n", filepath.ToSlash(paths.listenerKey))
-	fmt.Fprintf(&out, "  certFile                %s\n", filepath.ToSlash(paths.listenerCert))
-	out.WriteString("  certChain               0\n  sslProtocol             30\n")
-	for _, meta := range metas {
-		fmt.Fprintf(&out, "  map                    %s %s\n", meta.name, strings.Join(meta.domains, ","))
+	writeListener("OLSWPanelHTTP", "*:80", false)
+	writeListener("OLSWPanelHTTPS", "*:443", true)
+	if ipv6 {
+		writeListener("OLSWPanelHTTPIPv6", "[ANY]:80", false)
+		writeListener("OLSWPanelHTTPSIPv6", "[ANY]:443", true)
 	}
-	fmt.Fprintf(&out, "  map                    %s *\n", olsDefaultVHostName)
-	out.WriteString("}\n")
 	return out.String(), nil
 }
 
@@ -687,17 +714,21 @@ func testAndRestartOpenLiteSpeed() ([]byte, error) {
 	}
 	restartOut, err := runOLSCommand("systemctl", "restart", "lshttpd")
 	if err != nil {
-		return restartOut, fmt.Errorf("OpenLiteSpeed 优雅重载失败: %s", strings.TrimSpace(string(restartOut)))
+		return restartOut, fmt.Errorf("OpenLiteSpeed 重启失败: %s", strings.TrimSpace(string(restartOut)))
 	}
 	return append(testOut, restartOut...), nil
 }
 
 func reloadOLSManagedRegistry(enabledDir string) ([]byte, error) {
+	return reloadOLSManagedRegistryWithIPv6(enabledDir, olsIPv6Available())
+}
+
+func reloadOLSManagedRegistryWithIPv6(enabledDir string, ipv6 bool) ([]byte, error) {
 	paths := currentOLSRuntimePaths()
 	if err := ensureOLSDefaultVHost(paths); err != nil {
 		return nil, err
 	}
-	content, err := renderOLSManagedRegistry(enabledDir)
+	content, err := renderOLSManagedRegistryWithIPv6(enabledDir, ipv6)
 	if err != nil {
 		return nil, err
 	}
@@ -710,8 +741,32 @@ func reloadOLSManagedRegistry(enabledDir string) ([]byte, error) {
 		return nil, fmt.Errorf("写入 OpenLiteSpeed 站点注册表失败: %w", err)
 	}
 	out, applyErr := testAndRestartOpenLiteSpeed()
+	if applyErr == nil && ipv6 {
+		applyErr = verifyOLSIPv6Listeners()
+	}
 	if applyErr == nil {
 		return out, nil
+	}
+	if ipv6 {
+		// IPv6 listeners are optional. Keep this exact site's IPv4 changes if
+		// only the additional listeners fail validation or cannot be bound.
+		ipv4, fallbackErr := renderOLSManagedRegistryWithIPv6(enabledDir, false)
+		if fallbackErr == nil {
+			fallbackErr = writeOLSFileAtomic(paths.managed, []byte(ipv4), 0640)
+		}
+		if fallbackErr == nil {
+			var fallbackOut []byte
+			fallbackOut, fallbackErr = testAndRestartOpenLiteSpeed()
+			out = append(out, fallbackOut...)
+		}
+		if fallbackErr == nil {
+			fallbackErr = verifyOLSWebListeners(false)
+		}
+		if fallbackErr == nil {
+			log.Printf("[OpenLiteSpeed] IPv6 监听暂不可用，已保留 IPv4 配置: %v", applyErr)
+			return out, nil
+		}
+		applyErr = fmt.Errorf("%v；IPv4 配置回退也未通过: %v", applyErr, fallbackErr)
 	}
 	restoreErr := restoreOLSFile(paths.managed, old, existed, 0640)
 	_, restartErr := testAndRestartOpenLiteSpeed()
@@ -780,7 +835,9 @@ func applyOLSVHostConfig(engine *TemplateEngine, content, targetPath, enabledPat
 		backupDir := filepath.Join(engine.BackupDir, "openlitespeed")
 		_ = os.MkdirAll(backupDir, 0750)
 		backupName := filepath.Base(targetPath) + ".bak." + strconv.FormatInt(time.Now().UnixNano(), 10)
-		_ = os.WriteFile(filepath.Join(backupDir, backupName), oldConfig, 0600)
+		if err := os.WriteFile(filepath.Join(backupDir, backupName), oldConfig, 0600); err == nil {
+			cleanupOLSVHostConfigBackups(backupDir, targetPath, olsVHostConfigBackupKeepCount)
+		}
 	}
 	return nil
 }

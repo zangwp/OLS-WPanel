@@ -21,6 +21,8 @@ type LoginAttemptTracker struct {
 	mu               sync.Mutex
 }
 
+var loginAttemptAddPersistBan = executor.AddPersistBan
+
 func NewLoginAttemptTracker(db *sql.DB, maxAttempts int, windowMinutes int, banHours int) *LoginAttemptTracker {
 	return &LoginAttemptTracker{
 		DB:               db,
@@ -92,16 +94,21 @@ func (t *LoginAttemptTracker) countRecent(ip string) int {
 }
 
 func (t *LoginAttemptTracker) banIP(ip string, attemptType string) {
-	var existing int
-	t.DB.QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE ip_address = ? AND unbanned_at IS NULL AND (expires_at IS NULL OR expires_at > datetime('now'))`, ip).Scan(&existing)
-	if existing > 0 {
+	// Only a ban that actually gates panel access may replace this ban.
+	// A WordPress-login-only ban is deliberately ignored by IsBanned.
+	existing, err := t.IsBanned(ip)
+	if err != nil {
+		log.Printf("account security: panel ban lookup failed: %v", err)
+		return
+	}
+	if existing {
 		return
 	}
 
 	reason := fmt.Sprintf("panel_%s: 连续%d次认证失败", attemptType, t.MaxAttempts)
 	expiresAt := time.Now().UTC().Add(time.Duration(t.BanDurationHours) * time.Hour).Format("2006-01-02 15:04:05")
 
-	_, err := t.DB.Exec(
+	_, err = t.DB.Exec(
 		`INSERT INTO firewall_bans (ip_address, ban_level, reason, source_jail, expires_at, ban_count)
 		 VALUES (?, 3, ?, 'panel', ?, 1)`,
 		ip, reason, expiresAt,
@@ -116,7 +123,7 @@ func (t *LoginAttemptTracker) banIP(ip string, attemptType string) {
 		}
 	}
 
-	if err := executor.AddPersistBan(ip); err != nil {
+	if err := loginAttemptAddPersistBan(ip); err != nil {
 		log.Printf("登录防护 IP %s 已写入数据库，但持久封禁层应用失败，将等待同步重试: %v", ip, err)
 	}
 }

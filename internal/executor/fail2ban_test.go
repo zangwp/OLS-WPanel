@@ -1468,19 +1468,27 @@ func TestNormalizeCDNRealIPHeaderAndRanges(t *testing.T) {
 func TestFail2banWhitelistScopesKeepSSHIndependent(t *testing.T) {
 	settings := map[string]string{
 		"official_whitelist_ips": "173.245.48.0/20\n66.249.64.0/19",
+		"cloudflare_realip_ips":  "173.245.48.0/20\n2400:cb00::/32",
+		"googlebot_ips":         "66.249.64.0/19",
+		"bingbot_ips":           "157.55.39.0/24",
 		"whitelist_ips":          "203.0.113.10",
 		"ssh_whitelist_ips":      "198.51.100.7",
 	}
 	web, ssh := fail2banWhitelistScopes(settings, "192.0.2.0/24")
-	for _, want := range []string{"173.245.48.0/20", "66.249.64.0/19", "203.0.113.10", "192.0.2.0/24"} {
+	for _, want := range []string{"173.245.48.0/20", "2400:cb00::/32", "203.0.113.10", "192.0.2.0/24"} {
 		if !strings.Contains(web, want) {
 			t.Fatalf("web whitelist %q missing %q", web, want)
+		}
+	}
+	for _, forbidden := range []string{"66.249.64.0/19", "157.55.39.0/24"} {
+		if strings.Contains(web, forbidden) {
+			t.Fatalf("web whitelist %q unexpectedly exempts crawler %q", web, forbidden)
 		}
 	}
 	if ssh != "198.51.100.7" {
 		t.Fatalf("SSH whitelist = %q, want only the explicit SSH address", ssh)
 	}
-	for _, forbidden := range []string{"173.245.48.0/20", "66.249.64.0/19", "203.0.113.10", "192.0.2.0/24"} {
+	for _, forbidden := range []string{"173.245.48.0/20", "2400:cb00::/32", "66.249.64.0/19", "157.55.39.0/24", "203.0.113.10", "192.0.2.0/24"} {
 		if strings.Contains(ssh, forbidden) {
 			t.Fatalf("SSH whitelist %q unexpectedly contains web trust %q", ssh, forbidden)
 		}

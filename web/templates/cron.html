@@ -14,7 +14,7 @@
     <div class="card">
         <div class="overflow-x-auto">
             <table class="w-full cron-jobs">
-                <colgroup><col style="width:22%"><col style="width:10%"><col style="width:11%"><col style="width:18%"><col style="width:8%"><col style="width:16%"><col style="width:15%"></colgroup>
+                <colgroup><col style="width:22%"><col style="width:10%"><col style="width:11%"><col style="width:18%"><col style="width:8%"><col style="width:16%"><col style="width:180px"></colgroup>
                 <thead class="border-b border-gray-700">
                     <tr>
                         <th class="table-header">{{t .Lang "cron.job_name"}}</th>
@@ -23,7 +23,7 @@
                         <th class="table-header">{{t .Lang "cron.content"}}</th>
                         <th class="table-header">{{t .Lang "cron.status"}}</th>
                         <th class="table-header">{{t .Lang "cron.last_manual_run"}}</th>
-                        <th class="table-header">{{t .Lang "cron.actions"}}</th>
+                        <th class="table-header cron-actions-column">{{t .Lang "cron.actions"}}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -38,10 +38,10 @@
                                       x-text="job.runtime_reason === 'migration_locked' ? t('cron.status_migration_locked') : (job.runtime_reason === 'paused' ? t('cron.status_site_paused') : (job.enabled ? t('cron.status_enabled') : t('cron.status_disabled')))"></span>
                             </td>
                             <td class="table-cell text-xs text-gray-400" :title="job.last_run_at || ''" x-text="formatRunTime(job.last_run_at)"></td>
-                            <td class="table-cell">
-                                <div class="flex flex-wrap gap-1">
+                            <td class="table-cell cron-actions-column">
+                                <div class="cron-job-actions flex flex-wrap gap-1" :class="{ 'cron-wp-actions': job.task_type === 'wp_cron' }">
                                     <button x-show="job.task_type !== 'wp_cron'" @click="runJob(job)" :disabled="job.running" class="btn-secondary text-xs py-1 px-2" :class="job.running ? 'opacity-50 cursor-not-allowed' : ''" x-text="job.running ? t('cron.job_running') : t('cron.run')"></button>
-                                    <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
+                                    <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="cron-site-settings text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
                                     <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "cron.edit"}}</button>
                                     <button x-show="canDeleteJob(job)" @click="deleteJob(job)" :disabled="job.running || deletingId !== null" class="btn-danger text-xs py-1 px-2">{{t .Lang "cron.delete"}}</button>
                                 </div>

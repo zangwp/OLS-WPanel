@@ -9,15 +9,14 @@
         <template x-if="!status.installed"><a :href="safeAddress(status.install_url) || '#'" :aria-disabled="!safeAddress(status.install_url)" :tabindex="safeAddress(status.install_url) ? 0 : -1" @click="if (!safeAddress(status.install_url)) $event.preventDefault()" target="_blank" rel="noopener noreferrer" class="btn-primary mt-4">{{t .Lang "wp_access.open_install"}}</a></template>
         <template x-if="status.installed"><div>
         <div class="wp-access-actions mt-4">
-            <button x-show="!canSetupAuthorization()" type="button" class="btn-primary" :disabled="!canAuthorize() || busy || loading" @click="toggleAuthorization()" :aria-expanded="loginOpen" aria-controls="wp-access-login-form" aria-describedby="wp-access-availability">{{t .Lang "wp_access.one_click"}}</button>
+            <button x-show="!canSetupAuthorization()" type="button" class="btn-primary" :disabled="!canAuthorize() || busy || loading" @click="toggleAuthorization()" :aria-expanded="(status.administrators || []).length > 1 ? loginOpen : null" aria-controls="wp-access-login-form" aria-describedby="wp-access-availability" x-text="busy ? t('wp_access.authorizing') : t('wp_access.one_click')"></button>
             <button x-show="canSetupAuthorization()" type="button" class="btn-primary" :disabled="busy || loading" @click="openAuthorizationSettings()" :aria-expanded="settingsOpen" aria-controls="wp-access-settings" aria-describedby="wp-access-availability">{{t .Lang "wp_access.setup_authorization"}}</button>
             <p id="wp-access-availability" x-show="!canAuthorize()" class="text-sm text-gray-500" x-text="reasonText()"></p>
         </div>
+        <p x-show="canAuthorize()" class="text-xs text-gray-500 mt-3">{{t .Lang "wp_access.ticket_notice"}}</p>
         <form id="wp-access-login-form" x-show="loginOpen && canAuthorize()" x-cloak @submit.prevent="login()" class="wp-access-form">
             <label class="block"><span class="label">{{t .Lang "wp_access.administrator"}}</span><select x-model="administratorID" class="input-field" required :disabled="busy"><option value="">{{t .Lang "wp_access.choose_administrator"}}</option><template x-for="administrator in status.administrators || []" :key="administrator.id"><option :value="String(administrator.id)" :selected="String(administrator.id) === administratorID" x-text="administrator.display_name + ' (' + administrator.login + ')'"></option></template></select></label>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4"><label><span class="label">{{t .Lang "wp_access.panel_password"}}</span><input type="password" x-model="password" autocomplete="current-password" required :disabled="busy" class="input-field"></label><label><span class="label">{{t .Lang "wp_access.panel_code"}}</span><input type="text" x-model="code" autocomplete="one-time-code" :disabled="busy" class="input-field"></label></div>
-            <p class="text-xs text-gray-500 mt-3">{{t .Lang "wp_access.ticket_notice"}}</p>
-            <div class="flex flex-wrap gap-2 mt-4"><button type="submit" class="btn-primary" :disabled="busy || loading || !administratorID || !password" x-text="busy ? t('wp_access.authorizing') : t('wp_access.authorize_login')"></button><button type="button" class="btn-secondary" :disabled="busy" @click="closeLogin()">{{t .Lang "common.cancel"}}</button></div>
+            <div class="flex flex-wrap gap-2 mt-4"><button type="submit" class="btn-primary" :disabled="busy || loading || !administratorID" x-text="busy ? t('wp_access.authorizing') : t('wp_access.authorize_login')"></button><button type="button" class="btn-secondary" :disabled="busy" @click="closeLogin()">{{t .Lang "common.cancel"}}</button></div>
         </form>
 
         <details id="wp-access-settings" class="wp-access-settings mt-5" :open="settingsOpen" @toggle="settingsOpen = $el.open; if (!settingsOpen) { settingsPassword = ''; settingsCode = ''; }"><summary>{{t .Lang "wp_access.settings_title"}}</summary>
@@ -43,7 +42,7 @@ function wordpressPanelAccess() {
     return {
         status: null, loading: false, busy: false, error: '', generation: 0, readController: null, loginGeneration: 0, loginPopup: null, destroyed: false,
         suffix: '', enableSSO: false, administratorID: '',
-        password: '', code: '', settingsPassword: '', settingsCode: '', loginOpen: false, settingsOpen: false,
+        settingsPassword: '', settingsCode: '', loginOpen: false, settingsOpen: false,
         init() {
             this.$watch?.('detailTab', tab => {
                 if (tab === 'overview' && !this.status) this.load();
@@ -71,10 +70,13 @@ function wordpressPanelAccess() {
             const key = 'wp_access.reason_' + reason, value = t(key);
             return value === key ? t('wp_access.reason_unavailable') : value;
         },
-        toggleAuthorization() {
+        async toggleAuthorization() {
             if (this.busy || this.loading || !this.canAuthorize()) return;
             if (this.loginOpen) { this.closeLogin(); return; }
-            this.settingsOpen = false; this.settingsPassword = ''; this.settingsCode = ''; this.loginOpen = true;
+            this.settingsOpen = false; this.settingsPassword = ''; this.settingsCode = '';
+            const administrators = (this.status.administrators || []).filter(admin => Number.isSafeInteger(admin.id) && admin.id > 0);
+            if (administrators.length === 1) { this.administratorID = String(administrators[0].id); return this.login(); }
+            this.loginOpen = true;
         },
         openAuthorizationSettings() { if (this.busy || this.loading || !this.canSetupAuthorization()) return; this.closeLogin(); this.settingsOpen = true; },
         errorText(error) { const key = 'wp_access.error_' + String(error.code || '').replace(/^wp_access_/, ''); const value = t(key); return value === key ? error.message || t('common.operation_failed') : value; },
@@ -96,7 +98,7 @@ function wordpressPanelAccess() {
             finally { if (generation === this.generation) { this.loading = false; this.readController = null; } }
         },
         resetSettings() { this.suffix = this.status?.login_suffix || ''; this.enableSSO = this.status?.sso_enabled === true; },
-        closeLogin() { ++this.loginGeneration; this.loginOpen = false; this.password = ''; this.code = ''; this.loginPopup?.close(); this.loginPopup = null; },
+        closeLogin() { ++this.loginGeneration; this.loginOpen = false; this.loginPopup?.close(); this.loginPopup = null; },
         async copyAddress() { const url = this.safeAddress(this.status?.installed ? this.status.login_url : this.status?.install_url); if (!url) return; try { await navigator.clipboard.writeText(url); showToast(t('common.copied'), 'success'); } catch (_) { this.error = t('common.operation_failed'); } },
         async save() {
             if (this.busy || this.loading || !this.settingsPassword || this.site?.file_lock_enabled) return;
@@ -117,7 +119,7 @@ function wordpressPanelAccess() {
             finally { this.busy = false; }
         },
         async login() {
-            if (this.busy || this.loading || this.destroyed || this.detailTab !== 'overview' || !this.canAuthorize() || !this.password || !(this.status.administrators || []).some(admin => String(admin.id) === this.administratorID)) return;
+            if (this.busy || this.loading || this.destroyed || this.detailTab !== 'overview' || !this.canAuthorize() || !(this.status.administrators || []).some(admin => Number.isSafeInteger(admin.id) && admin.id > 0 && String(admin.id) === this.administratorID)) return;
             const generation = ++this.loginGeneration, siteID = this.site.id;
             const current = () => generation === this.loginGeneration && this.site?.id === siteID && this.detailTab === 'overview' && !this.destroyed;
             const targetName = 'ols_wp_' + crypto.randomUUID().replaceAll('-', ''), popup = window.open('about:blank', targetName);
@@ -126,7 +128,7 @@ function wordpressPanelAccess() {
             this.loginPopup = popup;
             this.busy = true; this.error = '';
             try {
-                const response = await api('/websites/' + siteID + '/wp-panel-access/login', {method:'POST',body:{administrator_id:Number(this.administratorID),current_password:this.password,code:this.code,confirm:true},silent:true,allowAuthFailure:true,timeout:30000});
+                const response = await api('/websites/' + siteID + '/wp-panel-access/login', {method:'POST',body:{administrator_id:Number(this.administratorID),confirm:true},silent:true,timeout:30000});
                 if (!current()) throw new Error('authorization_cancelled');
                 const ticket = response.data, action = this.safeAddress(ticket?.action_url), expires = Date.parse(ticket?.expires_at);
                 const expectedPath = (this.status.installation_path || '/').replace(/\/$/, '') + '/index.php';
@@ -140,7 +142,7 @@ function wordpressPanelAccess() {
             } catch (error) {
                 popup.close(); if (current()) this.error = this.errorText(error);
                 try { await api('/websites/' + siteID + '/wp-panel-access/revoke', {method:'POST',body:{},silent:true}); } catch (_) {}
-            } finally { this.loginPopup = null; this.password = ''; this.code = ''; this.busy = false; }
+            } finally { this.loginPopup = null; this.busy = false; }
         },
         destroy() { this.destroyed = true; this.cancelRead(); this.closeLogin(); this.settingsPassword = ''; this.settingsCode = ''; },
     };

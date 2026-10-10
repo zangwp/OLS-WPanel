@@ -530,12 +530,12 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 		return TaskResult{Success: false, Message: "刷新官方白名单失败: 数据库未初始化"}
 	}
 	updates := make(map[string]securitySettingUpdate)
-	var refreshedCloudflareIPs []string
+	var effectiveCloudflareIPs []string
 
-	if cfIPs, err := fetchCloudflareIPs(); err == nil {
+	if cfIPs, err := refreshOfficialCloudflareIPs(); err == nil {
 		allIPs = append(allIPs, cfIPs...)
 		details = append(details, fmt.Sprintf("Cloudflare: %d 条", len(cfIPs)))
-		refreshedCloudflareIPs = append([]string(nil), cfIPs...)
+		effectiveCloudflareIPs = append([]string(nil), cfIPs...)
 		updates["cloudflare_realip_ips"] = securitySettingUpdate{
 			value:       strings.Join(cfIPs, "\n"),
 			description: "Cloudflare 官方 IP 段缓存",
@@ -546,9 +546,10 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 			return TaskResult{Success: false, Message: fmt.Sprintf("读取 Cloudflare IP 段缓存失败: %v", cacheErr)}
 		}
 		allIPs = append(allIPs, cfIPs...)
+		effectiveCloudflareIPs = append([]string(nil), cfIPs...)
 		details = append(details, fmt.Sprintf("Cloudflare: 获取失败，沿用缓存 %d 条", len(cfIPs)))
 	}
-	googleIPs, googleSource, googleErr := fetchGooglebotIPsWithFallback()
+	googleIPs, googleSource, googleErr := refreshOfficialGooglebotIPs()
 	if googleErr == nil {
 		allIPs = append(allIPs, googleIPs...)
 		details = append(details, fmt.Sprintf("Googlebot: %d 条（%s）", len(googleIPs), googlebotSourceLabel(googleSource)))
@@ -569,7 +570,7 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 			details = append(details, "Googlebot: 官方与中转均失败，暂无有效缓存，可手动导入")
 		}
 	}
-	if bingIPs, err := fetchBingbotIPs(); err == nil {
+	if bingIPs, err := refreshOfficialBingbotIPs(); err == nil {
 		allIPs = append(allIPs, bingIPs...)
 		details = append(details, fmt.Sprintf("Bingbot: %d 条", len(bingIPs)))
 		updates["bingbot_ips"] = securitySettingUpdate{value: strings.Join(bingIPs, "\n"), description: "bingbot_ips 官方 IP 段缓存"}
@@ -590,20 +591,55 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 		value:       time.Now().UTC().Format("2006-01-02 15:04:05"),
 		description: "官方 IP 白名单最近更新时间",
 	}
+	selectedCloudflare, err := selectedCachedCloudflareProxy(db)
+	if err != nil {
+		return TaskResult{Success: false, Message: fmt.Sprintf("读取 Cloudflare 真实 IP 绑定失败: %v", err)}
+	}
+	if selectedCloudflare {
+		if len(effectiveCloudflareIPs) == 0 {
+			return TaskResult{Success: false, Message: "Cloudflare 官方网段获取失败且暂无有效缓存，未修改原可信代理配置"}
+		}
+		if err := refreshTrustedProxyReady(); err != nil {
+			return TaskResult{Success: false, Message: err.Error()}
+		}
+	}
+	previous, err := snapshotRefreshSecuritySettings(db, updates)
+	if err != nil {
+		return TaskResult{Success: false, Message: fmt.Sprintf("读取官方缓存快照失败: %v", err)}
+	}
 	if err := writeSecuritySettingUpdates(db, updates); err != nil {
 		return TaskResult{Success: false, Message: fmt.Sprintf("保存官方白名单缓存失败: %v", err)}
 	}
 
-	if len(refreshedCloudflareIPs) > 0 {
-		if err := DeployCloudflareRealIPConfig(refreshedCloudflareIPs); err != nil {
-			details = append(details, "Cloudflare Real IP: 配置失败")
+	rollback := func(cause error, restoreACL, restoreFail2ban bool) TaskResult {
+		var recovery []error
+		if err := restoreRefreshSecuritySettings(db, previous); err != nil {
+			recovery = append(recovery, fmt.Errorf("恢复官方缓存失败: %w", err))
 		} else {
-			details = append(details, "Cloudflare Real IP: 已更新")
+			if restoreACL {
+				if err := ApplyOLSTrustedProxyList(); err != nil {
+					recovery = append(recovery, fmt.Errorf("恢复 OpenLiteSpeed 可信代理 ACL 失败: %w", err))
+				}
+			}
+			if restoreFail2ban {
+				if err := apply(); err != nil {
+					recovery = append(recovery, fmt.Errorf("恢复 Fail2ban 配置失败: %w", err))
+				}
+			}
 		}
+		if len(recovery) > 0 {
+			return TaskResult{Success: false, Message: fmt.Sprintf("官方网段刷新未生效，恢复未完成，请人工检查: %v", errors.Join(append([]error{cause}, recovery...)...))}
+		}
+		return TaskResult{Success: false, Message: fmt.Sprintf("官方网段刷新未生效，原缓存与已修改配置已恢复: %v", cause)}
 	}
-
+	if selectedCloudflare {
+		if err := ApplyOLSTrustedProxyList(); err != nil {
+			return rollback(fmt.Errorf("应用 OpenLiteSpeed 可信代理 ACL 失败: %w", err), true, false)
+		}
+		details = append(details, "Cloudflare Real IP: 可信代理 ACL 已核对更新")
+	}
 	if err := apply(); err != nil {
-		return TaskResult{Success: false, Message: err.Error()}
+		return rollback(fmt.Errorf("应用 Fail2ban 配置失败: %w", err), selectedCloudflare, true)
 	}
 
 	return TaskResult{
@@ -665,7 +701,12 @@ func readCachedSecurityIPRanges(db *sql.DB, key string) ([]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
 	}
-	ips, err := NormalizeOfficialIPRanges(raw)
+	var ips []string
+	if key == "cloudflare_realip_ips" {
+		ips, err = normalizeCloudflareIPRanges(raw, 0)
+	} else {
+		ips, err = NormalizeOfficialIPRanges(raw)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("invalid cached ranges for %q: %w", key, err)
 	}
@@ -699,7 +740,7 @@ func applyFail2banSettingsLocked() error {
 
 	settings := make(map[string]string)
 	for _, key := range []string{
-		"official_whitelist_ips",
+		"cloudflare_realip_ips",
 		"whitelist_ips",
 		"ssh_whitelist_ips",
 		"fail2ban_maxretry",
@@ -764,10 +805,11 @@ func applyFail2banSettingsLocked() error {
 }
 
 func fail2banWhitelistScopes(settings map[string]string, cdnRealIPIPs string) (webIPs, sshIPs string) {
-	// Official crawler/CDN ranges and website exceptions are only safe for web
-	// jails. SSH has a separate, deliberately empty-by-default allowlist.
+	// Proxy infrastructure must not be banned by web jails. Official crawler
+	// ranges remain identification data, not automatic immunity from attacks.
+	// SSH has a separate, deliberately empty-by-default allowlist.
 	webIPs = joinSecurityIPLists(
-		settings["official_whitelist_ips"],
+		settings["cloudflare_realip_ips"],
 		settings["whitelist_ips"],
 		cdnRealIPIPs,
 	)
@@ -1586,25 +1628,30 @@ func parseBannedIPs(status string) []string {
 }
 
 func fetchCloudflareIPs() ([]string, error) {
+	return fetchCloudflareIPsWithCommand(executeCommand)
+}
+
+func fetchCloudflareIPsWithCommand(run func(string, ...string) (string, error)) ([]string, error) {
 	var ips []string
-	for _, url := range []string{
+	for family, url := range []string{
 		"https://www.cloudflare.com/ips-v4/",
 		"https://www.cloudflare.com/ips-v6/",
 	} {
-		out, err := executeCommand("curl", "-s", "-f", "-L", url)
-		if err == nil {
-			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-				line = strings.TrimSpace(line)
-				if line != "" {
-					ips = append(ips, line)
-				}
-			}
+		out, err := run("curl", "-fsSL", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "5", "--max-time", "20", url)
+		if err != nil {
+			return nil, fmt.Errorf("无法完整获取 Cloudflare IPv%d 官方网段，保留原缓存", 4+family*2)
 		}
+		bits := 32
+		if family == 1 {
+			bits = 128
+		}
+		ranges, err := normalizeCloudflareIPRanges(out, bits)
+		if err != nil {
+			return nil, fmt.Errorf("Cloudflare IPv%d 官方网段为空或无效，保留原缓存: %w", 4+family*2, err)
+		}
+		ips = append(ips, ranges...)
 	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("无法获取 Cloudflare IP 段")
-	}
-	return ips, nil
+	return uniqueStrings(ips), nil
 }
 
 func fetchGooglebotIPs() ([]string, error) {
@@ -1735,7 +1782,11 @@ func uniqueStrings(values []string) []string {
 }
 
 func fetchBingbotIPs() ([]string, error) {
-	out, err := executeCommand("curl", "-s", "-f", "-L", "https://www.bing.com/toolbox/bingbot.json")
+	return fetchBingbotIPsWithCommand(executeCommand)
+}
+
+func fetchBingbotIPsWithCommand(run func(string, ...string) (string, error)) ([]string, error) {
+	out, err := run("curl", "-s", "-f", "-L", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "5", "--max-time", "20", "https://www.bing.com/toolbox/bingbot.json")
 	if err != nil {
 		return nil, err
 	}
@@ -1750,14 +1801,29 @@ func fetchBingbotIPs() ([]string, error) {
 	}
 	var ips []string
 	for _, p := range data.Prefixes {
-		if p.IPv4Prefix != "" {
-			ips = append(ips, p.IPv4Prefix)
+		if p.IPv4Prefix == "" && p.IPv6Prefix == "" {
+			return nil, fmt.Errorf("Bingbot 官方网段条目为空")
 		}
-		if p.IPv6Prefix != "" {
-			ips = append(ips, p.IPv6Prefix)
+		for _, prefix := range []struct {
+			value string
+			bits  int
+		}{{p.IPv4Prefix, 32}, {p.IPv6Prefix, 128}} {
+			if prefix.value == "" {
+				continue
+			}
+			value := strings.TrimSpace(prefix.value)
+			ip, network, err := net.ParseCIDR(value)
+			if err != nil {
+				return nil, fmt.Errorf("Bingbot 官方网段不是有效 CIDR: %s", value)
+			}
+			_, bits := network.Mask.Size()
+			if bits != prefix.bits || (bits == 128 && ip.To4() != nil) {
+				return nil, fmt.Errorf("Bingbot 官方网段地址族与字段不匹配: %s", value)
+			}
+			ips = append(ips, value)
 		}
 	}
-	return ips, nil
+	return validateOfficialIPRanges(ips)
 }
 
 func executeManualBan(task *Task) TaskResult {
@@ -1847,47 +1913,8 @@ func parseIntOr(s string, def int) int {
 	return def
 }
 
-func RunWhitelistRefresh() string {
-	return executeRefreshWhitelist(&Task{ID: "cli-refresh", Type: TaskRefreshWhitelist}).Message
-}
-
-func DeployWhitelistTimer() error {
-	timerUnit := `[Unit]
-Description=OLS WPanel Weekly Whitelist Refresh
-Requires=olswpanel-whitelist.service
-
-[Timer]
-OnCalendar=Mon *-*-* 04:00:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-`
-
-	serviceUnit := `[Unit]
-Description=OLS WPanel Whitelist Refresh
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/ols-wpanel --refresh-whitelist --config=/www/ols-wpanel/config.json
-`
-
-	if err := os.WriteFile("/etc/systemd/system/olswpanel-whitelist.timer", []byte(timerUnit), 0644); err != nil {
-		return fmt.Errorf("写入白名单定时器失败: %w", err)
-	}
-	if err := os.WriteFile("/etc/systemd/system/olswpanel-whitelist.service", []byte(serviceUnit), 0644); err != nil {
-		return fmt.Errorf("写入白名单刷新服务失败: %w", err)
-	}
-	if _, err := executeCommand("systemctl", "daemon-reload"); err != nil {
-		return fmt.Errorf("重载 systemd 配置失败: %w", err)
-	}
-	if _, err := executeCommand("systemctl", "enable", "olswpanel-whitelist.timer"); err != nil {
-		return fmt.Errorf("启用白名单定时器失败: %w", err)
-	}
-	if _, err := executeCommand("systemctl", "start", "olswpanel-whitelist.timer"); err != nil {
-		return fmt.Errorf("启动白名单定时器失败: %w", err)
-	}
-	return nil
+func RunWhitelistRefresh() TaskResult {
+	return executeRefreshWhitelist(&Task{ID: "cli-refresh", Type: TaskRefreshWhitelist})
 }
 
 func UnbanAllIPs() string {
@@ -1955,6 +1982,7 @@ func StartFail2banSyncScheduler() {
 	GoSafe(func() {
 		SyncFail2banBans()
 		CleanExpiredBans()
+		StartCloudflareWebsiteSyncScheduler()
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {

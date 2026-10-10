@@ -282,6 +282,7 @@
 
 
         {{template "site_security_summary" .}}
+        {{template "site_cloudflare_security" .}}
         <section id="site-wp-policy" x-show="detailTab === 'security' && site.site_type === 'wordpress'" class="card site-security-controls">
             <h3>{{t .Lang "website.security_wp_policy"}}</h3><p>{{t .Lang "website.security_wp_policy_help"}}</p>
             <div class="site-security-policy">
@@ -768,6 +769,7 @@
 {{template "wp_anomaly_script" .}}
 {{template "wordpress_access_script" .}}
 {{template "site_security_summary_script" .}}
+{{template "site_cloudflare_security_script" .}}
 <script>
 function websiteDetail() {
     return {
@@ -1111,6 +1113,7 @@ function websiteDetail() {
                 'cache-performance': 'cache',
                 'site-performance': 'cache',
                 'site-security': 'security',
+                'site-cloudflare-security': 'security',
                 'site-monitoring': 'security',
                 'site-wp-anomaly': 'security',
                 'security-maintenance': 'security',
@@ -1124,7 +1127,7 @@ function websiteDetail() {
         },
         scrollDetailAnchor() {
             const anchor = (window.location.hash || '').replace(/^#/, '');
-            if (!this.site || this.detailDestroyed || !['site-monitoring', 'site-wp-anomaly'].includes(anchor)) return;
+            if (!this.site || this.detailDestroyed || !['site-monitoring', 'site-wp-anomaly', 'site-cloudflare-security'].includes(anchor)) return;
             this.$nextTick(() => {
                 if (this.detailDestroyed || this.detailTab !== 'security' || window.location.hash !== '#' + anchor) return;
                 const target = document.getElementById(anchor), main = document.getElementById('panel-main');
@@ -1951,18 +1954,21 @@ function websiteDetail() {
             this.fileLockSaving = false;
         },
         async saveMonitoring() {
+            if (this.monitoringSaving || !this.site?.id) return;
+            const site = this.site, snapshot = {enabled: !!this.monitoringEnabled, interval: parseInt(this.monitoringInterval) || 5};
             this.monitoringSaving = true;
             try {
-                await api('/websites/' + this.site.id + '/monitoring', {
+                await api('/websites/' + site.id + '/monitoring', {
                     method: 'PUT',
-                    body: { enabled: this.monitoringEnabled, interval: parseInt(this.monitoringInterval) || 5 }
+                    body: snapshot
                 });
-                this.site.monitoring_enabled = !!this.monitoringEnabled;
-                this.site.monitoring_interval = parseInt(this.monitoringInterval) || 5;
+                if (this.site !== site || this.detailDestroyed) return;
+                site.monitoring_enabled = snapshot.enabled;
+                site.monitoring_interval = snapshot.interval;
                 this.refreshSiteSecurityAfterChange();
                 showToast(t('website.monitoring_saved'), 'success');
-            } catch(e) { showToast(t('website.save_failed_with_error', { error: e.message }), 'error'); }
-            this.monitoringSaving = false;
+            } catch(e) { if (this.site === site && !this.detailDestroyed) showToast(t('website.save_failed_with_error', { error: e.message }), 'error'); }
+            finally { this.monitoringSaving = false; }
         },
         async saveExpiry() {
             this.expirySaving = true;

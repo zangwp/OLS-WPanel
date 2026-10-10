@@ -16,115 +16,41 @@
         <nav class="access-view-nav" aria-label="{{t .Lang "firewall.access_views"}}">
             <button type="button" @click="portView = 'policy'" :aria-pressed="portView === 'policy'" :class="{ selected: portView === 'policy' }">{{t .Lang "firewall.access_title"}}</button>
             <button type="button" @click="portView = 'listeners'" :disabled="accessBusy || !!accessToken" :aria-pressed="portView === 'listeners'" :class="{ selected: portView === 'listeners' }">{{t .Lang "firewall.listener_view"}} <span x-text="portStatus.listener_count || 0"></span></button>
-            <button type="button" @click="portView = 'legacy'" :disabled="accessBusy || !!accessToken" :aria-pressed="portView === 'legacy'" :class="{ selected: portView === 'legacy' }">{{t .Lang "firewall.legacy_view"}} <span x-text="(portStatus.rules || []).length"></span></button>
         </nav>
         <div x-show="portView === 'policy'" class="access-view-panel">
             {{template "firewall_access" .}}
             {{template "ssh_port" .}}
         </div>
 
-        <section x-show="portView === 'legacy'" x-cloak class="card access-legacy-panel">
-        <header class="access-panel-heading"><div><h3>{{t .Lang "firewall.legacy_view"}}</h3><p>{{t .Lang "firewall.legacy_help"}}</p></div><button type="button" @click="refreshAccess()" :disabled="portSubmitting || portsLoading || accessBusy || !!accessToken" class="btn-secondary">{{t .Lang "firewall.refresh"}}</button></header>
-        <p x-show="portStatus.access_enabled" class="access-note">{{t .Lang "firewall.legacy_policy_active"}}</p>
-        <details x-show="!portStatus.access_enabled" class="access-legacy-create">
-        <summary>{{t .Lang "firewall.legacy_create"}}</summary>
-        <div class="access-legacy-form">
-            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-5">
-                <div>
-                    <h3 class="text-lg font-semibold text-white">{{t .Lang "firewall.open_port"}}</h3>
-                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "firewall.ports_help"}}</p>
+        <details x-show="portView === 'policy' && portsLoaded && (portStatus.rules || []).length > 0" x-cloak class="card access-legacy-panel access-legacy-details">
+            <summary class="font-semibold text-sm cursor-pointer">{{t .Lang "firewall.legacy_view"}} <span class="text-xs text-gray-500 ml-2" x-text="(portStatus.rules || []).length"></span></summary>
+            <div class="mt-4">
+                <header class="access-panel-heading"><p>{{t .Lang "firewall.legacy_help"}}</p><button type="button" @click="refreshAccess()" :disabled="portSubmitting || portsLoading || accessBusy || !!accessToken" class="btn-secondary">{{t .Lang "firewall.refresh"}}</button></header>
+                <p x-show="portStatus.access_enabled" class="access-note">{{t .Lang "firewall.legacy_policy_active"}}</p>
+                <div class="access-legacy-records">
+                    <div class="overflow-x-auto">
+                        <table class="w-full min-w-[1180px]">
+                            <thead class="border-b border-gray-700"><tr><th class="table-header">{{t .Lang "firewall.protocol"}}</th><th class="table-header">{{t .Lang "firewall.port"}}</th><th class="table-header">{{t .Lang "firewall.source_scope"}}</th><th class="table-header">{{t .Lang "firewall.description"}}</th><th class="table-header">{{t .Lang "firewall.created_at"}}</th><th class="table-header">{{t .Lang "firewall.expires_at"}}</th><th class="table-header">{{t .Lang "firewall.hit_count"}}</th><th class="table-header">{{t .Lang "firewall.status"}}</th><th class="table-header">{{t .Lang "firewall.actions"}}</th></tr></thead>
+                            <tbody>
+                                <template x-for="rule in (portStatus.rules || [])" :key="rule.id">
+                                    <tr class="border-b border-gray-700/50">
+                                        <td class="table-cell uppercase" x-text="rule.protocol"></td>
+                                        <td class="table-cell font-mono" x-text="rule.port"></td>
+                                        <td class="table-cell font-mono text-xs" x-text="rule.source || t('firewall.any_source')"></td>
+                                        <td class="table-cell text-sm" x-text="rule.description || '--'"></td>
+                                        <td class="table-cell text-xs whitespace-nowrap" x-text="formatFirewallTime(rule.created_at)"></td>
+                                        <td class="table-cell text-xs whitespace-nowrap" x-text="rule.expires_at ? formatFirewallTime(rule.expires_at) : t('firewall.permanent')"></td>
+                                        <td class="table-cell font-mono text-xs" x-text="rule.hit_packets == null ? '--' : rule.hit_packets"></td>
+                                        <td class="table-cell"><span :class="rule.applied ? 'badge-success' : 'badge-warning'" x-text="rule.applied ? t('firewall.applied') : t('firewall.pending_reconcile')"></span></td>
+                                        <td class="table-cell"><button @click="deletePortRule(rule)" :disabled="portSubmitting || portStatus.access_enabled || accessBusy || !!accessToken" class="btn-danger text-xs py-1 px-2">{{t .Lang "firewall.remove_legacy_rule"}}</button></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            <div class="mb-4">
-                <p class="label">{{t .Lang "firewall.service_presets"}}</p>
-                <div class="flex flex-wrap gap-2">
-                    <template x-for="preset in portPresets" :key="preset.key">
-                        <button type="button" @click="applyPortPreset(preset)" class="btn-secondary text-xs py-1.5 px-3" x-text="preset.label"></button>
-                    </template>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                <div>
-                    <label class="label" for="legacy-service-name">{{t .Lang "firewall.service_preset"}}</label>
-                    <input id="legacy-service-name" type="text" class="input-field text-sm" :value="selectedPresetLabel()" readonly>
-                </div>
-                <div>
-                    <label class="label" for="legacy-field-0">{{t .Lang "firewall.protocol"}}</label>
-                    <select id="legacy-field-0" x-model="portForm.protocol" class="input-field text-sm"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
-                </div>
-                <div>
-                    <label class="label" for="legacy-field-1">{{t .Lang "firewall.port"}}</label>
-                    <input id="legacy-field-1" type="number" min="1" max="65535" x-model.number="portForm.port" class="input-field text-sm" placeholder="8443">
-                </div>
-                <div>
-                    <label class="label" for="legacy-field-2">{{t .Lang "firewall.description"}}</label>
-                    <input id="legacy-field-2" type="text" maxlength="80" x-model.trim="portForm.description" class="input-field text-sm" placeholder="{{t .Lang "firewall.description_placeholder"}}">
-                </div>
-            </div>
-            <div class="port-access-grid mt-4">
-                <div class="md:col-span-2">
-                    <label class="label" for="legacy-field-3">{{t .Lang "firewall.access_scope"}}</label>
-                    <select id="legacy-field-3" x-model="portForm.source_mode" @change="onSourceModeChange()" class="input-field text-sm">
-                        <option value="current">{{t .Lang "firewall.scope_current_ip"}}</option>
-                        <option value="specific">{{t .Lang "firewall.scope_specific"}}</option>
-                        <option value="any">{{t .Lang "firewall.scope_any"}}</option>
-                    </select>
-                </div>
-                <div class="md:col-span-2" x-show="portForm.source_mode !== 'any'">
-                    <label class="label" for="legacy-field-4">{{t .Lang "firewall.source_scope"}}</label>
-                    <input id="legacy-field-4" type="text" x-model.trim="portForm.source" :readonly="portForm.source_mode === 'current'" class="input-field text-sm" placeholder="203.0.113.5/32">
-                    <p class="text-xs text-gray-500 mt-1" x-text="portForm.source_mode === 'current' ? t('firewall.current_ip_help') : t('firewall.source_scope_help')"></p>
-                </div>
-                <div>
-                    <label class="label" for="legacy-field-5">{{t .Lang "firewall.validity"}}</label>
-                    <select id="legacy-field-5" x-model="portForm.duration_mode" class="input-field text-sm">
-                        <option value="permanent">{{t .Lang "firewall.permanent_open"}}</option>
-                        <option value="temporary">{{t .Lang "firewall.temporary_open"}}</option>
-                    </select>
-                </div>
-                <div x-show="portForm.duration_mode === 'temporary'">
-                    <label class="label" for="legacy-field-6">{{t .Lang "firewall.duration_minutes"}}</label>
-                    <input id="legacy-field-6" type="number" min="1" max="10080" x-model.number="portForm.duration_minutes" class="input-field text-sm" placeholder="60">
-                </div>
-            </div>
-            <div class="mt-4 flex justify-end">
-                <button @click="addPortRule()" :disabled="portSubmitting || !portStatus.writable || portStatus.access_enabled || accessBusy || !!accessToken" class="btn-primary text-sm" x-text="portSubmitting ? t('common.saving') : t('firewall.open_port')"></button>
-            </div>
-            <div x-show="portForm.source_mode === 'any'" class="mt-4 rounded border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-200">
-                {{t .Lang "firewall.any_source_warning"}}
-            </div>
-            <div class="mt-4 rounded border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-200">
-                {{t .Lang "firewall.port_safety_notice"}}
-            </div>
-        </div>
         </details>
-
-        <div class="access-legacy-records">
-            <h4 class="font-semibold mb-4">{{t .Lang "firewall.managed_port_rules"}}</h4>
-            <div class="overflow-x-auto">
-                <table class="w-full min-w-[1180px]">
-                    <thead class="border-b border-gray-700"><tr><th class="table-header">{{t .Lang "firewall.protocol"}}</th><th class="table-header">{{t .Lang "firewall.port"}}</th><th class="table-header">{{t .Lang "firewall.source_scope"}}</th><th class="table-header">{{t .Lang "firewall.description"}}</th><th class="table-header">{{t .Lang "firewall.created_at"}}</th><th class="table-header">{{t .Lang "firewall.expires_at"}}</th><th class="table-header">{{t .Lang "firewall.hit_count"}}</th><th class="table-header">{{t .Lang "firewall.status"}}</th><th class="table-header">{{t .Lang "firewall.actions"}}</th></tr></thead>
-                    <tbody>
-                        <template x-for="rule in (portStatus.rules || [])" :key="rule.id">
-                            <tr class="border-b border-gray-700/50">
-                                <td class="table-cell uppercase" x-text="rule.protocol"></td>
-                                <td class="table-cell font-mono" x-text="rule.port"></td>
-                                <td class="table-cell font-mono text-xs" x-text="rule.source || t('firewall.any_source')"></td>
-                                <td class="table-cell text-sm" x-text="rule.description || '--'"></td>
-                                <td class="table-cell text-xs whitespace-nowrap" x-text="formatFirewallTime(rule.created_at)"></td>
-                                <td class="table-cell text-xs whitespace-nowrap" x-text="rule.expires_at ? formatFirewallTime(rule.expires_at) : t('firewall.permanent')"></td>
-                                <td class="table-cell font-mono text-xs" x-text="rule.hit_packets == null ? '--' : rule.hit_packets"></td>
-                                <td class="table-cell"><span :class="rule.applied ? 'badge-success' : 'badge-warning'" x-text="rule.applied ? t('firewall.applied') : t('firewall.pending_reconcile')"></span></td>
-                                <td class="table-cell"><button @click="deletePortRule(rule)" :disabled="portSubmitting || portStatus.access_enabled || accessBusy || !!accessToken" class="btn-danger text-xs py-1 px-2">{{t .Lang "firewall.remove_legacy_rule"}}</button></td>
-                            </tr>
-                        </template>
-                        <tr x-show="portsLoaded && (portStatus.rules || []).length === 0"><td colspan="9" class="table-cell text-center text-gray-500 py-4">{{t .Lang "firewall.no_managed_port_rules"}}</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        </section>
         <section x-show="portView === 'listeners'" x-cloak class="card access-listener-panel">
             <header class="access-panel-heading"><div><h3>{{t .Lang "firewall.listener_view"}}</h3><p x-text="t('firewall.listening_ports_summary', { total: portStatus.listener_count || 0, network: portStatus.network_listener_count || 0, local: portStatus.local_listener_count || 0 })"></p></div><button type="button" @click="refreshAccess()" :disabled="portSubmitting || portsLoading || accessBusy || !!accessToken" class="btn-secondary">{{t .Lang "firewall.refresh"}}</button></header>
             <div class="access-listener-grid">

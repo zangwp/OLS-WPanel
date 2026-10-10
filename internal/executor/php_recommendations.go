@@ -67,8 +67,9 @@ func RecommendOPcacheMemoryConsumptionMB(facts SystemFacts) int {
 // RecommendLSPHPMaxChildren 计算新建站点的 LSPHP 子进程上限建议值。
 //
 // 分别按总内存和 CPU 核心数算出两个上限，取较小值。这个值只在建站时计算一次并持久化，
-// 之后不会因为服务器又建了多少个站点而重新计算。LSPHP 由 OpenLiteSpeed 按需拉起，
-// 闲置站点不常驻 worker，因此这里刻意不考虑站点数量维度。
+// 之后不会因为服务器又建了多少个站点而重新计算。当前受管虚拟主机在 OLS 启动时
+// 启动 PHP 父进程，子进程按请求需求扩展。此值是单站并发上限，不是整台服务器的
+// 内存预算；多个站点同时繁忙时仍需结合实际资源使用调整。
 func RecommendLSPHPMaxChildren(facts SystemFacts) int {
 	totalMB := int(facts.TotalMemoryBytes / 1024 / 1024)
 

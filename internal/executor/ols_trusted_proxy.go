@@ -2,14 +2,13 @@ package executor
 
 import (
 	"fmt"
-	"os"
-	"sort"
 	"strings"
+	"sync"
 
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
 
-const olsTrustedIPListPath = "/usr/local/lsws/conf/trusted-ip-list"
+var olsTrustedProxyConfigMu sync.Mutex
 
 func EnsureCloudflareRealIPConfig() error {
 	if strings.TrimSpace(cachedCloudflareRealIPRanges()) != "" {
@@ -39,9 +38,12 @@ func DeployCloudflareRealIPConfig(cfIPs []string) error {
 
 // ApplyOLSTrustedProxyList configures the only safe OpenLiteSpeed real-IP
 // mode: X-Forwarded-For is honored only when the direct peer is in the trusted
-// list. OpenLiteSpeed already recognizes Cloudflare and QUIC.cloud, while the
-// list below adds the explicitly enabled custom CDN ranges.
+// list. Every selected, enabled CDN's origin ranges, including Cloudflare,
+// are reconciled into the server ACL with T suffixes; this does not rely on
+// OpenLiteSpeed's built-in provider list remaining current.
 func ApplyOLSTrustedProxyList() error {
+	olsTrustedProxyConfigMu.Lock()
+	defer olsTrustedProxyConfigMu.Unlock()
 	raw, err := combinedCDNRealIPRangesForFail2ban(database.GetDB())
 	if err != nil {
 		return err
@@ -50,42 +52,8 @@ func ApplyOLSTrustedProxyList() error {
 	if err != nil {
 		return err
 	}
-	content := renderOLSTrustedProxyList(ranges)
-	old, readErr := os.ReadFile(olsTrustedIPListPath)
-	hadOld := readErr == nil
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return readErr
-	}
-	if err := writeOLSFileAtomic(olsTrustedIPListPath, []byte(content), 0640); err != nil {
-		return fmt.Errorf("写入 OpenLiteSpeed 可信代理列表失败: %w", err)
-	}
-	if _, err := testAndRestartOpenLiteSpeed(); err != nil {
-		_ = restoreOLSFile(olsTrustedIPListPath, old, hadOld, 0640)
-		_, _ = testAndRestartOpenLiteSpeed()
-		return err
-	}
-	return nil
-}
-
-func renderOLSTrustedProxyList(ranges []string) string {
-	seen := make(map[string]bool)
-	clean := make([]string, 0, len(ranges))
-	for _, item := range ranges {
-		item = strings.TrimSpace(item)
-		if item == "" || seen[item] || !isValidIPOrCIDR(item) {
-			continue
-		}
-		seen[item] = true
-		clean = append(clean, item)
-	}
-	sort.Strings(clean)
-	var out strings.Builder
-	out.WriteString("# OLS WPanel managed trusted proxy list. DO NOT EDIT.\n")
-	for _, item := range clean {
-		out.WriteString(item)
-		out.WriteString("T\n")
-	}
-	return out.String()
+	paths := currentOLSRuntimePaths()
+	return applyOLSTrustedProxyRanges(paths.mainConfig, paths.managed, ranges)
 }
 
 func cacheCloudflareRealIPRanges(cfIPs []string) {

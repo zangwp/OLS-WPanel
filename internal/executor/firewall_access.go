@@ -36,6 +36,12 @@ var accessCommentRE = regexp.MustCompile(`comment "ols-access:(tcp|udp):(\d+):([
 
 var persistAccessRules = persistCurrentNftablesRules
 
+// Service/filesystem boundaries also allow transaction tests to use private
+// temporary files without issuing commands against the host firewall.
+var accessSystemdAvailable = systemdRunAvailable
+var accessNftLookPath = exec.LookPath
+var accessRunDirectory = "/run"
+
 func readAccessState(ctx context.Context) (bool, []FirewallAccessRule, error) {
 	out, err := portCommand(ctx, "nft", "--stateless", "list", "tables")
 	if err != nil {
@@ -102,7 +108,7 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	if sshMoveActive(ctx) {
 		return FirewallProtectionResult{}, errors.New("SSH 端口变更尚未完成，请先确认或等待恢复")
 	}
-	if !systemdRunAvailable() {
+	if !accessSystemdAvailable() {
 		return FirewallProtectionResult{}, errors.New("需要 systemd 自动回退支持")
 	}
 	if active, _ := firewallProtectionPending(); active {
@@ -120,7 +126,7 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	if req.Fingerprint == "" || req.Fingerprint != preview.Fingerprint {
 		return FirewallProtectionResult{}, errors.New("规则或选择已变化，请重新预览")
 	}
-	dir, err := os.MkdirTemp("/run", "ols-access-*")
+	dir, err := os.MkdirTemp(accessRunDirectory, "ols-access-*")
 	if err != nil {
 		return FirewallProtectionResult{}, err
 	}
@@ -158,13 +164,18 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	if err != nil {
 		return FirewallProtectionResult{}, err
 	}
-	nft, err := exec.LookPath("nft")
+	nft, err := accessNftLookPath("nft")
 	if err != nil {
 		return FirewallProtectionResult{}, err
+	}
+	change := firewallAccessChangeRecord{Version: 1, ID: firewallAccessChangeID(token), State: "pending", PreviousExists: exists, Previous: previous}
+	if err = saveFirewallAccessChange(change); err != nil {
+		return FirewallProtectionResult{}, fmt.Errorf("无法记录防火墙变更，未应用: %w", err)
 	}
 	_, _ = portCommand(ctx, "systemctl", "reset-failed", accessRollbackUnit+".service")
 	rollbackStarted := time.Now()
 	if out, e := portCommand(ctx, "systemd-run", "--unit="+accessRollbackUnit, "--on-active=90s", "--timer-property=AccuracySec=1s", "--property=Type=oneshot", nft, "--file", rollback); e != nil {
+		_ = os.Remove(firewallAccessChangePath)
 		return FirewallProtectionResult{}, fmt.Errorf("无法安排自动回退: %s", out)
 	}
 	keep = true // Never remove the file while the timer could still need it.
@@ -183,7 +194,7 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	pendingAccess.sshPort = preview.SSHPort
 	pendingAccess.panelPort = preview.PanelPort
 	recordOperationLog("firewall_access_apply", accessTable, "success", "waiting for manual confirmation")
-	return FirewallProtectionResult{ConfirmationToken: token, Deadline: pendingAccess.deadline.Add(-15 * time.Second)}, nil
+	return FirewallProtectionResult{ConfirmationToken: token, ChangeID: change.ID, Deadline: pendingAccess.deadline.Add(-15 * time.Second)}, nil
 }
 
 func ConfirmFirewallAccess(token string) error {
@@ -250,6 +261,7 @@ func ConfirmFirewallAccess(token string) error {
 		return err
 	}
 	pendingAccess.token = ""
+	completeFirewallAccessChange(token)
 	_ = os.RemoveAll(pendingAccess.dir)
 	committed = true
 	recordOperationLog("firewall_access_confirm", accessTable, "success", "saved; nftables enabled")

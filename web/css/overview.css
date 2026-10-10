@@ -107,8 +107,8 @@
 .website-identity-icon { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; color: var(--panel-accent); background: var(--panel-accent-soft); border-radius: 11px; }
 .website-identity-icon svg { width: 24px; height: 24px; }
 .website-identity-copy { min-width: 0; }
-.website-domain-link { display: block; color: var(--panel-success); font-size: 16px; font-weight: 650; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
-.website-domain-link:is(:hover, :focus-visible) { color: color-mix(in srgb, var(--panel-success) 78%, #000); text-decoration: underline; text-underline-offset: 3px; }
+.website-domain-link { display: block; color: #315f87; font-size: 16px; font-weight: 650; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.website-domain-link:is(:hover, :focus-visible) { color: #294f70; text-decoration: underline; text-underline-offset: 3px; }
 .websites-table tbody > .website-row:hover > .table-cell { background: #f8fbfe; }
 .website-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 .websites-table .website-actions :is(a, button) { min-height: 34px; padding: 7px 9px; font-size: 12px; line-height: 1.45; white-space: nowrap; }

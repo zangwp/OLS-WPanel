@@ -148,7 +148,7 @@
                             <span class="ml-2 text-gray-400" x-text="sourceLabel(ban)"></span>
                             <span class="ml-2" :class="ban.verification === 'missing' ? 'text-red-300' : 'text-yellow-300'" x-text="ban.verification === 'missing' ? t('firewall.ban_rule_missing') : t('firewall.ban_status_unverified')"></span>
                         </div>
-                        <button x-show="ban.id > 0" @click="unban(ban)" class="btn-success text-xs py-1 px-2">{{t .Lang "firewall.unban"}}</button>
+                        <button x-show="ban.id > 0" @click="unban(ban)" class="btn-secondary firewall-unban-button text-xs py-1 px-2">{{t .Lang "firewall.unban"}}</button>
                     </div>
                 </template>
             </div>
@@ -330,7 +330,7 @@
                             <td class="table-cell text-xs" :title="!ban.expires_at && ban.source_jail.startsWith('olswpanel') ? t('firewall.fail2ban_managed_help') : ''" x-text="ban.ban_level >= 5 ? t('firewall.permanent') : (ban.expires_at ? formatTime(ban.expires_at) : (ban.source_jail.startsWith('olswpanel') ? t('firewall.fail2ban_managed') : t('firewall.unknown')))"></td>
                             <td class="table-cell" x-text="ban.ban_count ?? t('firewall.unknown')"></td>
                             <td class="table-cell">
-                                <button x-show="ban.id > 0" @click="unban(ban)" class="btn-success text-xs py-1 px-2">{{t .Lang "firewall.unban"}}</button>
+                                <button x-show="ban.id > 0" @click="unban(ban)" class="btn-secondary firewall-unban-button text-xs py-1 px-2">{{t .Lang "firewall.unban"}}</button>
                                 <button x-show="ban.id > 0 && ban.ban_level < 5" @click="permanentBan(ban)" class="btn-danger text-xs py-1 px-2 ml-1">{{t .Lang "firewall.permanent_ban"}}</button>
                                 <span x-show="!ban.id" class="text-xs text-gray-500">{{t .Lang "firewall.metadata_unknown"}}</span>
                             </td>

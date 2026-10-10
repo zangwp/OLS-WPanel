@@ -13,21 +13,42 @@ import (
 )
 
 func deployWordPress(ctx context.Context, cfg *config.Config, webRoot, tmpDir string) error {
+	_, err := deployWordPressPackage(ctx, cfg, webRoot, tmpDir)
+	return err
+}
+
+// The create-only wrapper passes the provenance of the actual deployed ZIP
+// to the deferred cleanup. Reinstall/import/restore do not use this wrapper.
+func deployNewWordPress(ctx context.Context, cfg *config.Config, webRoot, tmpDir string) error {
+	report, err := deployWordPressPackage(ctx, cfg, webRoot, tmpDir)
+	if err != nil {
+		return err
+	}
+	// OLS reads the root .htaccess while loading this new vhost, before the
+	// browser installer later saves WordPress's permalink configuration.
+	if err := prepareNewWordPressRewrite(webRoot); err != nil {
+		return err
+	}
+	return prepareNewWordPressDefaults(webRoot, report.OfficialDownload)
+}
+
+func deployWordPressPackage(ctx context.Context, cfg *config.Config, webRoot, tmpDir string) (WPPackageReport, error) {
 	os.RemoveAll(tmpDir)
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return fmt.Errorf("创建临时目录失败: %w", err)
+		return WPPackageReport{}, fmt.Errorf("创建临时目录失败: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	zipPath := filepath.Join(tmpDir, "wordpress.zip")
 
-	if err := downloadWP(ctx, cfg, zipPath); err != nil {
-		return err
+	report, _, err := AcquireCorePackage(ctx, cfg.Paths.WordPressPackage, zipPath, "", defaultCorePackageRefresher(cfg))
+	if err != nil {
+		return WPPackageReport{}, err
 	}
 
 	extractDir := filepath.Join(tmpDir, "wp_extract")
 	if _, err := executeCommand("unzip", "-q", "-o", zipPath, "-d", extractDir); err != nil {
-		return fmt.Errorf("解压失败: %w", err)
+		return WPPackageReport{}, fmt.Errorf("解压失败: %w", err)
 	}
 
 	srcDir := extractDir
@@ -37,18 +58,18 @@ func deployWordPress(ctx context.Context, cfg *config.Config, webRoot, tmpDir st
 
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
-		return fmt.Errorf("读取WordPress文件失败: %w", err)
+		return WPPackageReport{}, fmt.Errorf("读取WordPress文件失败: %w", err)
 	}
 
 	for _, entry := range entries {
 		srcPath := filepath.Join(srcDir, entry.Name())
 		dstPath := filepath.Join(webRoot, entry.Name())
 		if err := copyPath(srcPath, dstPath); err != nil {
-			return fmt.Errorf("移动文件 %s 失败: %w", entry.Name(), err)
+			return WPPackageReport{}, fmt.Errorf("移动文件 %s 失败: %w", entry.Name(), err)
 		}
 	}
 
-	return nil
+	return report, nil
 }
 
 func copyPath(src, dst string) error {

@@ -57,6 +57,7 @@ func TestRenderOLSVHostIncludesLSPHPAndLiteSpeedCache(t *testing.T) {
 	for _, want := range []string{
 		"# OLS-WPanel-Format: 1",
 		"# OLS-WPanel-Domains: example.com,www.example.com",
+		"indexFiles             index.php,index.html\n",
 		"type                   lsapi",
 		"address                uds://",
 		"path                   /usr/local/lsws/lsphp85/bin/lsphp",
@@ -85,6 +86,32 @@ func TestWordPressLegacyCacheFlagNeverEnablesDefaultPublicCache(t *testing.T) {
 		if strings.Contains(content, "enableCache            1") {
 			t.Fatalf("legacy flag %t enables default public caching", enabled)
 		}
+	}
+}
+
+func TestRenderOLSVHostTLSRetainsSNIPathsAndModernProtocols(t *testing.T) {
+	data := testOLSVHostData(t.TempDir())
+	data.UseSSL = true
+	data.SSLCertPath = filepath.Join(t.TempDir(), "fullchain.pem")
+	data.SSLKeyPath = filepath.Join(t.TempDir(), "privkey.pem")
+	content := mustRenderOLSVHost(t, data)
+	for _, want := range []string{
+		"# OLS-WPanel-Domains: example.com,www.example.com",
+		"keyFile                " + data.SSLKeyPath,
+		"certFile               " + data.SSLCertPath,
+		"certChain              1",
+		"sslProtocol            24\n",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("TLS vhost missing %q\n%s", want, content)
+		}
+	}
+	if olsTLSProtocols != 8|16 || strings.Contains(content, "sslProtocol            30") {
+		t.Fatal("TLS defaults must allow only TLS 1.2 and TLS 1.3")
+	}
+	data.UseSSL = false
+	if strings.Contains(mustRenderOLSVHost(t, data), "vhssl {") {
+		t.Fatal("HTTP-only vhost must not gain a TLS certificate block")
 	}
 }
 
@@ -260,6 +287,9 @@ func TestNormalizeAliasRedirectModeRejectsUnknownValue(t *testing.T) {
 }
 
 func TestRenderOLSManagedRegistryKeepsServerRunnableWithoutSites(t *testing.T) {
+	oldIPv6 := olsIPv6Available
+	olsIPv6Available = func() bool { return false }
+	t.Cleanup(func() { olsIPv6Available = oldIPv6 })
 	root := t.TempDir()
 	enabled := filepath.Join(root, "sites-enabled")
 	managed := filepath.Join(root, "sites.conf")
@@ -435,6 +465,9 @@ func TestRenderOLSManagedRegistryRejectsEscapingSymlink(t *testing.T) {
 }
 
 func TestApplyOLSVHostRollsBackWhenOLSTestFails(t *testing.T) {
+	oldIPv6 := olsIPv6Available
+	olsIPv6Available = func() bool { return false }
+	t.Cleanup(func() { olsIPv6Available = oldIPv6 })
 	root := t.TempDir()
 	available := filepath.Join(root, "sites-available")
 	enabled := filepath.Join(root, "sites-enabled")

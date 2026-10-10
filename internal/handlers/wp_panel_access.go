@@ -205,10 +205,8 @@ func (h *WPPanelAccessHandler) Save(c *gin.Context) {
 }
 
 type wpPanelAccessLoginRequest struct {
-	AdministratorID int    `json:"administrator_id" binding:"required,min=1"`
-	Confirm         bool   `json:"confirm"`
-	CurrentPassword string `json:"current_password" binding:"required,max=256"`
-	Code            string `json:"code" binding:"max=128"`
+	AdministratorID int  `json:"administrator_id" binding:"required,min=1"`
+	Confirm         bool `json:"confirm"`
 }
 
 func (h *WPPanelAccessHandler) Login(c *gin.Context) {
@@ -231,11 +229,12 @@ func (h *WPPanelAccessHandler) Login(c *gin.Context) {
 		wpPanelAccessResponseError(c, http.StatusUnauthorized, &executor.WPPanelAccessError{Code: "site_unavailable"})
 		return
 	}
-	if !h.Auth.VerifySensitiveCredential(c, req.CurrentPassword, req.Code) {
+	// The panel session was created only after password and any enabled MFA
+	// verification. Reuse it for an already-enabled SSO bridge, while still
+	// requiring the panel account to exist. Settings changes retain step-up.
+	if _, _, _, ok := h.Auth.accountIdentity(c); !ok {
 		return
 	}
-	req.CurrentPassword = ""
-	req.Code = ""
 	if !executor.TryAcquireSiteOpLock(site.ID, "wp_panel_access_login") {
 		wpPanelAccessResponseError(c, http.StatusConflict, &executor.WPPanelAccessError{Code: "site_unavailable"})
 		return
@@ -256,6 +255,10 @@ func (h *WPPanelAccessHandler) Login(c *gin.Context) {
 	}
 	if !status.SSOAvailable {
 		wpPanelAccessResponseError(c, http.StatusConflict, &executor.WPPanelAccessError{Code: status.ReasonCode})
+		return
+	}
+	if !status.SSOEnabled {
+		wpPanelAccessResponseError(c, http.StatusConflict, &executor.WPPanelAccessError{Code: "sso_disabled"})
 		return
 	}
 	var administrator executor.WPPanelAccessAdministrator

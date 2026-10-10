@@ -37,6 +37,10 @@ type WPPackageReport struct {
 	Version      string
 	Locale       string
 	Verification string
+	// True only when this exact archive matches the panel's receipt for a
+	// download from wordpress.org/latest.zip. This is download provenance,
+	// not an official checksum-verification claim.
+	OfficialDownload bool
 }
 
 type WPPackageService struct {
@@ -151,6 +155,7 @@ func copyCoreCacheIfVersionMatches(ctx context.Context, cachePath, destPath, wan
 		_ = os.Remove(destPath)
 		return WPPackageReport{}, false
 	}
+	report.OfficialDownload = wordPressPackageHasOfficialOrigin(cachePath, report)
 	return report, true
 }
 
@@ -237,7 +242,7 @@ func (s *WPPackageService) download(ctx context.Context, rawURL, wantVersion str
 	if resp.Request == nil || !allowedWordPressURL(resp.Request.URL) || resp.StatusCode != http.StatusOK {
 		return WPPackageReport{}, archiveError("package_download_failed", nil)
 	}
-	return s.publishLocked(ctx, io.LimitReader(resp.Body, wpDownloadMaxBytes+1), wpDownloadMaxBytes, wantVersion)
+	return s.publishLocked(ctx, io.LimitReader(resp.Body, wpDownloadMaxBytes+1), wpDownloadMaxBytes, wantVersion, rawURL)
 }
 
 func (s *WPPackageService) publish(ctx context.Context, src io.Reader, maxBytes int64) (WPPackageReport, error) {
@@ -245,10 +250,10 @@ func (s *WPPackageService) publish(ctx context.Context, src io.Reader, maxBytes 
 		return WPPackageReport{}, archiveError("package_busy", nil)
 	}
 	defer s.mu.Unlock()
-	return s.publishLocked(ctx, src, maxBytes, "")
+	return s.publishLocked(ctx, src, maxBytes, "", "")
 }
 
-func (s *WPPackageService) publishLocked(ctx context.Context, src io.Reader, maxBytes int64, wantVersion string) (report WPPackageReport, retErr error) {
+func (s *WPPackageService) publishLocked(ctx context.Context, src io.Reader, maxBytes int64, wantVersion, sourceURL string) (report WPPackageReport, retErr error) {
 	dir := filepath.Dir(s.target)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return report, archiveError("package_publish_failed", err)
@@ -300,8 +305,22 @@ func (s *WPPackageService) publishLocked(ctx context.Context, src io.Reader, max
 	if err := os.Chmod(stagedName, 0644); err != nil {
 		return report, archiveError("package_publish_failed", err)
 	}
+	if sourceURL != wordpressLatestURL {
+		// Invalidate the earlier download before publishing an upload, even
+		// if the uploaded ZIP happens to contain the same bytes. A failure
+		// here leaves the old archive in place rather than a trusted upload.
+		if err := os.Remove(s.target + ".origin.json"); err != nil && !os.IsNotExist(err) {
+			return report, archiveError("package_publish_failed", err)
+		}
+	}
 	if err := os.Rename(stagedName, s.target); err != nil {
 		return report, archiveError("package_publish_failed", err)
+	}
+	// The receipt is a separate atomic file bound to the archive's complete
+	// SHA256. A concurrent replacement or a failed receipt write cannot make
+	// different uploaded/custom bytes eligible for default-content cleanup.
+	if err := writeWordPressPackageOrigin(s.target, report, sourceURL); err == nil {
+		report.OfficialDownload = sourceURL == wordpressLatestURL
 	}
 	// rename 已经原子发布；若后续目录 fsync 失败，无法在不破坏原子语义的
 	// 前提下可靠恢复旧 inode。此时返回失败以表示持久化保证未完成，但目标

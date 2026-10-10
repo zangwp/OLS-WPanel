@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zangwp/OLS-WPanel/internal/cloudflaresecurity"
 	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/database"
 	"github.com/zangwp/OLS-WPanel/internal/models"
@@ -284,7 +285,7 @@ func executeCreateSite(task *Task) TaskResult {
 	// Step 3: Deploy site files
 	if payload.SiteType != "php" {
 		tmpDir := "/tmp/wp_deploy_" + siteName + "_" + generatePassword(8)
-		if err := deployWordPress(context.Background(), cfg, webRoot, tmpDir); err != nil {
+		if err := deployNewWordPress(context.Background(), cfg, webRoot, tmpDir); err != nil {
 			rollback()
 			log.Printf("WordPress 部署失败: %v", err)
 			return TaskResult{Success: false, Message: "WordPress 部署失败"}
@@ -438,14 +439,6 @@ func executeCreateSite(task *Task) TaskResult {
 	}
 
 	if payload.SiteType != "php" {
-		if payload.CleanDefaults {
-			removeDefaultPlugins(webRoot)
-			log.Printf("已清理默认插件 site=%s", domain)
-		}
-		if payload.RemoveUnusedThemes {
-			removeUnusedThemes(webRoot)
-			log.Printf("已删除未使用默认主题 site=%s", domain)
-		}
 		if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
 			rollback()
 			log.Printf("准备 LiteSpeed Cache + Redis Object Cache 失败 site=%s: %v", domain, err)
@@ -677,27 +670,7 @@ func executeDeleteSite(task *Task) TaskResult {
 }
 
 func markWebsiteDeleting(db *sql.DB, siteID int) error {
-	result, err := db.Exec(`UPDATE websites SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status<>?`,
-		models.StatusDeleting, siteID, models.StatusDeleting)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 1 {
-		return nil
-	}
-
-	var status models.WebsiteStatus
-	if err := db.QueryRow(`SELECT status FROM websites WHERE id=?`, siteID).Scan(&status); err != nil {
-		return err
-	}
-	if status != models.StatusDeleting {
-		return errors.New("网站状态已变化")
-	}
-	return nil
+	return cloudflaresecurity.BeginWebsiteDeletion(context.Background(), db, siteID)
 }
 
 func terminalSourceMigrationMaintenancePaths(db *sql.DB, siteID int, olsVHostRoot string) ([]string, error) {
@@ -737,6 +710,9 @@ func deleteSiteAndAssociatedCronJobs(db *sql.DB, siteID int) (bool, error) {
 			_ = tx.Rollback()
 		}
 	}()
+	if err := cloudflaresecurity.CheckWebsiteDeletion(context.Background(), tx, siteID); err != nil {
+		return false, err
+	}
 
 	if _, err := tx.Exec(`UPDATE site_migration_resources SET status='removed',updated_at=CURRENT_TIMESTAMP
 		WHERE resource_type='source_maintenance_config' AND status='created' AND migration_site_id IN (
