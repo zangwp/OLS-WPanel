@@ -127,7 +127,8 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 				}
 			}
 			desired("wp_updates", !site.DisableWPUpdates)
-			if !site.DisableWPUpdates && (strings.Contains(siteSecurityPHPWithoutComments(content), "ols_wpanel_policy_disable_checks") || siteSecurityBoolConstant(content, "DISALLOW_FILE_MODS", true)) {
+			// File protection restricts installing updates, not discovering them.
+			if !site.DisableWPUpdates && strings.Contains(siteSecurityPHPWithoutComments(content), "ols_wpanel_policy_disable_checks") {
 				set("wp_updates", "error", false)
 			}
 			applyWebsiteFileLockSecurityStatus(&report, site, siteSecurityBoolConstant(content, "DISALLOW_FILE_MODS", true), maintenanceState, maintenanceErr)

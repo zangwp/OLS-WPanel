@@ -485,6 +485,26 @@ var i18nKeys = []string{
 	"backups.collapse_all",
 	"backups.confirm_clean_record",
 	"backups.confirm_delete_local",
+	"backups.confirm_delete_file_local",
+	"backups.confirm_restore_database",
+	"backups.confirm_restore_files",
+	"backups.overview_load_failed",
+	"backups.restore_confirming",
+	"backups.restore_starting",
+	"backups.restore_checking",
+	"backups.restore_waiting",
+	"backups.restore_running",
+	"backups.restore_success",
+	"backups.restore_failed",
+	"backups.restore_status_unknown",
+	"backups.restore_no_active_task",
+	"backups.restore_task_missing",
+	"backups.restore_database",
+	"backups.restore_files",
+	"backups.restore_incremental_help",
+	"backups.restore_pair_help",
+	"backups.restore_remote_db_help",
+	"backups.restore_remote_file_help",
 	"backups.delete",
 	"backups.deleted",
 	"backups.download",
@@ -2424,6 +2444,9 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.POST("/api/websites/:id/backups/:bid/restore", backupHandler.Restore)
 	protected.DELETE("/api/websites/:id/file-backups/:bid", backupHandler.DeleteFileBackup)
 	protected.GET("/api/websites/:id/file-backups/:bid/download", backupHandler.DownloadFileBackup)
+	protected.POST("/api/websites/:id/file-backups/:bid/restore", backupHandler.RestoreFileBackup)
+	protected.GET("/api/websites/:id/file-backups/restore-tasks/:task_id", backupHandler.FileRestoreStatus)
+	protected.GET("/api/websites/:id/backups/active-restore", backupHandler.ActiveRestore)
 	protected.POST("/api/websites/:id/backups/upload-restore", backupHandler.UploadRestore)
 	protected.GET("/api/websites/:id/backups/restore-tasks/:task_id", backupHandler.RestoreStatus)
 	protected.GET("/api/websites/:id/backups/settings", backupHandler.GetSettings)

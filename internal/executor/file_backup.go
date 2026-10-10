@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -107,19 +108,14 @@ func executeFileBackupContext(ctx context.Context, siteID int, mode string, keep
 	backupCutoff := time.Now()
 	var tarName string
 	var fullPath string
-	var isFull bool
-
-	if mode == "full" {
-		isFull = true
-	} else {
-		if _, err := os.Stat(stampFile); os.IsNotExist(err) {
-			isFull = true
-		}
+	isFull, err := fileBackupShouldCreateFullContext(ctx, siteID, mode, backupDir, stampFile, remoteTarget.Enabled)
+	if err != nil {
+		return "", fmt.Errorf("无法确认本地增量基线，已保留现有备份链: %w", err)
 	}
 
 	// 增量备份前确认远程是否已有全量基线：远程服务器被更换或远程数据被清空时，
 	// 本地 stamp 文件依然存在，但远程可能只剩增量数据，此时强制转为全量重建基线。
-	// 探测失败（连接失败/配置无效）同样按"未确认完整"处理，强制全量。
+	// 探测失败（连接失败/配置无效）保留现有链并报告失败，避免贸然换代。
 	forcedFullByRemote := false
 	if !isFull {
 		if err := fileBackupContextError(ctx, "文件备份"); err != nil {
@@ -239,9 +235,84 @@ func executeFileBackupContext(ctx context.Context, siteID int, mode string, keep
 	logMsg := fmt.Sprintf("%s 文件备份成功: %s (%s)", domain, tarName, map[bool]string{true: "全量", false: "增量"}[isFull])
 	if forcedFullByRemote {
 		logMsg += "；检测到远程无全量基线，已自动转为全量备份"
+	} else if isFull && mode != "full" && !remoteEnabled {
+		logMsg += "；本地增量基线未确认，已自动转为全量备份"
 	}
 	appendCronLog(logMsg)
 	return logMsg, nil
+}
+
+// fileBackupShouldCreateFullContext is called while holding the file-backup
+// operation lock. A timestamp alone does not prove that its full baseline still
+// exists. Only the newest registered full archive may anchor the current chain;
+// an older retained archive must not silently replace a missing current one.
+func fileBackupShouldCreateFullContext(ctx context.Context, siteID int, mode, backupDir, stampFile string, remoteEnabled bool) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if mode == "full" {
+		return true, nil
+	}
+	stamp, err := os.Lstat(stampFile)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !stamp.Mode().IsRegular() {
+		return true, nil
+	}
+	if remoteEnabled {
+		// Remote-only retention intentionally permits an absent local archive.
+		// The caller separately verifies the frozen remote target's baseline.
+		return false, nil
+	}
+
+	var filename string
+	var size int64
+	err = database.GetDB().QueryRowContext(ctx, `SELECT filename, file_size FROM file_backups
+		WHERE site_id = ? AND mode = 'full' ORDER BY created_at DESC, id DESC LIMIT 1`, siteID).Scan(&filename, &size)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	valid, err := validLocalFullFileBackup(backupDir, filename, size)
+	return !valid, err
+}
+
+func validLocalFullFileBackup(backupDir, filename string, recordedSize int64) (bool, error) {
+	if recordedSize <= 0 || filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\`) ||
+		!strings.HasPrefix(filename, "file_full_") || !strings.HasSuffix(filename, ".tar.gz") {
+		return false, nil
+	}
+	info, err := os.Lstat(filepath.Join(backupDir, filename))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Archive contents are verified with tar -tzf before the record is inserted.
+	// Rechecking the entire compressed baseline on every incremental run would
+	// reread a potentially large site; detect deletion/truncation without that cost.
+	return info.Mode().IsRegular() && info.Size() > 0 && info.Size() == recordedSize, nil
+}
+
+// AcquireFileBackupOperationLock serializes backup creation and local deletion
+// across the panel service and cron processes. Callers must hold it until both
+// the filesystem and backup records have been updated.
+func AcquireFileBackupOperationLock(ctx context.Context) (io.Closer, error) {
+	lock, err := acquireFileBackupLock(ctx, fileBackupLockPath)
+	if err != nil {
+		return nil, err
+	}
+	return lock, nil
 }
 
 func withFileBackupCommandTimeout(ctx context.Context) (context.Context, context.CancelFunc) {

@@ -109,6 +109,17 @@ func executeRestoreBackup(task *Task) TaskResult {
 	} else if blocked {
 		return TaskResult{Success: false, Message: "该网站已开启 AI 开发访问，请先关闭授权"}
 	}
+	guardCtx, guardCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	currentSite, guardErr := validateDatabaseRestoreSite(guardCtx, database.GetDB(), site, payload.UpdateBackupPath != "")
+	guardCancel()
+	if guardErr != nil {
+		return TaskResult{Success: false, Message: "恢复前网站检查失败: " + guardErr.Error()}
+	}
+	site = currentSite
+	cfg := config.AppConfig
+	if cfg == nil || strings.TrimSpace(cfg.Panel.BackupDir) == "" {
+		return TaskResult{Success: false, Message: "恢复失败: 备份目录未配置"}
+	}
 	dbPass := restoreBackupPassword()
 	if dbPass == "" {
 		return TaskResult{Success: false, Message: "无法读取 MariaDB root 密码"}
@@ -116,9 +127,7 @@ func executeRestoreBackup(task *Task) TaskResult {
 
 	var filePath string
 	if payload.UpdateBackupPath != "" {
-		cfg := config.AppConfig
-		if cfg == nil || strings.TrimSpace(cfg.Panel.BackupDir) == "" ||
-			!wpUpdateSHA256Pattern.MatchString(payload.ExpectedSHA256) {
+		if !wpUpdateSHA256Pattern.MatchString(payload.ExpectedSHA256) {
 			return TaskResult{Success: false, Message: "恢复失败: 更新备份参数不合法"}
 		}
 		artifactRoot := filepath.Join(filepath.Clean(cfg.Panel.BackupDir), "wp-updates")
@@ -142,16 +151,11 @@ func executeRestoreBackup(task *Task) TaskResult {
 		}
 		filePath = cleanPath
 	} else {
-		cfg := config.AppConfig
 		backupDir := filepath.Join(cfg.Panel.BackupDir, site.Domain, "db")
 		filePath = filepath.Join(backupDir, payload.Filename)
 	}
 	if err := validateRestoreBackupFile(filePath); err != nil {
 		return TaskResult{Success: false, Message: "恢复文件校验失败: " + err.Error()}
-	}
-	cfg := config.AppConfig
-	if cfg == nil || strings.TrimSpace(cfg.Panel.BackupDir) == "" {
-		return TaskResult{Success: false, Message: "恢复失败: 备份目录未配置"}
 	}
 	return restoreDatabaseSafely(int64(site.ID), site.DBName, dbPass, filePath,
 		filepath.Join(cfg.Panel.BackupDir, site.Domain, "restore-safety"))
@@ -784,6 +788,12 @@ func clearDatabaseObjects(siteID int64, dbName, dbPass string, allObjects bool) 
 		return fmt.Errorf("检查 AI 开发授权失败: %w", err)
 	} else if blocked {
 		return fmt.Errorf("该网站已开启 AI 开发访问，请先关闭授权")
+	}
+	guardCtx, guardCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	guardErr := verifyDatabaseRestoreBinding(guardCtx, database.GetDB(), siteID, dbName)
+	guardCancel()
+	if guardErr != nil {
+		return guardErr
 	}
 	if !isValidMySQLIdentifier(dbName) {
 		return fmt.Errorf("invalid database name")

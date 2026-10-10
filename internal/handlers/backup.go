@@ -24,6 +24,7 @@ type BackupHandler struct{}
 
 var mysqlIdentifierRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 var fileBackupStorageRoot = config.DefaultBackupDir
+var acquireFileBackupOperationLock = executor.AcquireFileBackupOperationLock
 
 func dbBackupRoot() string {
 	if config.AppConfig != nil && strings.TrimSpace(config.AppConfig.Panel.BackupDir) != "" {
@@ -307,6 +308,13 @@ func (h *BackupHandler) DownloadFileBackup(c *gin.Context) {
 func (h *BackupHandler) DeleteFileBackup(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	bid, _ := strconv.Atoi(c.Param("bid"))
+	ctx := c.Request.Context()
+	backupLock, err := acquireFileBackupOperationLock(ctx)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse("无法取得文件备份操作锁，删除未执行，请稍后重试"))
+		return
+	}
+	defer backupLock.Close()
 
 	site := getWebsiteByID(id)
 	if site == nil {
@@ -315,8 +323,8 @@ func (h *BackupHandler) DeleteFileBackup(c *gin.Context) {
 	}
 
 	db := database.GetDB()
-	var filename string
-	err := db.QueryRow("SELECT filename FROM file_backups WHERE id = ? AND site_id = ?", bid, id).Scan(&filename)
+	var filename, mode string
+	err = db.QueryRowContext(ctx, "SELECT filename, mode FROM file_backups WHERE id = ? AND site_id = ?", bid, id).Scan(&filename, &mode)
 	if err != nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("备份记录不存在"))
 		return
@@ -327,12 +335,40 @@ func (h *BackupHandler) DeleteFileBackup(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("备份路径越权"))
 		return
 	}
+	if mode == "full" {
+		var newestID int
+		err := db.QueryRowContext(ctx, `SELECT id FROM file_backups WHERE site_id = ? AND mode = 'full'
+			ORDER BY created_at DESC, id DESC LIMIT 1`, id).Scan(&newestID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("无法确认当前全量基线，删除未执行"))
+			return
+		}
+		if newestID == bid {
+			// Invalidate the cutoff before explicitly deleting its baseline
+			// record, including in remote mode: switching back to local-only
+			// storage must not attach this cutoff to an older retained full.
+			// Automatic remote-only cache removal retains the record and stamp.
+			stampPath, ok := siteFileBackupPath(site, ".last_backup.stamp")
+			if !ok {
+				c.JSON(http.StatusForbidden, models.ErrorResponse("备份时间戳路径越权，删除未执行"))
+				return
+			}
+			if err := os.Remove(stampPath); err != nil && !os.IsNotExist(err) {
+				c.JSON(http.StatusInternalServerError, models.ErrorResponse("无法重置增量基线，删除未执行"))
+				return
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse("删除请求已取消，备份文件及记录已保留"))
+		return
+	}
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		log.Printf("删除文件备份失败 path=%s: %v", filePath, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("删除备份文件失败"))
 		return
 	}
-	if _, err := db.Exec("DELETE FROM file_backups WHERE id = ? AND site_id = ?", bid, id); err != nil {
+	if _, err := db.ExecContext(ctx, "DELETE FROM file_backups WHERE id = ? AND site_id = ?", bid, id); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("删除备份记录失败"))
 		return
 	}
@@ -340,32 +376,45 @@ func (h *BackupHandler) DeleteFileBackup(c *gin.Context) {
 }
 
 func (h *BackupHandler) RestoreStatus(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	c.Header("Cache-Control", "no-store")
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("无效的网站编号"))
+		return
+	}
 	site := getWebsiteByID(id)
 	if site == nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("网站不存在"))
 		return
 	}
 
-	taskID := strings.TrimSpace(c.Param("task_id"))
-	task, ok := executor.GlobalQueue.GetTask(taskID)
-	if !ok {
-		c.JSON(http.StatusNotFound, models.ErrorResponse("恢复任务不存在"))
+	if executor.GlobalQueue == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse("任务队列暂不可用，无法核对数据库恢复状态"))
 		return
 	}
-	if task.Type != executor.TaskRestoreBackup || task.SiteID != site.ID {
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	task, ok := lookupBackupRestoreTask(taskID)
+	if !ok || task == nil || task.Type != executor.TaskRestoreBackup || task.SiteID != site.ID {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("恢复任务不存在"))
 		return
 	}
 
 	message := "数据库恢复等待中"
-	if task.Status == executor.TaskStatusRunning {
-		message = "数据库恢复中"
-	}
 	success := false
-	if task.Result != nil {
+	switch task.Status {
+	case executor.TaskStatusWaiting:
+	case executor.TaskStatusRunning:
+		message = "数据库恢复中"
+	case executor.TaskStatusSuccess, executor.TaskStatusFailed:
+		if task.Result == nil || task.Result.Success != (task.Status == executor.TaskStatusSuccess) {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("无法核对数据库恢复结果，请稍后重试"))
+			return
+		}
 		message = task.Result.Message
 		success = task.Result.Success
+	default:
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("无法核对数据库恢复状态，请稍后重试"))
+		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"task_id": task.ID,

@@ -12,15 +12,46 @@ import (
 
 // BackupDatabase 使用 VACUUM INTO 对在线数据库做一致性热备
 func BackupDatabase(backupDir string) (string, error) {
+	return backupDatabaseAt(backupDir, time.Now())
+}
+
+func backupDatabaseAt(backupDir string, now time.Time) (string, error) {
 	if err := os.MkdirAll(backupDir, 0700); err != nil {
 		return "", fmt.Errorf("创建备份目录失败: %w", err)
 	}
 
-	ts := time.Now().Format("20060102_150405")
-	backupPath := filepath.Join(backupDir, fmt.Sprintf("panel_%s.db", ts))
+	ts := now.Format("20060102_150405")
+	var backupPath string
+	for collision := 0; collision < 10000; collision++ {
+		name := fmt.Sprintf("panel_%s.db", ts)
+		if collision > 0 {
+			name = fmt.Sprintf("panel_%s_%09d.db", ts, collision)
+		}
+		candidate := filepath.Join(backupDir, name)
+		// VACUUM INTO accepts an existing empty file. Reserve it exclusively so
+		// concurrent backups cannot overwrite or clean up another backup.
+		file, err := os.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("创建备份文件失败: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(candidate)
+			return "", fmt.Errorf("关闭备份文件失败: %w", err)
+		}
+		backupPath = candidate
+		break
+	}
+	if backupPath == "" {
+		return "", fmt.Errorf("同一时间的备份文件过多，请稍后重试")
+	}
 
 	if _, err := DB.Exec("VACUUM INTO ?", backupPath); err != nil {
-		os.Remove(backupPath)
+		if removeErr := os.Remove(backupPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return "", fmt.Errorf("VACUUM INTO 失败: %w; 清理本次备份失败: %v", err, removeErr)
+		}
 		return "", fmt.Errorf("VACUUM INTO 失败: %w", err)
 	}
 
@@ -54,11 +85,15 @@ func ListDBBackups(backupDir string) ([]DBBackupInfo, error) {
 		if err != nil {
 			continue
 		}
-		// 从文件名解析时间: panel_20260107_023000.db
+		// 同秒备份可带序号: panel_20260107_023000_000000001.db。
 		name := strings.TrimPrefix(e.Name(), "panel_")
 		name = strings.TrimSuffix(name, ".db")
 		displayTime := name
-		if t, err := time.Parse("20060102_150405", name); err == nil {
+		dateName := name
+		if parts := strings.SplitN(name, "_", 3); len(parts) == 3 {
+			dateName = parts[0] + "_" + parts[1]
+		}
+		if t, err := time.Parse("20060102_150405", dateName); err == nil {
 			displayTime = t.Format("2006-01-02 15:04:05")
 		}
 
