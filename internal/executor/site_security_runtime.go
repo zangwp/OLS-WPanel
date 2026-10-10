@@ -58,8 +58,8 @@ try {
  $editorDisabled = defined('DISALLOW_FILE_EDIT') && DISALLOW_FILE_EDIT === true
   && in_array('do_not_allow', map_meta_cap('edit_themes', 0), true)
   && in_array('do_not_allow', map_meta_cap('edit_plugins', 0), true);
- $updates = (!defined('DISALLOW_FILE_MODS') || DISALLOW_FILE_MODS !== true)
-  && has_action('init', 'wp_schedule_update_checks') !== false
+ // DISALLOW_FILE_MODS restricts installation; update-discovery hooks can remain active.
+ $updates = has_action('init', 'wp_schedule_update_checks') !== false
   && has_action('wp_version_check', 'wp_version_check') !== false
   && has_action('wp_update_plugins', 'wp_update_plugins') !== false
   && has_action('wp_update_themes', 'wp_update_themes') !== false;

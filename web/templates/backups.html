@@ -27,6 +27,7 @@
                 <span class="text-xs text-gray-500" x-text="policyRemoteEnabled ? t('backups.remote_enabled_help') : t('backups.remote_disabled_help')"></span>
             </div>
             <p class="text-xs text-amber-400 mb-4">{{t .Lang "backups.database_schedule_help"}}</p>
+            <p class="text-xs text-gray-500 mb-4">{{t .Lang "backups.backup_types_help"}}</p>
 
             <div x-show="policyLoading" class="py-10 text-center text-gray-500">{{t .Lang "backups.loading"}}</div>
             <div x-show="!policyLoading" class="backup-policy-scroll overflow-auto border border-gray-700 rounded">
@@ -35,7 +36,7 @@
                         <tr>
                             <th class="px-4 py-3 text-left">{{t .Lang "backups.website"}}</th>
                             <th class="px-3 py-3 text-left">{{t .Lang "backups.database_auto_backup"}}</th>
-                            <th class="px-3 py-3 text-left">{{t .Lang "backups.keep_count"}}</th>
+                            <th class="px-3 py-3 text-left">{{t .Lang "backups.database_keep_count"}}</th>
                             <th class="px-3 py-3 text-left">{{t .Lang "backups.incremental_file_backup"}}</th>
                             <th class="px-3 py-3 text-left">{{t .Lang "backups.execution_cycle"}}</th>
                             <th class="px-3 py-3 text-left">{{t .Lang "backups.full_file_backup"}}</th>
@@ -107,7 +108,11 @@
     </div>
 
     <div class="card mb-6">
-        <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "backups.panel_section_title"}}</h3>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h3 class="text-lg font-semibold text-white">{{t .Lang "backups.panel_section_title"}}</h3>
+            <a href="/{{.RandomSuffix}}/settings#panel-backups" class="btn-secondary text-xs py-1 px-3">{{t .Lang "backups.manage_panel_backups"}}</a>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">{{t .Lang "backups.panel_section_help"}}</p>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead class="border-b border-gray-700 text-gray-400">
@@ -135,6 +140,10 @@
         </div>
     </div>
 
+    <div x-show="overviewError" x-cloak class="card mb-4 text-sm text-red-400" role="alert">
+        <span x-text="overviewError"></span>
+        <button @click="fetchOverview()" :disabled="loading" class="btn-secondary text-xs ml-3">{{t .Lang "common.retry"}}</button>
+    </div>
     <div x-show="loading" class="text-center text-gray-500 py-8">{{t .Lang "backups.loading"}}</div>
 
     <template x-for="site in sites" :key="site.site_id">
@@ -153,81 +162,72 @@
                 <button type="button" @click.stop.prevent="goToSite(site.site_id)" class="btn-secondary text-xs py-1 px-3 flex-shrink-0">{{t .Lang "backups.view_website"}}</button>
             </summary>
 
-            <div class="mb-4 mt-4">
-                <div class="text-xs text-gray-400 mb-2">{{t .Lang "backups.db_section_title"}}</div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="border-b border-gray-700 text-gray-400">
-                            <tr>
-                                <th class="py-2 text-left">{{t .Lang "backups.filename"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.size"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.time"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.mode"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.transport"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.actions"}}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="b in site.db_backups" :key="b.id">
-                                <tr class="border-b border-gray-700/50">
-                                    <td class="py-2 font-mono text-xs whitespace-nowrap" x-text="b.filename"></td>
-                                    <td class="py-2 text-xs whitespace-nowrap" x-text="formatBytes(b.file_size)"></td>
-                                    <td class="py-2 text-xs whitespace-nowrap" x-text="fmtTime(b.created_at)"></td>
-                                    <td class="py-2 whitespace-nowrap"><span :class="b.auto ? 'badge-info' : 'badge-success'" class="text-xs" x-text="b.auto ? t('backups.backup_auto') : t('backups.backup_manual')"></span></td>
-                                    <td class="py-2 whitespace-nowrap"><span :class="transportBadgeClass(b)" class="text-xs" x-text="transportLabel(b)"></span></td>
-                                    <td class="py-2 whitespace-nowrap">
-                                        <button type="button" @click="downloadDBBackup(site, b)" :disabled="!b.local_exists" class="btn-secondary text-xs py-1 px-2 mr-1" x-text="t('backups.download')"></button>
-                                        <button type="button" @click="deleteDBBackup(site, b)" class="btn-danger text-xs py-1 px-2" x-text="b.local_exists ? t('backups.delete') : t('backups.clean_record')"></button>
-                                    </td>
-                                </tr>
-                            </template>
-                            <tr x-show="site.db_backups.length === 0">
-                                <td colspan="6" class="py-3 text-center text-gray-500">{{t .Lang "backups.no_backups"}}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <p class="text-xs text-gray-500 mt-4 mb-4">{{t .Lang "backups.restore_pair_help"}}</p>
+            <div class="backup-restore-grid">
+                <section class="backup-restore-column" :aria-labelledby="'db-backup-title-' + site.site_id">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                        <h3 class="font-semibold text-white" :id="'db-backup-title-' + site.site_id">{{t .Lang "backups.db_section_title"}}</h3>
+                        <a :href="'/{{.RandomSuffix}}/databases/' + site.site_id" class="text-xs text-blue-400">{{t .Lang "backups.database_backup_management"}}</a>
+                    </div>
+                    <label class="label" :for="'db-backup-select-' + site.site_id">{{t .Lang "backups.choose_backup"}}</label>
+                    <select :id="'db-backup-select-' + site.site_id" x-model.number="dbSelections[site.site_id]" :disabled="siteBusy(site) || !site.db_backups.length" class="input-field w-full text-sm mb-3">
+                        <option value="0" disabled>{{t .Lang "backups.no_backups"}}</option>
+                        <template x-for="b in site.db_backups" :key="b.id"><option :value="b.id" x-text="backupOption(b, 'db')"></option></template>
+                    </select>
+                    <template x-if="selectedBackup(site, 'db')">
+                        <div>
+                            <p class="backup-filename font-mono text-xs text-gray-400 mb-2" x-text="selectedBackup(site, 'db')?.filename"></p>
+                            <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
+                                <span x-text="formatBytes(selectedBackup(site, 'db')?.file_size || 0)"></span>
+                                <span :class="transportBadgeClass(selectedBackup(site, 'db'))" x-text="transportLabel(selectedBackup(site, 'db'))"></span>
+                            </div>
+                            <p x-show="!selectedBackup(site, 'db')?.local_exists" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.restore_remote_db_help"}}</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button @click="restoreSelected(site, 'db')" :disabled="siteBusy(site) || !selectedBackup(site, 'db')?.local_exists" class="btn-primary text-xs py-1 px-3">{{t .Lang "backups.restore_database"}}</button>
+                                <button @click="downloadDBBackup(site, selectedBackup(site, 'db'))" :disabled="siteBusy(site) || !selectedBackup(site, 'db')?.local_exists" class="btn-secondary text-xs py-1 px-3">{{t .Lang "backups.download"}}</button>
+                                <button @click="deleteDBBackup(site, selectedBackup(site, 'db'))" :disabled="siteBusy(site)" class="btn-danger text-xs py-1 px-3 ml-auto" x-text="selectedBackup(site, 'db')?.local_exists ? t('backups.delete') : t('backups.clean_record')"></button>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-show="!site.db_backups.length" class="text-xs text-gray-500">{{t .Lang "backups.empty_db_help"}}</p>
+                </section>
+                <section class="backup-restore-column" :aria-labelledby="'file-backup-title-' + site.site_id">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                        <h3 class="font-semibold text-white" :id="'file-backup-title-' + site.site_id">{{t .Lang "backups.file_section_title"}}</h3>
+                        <a href="/{{.RandomSuffix}}/cron" class="text-xs text-blue-400">{{t .Lang "backups.file_backup_plan"}}</a>
+                    </div>
+                    <label class="label" :for="'file-backup-select-' + site.site_id">{{t .Lang "backups.choose_backup"}}</label>
+                    <select :id="'file-backup-select-' + site.site_id" x-model.number="fileSelections[site.site_id]" :disabled="siteBusy(site) || !site.file_backups.length" class="input-field w-full text-sm mb-3">
+                        <option value="0" disabled>{{t .Lang "backups.no_backups"}}</option>
+                        <template x-for="b in site.file_backups" :key="b.id"><option :value="b.id" x-text="backupOption(b, 'file')"></option></template>
+                    </select>
+                    <template x-if="selectedBackup(site, 'file')">
+                        <div>
+                            <p class="backup-filename font-mono text-xs text-gray-400 mb-2" x-text="selectedBackup(site, 'file')?.filename"></p>
+                            <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
+                                <span x-text="formatBytes(selectedBackup(site, 'file')?.file_size || 0)"></span>
+                                <span :class="transportBadgeClass(selectedBackup(site, 'file'))" x-text="transportLabel(selectedBackup(site, 'file'))"></span>
+                            </div>
+                            <p x-show="selectedBackup(site, 'file')?.mode !== 'full'" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.restore_incremental_help"}}</p>
+                            <p x-show="!selectedBackup(site, 'file')?.local_exists" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.restore_remote_file_help"}}</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button @click="restoreSelected(site, 'file')" :disabled="siteBusy(site) || !canRestoreFile(site)" class="btn-primary text-xs py-1 px-3">{{t .Lang "backups.restore_files"}}</button>
+                                <button @click="downloadFileBackup(site, selectedBackup(site, 'file'))" :disabled="siteBusy(site) || !selectedBackup(site, 'file')?.local_exists" class="btn-secondary text-xs py-1 px-3">{{t .Lang "backups.download"}}</button>
+                                <button @click="deleteFileBackup(site, selectedBackup(site, 'file'))" :disabled="siteBusy(site)" class="btn-danger text-xs py-1 px-3 ml-auto" x-text="selectedBackup(site, 'file')?.local_exists ? t('backups.delete') : t('backups.clean_record')"></button>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-show="!site.file_backups.length" class="text-xs text-gray-500">{{t .Lang "backups.empty_files_help"}}</p>
+                </section>
             </div>
-
-            <div>
-                <div class="text-xs text-gray-400 mb-2">{{t .Lang "backups.file_section_title"}}</div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="border-b border-gray-700 text-gray-400">
-                            <tr>
-                                <th class="py-2 text-left">{{t .Lang "backups.filename"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.size"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.time"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.mode"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.transport"}}</th>
-                                <th class="py-2 text-left">{{t .Lang "backups.actions"}}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="b in site.file_backups" :key="b.id">
-                                <tr class="border-b border-gray-700/50">
-                                    <td class="py-2 font-mono text-xs whitespace-nowrap" x-text="b.filename"></td>
-                                    <td class="py-2 text-xs whitespace-nowrap" x-text="formatBytes(b.file_size)"></td>
-                                    <td class="py-2 text-xs whitespace-nowrap" x-text="fmtTime(b.created_at)"></td>
-                                    <td class="py-2 whitespace-nowrap"><span :class="b.mode === 'full' ? 'badge-success' : 'badge-info'" class="text-xs" x-text="b.mode === 'full' ? t('backups.mode_full') : t('backups.mode_incremental')"></span></td>
-                                    <td class="py-2 whitespace-nowrap"><span :class="transportBadgeClass(b)" class="text-xs" x-text="transportLabel(b)"></span></td>
-                                    <td class="py-2 whitespace-nowrap">
-                                        <button type="button" @click="downloadFileBackup(site, b)" :disabled="!b.local_exists" class="btn-secondary text-xs py-1 px-2 mr-1" x-text="t('backups.download')"></button>
-                                        <button type="button" @click="deleteFileBackup(site, b)" class="btn-danger text-xs py-1 px-2" x-text="b.local_exists ? t('backups.delete') : t('backups.clean_record')"></button>
-                                    </td>
-                                </tr>
-                            </template>
-                            <tr x-show="site.file_backups.length === 0">
-                                <td colspan="6" class="py-3 text-center text-gray-500">{{t .Lang "backups.no_backups"}}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <div x-show="restoreStates[site.site_id]" x-cloak class="mt-4 pt-3 border-t border-gray-700 text-sm" role="status" aria-live="polite">
+                <p :class="restoreStates[site.site_id]?.phase === 'failed' ? 'text-red-400' : 'text-gray-400'" x-text="restoreStates[site.site_id]?.message"></p>
+                <button x-show="restoreStates[site.site_id]?.phase === 'unknown'" @click="resumeSiteRestore(site)" class="btn-secondary text-xs mt-2">{{t .Lang "backups.refresh_restore_status"}}</button>
             </div>
         </details>
     </template>
 
-    <div x-show="!loading && sites.length === 0" class="card text-center text-gray-500 py-8">{{t .Lang "backups.no_websites"}}</div>
+    <div x-show="!loading && !overviewError && sites.length === 0" class="card text-center text-gray-500 py-8">{{t .Lang "backups.no_websites"}}</div>
 </div>
 
 <style>
@@ -244,30 +244,170 @@
     .site-backup-card > summary::-webkit-details-marker { display: none; }
     .site-backup-card .chevron-icon { transition: transform 0.15s ease; }
     .site-backup-card[open] > summary .chevron-icon { transform: rotate(90deg); }
+    .backup-restore-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .backup-restore-column { min-width: 0; }
+    .backup-restore-column + .backup-restore-column { border-left: 1px solid var(--panel-border, #dbe5ef); padding-left: 24px; }
+    .backup-filename { overflow-wrap: anywhere; }
+    @media (max-width: 1023px) {
+        .backup-restore-grid { grid-template-columns: minmax(0, 1fr); }
+        .backup-restore-column + .backup-restore-column { border-left: 0; padding-left: 0; border-top: 1px solid var(--panel-border, #dbe5ef); padding-top: 20px; }
+    }
+    @media (max-width: 639px) {
+        .site-backup-card > summary { flex-wrap: wrap; gap: 12px; }
+        .site-backup-card > summary > span { flex: 1 1 100%; flex-wrap: wrap; gap: 8px; }
+        .site-backup-card > summary > span > .text-lg { flex: 1 1 calc(100% - 24px); min-width: 0; }
+        .site-backup-card > summary > button { margin-left: auto; }
+    }
 </style>
 
 <script>
 function backupsOverview() {
     return {
         loading: true,
+        overviewError: '',
+        overviewEpoch: 0,
         reconciling: false,
         sites: [],
         panelBackups: [],
+        dbSelections: {},
+        fileSelections: {},
+        restoreStates: {},
+        restoreTimers: {},
+        backupMutations: {},
+        alive: true,
         policyOpen: false,
         policyLoading: false,
         policySaving: false,
         policyRemoteEnabled: false,
         policySites: [],
         async fetchOverview() {
+            const epoch = ++this.overviewEpoch;
             this.loading = true;
             try {
-                const r = await api('/backups/overview');
-                if (r.success) {
-                    this.sites = r.data.sites || [];
-                    this.panelBackups = r.data.panel_db_backups || [];
+                const r = await api('/backups/overview', {timeout:15000, suppressToast:true});
+                if (!r.success || !Array.isArray(r.data?.sites) || !Array.isArray(r.data?.panel_db_backups) ||
+                    r.data.sites.some(site => !Array.isArray(site.db_backups) || !Array.isArray(site.file_backups))) {
+                    throw new Error(t('backups.overview_load_failed'));
                 }
-            } catch (e) {}
-            this.loading = false;
+                if (!this.alive || epoch !== this.overviewEpoch) return;
+                this.sites = r.data.sites;
+                this.panelBackups = r.data.panel_db_backups;
+                for (const site of this.sites) {
+                    if (!site.db_backups.some(b => b.id === Number(this.dbSelections[site.site_id]))) {
+                        this.dbSelections[site.site_id] = site.db_backups[0]?.id || 0;
+                    }
+                    if (!site.file_backups.some(b => b.id === Number(this.fileSelections[site.site_id]))) {
+                        this.fileSelections[site.site_id] = site.file_backups.find(b => b.mode === 'full' && b.local_exists)?.id || site.file_backups[0]?.id || 0;
+                    }
+                }
+                this.overviewError = '';
+            } catch (e) { if (this.alive && epoch === this.overviewEpoch) this.overviewError = e.message || t('backups.overview_load_failed'); }
+            finally { if (this.alive && epoch === this.overviewEpoch) this.loading = false; }
+            if (!this.overviewError && this.alive && epoch === this.overviewEpoch) {
+                await Promise.allSettled(this.sites.filter(site => !this.restoreStates[site.site_id]).map(site => this.resumeSiteRestore(site)));
+            }
+        },
+        destroy() {
+            this.alive = false;
+            Object.values(this.restoreTimers).forEach(timer => clearTimeout(timer));
+        },
+        selectedBackup(site, kind) {
+            const list = kind === 'db' ? site.db_backups : site.file_backups;
+            const selected = kind === 'db' ? this.dbSelections[site.site_id] : this.fileSelections[site.site_id];
+            return (list || []).find(b => b.id === Number(selected)) || null;
+        },
+        backupOption(backup, kind) {
+            const mode = kind === 'file' ? t(backup.mode === 'full' ? 'backups.mode_full' : 'backups.mode_incremental') : t(backup.auto ? 'backups.backup_auto' : 'backups.backup_manual');
+            return fmtTime(backup.created_at) + ' · ' + mode;
+        },
+        siteBusy(site) {
+            return this.loading || !!this.overviewError || !!this.backupMutations[site.site_id] || ['confirming', 'submitting', 'waiting', 'running', 'unknown'].includes(this.restoreStates[site.site_id]?.phase);
+        },
+        canRestoreFile(site) {
+            const b = this.selectedBackup(site, 'file');
+            return !!b?.local_exists && b.mode === 'full';
+        },
+        async restoreSelected(site, kind) {
+            if (this.siteBusy(site)) return;
+            const selected = this.selectedBackup(site, kind);
+            if (!selected?.local_exists || (kind === 'file' && selected.mode !== 'full')) return;
+            const backup = {...selected};
+            this.restoreStates[site.site_id] = {kind, phase:'confirming', message:t('backups.restore_confirming'), task_id:''};
+            const state = this.restoreStates[site.site_id];
+            let confirmed = false;
+            try {
+                confirmed = await confirmModal(t(kind === 'db' ? 'backups.confirm_restore_database' : 'backups.confirm_restore_files', {
+                    domain:site.domain, filename:backup.filename, time:fmtTime(backup.created_at)
+                }));
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                if (!confirmed) { delete this.restoreStates[site.site_id]; return; }
+                state.phase = 'submitting';
+                state.message = t('backups.restore_starting');
+                const collection = kind === 'db' ? 'backups' : 'file-backups';
+                const r = await api('/websites/' + site.site_id + '/' + collection + '/' + backup.id + '/restore', {method:'POST', timeout:15000, suppressToast:true});
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                if (!r.success || typeof r.data?.task_id !== 'string' || !r.data.task_id) {
+                    state.phase = 'unknown';
+                    state.message = t('backups.restore_status_unknown');
+                    return;
+                }
+                state.task_id = r.data.task_id;
+                state.phase = 'waiting';
+                state.message = r.data.message || t('backups.restore_waiting');
+                await this.pollSiteRestore(site, state);
+            } catch (e) {
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                state.phase = confirmed && !e.status ? 'unknown' : 'failed';
+                state.message = state.phase === 'unknown' ? t('backups.restore_status_unknown') : (e.message || t('backups.restore_failed'));
+            }
+        },
+        async resumeSiteRestore(site) {
+            if (!this.alive) return;
+            const previous = this.restoreStates[site.site_id];
+            if (previous?.task_id) { await this.pollSiteRestore(site, previous); return; }
+            this.restoreStates[site.site_id] = {kind:'', phase:'unknown', message:t('backups.restore_checking'), task_id:''};
+            const state = this.restoreStates[site.site_id];
+            try {
+                const r = await api('/websites/' + site.site_id + '/backups/active-restore', {suppressToast:true, timeout:15000});
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                if (!r.success || typeof r.data?.active !== 'boolean') throw new Error(t('backups.restore_status_unknown'));
+                if (!r.data.active) {
+                    if (previous?.phase === 'unknown') {
+                        state.phase = 'failed';
+                        state.message = t('backups.restore_no_active_task');
+                    } else delete this.restoreStates[site.site_id];
+                    return;
+                }
+                if (!['db', 'file'].includes(r.data.kind) || typeof r.data.task_id !== 'string' || !r.data.task_id || !['waiting', 'running'].includes(r.data.status)) throw new Error(t('backups.restore_status_unknown'));
+                Object.assign(state, {kind:r.data.kind, task_id:r.data.task_id, phase:r.data.status, message:r.data.message || t('backups.restore_waiting')});
+                await this.pollSiteRestore(site, state);
+            } catch (e) {
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                state.phase = 'unknown'; state.message = t('backups.restore_status_unknown');
+            }
+        },
+        async pollSiteRestore(site, state) {
+            if (!this.alive || this.restoreStates[site.site_id] !== state || !state.task_id) return;
+            clearTimeout(this.restoreTimers[site.site_id]);
+            const collection = state.kind === 'db' ? 'backups' : 'file-backups';
+            try {
+                const r = await api('/websites/' + site.site_id + '/' + collection + '/restore-tasks/' + encodeURIComponent(state.task_id), {suppressToast:true, timeout:15000});
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                if (!r.success || r.data?.task_id !== state.task_id || !['waiting', 'running', 'success', 'failed'].includes(r.data?.status)) throw new Error(t('backups.restore_status_unknown'));
+                if (r.data.status === 'success' && r.data.success !== true) throw new Error(t('backups.restore_status_unknown'));
+                state.phase = r.data.status;
+                state.message = r.data.message || t('backups.restore_' + r.data.status);
+                if (['waiting', 'running'].includes(state.phase)) {
+                    this.restoreTimers[site.site_id] = setTimeout(() => this.pollSiteRestore(site, state), 2000);
+                } else if (state.phase === 'success') {
+                    showToast(state.message, 'success');
+                    await this.fetchOverview();
+                }
+            } catch (e) {
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                state.phase = [404, 410].includes(e.status) ? 'failed' : 'unknown';
+                state.message = state.phase === 'failed' ? t('backups.restore_task_missing') : t('backups.restore_status_unknown');
+            }
         },
         async openPolicy() {
             this.policyOpen = true;
@@ -348,12 +488,14 @@ function backupsOverview() {
             return t('backups.remote_chain_unknown');
         },
         transportBadgeClass(b) {
+            if (!b) return 'badge-info';
             if (b.transport_status === 'synced') return 'badge-success';
             if (b.transport_status === 'failed') return 'badge-danger';
             if (!b.local_exists) return 'badge-warning';
             return 'badge-info';
         },
         transportLabel(b) {
+            if (!b) return '';
             if (b.transport_status === 'synced') return b.local_exists ? t('backups.transport_synced') : t('backups.transport_synced_remote_only');
             if (b.transport_status === 'failed') return t('backups.transport_failed');
             return b.local_exists ? t('backups.transport_local') : t('backups.transport_missing');
@@ -369,30 +511,36 @@ function backupsOverview() {
             window.location.href = this.siteDetailUrl(siteId);
         },
         downloadDBBackup(site, backup) {
-            if (!backup.local_exists) return;
+            if (this.siteBusy(site) || !backup?.local_exists) return;
             window.open(this.apiPrefix() + '/api/websites/' + site.site_id + '/backups/' + backup.id + '/download');
         },
         downloadFileBackup(site, backup) {
-            if (!backup.local_exists) return;
+            if (this.siteBusy(site) || !backup?.local_exists) return;
             window.open(this.apiPrefix() + '/api/websites/' + site.site_id + '/file-backups/' + backup.id + '/download');
         },
         async deleteDBBackup(site, backup) {
+            if (this.siteBusy(site) || !backup) return;
+            this.backupMutations[site.site_id] = true;
             const key = backup.local_exists ? 'backups.confirm_delete_local' : 'backups.confirm_clean_record';
-            if (!await confirmModal(t(key, { filename: backup.filename }))) return;
             try {
+                if (!await confirmModal(t(key, { filename: backup.filename }))) return;
                 await api('/websites/' + site.site_id + '/backups/' + backup.id, { method: 'DELETE' });
                 await this.fetchOverview();
                 showToast(t('backups.deleted'), 'success');
             } catch (e) { showToast(e.message, 'error'); }
+            finally { delete this.backupMutations[site.site_id]; }
         },
         async deleteFileBackup(site, backup) {
-            const key = backup.local_exists ? 'backups.confirm_delete_local' : 'backups.confirm_clean_record';
-            if (!await confirmModal(t(key, { filename: backup.filename }))) return;
+            if (this.siteBusy(site) || !backup) return;
+            this.backupMutations[site.site_id] = true;
+            const key = backup.local_exists ? 'backups.confirm_delete_file_local' : 'backups.confirm_clean_record';
             try {
+                if (!await confirmModal(t(key, { filename: backup.filename }))) return;
                 await api('/websites/' + site.site_id + '/file-backups/' + backup.id, { method: 'DELETE' });
                 await this.fetchOverview();
                 showToast(t('backups.deleted'), 'success');
             } catch (e) { showToast(e.message, 'error'); }
+            finally { delete this.backupMutations[site.site_id]; }
         },
         expandAll() {
             // 用 document 而不是 this.$el：在方法体内 this.$el 指向触发这次调用的元素（这里是

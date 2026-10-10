@@ -362,6 +362,8 @@ func (q *TaskQueue) worker() {
 				result = executeCreateBackup(task)
 			case TaskRestoreBackup:
 				result = executeRestoreBackup(task)
+			case TaskRestoreFileBackup:
+				result = executeRestoreFileBackup(task)
 			case TaskSetFileLock:
 				result = executeSetFileLock(task)
 			default:
@@ -455,6 +457,10 @@ func taskSecrets(payload interface{}) []string {
 
 func taskSiteID(payload interface{}) int {
 	switch p := payload.(type) {
+	case *RestoreFileBackupPayload:
+		if p != nil && p.Site != nil {
+			return p.Site.ID
+		}
 	case *RestoreBackupPayload:
 		if p != nil && p.Site != nil {
 			return p.Site.ID
@@ -545,6 +551,10 @@ func logOp(task *Task, result TaskResult) {
 		}
 	case TaskRestoreBackup:
 		if p, ok := task.Payload.(*RestoreBackupPayload); ok && p.Site != nil {
+			target = p.Site.Domain
+		}
+	case TaskRestoreFileBackup:
+		if p, ok := task.Payload.(*RestoreFileBackupPayload); ok && p.Site != nil {
 			target = p.Site.Domain
 		}
 	case TaskSetFileLock:

@@ -127,6 +127,65 @@ func securityVerificationCheck(t *testing.T, report models.WebsiteSecurityStatus
 	return models.WebsiteSecurityCheck{}
 }
 
+func TestSiteSecurityUpdateChecksRemainVerifiableWithFileProtection(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		disable, stopPolicy bool
+		state               string
+		canVerify           bool
+	}{
+		{"locked with checks enabled", false, false, "configured", true},
+		{"explicitly disabled", true, true, "disabled", false},
+		{"stale stop-checks policy", false, true, "error", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := securityVerificationWebsite(t)
+			site.DisableWPUpdates = tc.disable
+			site.FileLockEnabled, site.FileLockApplyStatus = true, FileLockApplyStatusReady
+			wpConfig := renderWPNativePolicy("<?php\ndefine('DISALLOW_FILE_MODS', true);\ndefine('DISALLOW_FILE_EDIT', true);\ndefine('WP_DEBUG_DISPLAY', false);\n", tc.stopPolicy, true)
+			configPath := filepath.Join(site.WebRoot, "wp-config.php")
+			if err := os.WriteFile(configPath, []byte(wpConfig), 0600); err != nil {
+				t.Fatal(err)
+			}
+			oldMaintenance, oldCore := websiteSecurityMaintenanceState, verifyWebsiteSecurityCore
+			t.Cleanup(func() { websiteSecurityMaintenanceState, verifyWebsiteSecurityCore = oldMaintenance, oldCore })
+			websiteSecurityMaintenanceState = func(context.Context, int) (string, error) { return "locked", nil }
+			coreCalls := 0
+			verifyWebsiteSecurityCore = func(context.Context, *models.Website) (map[string]bool, error) {
+				coreCalls++
+				return map[string]bool{"wp_updates": true}, nil
+			}
+			report := CollectWebsiteSecurityStatus(context.Background(), site)
+			check := securityVerificationCheck(t, report, "wp_updates")
+			if check.State != tc.state || check.CanVerify != tc.canVerify {
+				t.Fatalf("file protection altered update-check policy: %+v", check)
+			}
+			verified, err := VerifyWebsiteSecurityStatus(context.Background(), site, "wp_updates")
+			if err != nil {
+				t.Fatal(err)
+			}
+			check = securityVerificationCheck(t, verified, "wp_updates")
+			if tc.state == "configured" {
+				if coreCalls != 1 || check.State != "runtime_verified" || check.ReasonCode != "core_updates_allowed" || check.EvidenceSource != "isolated_wp_core" || check.Effective != nil {
+					t.Fatalf("locked site lost core update-discovery verification: calls=%d check=%+v", coreCalls, check)
+				}
+				cached := securityVerificationCheck(t, CollectWebsiteSecurityStatus(context.Background(), site), "wp_updates")
+				if cached.State != "runtime_verified" || cached.ReasonCode != check.ReasonCode {
+					t.Fatalf("file protection discarded valid cached check: %+v", cached)
+				}
+			} else if coreCalls != 0 || check.State != tc.state {
+				t.Fatalf("disabled/mismatched update policy was verified: calls=%d check=%+v", coreCalls, check)
+			}
+			if lock := securityVerificationCheck(t, verified, "file_lock"); lock.State != "ready" || lock.ReasonCode != "file_lock_applied" {
+				t.Fatalf("update check changed file protection evidence: %+v", lock)
+			}
+			if content, err := os.ReadFile(configPath); err != nil || string(content) != wpConfig {
+				t.Fatalf("verification changed file protection policy: %v", err)
+			}
+		})
+	}
+}
+
 func TestSiteSecurityCoreVerificationIsScopedAndCacheInvalidates(t *testing.T) {
 	site := securityVerificationWebsite(t)
 	old := verifyWebsiteSecurityCore
