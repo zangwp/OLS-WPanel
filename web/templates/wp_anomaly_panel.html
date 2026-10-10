@@ -44,6 +44,7 @@ function wpAnomalyMonitor(siteID) {
                 this.state = r.data; this.enabled = r.data.enabled; this.threshold = r.data.threshold;
                 if (r.data.last_error) this.error = this.errorText(r.data.last_error);
                 if (saving) showToast(t('common.saved'), 'success');
+                if (saving || path === '/check') this.$dispatch?.('site-anomaly-updated', {site_id:siteID});
             } catch (e) { this.error = this.errorText(e.message); }
             finally { this.busy = false; }
         },

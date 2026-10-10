@@ -28,8 +28,9 @@
                                 <button type="button" class="site-security-log-link" x-show="['login_protection','sql_injection','sensitive_files','uploads_php'].includes(key)" @click="openSummaryLogs()" x-text="t('website.security_view_logs')"></button>
                             </div>
                         </details>
-                        <div class="site-security-row-actions" x-show="summaryCheck(key).can_verify">
+                        <div class="site-security-row-actions" x-show="summaryCheck(key).can_verify || summarySettingsAvailable(key)">
                             <button type="button" class="site-security-action" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" :aria-label="siteSecurityTitle(key) + ': ' + t('site_security.verify')" x-text="verifyingKey === key ? t('site_security.verifying') : t('site_security.verify_short')"></button>
+                            <button type="button" class="site-security-action" x-show="!summaryCheck(key).can_verify && summarySettingsAvailable(key)" :disabled="securityStatusLoading || !!verifyingKey" @click="openSummarySettings(key)" :aria-label="siteSecurityTitle(key) + ': ' + summarySettingsText(key)" x-text="summarySettingsText(key)"></button>
                         </div>
                     </div>
                 </template>
@@ -55,16 +56,20 @@ function siteSecuritySummary() {
         },
         summaryStateText(key) {
             if (this.securityStatusLoading) return t('website.security_checking');
-            const state = this.summaryCheck(key).state;
+            const check = this.summaryCheck(key), state = check.state;
+            if (state === 'ready' && ['file_editing_managed_by_file_lock','file_lock_applied','uptime_check_succeeded','anomaly_check_succeeded'].includes(check.reason_code)) return t('site_security.state_' + check.reason_code);
+            if (state === 'configured' && check.reason_code === 'file_lock_temporarily_unlocked') return t('site_security.state_file_lock_temporarily_unlocked');
+            if (state === 'configured' && check.can_verify === false) return t(['uptime_check_pending','uptime_check_stale','anomaly_check_pending','anomaly_check_stale'].includes(check.reason_code) ? 'site_security.state_waiting_check' : 'site_security.state_configured');
             return ['ready','runtime_verified'].includes(state) ? t('site_security.state_' + state) : t('website.security_state_' + state);
         },
         summaryStateClass(key) {
             if (this.securityStatusLoading) return 'badge-info';
-            const state = this.summaryCheck(key).state;
-            return state === 'effective' ? 'badge-success' : ['error','configured'].includes(state) ? 'badge-warning' : 'badge-info';
+            const check = this.summaryCheck(key), state = check.state;
+            return state === 'effective' ? 'badge-success' : state === 'error' || (state === 'configured' && check.can_verify !== false) ? 'badge-warning' : 'badge-info';
         },
         summaryReason(key) {
-            const code = this.summaryCheck(key).reason_code || 'not_checked';
+            const check = this.summaryCheck(key);
+            const code = check.state === 'configured' && check.can_verify === false && check.reason_code === 'configured_not_run' ? 'configuration_saved' : check.reason_code || 'not_checked';
             const value = t('site_security.reason_' + code);
             return value === 'site_security.reason_' + code ? t('site_security.reason_not_checked') : value;
         },
@@ -74,6 +79,16 @@ function siteSecuritySummary() {
             return value === 'site_security.source_' + source ? t('site_security.source_saved_configuration') : value;
         },
         summaryTime(value) { const date = new Date(value); return value && Number.isFinite(date.getTime()) ? date.toLocaleString(currentLocale()) : '—'; },
+        summarySettingsAvailable(key) { return this.summaryCheck(key).state !== 'unsupported' && ['file_lock','file_editing','uptime_monitor','anomaly_monitor','backup'].includes(key); },
+        summarySettingsText(key) {
+            return t(key === 'uptime_monitor' ? 'site_security.view_alerts' : key === 'anomaly_monitor' ? 'site_security.check_results' : key === 'backup' ? 'site_security.view_backups' : 'site_security.view_settings');
+        },
+        openSummarySettings(key) {
+            if (this.securityStatusLoading || this.verifyingKey || !this.summarySettingsAvailable(key)) return;
+            if (key === 'uptime_monitor' || key === 'backup') { window.location.assign('/{{.RandomSuffix}}/' + (key === 'uptime_monitor' ? 'alert' : 'backups')); return; }
+            const anchor = {file_lock:'site-protection',file_editing:'site-file-editing-control',anomaly_monitor:'site-wp-anomaly'}[key];
+            if (anchor) { window.location.hash = '#' + anchor; this.scrollDetailAnchor(); }
+        },
         async verifySummaryCheck(key) {
             if (!this.site || this.site.status !== 'active' || this.verifyingKey || this.securityStatusLoading || !this.summaryCheck(key).can_verify) return;
             const siteID = this.site.id, generation = ++this.securityStatusGeneration;

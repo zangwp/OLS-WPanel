@@ -29,12 +29,12 @@
     --panel-font: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     --chart-grid: #e9eff5;
     --chart-text: #637589;
-    --chart-cpu: #116b9a;
-    --chart-memory: #8360b5;
-    --chart-disk: #238875;
-    --panel-chart-cpu: #116b9a;
-    --panel-chart-memory: #8360b5;
-    --panel-chart-load: #238875;
+    --chart-cpu: #4f7fa6;
+    --chart-memory: #a7783b;
+    --chart-disk: #b05d52;
+    --panel-chart-cpu: #4f7fa6;
+    --panel-chart-memory: #a7783b;
+    --panel-chart-load: #b05d52;
 }
 
 html, body { background: var(--panel-bg); }

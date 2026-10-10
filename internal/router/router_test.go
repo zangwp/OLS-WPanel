@@ -1707,8 +1707,20 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 			t.Fatalf("website security workspace missing control %q", required)
 		}
 	}
-	if bytes.Contains(security, []byte(`openSummarySettings`)) {
-		t.Fatal("compact security summary must not restore duplicate settings actions")
+	for _, action := range []struct {
+		click string
+		show  string
+	}{
+		{`verifySummaryCheck(key)`, `summaryCheck(key).can_verify`},
+		{`openSummarySettings(key)`, `!summaryCheck(key).can_verify && summarySettingsAvailable(key)`},
+	} {
+		buttons := regexp.MustCompile(`<button\b[^>]*@click="` + regexp.QuoteMeta(action.click) + `"[^>]*>`).FindAll(security, -1)
+		if len(buttons) != 1 {
+			t.Fatalf("compact security summary must have exactly one %s action, got %d", action.click, len(buttons))
+		}
+		if bytes.Count(buttons[0], []byte(`x-show="`)) != 1 || !bytes.Contains(buttons[0], []byte(`x-show="`+action.show+`"`)) {
+			t.Fatalf("compact security summary action %s must use its mutually exclusive can_verify guard", action.click)
+		}
 	}
 	if bytes.Contains(source, []byte(`website.openlitespeed_custom_config`)) {
 		t.Fatal("website detail still exposes the disabled OpenLiteSpeed custom configuration card")

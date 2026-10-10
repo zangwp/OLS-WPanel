@@ -144,6 +144,92 @@ test('maintenance polling skips hidden, saving and inactive tabs', async () => {
     page.detailTab = 'security'; poll.callback(); await settle(); assert.equal(calls.length, before + 1);
 });
 
+const coveredFileChecks = () => [
+    {key:'file_lock',state:'ready',configured:true,runtime_ready:true,can_verify:false,reason_code:'file_lock_applied'},
+    {key:'file_editing',state:'ready',configured:true,runtime_ready:true,can_verify:false,reason_code:'file_editing_managed_by_file_lock',details:{protected_by:'file_lock'}},
+];
+
+test('an external maintenance unlock invalidates covered editing immediately and steady polls do not repeat security probes', async () => {
+    const {page,context,calls,response} = setup(), refreshed = deferred();
+    page.site = {...site(),file_lock_enabled:true,file_lock_apply_status:'ready'}; page.detailTab = 'security';
+    page.maintenance = {state:'locked',window_id:'',enabled:false};
+    page.securityStatus = {site_id:1,checks:coveredFileChecks()};
+    const observation = {state:'unlocked',window_id:'window-A',revision:1,expires_at:1900000000,enabled:false,file_lock_enabled:false,file_lock_apply_status:''};
+    context.api = async (url, options) => {
+        calls.push({url,options});
+        return url.endsWith('/maintenance') ? {success:true,data:{...observation,server_time:calls.length}} : refreshed.promise;
+    };
+    assert.equal(page.fileEditingManagedByLock(),true);
+    await page.loadMaintenance();
+    assert.equal(page.site.file_lock_enabled,false); assert.equal(page.site.file_lock_apply_status,'');
+    assert.equal(page.fileEditingManagedByLock(),false); assert.equal(page.securityStatusLoading,true);
+    await page.loadMaintenance();
+    assert.equal(paths(calls).filter(url => url.endsWith('/security-status')).length,1, 'server clock changes must not trigger another probe');
+    refreshed.resolve({success:true,data:{site_id:1,checks:[{key:'file_lock',state:'configured',configured:true,can_verify:false,reason_code:'file_lock_temporarily_unlocked'}]}});
+    await settle();
+    assert.equal(page.siteSecurityStateText('file_lock'),'site_security.state_file_lock_temporarily_unlocked');
+    await page.loadMaintenance();
+    assert.equal(paths(calls).filter(url => url.endsWith('/security-status')).length,1);
+    assert.equal(page.maintenanceEnabled,false, 'maintenance authorization must not be inferred from a lock transition');
+});
+
+test('maintenance relock failures and recovery use actual lock flags with one summary refresh per transition', async () => {
+    const {page,context,calls} = setup(); page.site = {...site(),file_lock_enabled:false,file_lock_apply_status:''}; page.detailTab = 'security';
+    page.maintenance = {state:'unlocked',window_id:'window-A',revision:1};
+    let observation;
+    context.api = async (url, options) => {
+        calls.push({url,options});
+        if (url.endsWith('/maintenance')) return {success:true,data:observation};
+        return {success:true,data:{site_id:1,checks:observation.state === 'locked' ? coveredFileChecks() : [{key:'file_lock',state:'error',configured:true,can_verify:false,reason_code:'file_lock_not_ready'}]}};
+    };
+    let expectedProbes = 0;
+    for (const [state,enabled,apply] of [['relocking',false,'applying'],['relock_failed',false,'failed'],['locked',true,'ready']]) {
+        observation = {state,window_id:state === 'locked' ? '' : 'window-A',revision:2,enabled:false,file_lock_enabled:enabled,file_lock_apply_status:apply};
+        await page.loadMaintenance(); await settle(); expectedProbes++;
+        assert.equal(page.site.file_lock_enabled,enabled); assert.equal(page.site.file_lock_apply_status,apply);
+        assert.equal(page.fileEditingManagedByLock(),state === 'locked');
+        await page.loadMaintenance(); await settle();
+        assert.equal(paths(calls).filter(url => url.endsWith('/security-status')).length,expectedProbes);
+    }
+});
+
+test('old maintenance responses never promote file protection from lifecycle or authorization flags', async () => {
+    const {page,context,calls} = setup(); page.site = {...site(),file_lock_enabled:false,file_lock_apply_status:'failed'}; page.detailTab = 'security';
+    context.api = async (url, options) => {
+        calls.push({url,options});
+        return {success:true,data:url.endsWith('/maintenance/password') ? {password:'fixture'} : {state:'locked',enabled:true,minutes:5}};
+    };
+    await page.loadMaintenance(true);
+    assert.equal(page.site.file_lock_enabled,false); assert.equal(page.site.file_lock_apply_status,'failed');
+    assert.equal(page.maintenanceEnabled,true); assert.equal(page.fileEditingManagedByLock(),false);
+    assert.equal(paths(calls).includes('/websites/1/security-status'),false);
+});
+
+test('failed or unknown maintenance reads remove only cached file coverage without claiming success or probing repeatedly', async () => {
+    for (const result of [new Error('offline'),{success:false,data:{state:'locked'}},{success:true,data:{state:'unknown'}},{success:true,data:{state:'locked',file_lock_enabled:'true'}}]) {
+        const {page,context,calls} = setup(); page.site = {...site(),file_lock_enabled:true,file_lock_apply_status:'ready'}; page.detailTab = 'security';
+        page.maintenance = {state:'locked'};
+        page.securityStatus = {site_id:1,checks:[...coveredFileChecks(),{key:'https',state:'effective',configured:true,effective:true}]};
+        context.api = async (url, options) => { calls.push({url,options}); if (result instanceof Error) throw result; return result; };
+        await page.loadMaintenance(); await page.loadMaintenance();
+        assert.equal(page.maintenance.state,'unknown'); assert.equal(page.fileEditingManagedByLock(),false);
+        assert.equal(page.siteSecurityCheck('file_lock').state,'unknown');
+        assert.equal(page.siteSecurityCheck('file_lock').reason_code,'file_lock_state_unknown');
+        assert.equal(page.siteSecurityCheck('https').state,'effective', 'unrelated confirmed checks remain available');
+        assert.equal(paths(calls).filter(url => url.endsWith('/security-status')).length,0);
+    }
+});
+
+test('a security response begun before a failed maintenance read cannot restore stale file coverage', async () => {
+    const {page,context} = setup(), pending = deferred();
+    page.site = {...site(),file_lock_enabled:true,file_lock_apply_status:'ready'}; page.detailTab = 'security'; page.maintenance = {state:'locked'};
+    context.api = async url => { if (url.endsWith('/security-status')) return pending.promise; throw Error('maintenance read failed'); };
+    const read = page.fetchSiteSecurityStatus(); await page.loadMaintenance();
+    pending.resolve({success:true,data:{site_id:1,checks:coveredFileChecks()}}); await read;
+    assert.equal(page.siteSecurityCheck('file_lock').state,'unknown'); assert.equal(page.fileEditingManagedByLock(),false);
+    assert.equal(page.siteSecurityCheck('file_lock').reason_code,'file_lock_state_unknown'); assert.equal(page.securityStatusLoading,false);
+});
+
 test('a delayed maintenance password cannot restore its secret after leaving security', async () => {
     const {page, context, calls, response} = setup({hash:'#site-security'}); const pending = deferred();
     context.api = async (url, options) => { calls.push({url, options}); return url.endsWith('/maintenance/password') ? pending.promise : response(url); };

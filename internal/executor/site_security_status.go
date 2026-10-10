@@ -52,8 +52,9 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 	desired("https", site.SSLEnabled)
 	desired("uptime_monitor", site.MonitoringEnabled)
 	desired("file_lock", site.FileLockEnabled)
-	if site.FileLockEnabled && site.FileLockApplyStatus != FileLockApplyStatusReady {
-		set("file_lock", "error", false)
+	if site.FileLockEnabled {
+		set("file_lock", "error", true)
+		setWebsiteSecurityEvidence(&report, "file_lock", "file_lock_not_ready", "file_lock_apply", report.CheckedAt, nil)
 	}
 	if site.SiteType != "wordpress" {
 		for _, key := range []string{"login_protection", "xmlrpc", "application_passwords", "uploads_php", "file_editing", "debug_display", "anomaly_monitor", "wp_updates", "sql_injection"} {
@@ -82,6 +83,10 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 		set("sensitive_files", "configured", true)
 	}
 	if site.SiteType == "wordpress" {
+		// Temporary maintenance deliberately clears file_lock_enabled. Read the
+		// durable window even when that flag is false so relock failures cannot
+		// disappear as an ordinary disabled setting.
+		maintenanceState, maintenanceErr := websiteSecurityMaintenanceState(ctx, site.ID)
 		desired("xmlrpc", !site.XMLRPCEnabled)
 		desired("sql_injection", blockSQLi)
 		for _, key := range []string{"uploads_php", "login_protection", "application_passwords", "file_editing", "debug_display", "wp_updates"} {
@@ -125,13 +130,17 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 			if !site.DisableWPUpdates && (strings.Contains(siteSecurityPHPWithoutComments(content), "ols_wpanel_policy_disable_checks") || siteSecurityBoolConstant(content, "DISALLOW_FILE_MODS", true)) {
 				set("wp_updates", "error", false)
 			}
-			if site.FileLockEnabled && (!siteSecurityBoolConstant(content, "DISALLOW_FILE_MODS", true) || site.FileLockApplyStatus != FileLockApplyStatusReady) {
-				set("file_lock", "error", false)
-			}
+			applyWebsiteFileLockSecurityStatus(&report, site, siteSecurityBoolConstant(content, "DISALLOW_FILE_MODS", true), maintenanceState, maintenanceErr)
 			// Installation + a running jail still needs real WordPress evidence.
 			if WPLoginFailureLoggingConfigured(site.WebRoot, site.LogDir, site.SystemUser) && rulesMatch && strings.Contains(string(vhost), ":"+site.LogDir+"\"") {
 				loginReady = true
 				set("login_protection", "configured", true)
+			}
+		} else {
+			applyWebsiteFileLockSecurityStatus(&report, site, false, maintenanceState, maintenanceErr)
+			if site.FileLockEnabled && maintenanceState == "locked" && maintenanceErr == nil {
+				SetWebsiteSecurityCheck(&report, "file_lock", "unknown", securityBool(true), nil)
+				setWebsiteSecurityEvidence(&report, "file_lock", "file_lock_policy_not_confirmed", "file_lock_apply", report.CheckedAt, nil)
 			}
 		}
 	}

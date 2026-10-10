@@ -1242,9 +1242,11 @@ func checkSitesState() alertCheckResult {
 	}
 
 	type checkTarget struct {
-		id     string
-		domain string
-		url    string
+		id       string
+		domain   string
+		url      string
+		ssl      bool
+		interval int
 	}
 	var toCheck []checkTarget
 	var msgs []string
@@ -1266,7 +1268,7 @@ func checkSitesState() alertCheckResult {
 			proto = "https"
 		}
 		url := proto + "://" + s.domain + "/?wp_hc=" + strconv.FormatInt(time.Now().Unix(), 10)
-		toCheck = append(toCheck, checkTarget{id: s.id, domain: s.domain, url: url})
+		toCheck = append(toCheck, checkTarget{id: s.id, domain: s.domain, url: url, ssl: s.ssl == 1, interval: s.interval})
 	}
 
 	if len(toCheck) == 0 {
@@ -1287,17 +1289,18 @@ func checkSitesState() alertCheckResult {
 		domain string
 		code   int
 		err    error
+		target checkTarget
 	}
 	resultCh := make(chan result, len(toCheck))
 	for _, t := range toCheck {
 		go func(t checkTarget) {
 			resp, err := httpClient.Get(t.url)
 			if err != nil {
-				resultCh <- result{id: t.id, domain: t.domain, err: err}
+				resultCh <- result{id: t.id, domain: t.domain, err: err, target: t}
 				return
 			}
 			resp.Body.Close()
-			resultCh <- result{id: t.id, domain: t.domain, code: resp.StatusCode}
+			resultCh <- result{id: t.id, domain: t.domain, code: resp.StatusCode, target: t}
 		}(t)
 	}
 
@@ -1325,6 +1328,7 @@ func checkSitesState() alertCheckResult {
 			delete(siteFailureMessages, r.id)
 			delete(siteFailureCounts, r.id)
 		}
+		recordWebsiteAvailabilityObservation(r.id, r.domain, r.target.ssl, r.target.interval, r.code, siteFailureCounts[r.id], time.Now())
 	}
 
 	if len(msgs) > 0 {

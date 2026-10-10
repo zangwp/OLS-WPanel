@@ -31,6 +31,27 @@ test('monitoring save records the sent snapshot and preserves later edits withou
     assert.equal(notices.filter(n=>n[0]==='website.monitoring_saved').length,1);
 });
 
+test('only confirmed file protection coverage hides the separate editing control and retains its saved value',()=>{
+    const {page}=setup();page.site.file_lock_enabled=true;page.site.file_lock_apply_status='ready';page.disableFileEditing=false;
+    page.securityStatus={checks:[{key:'file_editing',state:'ready',configured:true,runtime_ready:true,can_verify:false,reason_code:'file_editing_managed_by_file_lock',details:{protected_by:'file_lock'}}]};
+    assert.equal(page.fileEditingManagedByLock(),true);assert.equal(page.disableFileEditing,false);
+    assert.equal(page.siteSecurityStateText('file_editing'),'site_security.state_file_editing_managed_by_file_lock');
+    for(const status of ['failed','applying','']) {page.site.file_lock_apply_status=status;assert.equal(page.fileEditingManagedByLock(),false);}
+    page.site.file_lock_apply_status='ready';page.site.file_lock_enabled=false;assert.equal(page.fileEditingManagedByLock(),false);
+    page.site.file_lock_enabled=true;page.securityStatus.checks[0].state='error';assert.equal(page.fileEditingManagedByLock(),false);
+    page.securityStatus.checks[0].state='ready';page.securityStatus.checks[0].runtime_ready=false;assert.equal(page.fileEditingManagedByLock(),false);
+});
+
+test('file protection card and non-verifiable configuration use the same neutral labels as the summary',()=>{
+    const {page}=setup();
+    page.securityStatus={checks:[{key:'file_lock',state:'ready',configured:true,runtime_ready:true,can_verify:false,reason_code:'file_lock_applied'}]};
+    assert.equal(page.siteSecurityStateText('file_lock'),'site_security.state_file_lock_applied');assert.equal(page.siteSecurityClass('file_lock'),'badge-info');
+    page.securityStatus={checks:[{key:'backup',state:'configured',configured:true,can_verify:false,reason_code:'backup_schedule_enabled'}]};
+    assert.equal(page.siteSecurityStateText('backup'),'site_security.state_configured');assert.equal(page.siteSecurityClass('backup'),'badge-info');
+    page.securityStatus={checks:[{key:'file_lock',state:'configured',configured:true,can_verify:false,reason_code:'file_lock_temporarily_unlocked'}]};
+    assert.equal(page.siteSecurityStateText('file_lock'),'site_security.state_file_lock_temporarily_unlocked');assert.equal(page.siteSecurityClass('file_lock'),'badge-info');
+});
+
 test('failed or stale monitoring save cannot replace observed settings or claim success',async()=>{
     const {page,context,notices}=setup();page.site.monitoring_enabled=false;page.site.monitoring_interval=5;
     page.monitoringEnabled=true;page.monitoringInterval=10;

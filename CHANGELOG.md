@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.21.4 — 2026-10-10
+
+- Uses applied file-protection results, recent availability checks and WordPress inventory samples as dated security evidence. Saved configuration, completed checks and verified request protection remain distinct. Items without an isolated verification action use relevant settings, alerts, check results or backup links instead of asking users to click a missing Verify button.
+- Shows confirmed file-protection coverage of the WordPress editor in the security summary and hides the duplicate editor checkbox and Save action. Retains the independent editor setting for use outside file protection; unfinished, failed, unknown or temporarily unlocked protection does not claim coverage.
+- Reads actual file-lock flags separately from temporary-maintenance authorization, preserves unlock and relock-failure states even when the lock flag is cleared, and prevents older core-policy verification cache entries from overriding an active or uncertain lock lifecycle. Maintenance transitions invalidate the page's previous evidence, failed reads remove stale file coverage, and delayed responses cannot restore it. Unchanged maintenance polls do not repeat security probes.
+- Reports availability checks using their actual HTTP result and collection time, and WordPress anomaly monitoring using the latest inventory success or failure. Pending, stale, changed-setting and disabled-alert states remain explicit; a successful sample does not claim that a site has no anomalies or that every protection is effective.
+- Replaces the dashboard's purple memory and green load curves with muted warm-gold and brick-red colors. Keeps CPU blue and matches each metric's chart, legend and related progress-bar colors.
+
+Upgrade notes: no database migration is introduced. After updating, review Website security for current application results, maintenance state and evidence times. Availability observations are process-local, so a panel restart shows a pending check until the existing scheduler collects a new sample.
+
 ## v1.21.3 — 2026-10-10
 
 - Uses the current authenticated panel session for enabled WordPress passwordless sign-in. A single administrator opens directly in a new tab; multiple administrators require an account selection. Settings changes still require the panel password and configured MFA, and expired or revoked sessions cannot issue authorization.
