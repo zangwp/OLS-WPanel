@@ -1,6 +1,6 @@
 {{template "base" .}}
 {{define "websites_detail_content"}}
-<div x-data="websiteDetail()">
+<div x-data="websiteDetail()" @site-anomaly-updated="if (Number($event.detail?.site_id) === Number(site?.id)) refreshSiteSecurityAfterChange()">
 
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
@@ -426,16 +426,22 @@
                 </fieldset>
                 <button type="button" x-show="maintenance.window_id" :disabled="maintenanceSaving" class="btn-primary text-sm" @click="relockMaintenance()">{{t .Lang "maintenance.relock"}}</button>
             </section>
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div id="site-file-editing-control" class="space-y-3 scroll-mt-4">
+                <div x-show="fileEditingManagedByLock()" class="text-sm text-gray-300">
+                    <p class="font-medium">{{t .Lang "website.disable_file_editing_managed_title"}}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.disable_file_editing_managed"}}</p>
+                </div>
+                <div x-show="!fileEditingManagedByLock()" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <label class="flex items-start space-x-2 text-sm text-gray-300" :class="site.file_lock_enabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'">
-                    <input id="site-file-editing" type="checkbox" :checked="site.file_lock_enabled || disableFileEditing" @change="disableFileEditing = $event.target.checked" :disabled="site.file_lock_enabled || fileEditingSaving || optimizationSaving" class="mt-0.5">
+                    <input id="site-file-editing" type="checkbox" :checked="disableFileEditing" @change="disableFileEditing = $event.target.checked" :disabled="site.file_lock_enabled || fileEditingSaving || optimizationSaving" class="mt-0.5">
                     <span>
                         <span class="block">{{t .Lang "website.disable_file_editing"}}</span>
                         <span class="block text-xs text-gray-500 mt-1">{{t .Lang "website.disable_file_editing_help"}}</span>
-                        <span x-show="site.file_lock_enabled" class="block text-xs text-gray-500 mt-1">{{t .Lang "website.disable_file_editing_managed"}}</span>
+                        <span x-show="site.file_lock_enabled" class="block text-xs text-yellow-300 mt-1">{{t .Lang "website.disable_file_editing_lock_pending"}}</span>
                     </span>
                 </label>
                 <button x-show="!site.file_lock_enabled" @click="saveFileEditingProtection()" :disabled="fileEditingSaving || optimizationSaving" class="btn-secondary text-sm whitespace-nowrap" x-text="fileEditingSaving ? t('common.saving') : t('website.save_file_editing')"></button>
+                </div>
             </div>
 
             <hr class="my-5 border-gray-700">
@@ -868,20 +874,43 @@ function websiteDetail() {
 		maintenanceStateText() {
 			return ({ locked:t('maintenance.locked'), unlocked:t('maintenance.unlocked'), unlocked_permanent:t('maintenance.unlocked_permanent'), unlocking:t('maintenance.unlocking'), relocking:t('maintenance.relocking'), relock_failed:t('maintenance.relock_failed'), unknown:t('maintenance.unknown') })[this.maintenance.state] || t('maintenance.unknown');
 		},
+		maintenanceSecurityFingerprint() {
+			return JSON.stringify([this.maintenance.state, this.maintenance.window_id || '', this.maintenance.revision || 0, this.maintenance.expires_at || 0, this.site?.file_lock_enabled, this.site?.file_lock_apply_status || '']);
+		},
+		invalidateMaintenanceSecurityEvidence() {
+			this.securityStatusGeneration++;
+			const checks = (this.securityStatus?.checks || []).filter(check => !['file_lock','file_editing'].includes(check?.key));
+			for (const key of ['file_lock','file_editing']) checks.push({key,state:'unknown',can_verify:false,reason_code:'file_lock_state_unknown'});
+			this.securityStatus = {...this.securityStatus,site_id:this.site.id,checks};
+			this.securityStatusLoading = false; this.securityStatusAttempted = true; this.securityStatusError = '';
+		},
 		async loadMaintenance(initial = false) {
 			if (!this.site || this.site.site_type !== 'wordpress' || this.detailTab !== 'security' || this.detailDestroyed || this.maintenanceLoading) return;
 			const controller = new AbortController(); this.maintenanceReadController = controller;
 			const generation = this.maintenanceReadGeneration, siteID = this.site.id;
+			const previous = this.maintenanceSecurityFingerprint();
+			const previousLockFlags = JSON.stringify([this.site.file_lock_enabled, this.site.file_lock_apply_status || '']);
 			this.maintenanceLoading = true;
 			try {
 				const r = await api('/websites/' + siteID + '/maintenance', {signal:controller.signal});
 				if (controller.signal.aborted || generation !== this.maintenanceReadGeneration || this.site?.id !== siteID || this.detailTab !== 'security' || this.detailDestroyed) return;
+				if (!r.success || !r.data || !['locked','unlocked','unlocked_permanent','unlocking','relocking','relock_failed','unknown'].includes(r.data.state)) throw new Error(t('maintenance.state_unknown'));
+				if (('file_lock_enabled' in r.data && typeof r.data.file_lock_enabled !== 'boolean') || ('file_lock_apply_status' in r.data && typeof r.data.file_lock_apply_status !== 'string')) throw new Error(t('maintenance.state_unknown'));
+				const hadFileEvidence = ['file_lock','file_editing'].some(key => ['ready','effective','runtime_verified'].includes(this.siteSecurityCheck(key).state));
 				this.maintenance = r.data;
-				if (r.data.state === 'locked') { this.site.file_lock_enabled = true; this.site.file_lock_apply_status = 'ready'; }
-				else if (r.data.state === 'unlocked' || r.data.state === 'unlocked_permanent') { this.site.file_lock_enabled = false; this.site.file_lock_apply_status = ''; }
-				else { this.site.file_lock_apply_status = r.data.state === 'relock_failed' ? 'failed' : 'applying'; }
+				if (r.data.state === 'unknown') this.invalidateMaintenanceSecurityEvidence();
+				else {
+					if (typeof r.data.file_lock_enabled === 'boolean') this.site.file_lock_enabled = r.data.file_lock_enabled;
+					if (typeof r.data.file_lock_apply_status === 'string') this.site.file_lock_apply_status = r.data.file_lock_apply_status;
+					const flagsChanged = previousLockFlags !== JSON.stringify([this.site.file_lock_enabled, this.site.file_lock_apply_status || '']);
+					if (previous !== this.maintenanceSecurityFingerprint() && (!initial || flagsChanged || (hadFileEvidence && r.data.state !== 'locked'))) this.refreshSiteSecurityAfterChange();
+				}
 				if (initial) { this.maintenanceEnabled = r.data.enabled; this.maintenanceMinutes = r.data.minutes; await this.loadMaintenancePassword(); }
-			} catch (_) { if (!controller.signal.aborted && generation === this.maintenanceReadGeneration) this.maintenance.state = 'unknown'; }
+			} catch (_) {
+				if (!controller.signal.aborted && generation === this.maintenanceReadGeneration && this.site?.id === siteID && this.detailTab === 'security' && !this.detailDestroyed) {
+					this.maintenance.state = 'unknown'; this.invalidateMaintenanceSecurityEvidence();
+				}
+			}
 			finally { if (this.maintenanceReadController === controller) { this.maintenanceLoading = false; this.maintenanceReadController = null; } }
 		},
 		async saveMaintenance() {
@@ -1018,13 +1047,20 @@ function websiteDetail() {
         siteSecurityTitle(key) { const textKey = 'website.security_check_' + key; return t(textKey); },
         siteSecurityStateText(key) {
             if (this.securityStatusLoading) return t('website.security_checking');
-            const state = this.siteSecurityCheck(key).state;
+            const check = this.siteSecurityCheck(key), state = check.state;
+            if (state === 'ready' && ['file_editing_managed_by_file_lock','file_lock_applied','uptime_check_succeeded','anomaly_check_succeeded'].includes(check.reason_code)) return t('site_security.state_' + check.reason_code);
+            if (state === 'configured' && check.reason_code === 'file_lock_temporarily_unlocked') return t('site_security.state_file_lock_temporarily_unlocked');
+            if (state === 'configured' && check.can_verify === false) return t(['uptime_check_pending','uptime_check_stale','anomaly_check_pending','anomaly_check_stale'].includes(check.reason_code) ? 'site_security.state_waiting_check' : 'site_security.state_configured');
             const textKey = (['ready','runtime_verified'].includes(state) ? 'site_security.state_' : 'website.security_state_') + state;
             return t(textKey);
         },
         siteSecurityClass(key) {
-            const state = this.siteSecurityCheck(key).state;
-            return state === 'effective' ? 'badge-success' : state === 'configured' || state === 'error' ? 'badge-warning' : 'badge-info';
+            const check = this.siteSecurityCheck(key), state = check.state;
+            return state === 'effective' ? 'badge-success' : state === 'error' || (state === 'configured' && check.can_verify !== false) ? 'badge-warning' : 'badge-info';
+        },
+        fileEditingManagedByLock() {
+            const check = this.siteSecurityCheck('file_editing');
+            return this.site?.file_lock_enabled === true && this.site.file_lock_apply_status === 'ready' && check.state === 'ready' && check.reason_code === 'file_editing_managed_by_file_lock' && check.details?.protected_by === 'file_lock' && check.can_verify === false;
         },
         siteSecurityCheckedAt() {
             const value = this.securityStatus?.checked_at;
@@ -1118,6 +1154,7 @@ function websiteDetail() {
                 'site-wp-anomaly': 'security',
                 'security-maintenance': 'security',
                 'site-protection': 'security',
+                'site-file-editing-control': 'security',
                 logs: 'logs',
                 'site-logs': 'logs'
             }[hash] || 'overview';
@@ -1127,7 +1164,7 @@ function websiteDetail() {
         },
         scrollDetailAnchor() {
             const anchor = (window.location.hash || '').replace(/^#/, '');
-            if (!this.site || this.detailDestroyed || !['site-monitoring', 'site-wp-anomaly', 'site-cloudflare-security'].includes(anchor)) return;
+            if (!this.site || this.detailDestroyed || !['site-monitoring', 'site-wp-anomaly', 'site-cloudflare-security','site-protection','site-file-editing-control'].includes(anchor)) return;
             this.$nextTick(() => {
                 if (this.detailDestroyed || this.detailTab !== 'security' || window.location.hash !== '#' + anchor) return;
                 const target = document.getElementById(anchor), main = document.getElementById('panel-main');

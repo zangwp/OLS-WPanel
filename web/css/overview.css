@@ -2,8 +2,8 @@
 .overview-page,
 .websites-page {
     min-width: 0;
-    --overview-memory: var(--panel-chart-memory, #25877e);
-    --overview-disk: var(--panel-chart-load, #bc7d22);
+    --overview-memory: var(--panel-chart-memory, #a7783b);
+    --overview-disk: var(--panel-chart-load, #b05d52);
 }
 
 .overview-heading {
@@ -56,7 +56,7 @@
 .overview-metric-detail + .overview-metric-detail { margin-top: 2px; }
 .overview-metric-uptime .overview-metric-value { font-size: clamp(20px, 1.8vw, 27px); letter-spacing: -.025em; line-height: 1.5; overflow-wrap: anywhere; }
 .overview-meter { height: 4px; margin-top: 16px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--panel-accent) 9%, var(--panel-bg)); }
-.overview-meter span { display: block; height: 100%; border-radius: inherit; background: var(--panel-accent); }
+.overview-meter span { display: block; height: 100%; border-radius: inherit; background: var(--panel-chart-cpu, #4f7fa6); }
 .overview-meter-memory span { background: var(--overview-memory); }
 .overview-meter-disk span { background: var(--overview-disk); }
 

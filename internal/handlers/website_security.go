@@ -60,7 +60,24 @@ func completeWebsiteSecuritySettings(ctx context.Context, db *sql.DB, site *mode
 		executor.SetWebsiteSecurityCheck(report, key, state, &configured, nil)
 	}
 	setSetting("backup", "SELECT enabled FROM backup_settings WHERE site_id=?")
+	if site.MonitoringEnabled {
+		var enabled string
+		err := db.QueryRowContext(ctx, "SELECT svalue FROM security_settings WHERE skey='alert_site'").Scan(&enabled)
+		if err != nil || (enabled != "true" && enabled != "false") {
+			executor.SetWebsiteSecurityCheck(report, "uptime_monitor", "unknown", nil, nil)
+		} else {
+			executor.ApplyWebsiteAvailabilitySecurityStatus(report, site, enabled == "true", time.Now())
+		}
+	}
 	if site.SiteType == "wordpress" {
-		setSetting("anomaly_monitor", "SELECT enabled FROM site_wp_anomaly_state WHERE site_id=?")
+		var enabled int
+		var lastSuccess, nextCheck int64
+		var lastError string
+		err := db.QueryRowContext(ctx, "SELECT enabled,last_success,next_check,last_error FROM site_wp_anomaly_state WHERE site_id=?", site.ID).Scan(&enabled, &lastSuccess, &nextCheck, &lastError)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			executor.SetWebsiteSecurityCheck(report, "anomaly_monitor", "unknown", nil, nil)
+		} else {
+			executor.ApplyWebsiteAnomalySecurityStatus(report, enabled == 1, lastSuccess, nextCheck, lastError, time.Now())
+		}
 	}
 }

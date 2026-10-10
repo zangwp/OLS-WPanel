@@ -35,6 +35,11 @@ func newWebsiteSecurityCheck(key, state string, configured, effective *bool, che
 	if key == "https" && state == "configured" {
 		check.ReasonCode = "https_setting_enabled"
 	}
+	if state == "configured" && !check.CanVerify {
+		if reason := map[string]string{"file_lock": "file_lock_not_ready", "uptime_monitor": "uptime_check_pending", "anomaly_monitor": "anomaly_check_pending", "backup": "backup_schedule_enabled"}[key]; reason != "" {
+			check.ReasonCode = reason
+		}
+	}
 	if configured != nil && *configured {
 		check.EvidenceSource, check.EvidenceAt = "saved_configuration", checkedAt
 		if key == "application_passwords" || key == "file_editing" || key == "debug_display" || key == "wp_updates" {
@@ -121,7 +126,18 @@ func applyCachedWebsiteSecurityVerification(site *models.Website, report *models
 	}
 	websiteSecurityVerificationCache.Lock()
 	defer websiteSecurityVerificationCache.Unlock()
+	lockLifecycle := site.FileLockEnabled || site.FileLockApplyStatus != ""
+	for _, check := range report.Checks {
+		if check.Key == "file_lock" && (check.ReasonCode == "file_lock_temporarily_unlocked" || check.ReasonCode == "file_lock_state_unknown") {
+			lockLifecycle = true
+		}
+	}
 	for i := range report.Checks {
+		// Maintenance clears the enabled flag before relocking. Cached core-policy
+		// evidence cannot replace an active or uncertain file-lock lifecycle.
+		if report.Checks[i].Key == "file_editing" && lockLifecycle {
+			continue
+		}
 		key := strconv.Itoa(site.ID) + ":" + report.Checks[i].Key
 		cached, exists := websiteSecurityVerificationCache.entries[key]
 		if !exists {
@@ -188,7 +204,7 @@ func VerifyWebsiteSecurityStatus(ctx context.Context, site *models.Website, key 
 	}
 	for i := range report.Checks {
 		check := &report.Checks[i]
-		if check.Key != key || check.State == "unsupported" || check.State == "disabled" || check.Configured == nil || !*check.Configured {
+		if check.Key != key || !check.CanVerify || check.State == "unsupported" || check.State == "disabled" || check.Configured == nil || !*check.Configured {
 			continue
 		}
 		switch key {

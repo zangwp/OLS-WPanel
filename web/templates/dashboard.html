@@ -209,9 +209,9 @@ function dashboardStats() {
         if (!canvas) return;
         const theme = typeof getComputedStyle === 'function' ? getComputedStyle(canvas) : null;
         const chartToken = (name, fallback) => theme?.getPropertyValue(name).trim() || fallback;
-        const cpuColor = chartToken('--panel-chart-cpu', chartToken('--panel-accent', '#116b9a'));
-        const memoryColor = chartToken('--panel-chart-memory', '#25877e');
-        const loadColor = chartToken('--panel-chart-load', '#bc7d22');
+        const cpuColor = chartToken('--panel-chart-cpu', '#4f7fa6');
+        const memoryColor = chartToken('--panel-chart-memory', '#a7783b');
+        const loadColor = chartToken('--panel-chart-load', '#b05d52');
         const labelColor = chartToken('--panel-muted', '#637589');
         const gridColor = chartToken('--panel-border', '#dce4ec');
         chart = new Chart(canvas.getContext('2d'), {
