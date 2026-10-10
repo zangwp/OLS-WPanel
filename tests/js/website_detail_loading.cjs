@@ -38,7 +38,9 @@ function setup({hash = '', type = 'wordpress'} = {}) {
         api:async(url, options) => { calls.push({url, options}); return response(url); },
     };
     vm.createContext(context); vm.runInContext(source, context);
-    return {page:context.websiteDetail(), context, calls, notices, listeners, removed, intervals, cleared, response};
+    const page = context.websiteDetail();
+    page.$nextTick = callback => Promise.resolve().then(callback);
+    return {page, context, calls, notices, listeners, removed, intervals, cleared, response};
 }
 const paths = calls => calls.map(call => call.url);
 const overviewPaths = ['/websites/1/ssl/renewal', '/websites/1/ai-development-access', '/software/php-runtimes'];
@@ -66,6 +68,23 @@ test('PHP security does not read WordPress jobs, credentials or maintenance stat
     const {page, calls, intervals} = setup({hash:'#site-security', type:'php'}); page.init(); await settle();
     assert.deepEqual(paths(calls), ['/websites/1', '/websites/1/security-status']); assert.equal(intervals.size, 0);
 });
+
+for (const anchor of ['site-monitoring', 'site-wp-anomaly']) {
+    test(anchor + ' deep link loads security and scrolls after the site renders', async () => {
+        const {page, context, calls} = setup({hash:'#' + anchor});
+        const scrolled = [];
+        context.document.getElementById = id => id === 'panel-main'
+            ? {scrollTop:100, getBoundingClientRect:() => ({top:64}), scrollTo:options => scrolled.push(options.top)}
+            : {getBoundingClientRect:() => ({top:400})};
+        context.window.getComputedStyle = () => ({scrollMarginTop:'24px'});
+        page.init(); await settle();
+        assert.equal(page.detailTab, 'security');
+        assert.deepEqual(paths(calls).sort(), ['/websites/1', ...securityPaths].sort());
+        assert.deepEqual(scrolled, [412]);
+        page.scrollDetailAnchor(); page.setDetailTab('overview'); await settle();
+        assert.deepEqual(scrolled, [412], 'queued navigation must not scroll a hidden panel');
+    });
+}
 
 test('hash navigation loads its target once and a loaded overview can be revisited without duplicate reads', async () => {
     const {page, context, calls, listeners} = setup(); page.init(); await settle();
@@ -275,25 +294,4 @@ test('a late clear completion cannot blank a newer visit to the same log type', 
     const clearing = page.clearLogs(); await settle(); page.selectLogType('error'); await settle(); page.selectLogType('access'); await settle();
     assert.equal(page.logContent, 'fixture log'); deletion.resolve({success:true, data:{}}); await clearing;
     assert.equal(page.logContent, 'fixture log'); assert.equal(page.logsLoaded, true); assert.equal(page.logClearing, false); assert.deepEqual(notices, []);
-});
-
-test('basic administrator access opens the detected same-site login or installation URL in a protected new tab', () => {
-    const {page, calls}=setup();page.site=site();assert.equal(page.wordpressAdminURL(),'');
-    const link=html.match(/<a[^>]*:href="wordpressAdminURL\(\)[^>]*>/)[0];assert.match(link,/target="_blank"/);assert.match(link,/rel="noopener noreferrer"/);assert(!link.includes('scrollIntoView'));
-    for(const login of ['https://site.example/wp-login.php','https://site.example/custom-login/','https://site.example/plugin-login/']){
-        page.acceptWordPressAccessStatus({site_id:1,installed:true,login_url:login});assert.equal(page.wordpressAdminURL(),login);
-    }
-    page.acceptWordPressAccessStatus({site_id:1,installed:false,install_url:'https://site.example/wp-admin/install.php'});assert.equal(page.wordpressAdminURL(),'https://site.example/wp-admin/install.php');assert.equal(calls.length,0);
-});
-
-test('administrator address events reject foreign, mixed-content and malformed destinations', () => {
-    const {page}=setup();page.site=site();
-    for(const login of ['javascript:alert(1)','https://other.example/login/','http://site.example/login/','https://admin@site.example/','https://site.example/#proof','https://site.example/'+ 'a'.repeat(2048)]){
-        page.acceptWordPressAccessStatus({site_id:1,installed:true,login_url:'https://site.example/native/'});
-        page.acceptWordPressAccessStatus({site_id:1,installed:true,login_url:login});assert.equal(page.wordpressAdminURL(),'');
-    }
-    page.acceptWordPressAccessStatus({site_id:1,installed:true,login_url:'https://site.example/native/'});
-    page.acceptWordPressAccessStatus({site_id:2,installed:true,login_url:'https://other.example/'});assert.equal(page.wordpressAdminURL(),'https://site.example/native/');
-    page.acceptWordPressAccessStatus({site_id:1,installed:undefined});assert.equal(page.wordpressAdminURL(),'');
-    page.site.site_type='php';page.acceptWordPressAccessStatus({site_id:1,installed:true,login_url:'https://site.example/login/'});assert.equal(page.wordpressAdminURL(),'');
 });

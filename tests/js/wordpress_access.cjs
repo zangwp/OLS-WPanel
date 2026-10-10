@@ -6,17 +6,16 @@ const {test} = require('node:test');
 const html=fs.readFileSync(path.join(__dirname,'../../web/templates/wordpress_access.html'),'utf8');
 const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function setup() {
-    const calls=[],forms=[],fields=[],watchers=new Map(),observations=[],popup={opener:{},closed:false,close(){this.closed=true;}};
+    const calls=[],forms=[],fields=[],watchers=new Map(),popup={opener:{},closed:false,close(){this.closed=true;}};
     const context={URL,Date,AbortController,crypto:require('node:crypto').webcrypto,t:key=>key,showToast(){},navigator:{clipboard:{async writeText(){}}},window:{open:()=>popup},document:{body:{append:form=>forms.push(form)},createElement:type=>type==='form'?{style:{},append:field=>fields.push(field),submit(){this.submitted=true;},remove(){this.removed=true;}}:{}}};
     popup.document=context.document;popup.document.head={append(){}};
     context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:{}};};
     vm.createContext(context);vm.runInContext(source,context);
     const component=context.wordpressPanelAccess();component.site={id:1,domain:'site.example',ssl_enabled:true,site_type:'wordpress'};
     component.detailTab='overview';component.$watch=(key,callback)=>{assert(!watchers.has(key),'duplicate watcher');watchers.set(key,callback);};
-    component.$dispatch=(name,detail)=>observations.push({name,detail});
     component.status={installed:true,sso_enabled:true,sso_available:true,administrators:[{id:7}],installation_path:'/'};
     component.password='panel-password';component.code='123456';component.administratorID='7';
-    return {component,context,calls,forms,fields,popup,watchers,observations};
+    return {component,context,calls,forms,fields,popup,watchers};
 }
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const settle=async()=>{for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));};
@@ -24,7 +23,7 @@ const readStatus=(extra={})=>({success:true,data:{installed:true,sso_enabled:tru
 test('login links reject cross-origin schemes, credentials and fragments',()=>{
     const {component}=setup();
     assert.equal(component.safeAddress('https://site.example/private-login/'),'https://site.example/private-login/');
-    for(const value of ['javascript:alert(1)','https://other.example/','http://site.example/','https://admin@site.example/','https://site.example/#token','https://site.example.evil/']) assert.equal(component.safeAddress(value),'');
+    for(const value of ['javascript:alert(1)','https://other.example/','http://site.example/','https://admin@site.example/','https://site.example/#token','https://site.example.evil/','https://site.example/'+'x'.repeat(2048),null]) assert.equal(component.safeAddress(value),'');
 });
 test('successful authorization submits the secret only in a removed POST form and clears credentials',async()=>{
     const {component,context,calls,forms,fields,popup}=setup();
@@ -93,21 +92,61 @@ test('leaving overview aborts reads and clears credentials before a late respons
     assert.equal(component.status,null);assert.equal(Object.hasOwn(component,'manualURL'),false);assert.equal(component.suffix,'');assert.equal(component.enableSSO,false);assert.equal(component.administratorID,'7');assert.equal(component.error,'');
 });
 
-test('access shares only a sanitized public address with its parent and clears a failed observation',async()=>{
-    const {component,context,observations}=setup();context.api=async()=>readStatus({login_url:'https://site.example/plugin-login/',password:'must-not-dispatch',token:'must-not-dispatch'});
-    await component.load();assert.equal(observations.length,1);assert.equal(observations[0].name,'wordpress-access-observed');
-    assert.equal(observations[0].detail.login_url,'https://site.example/plugin-login/');assert.deepEqual(Object.keys(observations[0].detail).sort(),['install_url','installed','login_url','site_id']);
-    context.api=async()=>{throw new Error('offline');};await component.load();assert.equal(observations.at(-1).detail.login_url,'');assert.equal(observations.at(-1).detail.installed,undefined);
+test('ordinary address uses the detected plugin or installation address without publishing credentials elsewhere',async()=>{
+    const {component,context}=setup();context.api=async()=>readStatus({login_url:'https://site.example/plugin-login/'});
+    await component.load();assert.equal(component.safeAddress(component.status.login_url),'https://site.example/plugin-login/');
+    context.api=async()=>readStatus({installed:false,sso_enabled:false,sso_available:false,administrators:[],install_url:'https://site.example/wp-admin/install.php'});
+    await component.load();assert.equal(component.safeAddress(component.status.install_url),'https://site.example/wp-admin/install.php');assert.equal(component.canAuthorize(),false);assert.equal(component.canSetupAuthorization(),false);
+    const addressLink=html.match(/<a[^>]*:href="safeAddress\(status\.installed[^>]*>/)[0];assert.match(addressLink,/target="_blank"/);assert.match(addressLink,/rel="noopener noreferrer"/);
 });
 
-test('advanced authorization remains inside settings and closing settings removes both proofs',()=>{
-    const {component}=setup();const detailsStart=html.indexOf('<details class="wp-access-settings');const detailsEnd=html.indexOf('</details>',detailsStart);
-    const advancedButton=html.indexOf('@click="loginOpen = !loginOpen"');assert(advancedButton>detailsStart&&advancedButton<detailsEnd);
-    assert.equal(html.includes("status.installed ? t('wp_access.open_login') : t('wp_access.open_install')"),false);
+test('authorization is an independent primary action and toggling it clears stale panel proofs',()=>{
+    const {component,calls}=setup();component.loginOpen=false;component.settingsOpen=true;component.settingsPassword='settings-secret';component.settingsCode='654321';
+    component.toggleAuthorization();assert.equal(component.loginOpen,true);assert.equal(component.settingsOpen,false);assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');assert.equal(calls.length,0);
+    component.toggleAuthorization();assert.equal(component.loginOpen,false);assert.equal(component.password,'');assert.equal(component.code,'');assert.equal(component.reasonText(),'');
+    assert(html.indexOf('id="wp-access-login-form"') < html.indexOf('<details id="wp-access-settings"'));
+});
+
+test('authorization setup opens configuration without enabling SSO or issuing a mutation',()=>{
+    const {component,calls}=setup();component.status.sso_enabled=false;component.status.sso_available=false;component.status.reason_code='sso_disabled';component.enableSSO=false;
+    assert.equal(component.canSetupAuthorization(),true);assert.equal(component.canAuthorize(),false);component.openAuthorizationSettings();
+    assert.equal(component.settingsOpen,true);assert.equal(component.enableSSO,false);assert.equal(component.status.sso_enabled,false);assert.equal(component.loginOpen,false);assert.equal(component.password,'');assert.equal(component.code,'');assert.equal(calls.length,0);
+});
+
+test('an outdated login bridge offers explicit settings repair without issuing authorization',()=>{
+    const {component,calls}=setup();component.status.sso_available=false;component.status.reason_code='bridge_unavailable';component.enableSSO=true;
+    assert.equal(component.canSetupAuthorization(),true);assert.equal(component.canAuthorize(),false);
+    component.openAuthorizationSettings();assert.equal(component.settingsOpen,true);assert.equal(component.enableSSO,true);assert.equal(calls.length,0);
+    component.status.authentication_plugins=['two-factor'];assert.equal(component.canSetupAuthorization(),false);
+});
+
+test('unavailable and conflicting login environments never issue a ticket or open an ordinary login as fallback',async()=>{
+    for (const change of [{installed:false},{sso_available:false,reason_code:'https_required'},{authentication_plugins:['two-factor']},{external_login_control:true},{administrators:[]},{administrators:[{id:-1}]}]) {
+        const {component,context,calls}=setup();let opened=0;context.window.open=()=>{opened++;return null;};Object.assign(component.status,change);
+        assert.equal(component.canAuthorize(),false);assert.equal(component.canSetupAuthorization(),false);assert(component.reasonText());component.toggleAuthorization();component.openAuthorizationSettings();await component.login();
+        assert.equal(component.loginOpen,false);assert.equal(component.settingsOpen,false);assert.equal(calls.length,0);assert.equal(opened,0);
+    }
+});
+
+test('closing settings clears only its settings proofs and keeps the independent authorization form open',()=>{
+    const {component}=setup();
     const toggle=html.match(/<details[^>]*@toggle="([^"]+)"/)[1];
     component.settingsOpen=true;component.settingsPassword='secret';component.settingsCode='123456';component.loginOpen=true;
     vm.runInNewContext('with (data) { '+toggle+' }',{data:component,$el:{open:false}});
-    assert.equal(component.password,'');assert.equal(component.code,'');assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');assert.equal(component.loginOpen,false);
+    assert.equal(component.password,'panel-password');assert.equal(component.code,'123456');assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');assert.equal(component.loginOpen,true);
+});
+
+test('leaving overview or destroying the page closes pending authorization and revokes a late ticket',async()=>{
+    for (const action of ['navigate','destroy']) {
+        const {component,context,calls,forms,popup,watchers}=setup();const pending=deferred();
+        context.api=(url,options)=>{calls.push({url,options});return url.endsWith('/login') ? pending.promise : Promise.resolve(readStatus());};
+        component.init();await settle();component.password='panel-password';component.code='123456';component.loginOpen=true;
+        const login=component.login();assert.equal(component.busy,true);
+        if (action==='navigate') { component.detailTab='logs';watchers.get('detailTab')('logs'); } else component.destroy();
+        assert.equal(popup.closed,true);assert.equal(component.password,'');assert.equal(component.code,'');assert.equal(component.loginOpen,false);
+        pending.resolve({success:true,data:{action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString()}});await login;
+        assert.equal(forms.length,0);assert.equal(calls.at(-1).url,'/websites/1/wp-panel-access/revoke');assert.equal(component.error,'');assert.equal(component.busy,false);
+    }
 });
 
 test('returning to overview after cancellation starts a new read and an older response cannot finish it',async()=>{

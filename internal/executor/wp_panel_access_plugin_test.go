@@ -26,6 +26,82 @@ func TestWPPanelAccessGeneratedPHPParses(t *testing.T) {
 	}
 }
 
+func TestWPPanelAccessAuthenticationCacheObserversRemainNarrow(t *testing.T) {
+	php := wpPanelAccessTestPHP(t)
+	for _, mode := range []string{"cache", "foreign_source"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "guards.php"), []byte(wpPanelAccessGuardsSource), 0600); err != nil {
+				t.Fatal(err)
+			}
+			fixture := `<?php
+define('WP_PLUGIN_DIR', __DIR__ . '/plugins');
+$options = ['active_plugins' => ['litespeed-cache/litespeed-cache.php']];
+$wp_filter = [];
+function get_option($key, $default=null) { return $GLOBALS['options'][$key] ?? $default; }
+function observe($hook, $callback) { $GLOBALS['wp_filter'][$hook] = (object)['callbacks'=>[10=>[['function'=>$callback]]]]; }
+function check($condition, $message) { if (!$condition) throw new RuntimeException($message); }
+require __DIR__ . '/guards.php';
+$definitions = [
+ 'tag.cls.php' => 'class Tag { public function check_login_cacheable() { throw new \\RuntimeException("callback must not run"); } public function authenticate() {} }',
+ 'purge.cls.php' => 'class Purge { public static function purge_on_logout() { throw new \\RuntimeException("callback must not run"); } }',
+ 'vary.cls.php' => 'class Vary { public function add_logged_in() { throw new \\RuntimeException("callback must not run"); } }',
+];
+$source_dir = WP_PLUGIN_DIR . ($argv[1] === 'cache' ? '/litespeed-cache/src' : '/another-plugin');
+mkdir(WP_PLUGIN_DIR . '/litespeed-cache/src', 0700, true);
+if (!is_dir($source_dir)) mkdir($source_dir, 0700, true);
+foreach ($definitions as $filename => $definition) {
+ // Even a same-named class must not be trusted from another plugin's file.
+ file_put_contents(WP_PLUGIN_DIR . '/litespeed-cache/src/' . $filename, '<?php');
+ file_put_contents($source_dir . '/' . $filename, '<?php namespace LiteSpeed; ' . $definition);
+ require $source_dir . '/' . $filename;
+}
+$cache = [
+ 'login_init' => [new LiteSpeed\Tag(), 'check_login_cacheable'],
+ 'wp_login' => 'LiteSpeed\Purge::purge_on_logout',
+ 'set_logged_in_cookie' => [new LiteSpeed\Vary(), 'add_logged_in'],
+];
+foreach ($cache as $hook => $callback) observe($hook, $callback);
+$expected = $argv[1] === 'cache' ? [] : ['login_init_filter', 'wp_login_filter', 'set_logged_in_cookie_filter'];
+check(ols_wpanel_access_authentication_conflicts() === $expected, 'cache callback classification');
+if ($argv[1] === 'foreign_source') exit(0);
+$before = serialize($wp_filter);
+check(ols_wpanel_access_authentication_conflicts() === [], 'repeat inspection');
+check(serialize($wp_filter) === $before, 'inspection removed or replaced hooks');
+// Every monitored hook still rejects an unknown MFA callback alongside cache.
+foreach (['authenticate', 'wp_authenticate_user', 'determine_current_user', 'wp_authenticate', 'login_init', 'wp_login', 'send_auth_cookies', 'set_auth_cookie', 'set_logged_in_cookie'] as $hook) {
+ $wp_filter = unserialize($before);
+ if (!isset($wp_filter[$hook])) $wp_filter[$hook] = (object)['callbacks'=>[]];
+ $wp_filter[$hook]->callbacks[20][] = ['function'=>function() {}];
+ check(ols_wpanel_access_authentication_conflicts() === [$hook . '_filter'], 'unknown auth hook bypassed: ' . $hook);
+}
+$wp_filter = unserialize($before);
+$options['active_plugins'][] = 'two-factor/two-factor.php';
+check(ols_wpanel_access_authentication_conflicts() === ['two-factor'], 'known MFA plugin bypassed');
+$options['active_plugins'] = [];
+check(ols_wpanel_access_authentication_conflicts() === ['login_init_filter', 'wp_login_filter', 'set_logged_in_cookie_filter'], 'inactive cache plugin trusted');
+$options['active_plugins'] = ['litespeed-cache/litespeed-cache.php'];
+check(!ols_wpanel_access_cache_observer('authenticate', $cache['set_logged_in_cookie']), 'cache method trusted on auth hook');
+check(!ols_wpanel_access_cache_observer('login_init', [new LiteSpeed\Tag(), 'authenticate']), 'unknown cache method trusted');
+check(!ols_wpanel_access_cache_observer('login_init', ['LiteSpeed\Tag', 'check_login_cacheable']), 'invalid static method trusted');
+eval('namespace LiteSpeed; class ChildTag extends Tag {}');
+check(!ols_wpanel_access_cache_observer('login_init', [new LiteSpeed\ChildTag(), 'check_login_cacheable']), 'subclass trusted');
+foreach ([null, [], ['unknown'], ['class'=>'LiteSpeed\Tag','method'=>'check_login_cacheable'], function() {}] as $bad) {
+ check(!ols_wpanel_access_cache_observer('login_init', $bad), 'unknown callback representation trusted');
+}
+echo "cache observers and authentication guards verified\n";
+`
+			file := filepath.Join(dir, "test.php")
+			if err := os.WriteFile(file, []byte(fixture), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if output, err := exec.Command(php, "-n", file, mode).CombinedOutput(); err != nil {
+				t.Fatalf("authentication observer checks: %v: %s", err, output)
+			}
+		})
+	}
+}
+
 // The real generated plugin runs through PHP's HTTP server. Only WordPress core
 // APIs are fixture stubs; the plugin route, URL filters and refusal paths remain
 // exactly the embedded production source, including the non-CLI request guard.

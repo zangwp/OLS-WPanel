@@ -248,6 +248,62 @@ func TestCronUpdateCanReenableDisabledTask(t *testing.T) {
 	}
 }
 
+func TestCronDeleteDisabledPreconditionUsesCurrentState(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		query   string
+		enabled int
+		running int
+		status  int
+	}{
+		{"re-enabled after list read", "?require_disabled=true", 1, 0, http.StatusConflict},
+		{"disabled task", "?require_disabled=true", 0, 0, http.StatusOK},
+		{"disabled but still running", "?require_disabled=true", 0, 1, http.StatusConflict},
+		{"legacy active deletion", "", 1, 0, http.StatusOK},
+		{"explicitly omitted precondition", "?require_disabled=false", 1, 0, http.StatusOK},
+		{"invalid precondition", "?require_disabled=invalid", 0, 0, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupCronHandlerRuntimeTest(t)
+			const config = "<?php\n// Site-owned config remains untouched.\n/* That's all, stop editing! Happy publishing. */\n"
+			configPath := setCronTestWPConfig(t, 1, config)
+			if _, err := database.GetDB().Exec(`UPDATE cron_jobs SET enabled=?,running=? WHERE id=41`, tc.enabled, tc.running); err != nil {
+				t.Fatal(err)
+			}
+			renders := 0
+			oldRender := renderManagedCron
+			renderManagedCron = func() executor.TaskResult { renders++; return executor.TaskResult{Success: true} }
+			t.Cleanup(func() { renderManagedCron = oldRender })
+
+			response := cronJSONRequest(t, http.MethodDelete, "/api/cron/41"+tc.query, "", gin.Params{{Key: "id", Value: "41"}})
+			if response.Code != tc.status {
+				t.Fatalf("delete status=%d, want %d; body=%s", response.Code, tc.status, response.Body.String())
+			}
+			var count int
+			if err := database.GetDB().QueryRow(`SELECT COUNT(*) FROM cron_jobs WHERE id=41`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if tc.status == http.StatusOK {
+				if count != 0 || renders != 1 {
+					t.Fatalf("successful delete retained %d rows or rendered %d times", count, renders)
+				}
+			} else {
+				if count != 1 || renders != 0 {
+					t.Fatalf("rejected delete changed the task or rendered config: rows=%d renders=%d", count, renders)
+				}
+				var enabled, running int
+				if err := database.GetDB().QueryRow(`SELECT enabled,running FROM cron_jobs WHERE id=41`).Scan(&enabled, &running); err != nil || enabled != tc.enabled || running != tc.running {
+					t.Fatalf("rejected delete changed enabled/running: enabled=%d running=%d err=%v", enabled, running, err)
+				}
+			}
+			data, err := os.ReadFile(configPath)
+			if err != nil || string(data) != config {
+				t.Fatalf("site-owned config changed: %q err=%v", data, err)
+			}
+		})
+	}
+}
+
 func TestWPCronManagedMarkerLifecycle(t *testing.T) {
 	const normalConfig = "<?php\n// DISABLE_WP_CRON is documented here only.\n/* That's all, stop editing! Happy publishing. */\n"
 	setupBackupOverviewTestDB(t)

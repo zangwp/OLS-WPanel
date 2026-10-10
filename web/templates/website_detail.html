@@ -1,6 +1,6 @@
 {{template "base" .}}
 {{define "websites_detail_content"}}
-<div x-data="websiteDetail()" @wordpress-access-observed="acceptWordPressAccessStatus($event.detail)">
+<div x-data="websiteDetail()">
 
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
@@ -53,7 +53,6 @@
                 </div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.https_policy"}}</dt><dd class="text-white" x-text="site.ssl_enabled ? t('website.https_forced') : t('website.https_requires_ssl')"></dd></div>
                 <div class="pt-2 flex flex-wrap gap-2">
-                    <a x-show="site.site_type === 'wordpress'" :href="wordpressAdminURL() || '#'" :aria-disabled="!wordpressAdminURL()" :tabindex="wordpressAdminURL() ? 0 : -1" @click="if (!wordpressAdminURL()) $event.preventDefault()" target="_blank" rel="noopener noreferrer" class="btn-primary text-sm" x-text="wpAccessStatus?.installed === false ? t('wp_access.open_install') : t('wp_access.title')"></a>
                     <button @click="openDomainModal()" class="text-sm py-1.5 px-3 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "website.edit_domain"}}</button>
                     <a :href="(document.body.dataset.panelPrefix || '') + '/files?site_id=' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "nav.files"}}</a>
                     <a :href="(document.body.dataset.panelPrefix || '') + '/databases/' + site.id" class="text-sm py-1.5 px-3 rounded inline-block" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "nav.databases"}}</a>
@@ -306,7 +305,10 @@
                     <option value="30">{{t .Lang "website.minute_30"}}</option>
                 </select>
             </div>
-            <button @click="saveMonitoring()" :disabled="monitoringSaving" class="btn-primary text-sm" x-text="monitoringSaving ? t('common.saving') : t('website.save_settings')"></button>
+            <div class="flex flex-wrap items-center gap-3">
+                <button @click="saveMonitoring()" :disabled="monitoringSaving" class="btn-primary text-sm" x-text="monitoringSaving ? t('common.saving') : t('website.save_settings')"></button>
+                <a href="/{{.RandomSuffix}}/alert" class="btn-secondary text-sm">{{t .Lang "website.monitoring_results"}}</a>
+            </div>
             <p x-show="monitoringEnabled" class="text-xs text-gray-500 mt-3">{{t .Lang "website.monitoring_enabled_help"}}</p>
             <p x-show="!monitoringEnabled" class="text-xs text-gray-600 mt-3">{{t .Lang "website.monitoring_disabled_help"}}</p>
             <template x-if="detailTab === 'security' && site.site_type === 'wordpress'"><div id="site-wp-anomaly">{{template "wp_anomaly_panel" .}}</div></template>
@@ -824,23 +826,6 @@ function websiteDetail() {
         },
         detailTab: 'overview',
         site: null,
-        wpAccessStatus: null,
-        acceptWordPressAccessStatus(detail) {
-            if (!this.site || Number(detail?.site_id) !== Number(this.site.id)) return;
-            this.wpAccessStatus = null;
-            if (typeof detail.installed !== 'boolean') return;
-            const raw = detail.installed ? detail.login_url : detail.install_url;
-            try {
-                if (typeof raw !== 'string' || raw.length > 2048) return;
-                const url = new URL(raw), expected = new URL((this.site.ssl_enabled ? 'https://' : 'http://') + this.site.domain);
-                if (url.origin !== expected.origin || url.username || url.password || url.hash || !['http:', 'https:'].includes(url.protocol)) return;
-                this.wpAccessStatus = {site_id:this.site.id, installed:detail.installed, address:url.href};
-            } catch (_) {}
-        },
-        wordpressAdminURL() {
-            if (!this.site || this.site.site_type !== 'wordpress' || this.wpAccessStatus?.site_id !== this.site.id) return '';
-            return this.wpAccessStatus.address || '';
-        },
 		maintenance: { state: 'unknown', window_id: '' },
 		maintenanceEnabled: false,
 		maintenanceMinutes: 5,
@@ -1126,6 +1111,8 @@ function websiteDetail() {
                 'cache-performance': 'cache',
                 'site-performance': 'cache',
                 'site-security': 'security',
+                'site-monitoring': 'security',
+                'site-wp-anomaly': 'security',
                 'security-maintenance': 'security',
                 'site-protection': 'security',
                 logs: 'logs',
@@ -1133,6 +1120,18 @@ function websiteDetail() {
             }[hash] || 'overview';
             this.detailTab = tab;
             if (loadContent) this.loadDetailTab(tab);
+            this.scrollDetailAnchor();
+        },
+        scrollDetailAnchor() {
+            const anchor = (window.location.hash || '').replace(/^#/, '');
+            if (!this.site || this.detailDestroyed || !['site-monitoring', 'site-wp-anomaly'].includes(anchor)) return;
+            this.$nextTick(() => {
+                if (this.detailDestroyed || this.detailTab !== 'security' || window.location.hash !== '#' + anchor) return;
+                const target = document.getElementById(anchor), main = document.getElementById('panel-main');
+                if (!target || !main) return;
+                const margin = parseFloat(window.getComputedStyle(target).scrollMarginTop) || 0;
+                main.scrollTo({top:main.scrollTop + target.getBoundingClientRect().top - main.getBoundingClientRect().top - margin});
+            });
         },
         setDetailTab(tab, updateURL = true) {
             this.detailTab = tab;
@@ -1194,7 +1193,7 @@ function websiteDetail() {
                 const r = await api('/websites/' + id);
                 if (!r.success || !r.data || Number(r.data.id) !== Number(id) || !['wordpress','php'].includes(r.data.site_type)) throw new Error(t('common.operation_failed'));
                 if (this.detailDestroyed) return;
-                if (this.site?.id !== r.data.id) { this.wpAccessStatus = null; this.cancelLogReads(); }
+                if (this.site?.id !== r.data.id) this.cancelLogReads();
                 this.site = r.data;
                 this.lscacheEnabled = r.data.litespeed_cache_enabled;
                 this.lscacheTTL = r.data.litespeed_cache_ttl || 300;
@@ -1223,7 +1222,7 @@ function websiteDetail() {
                 for (const [tab, state] of Object.entries(this.tabLoads)) if (tab !== this.detailTab) state.loaded = false;
                 this.loadDetailTab(this.detailTab, true);
             } catch(e) { if (!this.detailDestroyed) this.siteLoadError = t('website.load_failed_with_error', { error: e.message }); }
-            finally { this.loading = false; this.detailLoading = false; }
+            finally { this.loading = false; this.detailLoading = false; this.scrollDetailAnchor(); }
         },
         installedPHPRuntimes() {
             return this.phpRuntimes.filter(runtime => runtime.installed);
