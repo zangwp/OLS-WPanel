@@ -28,6 +28,33 @@ function ols_wpanel_access_login_conflicts($expected, $actual) {
     return array_values(array_unique($items));
 }
 
+function ols_wpanel_access_cache_observer($hook, $callback) {
+    // LiteSpeed Cache observes login events to invalidate private cache and
+    // update its vary cookie. These three callbacks do not authenticate users.
+    // Keep this exception tied to the exact hook, class, method and source file;
+    // other LiteSpeed callbacks and third-party authentication remain blocked.
+    $observers = [
+        'login_init' => ['LiteSpeed\\Tag', 'check_login_cacheable', 'tag.cls.php'],
+        'wp_login' => ['LiteSpeed\\Purge', 'purge_on_logout', 'purge.cls.php'],
+        'set_logged_in_cookie' => ['LiteSpeed\\Vary', 'add_logged_in', 'vary.cls.php'],
+    ];
+    if (!isset($observers[$hook]) || !defined('WP_PLUGIN_DIR') || !in_array('litespeed-cache/litespeed-cache.php', (array)get_option('active_plugins', []), true)) return false;
+    if (is_string($callback)) $callback = explode('::', $callback, 2);
+    if (!is_array($callback) || count($callback) !== 2 || !isset($callback[0], $callback[1]) || !is_string($callback[1])) return false;
+    $class = is_object($callback[0]) ? get_class($callback[0]) : $callback[0];
+    [$expected_class, $expected_method, $expected_file] = $observers[$hook];
+    if ($class !== $expected_class || $callback[1] !== $expected_method || !class_exists($class, false)) return false;
+    try {
+        $method = new ReflectionMethod($class, $expected_method);
+        if (!$method->isPublic() || $method->getDeclaringClass()->getName() !== $expected_class || (!is_object($callback[0]) && !$method->isStatic())) return false;
+        $file = $method->getFileName();
+        $expected = realpath(WP_PLUGIN_DIR . '/litespeed-cache/src/' . $expected_file);
+        return $expected !== false && $file !== false && realpath($file) === $expected;
+    } catch (ReflectionException $error) {
+        return false;
+    }
+}
+
 function ols_wpanel_access_authentication_conflicts() {
     $items = [];
     foreach ((array)get_option('active_plugins', []) as $plugin) {
@@ -43,6 +70,7 @@ function ols_wpanel_access_authentication_conflicts() {
             foreach ($callbacks as $callback) {
                 $fn = $callback['function'];
                 if (is_string($fn) && in_array($fn, $core, true)) continue;
+                if (ols_wpanel_access_cache_observer($hook, $fn)) continue;
                 $items[] = $hook . '_filter';
             }
         }
