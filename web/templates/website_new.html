@@ -17,6 +17,7 @@
                     </label>
                 </div>
             </div>
+            <p x-show="siteType === 'wordpress'" class="text-sm text-gray-500 mb-4">{{t .Lang "website.wordpress_defaults_help"}}</p>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.main_domain"}}</label>
                 <input type="text" x-model="domain" class="input-field" placeholder="example.com" required>

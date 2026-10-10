@@ -52,8 +52,12 @@ function firewallManager(initialTab = 'current') {
         accessPreview: null,
         accessBusy: false,
         accessToken: '',
+        accessChangeID: '',
         accessTimer: null,
+        accessExpiryTimer: null,
         accessDeadline: '',
+        accessExpired: false,
+        accessRollbackReady: false,
         accessChecked: false,
         accessDirty: false,
         accessError: '',
@@ -127,6 +131,46 @@ function firewallManager(initialTab = 'current') {
         accessPayload() {
             return this.accessRows.flatMap(r => r.scope === 'closed' ? [] : r.scope === 'public' ? [{ protocol: r.protocol, port: Number(r.port), source: '' }] : String(r.sources).split(/[,\s]+/).filter(Boolean).map(source => ({ protocol: r.protocol, port: Number(r.port), source })));
         },
+        focusAccessSaveStage() {
+            this.$nextTick?.(() => {
+                const stage = this.accessToken ? this.$refs?.accessSaveVerification : this.$refs?.accessSaveReview;
+                stage?.scrollIntoView({ block: 'nearest' });
+                stage?.focus({ preventScroll: true });
+            });
+        },
+        async startAccessSave() {
+            await this.previewAccess();
+            if (this.accessPreview && !this.accessToken) this.focusAccessSaveStage();
+        },
+        editAccessDraft() {
+            if (this.accessBusy || this.portSubmitting || this.accessToken) return;
+            this.accessPreview = null;
+        },
+        clearAccessTimers() {
+            clearTimeout(this.accessTimer);
+            clearTimeout(this.accessExpiryTimer);
+            this.accessTimer = null;
+            this.accessExpiryTimer = null;
+        },
+        async checkAccessRollback() {
+            if (!this.accessToken || !this.accessRollbackReady || this.accessBusy || this.portSubmitting) return;
+            this.accessBusy = true;
+            try {
+                if (!await this.fetchPortStatus({ resetDraft: true })) {
+                    this.accessError = t('firewall.access_status_unverified');
+                    return;
+                }
+                // A successful status read alone does not prove that the
+                // temporary rules were restored or deliberately confirmed.
+                const sameChange = /^[a-f0-9]{32}$/.test(this.accessChangeID) && this.portStatus.access_change_id === this.accessChangeID;
+                if (!sameChange || !['rolled_back', 'confirmed'].includes(this.portStatus.access_change_state)) {
+                    this.accessError = this.portStatus.access_change_error || t('firewall.access_status_unverified');
+                    return;
+                }
+                this.clearAccessTimers();
+                this.accessToken = ''; this.accessChangeID = ''; this.accessChecked = false; this.accessExpired = false; this.accessRollbackReady = false; this.accessDeadline = '';
+            } finally { this.accessBusy = false; }
+        },
         async previewAccess() {
             if (this.accessRows.some(r => r.scope === 'specific' && !String(r.sources).trim())) { this.accessError = t('firewall.source_required'); showToast(this.accessError, 'error'); return; }
             if (this.accessBusy || this.accessToken || this.portSubmitting) return;
@@ -141,19 +185,25 @@ function firewallManager(initialTab = 'current') {
             try {
                 const r = await api('/firewall/ports/access/apply', { method: 'POST', body: { rules: this.accessPreview.rules, fingerprint: this.accessPreview.fingerprint }, timeout: 30000 });
                 if (!r.success || !r.data?.confirmation_token) throw Error(t('common.operation_failed'));
-                clearTimeout(this.accessTimer);
-                this.accessTimer = setTimeout(() => { this.accessToken = ''; this.accessChecked = false; this.fetchPortStatus({ resetDraft: true }); }, 95000);
-                this.accessToken = r.data.confirmation_token; this.accessDeadline = r.data.deadline; this.accessChecked = false; this.accessPreview = null;
+                this.clearAccessTimers();
+                this.accessToken = r.data.confirmation_token; this.accessChangeID = typeof r.data.change_id === 'string' && /^[a-f0-9]{32}$/.test(r.data.change_id) ? r.data.change_id : ''; this.accessDeadline = r.data.deadline; this.accessChecked = false; this.accessPreview = null; this.accessRollbackReady = false;
+                const remaining = Date.parse(this.accessDeadline) - Date.now();
+                this.accessExpired = !Number.isFinite(remaining) || remaining <= 0;
+                if (!this.accessExpired) this.accessExpiryTimer = setTimeout(() => { this.accessExpired = true; this.accessChecked = false; }, remaining);
+                this.accessTimer = setTimeout(() => { this.accessExpired = true; this.accessChecked = false; this.accessRollbackReady = true; this.checkAccessRollback(); }, 95000);
                 await this.fetchPortStatus({ resetDraft: true });
-            } catch(e) { this.accessError = e.message; showToast(e.message, 'error'); this.accessPreview = null; } finally { this.accessBusy = false; }
+                if (!this.accessChangeID) this.accessError = t('firewall.access_status_unverified');
+            } catch(e) { this.accessError = e.message + ' ' + t('firewall.access_apply_uncertain'); showToast(this.accessError, 'error'); this.accessPreview = null; } finally { this.accessBusy = false; if (this.accessToken) this.focusAccessSaveStage(); }
         },
         async confirmAccess() {
-            if (this.accessBusy || !this.accessChecked || !this.accessToken) return;
+            if (this.accessBusy || this.portSubmitting || !this.accessChecked || !this.accessToken || this.accessExpired) return;
+            const deadline = Date.parse(this.accessDeadline);
+            if (!Number.isFinite(deadline) || Date.now() >= deadline) { this.accessExpired = true; this.accessChecked = false; return; }
             this.accessBusy = true;
             try {
                 const r = await api('/firewall/ports/access/confirm', { method: 'POST', body: { token: this.accessToken }, timeout: 20000 });
                 if (!r.success) throw Error(t('common.operation_failed'));
-                clearTimeout(this.accessTimer); this.accessToken = ''; this.accessChecked = false; await this.fetchPortStatus({ resetDraft: true }); showToast(t('firewall.access_saved'), 'success');
+                this.clearAccessTimers(); this.accessToken = ''; this.accessChangeID = ''; this.accessChecked = false; this.accessExpired = false; this.accessRollbackReady = false; this.accessDeadline = ''; const observed = await this.fetchPortStatus({ resetDraft: true }); showToast(t('firewall.access_saved'), 'success'); if (!observed) this.accessError = t('firewall.access_saved_status_unavailable');
             } catch(e) { this.accessError = e.message; showToast(e.message, 'error'); } finally { this.accessBusy = false; }
         },
         init() {
@@ -191,9 +241,12 @@ function firewallManager(initialTab = 'current') {
                     else this.accessPreview = null;
                     if (this.portForm.source_mode === 'current') this.portForm.source = this.portStatus.current_management_ip || '';
                     this.portsLoaded = true;
+                    return true;
                 }
+                return false;
             } catch(e) { showToast(e.message || t('common.operation_failed'), 'error'); }
             finally { this.portsLoading = false; }
+            return false;
         },
         async addPortRule() {
             if (this.portStatus.access_enabled || this.accessToken || this.accessBusy || this.portSubmitting) return;
@@ -244,7 +297,7 @@ function firewallManager(initialTab = 'current') {
             if (this.portForm.source_mode === 'any') this.portForm.source = '';
             if (this.portForm.source_mode === 'specific' && this.portForm.source === this.portStatus.current_management_ip) this.portForm.source = '';
         },
-        async enableProtection() { await this.previewAccess(); },
+        async enableProtection() { await this.startAccessSave(); },
         firewallBackendLabel() {
             const backend = this.portStatus.backend || '';
             return { nftables: 'nftables', ufw: 'UFW', iptables: 'iptables' }[backend.toLowerCase()] || backend || '--';

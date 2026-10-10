@@ -39,9 +39,9 @@
                             </td>
                             <td class="table-cell text-xs text-gray-400" :title="job.last_run_at || ''" x-text="formatRunTime(job.last_run_at)"></td>
                             <td class="table-cell cron-actions-column">
-                                <div class="cron-job-actions flex flex-wrap gap-1">
+                                <div class="cron-job-actions flex flex-wrap gap-1" :class="{ 'cron-wp-actions': job.task_type === 'wp_cron' }">
                                     <button x-show="job.task_type !== 'wp_cron'" @click="runJob(job)" :disabled="job.running" class="btn-secondary text-xs py-1 px-2" :class="job.running ? 'opacity-50 cursor-not-allowed' : ''" x-text="job.running ? t('cron.job_running') : t('cron.run')"></button>
-                                    <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
+                                    <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="cron-site-settings text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
                                     <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "cron.edit"}}</button>
                                     <button x-show="canDeleteJob(job)" @click="deleteJob(job)" :disabled="job.running || deletingId !== null" class="btn-danger text-xs py-1 px-2">{{t .Lang "cron.delete"}}</button>
                                 </div>

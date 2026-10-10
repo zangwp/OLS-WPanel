@@ -787,6 +787,10 @@ var upgrades = []Upgrade{
 	},
 	{Version: "1.0.73", Description: "网站独立证书续期设置", SQL: []string{siteSSLRenewalSchema}},
 	{Version: "1.0.74", Description: "网站访问与真实认证失败日志独立增量位置", SQL: []string{wpSecuritySourcePositionsSchema}},
+	{Version: "1.0.75", Description: "在具备可用 IPv6 的主机上同步受管 OpenLiteSpeed 双栈监听"},
+	{Version: "1.0.76", Description: "将已启用 CDN 回源网络接入受管 OpenLiteSpeed 服务器可信代理 ACL"},
+	{Version: "1.0.77", Description: "网站独立 Cloudflare API 凭据与受管 WAF 规则同步状态", SQL: []string{cloudflareSecuritySchema}},
+	{Version: "1.0.78", Description: "自动识别网站 Cloudflare Zone 并记录已配置域名的 WAF 覆盖范围", Func: ensureCloudflareSecurityCoverageSchema},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

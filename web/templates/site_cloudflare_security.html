@@ -1,0 +1,158 @@
+{{define "site_cloudflare_security"}}
+<section id="site-cloudflare-security" x-show="detailTab === 'security'" x-data="siteCloudflareSecurity()" class="card site-cloudflare-security" :aria-busy="!!cfBusy">
+    <div class="site-cloudflare-header">
+        <div><h3>{{t .Lang "cloudflare_security.title"}}</h3><p>{{t .Lang "cloudflare_security.subtitle"}}</p></div>
+        <button type="button" class="btn-secondary" @click="loadCloudflare()" :disabled="!!cfBusy" x-text="cfBusy === 'load' ? t('common.loading') : t('common.refresh')"></button>
+    </div>
+    <div class="site-cloudflare-scope">
+        <p>{{t .Lang "cloudflare_security.scope_help"}}</p>
+        <p>{{t .Lang "cloudflare_security.hostname_help"}} <strong x-text="cloudflareWebsiteHostnames().join(', ')"></strong></p>
+        <p class="site-cloudflare-muted">{{t .Lang "cloudflare_security.hostname_source_help"}}</p>
+        <p x-show="cfLoaded && cfConfig.hostname !== site?.domain" x-cloak>{{t .Lang "cloudflare_security.previous_hostname"}} <strong x-text="cfConfig.hostname"></strong> {{t .Lang "cloudflare_security.hostname_changed_help"}}</p>
+    </div>
+    <p class="site-cloudflare-error" x-show="cfError" x-cloak role="alert" x-text="cfError"></p>
+    <p class="site-cloudflare-notice" x-show="cfNotice" x-cloak role="status" x-text="cfNotice"></p>
+    <form @submit.prevent="saveCloudflare()" autocomplete="off">
+        <fieldset :disabled="!cfLoaded || !!cfBusy" class="site-cloudflare-fieldset">
+            <label class="site-cloudflare-checkbox"><input type="checkbox" x-model="cfForm.enabled"><span>{{t .Lang "cloudflare_security.enable"}}</span></label>
+            <div class="site-cloudflare-fields">
+                <label><span>Account ID</span><input type="text" x-model="cfForm.account_id" :disabled="cloudflareBindingLocked()" class="input-field font-mono" maxlength="32" pattern="[a-fA-F0-9]{32}" autocomplete="off" spellcheck="false" placeholder="{{t .Lang "cloudflare_security.id_placeholder"}}"><small>{{t .Lang "cloudflare_security.account_help"}}</small></label>
+                <label class="site-cloudflare-token"><span>API Token <small class="site-cloudflare-token-state" x-text="cfConfig.token_configured ? t('cloudflare_security.token_saved') : t('cloudflare_security.token_missing')"></small></span><input type="password" x-model="cfToken" class="input-field" autocomplete="new-password" spellcheck="false" :placeholder="cfConfig.token_configured ? t('cloudflare_security.token_keep') : t('cloudflare_security.token_placeholder')"><small>{{t .Lang "cloudflare_security.token_help"}}</small></label>
+            </div>
+            <p class="site-cloudflare-muted" x-show="cloudflareBindingLocked()">{{t .Lang "cloudflare_security.rebind_help"}}</p>
+            <div class="site-cloudflare-actions">
+                <button type="submit" class="btn-primary" x-text="cfBusy === 'save' ? t('common.saving') : t('cloudflare_security.save')"></button>
+                <button type="button" class="btn-secondary" @click="testCloudflare()" :disabled="!canTestCloudflare()" x-text="cfBusy === 'test' ? t('cloudflare_security.testing') : t('cloudflare_security.test')"></button>
+            </div>
+            <p class="site-cloudflare-muted">{{t .Lang "cloudflare_security.save_help"}}</p>
+        </fieldset>
+    </form>
+    <div class="site-cloudflare-sync">
+        <dl class="site-cloudflare-status">
+            <div><dt>{{t .Lang "cloudflare_security.detected_zone"}}</dt><dd x-text="cloudflareZoneName()"></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.status"}}</dt><dd x-text="cloudflareStatusLabel()"></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.last_sync"}}</dt><dd x-text="cloudflareSyncTime()"></dd></div>
+            <div class="site-cloudflare-coverage"><dt>{{t .Lang "cloudflare_security.covered_hostnames"}}</dt><dd x-text="cfConfig.covered_hostnames?.length ? cfConfig.covered_hostnames.join(', ') : t('cloudflare_security.coverage_pending')"></dd></div>
+        </dl>
+        <p class="site-cloudflare-muted" x-show="cfTestInfo">{{t .Lang "cloudflare_security.zone_test_result"}}</p>
+        <p class="site-cloudflare-error" x-show="cfConfig.coverage_error && !cfError" x-text="cfConfig.coverage_error"></p>
+        <p class="site-cloudflare-error" x-show="cfConfig.last_error && !cfError && cfConfig.last_error !== cfConfig.coverage_error" x-text="cfConfig.last_error"></p>
+        <div class="site-cloudflare-actions">
+            <button type="button" class="btn-secondary" @click="syncCloudflare()" :disabled="!canSyncCloudflare()" x-text="cfBusy === 'sync' ? t('cloudflare_security.syncing') : (!cfForm.enabled && cloudflareBindingLocked() ? t('cloudflare_security.remove_rule') : t('cloudflare_security.sync'))"></button>
+            <span class="site-cloudflare-muted" x-show="cloudflareDirty()">{{t .Lang "cloudflare_security.save_before_sync"}}</span>
+        </div>
+        <p class="site-cloudflare-muted">{{t .Lang "cloudflare_security.sync_help"}}</p>
+    </div>
+    <details class="site-cloudflare-technical-info">
+        <summary>{{t .Lang "cloudflare_security.technical_info"}}</summary>
+        <dl><div><dt>Zone ID</dt><dd class="font-mono" x-text="cfTestInfo?.zone_id || cfConfig.zone_id || t('cloudflare_security.zone_pending')"></dd></div></dl>
+    </details>
+    <details class="site-cloudflare-help">
+        <summary>{{t .Lang "cloudflare_security.setup_help"}}</summary>
+        <div>
+            <p>{{t .Lang "cloudflare_security.what_token"}}</p>
+            <ol>
+                <li>{{t .Lang "cloudflare_security.token_step"}} <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">{{t .Lang "cloudflare_security.open_tokens"}}</a></li>
+                <li>{{t .Lang "cloudflare_security.permissions_help"}}</li>
+                <li>{{t .Lang "cloudflare_security.resource_help"}}</li>
+                <li>{{t .Lang "cloudflare_security.id_step"}}</li>
+                <li>{{t .Lang "cloudflare_security.finish_step"}}</li>
+            </ol>
+            <p>{{t .Lang "cloudflare_security.rule_scope_help"}}</p>
+            <p>{{t .Lang "cloudflare_security.plan_limit"}}</p>
+            <p>{{t .Lang "cloudflare_security.layers_help"}}</p>
+            <p>{{t .Lang "cloudflare_security.crawler_help"}}</p>
+            <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noopener noreferrer">{{t .Lang "cloudflare_security.official_help"}}</a>
+        </div>
+    </details>
+</section>
+{{end}}
+{{define "site_cloudflare_security_script"}}
+<script>
+function siteCloudflareSecurity() {
+    return {
+        cfConfig: {}, cfForm: {enabled: false, account_id: ''}, cfToken: '', cfTestInfo: null,
+        cfLoaded: false, cfBusy: '', cfError: '', cfNotice: '', cfGeneration: 0, cfController: null, cfDestroyed: false,
+        init() {
+            this.$watch('detailTab', tab => { if (tab === 'security' && !this.cfLoaded && !this.cfBusy) this.loadCloudflare(); });
+            this.$watch('site.id', () => { this.resetCloudflare(); if (this.detailTab === 'security') this.loadCloudflare(); });
+            this.$watch('cfForm.account_id', () => { this.cfTestInfo = null; });
+            this.$watch('cfToken', () => { this.cfTestInfo = null; });
+            if (this.detailTab === 'security') this.loadCloudflare();
+        },
+        destroy() { this.cfDestroyed = true; this.cfGeneration++; this.cfController?.abort(); this.cfToken = ''; },
+        resetCloudflare() {
+            this.cfGeneration++; this.cfController?.abort(); this.cfController = null;
+            this.cfConfig = {}; this.cfForm = {enabled: false, account_id: ''}; this.cfToken = ''; this.cfTestInfo = null;
+            this.cfLoaded = false; this.cfBusy = ''; this.cfError = ''; this.cfNotice = '';
+        },
+        cloudflareBody() {
+            const body = {enabled: !!this.cfForm.enabled, account_id: this.cfForm.account_id.trim()};
+            if (this.cfToken.trim()) body.api_token = this.cfToken.trim();
+            return body;
+        },
+        cloudflareDirty() {
+            return this.cfLoaded && (!!this.cfForm.enabled !== this.cfConfig.enabled || this.cfForm.account_id.trim() !== this.cfConfig.account_id || !!this.cfToken.trim());
+        },
+        canTestCloudflare() { return this.cfLoaded && !this.cfBusy && /^[a-fA-F0-9]{32}$/.test(this.cfForm.account_id.trim()) && (!!this.cfToken.trim() || this.cfConfig.token_configured); },
+        cloudflareBindingLocked() { return !!this.cfConfig.cleanup_required || !!this.cfConfig.rule_id || this.cfConfig.sync_status === 'removal_required'; },
+        canSyncCloudflare() { return this.cfLoaded && !this.cfBusy && !this.cloudflareDirty() && (this.cfConfig.enabled || this.cloudflareBindingLocked()); },
+        applyCloudflareConfig(data, siteID) {
+            if (!data || Number(data.site_id) !== Number(siteID) || typeof data.hostname !== 'string' || !data.hostname || data.scope !== 'shared_web_bans' || typeof data.enabled !== 'boolean' || typeof data.token_configured !== 'boolean' || typeof data.account_id !== 'string' || !this.cloudflareZoneIDValid(data.zone_id)) throw new Error(t('cloudflare_security.invalid_response'));
+            const websiteHostnames = this.cloudflareHostnameList(data.website_hostnames);
+            const coveredHostnames = this.cloudflareHostnameList(data.covered_hostnames);
+            this.cfConfig = {site_id: data.site_id, hostname: data.hostname, enabled: data.enabled, account_id: data.account_id, zone_id: data.zone_id, zone_name: String(data.zone_name || ''), token_configured: data.token_configured, cleanup_required: !!data.cleanup_required, rule_id: String(data.rule_id || ''), sync_status: String(data.sync_status || ''), last_sync_at: String(data.last_sync_at || ''), last_error: String(data.last_error || ''), website_hostnames: websiteHostnames, covered_hostnames: coveredHostnames, coverage_error: String(data.coverage_error || '')};
+            this.cfForm = {enabled: data.enabled, account_id: data.account_id}; this.cfLoaded = true; this.cfTestInfo = null;
+        },
+        cloudflareHostnameList(value) { if (value === undefined) return []; if (!Array.isArray(value) || value.some(hostname => typeof hostname !== 'string' || !hostname)) throw new Error(t('cloudflare_security.invalid_response')); return [...new Set(value)]; },
+        cloudflareZoneIDValid(value) { return typeof value === 'string' && (value === '' || /^[a-fA-F0-9]{32}$/.test(value)); },
+        cloudflareZoneName() { return this.cfTestInfo?.zone_name || this.cfConfig.zone_name || ((this.cfTestInfo?.zone_id || this.cfConfig.zone_id) ? t('cloudflare_security.zone_name_pending') : t('cloudflare_security.zone_pending')); },
+        cloudflareWebsiteHostnames() { return this.cfConfig.website_hostnames?.length ? this.cfConfig.website_hostnames : (this.site?.domain ? [this.site.domain] : []); },
+        cloudflareStatusLabel() {
+            if (!this.cfLoaded) return t('cloudflare_security.status_unknown');
+            const key = 'cloudflare_security.status_' + this.cfConfig.sync_status;
+            const label = t(key);
+            return label !== key ? label : t('cloudflare_security.status_unknown');
+        },
+        cloudflareSyncTime() {
+            const value = this.cfConfig.last_sync_at;
+            // SQLite CURRENT_TIMESTAMP has no offset, but is always UTC.
+            const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value || '') ? value.replace(' ', 'T') + 'Z' : value;
+            const date = new Date(normalized);
+            return value && Number.isFinite(date.getTime()) ? date.toLocaleString(currentLocale()) : t('cloudflare_security.not_synced');
+        },
+        cloudflareError(error) { const key = 'cloudflare_security.' + (error?.code || ''); const label = t(key); return error?.message || (label !== key ? label : t('cloudflare_security.request_failed')); },
+        async loadCloudflare() { return this.cloudflareRequest('load', 'GET'); },
+        async saveCloudflare() { if (!this.cfLoaded || this.cfBusy) return; return this.cloudflareRequest('save', 'PUT', this.cloudflareBody()); },
+        async testCloudflare() { if (!this.canTestCloudflare()) return; return this.cloudflareRequest('test', 'POST', this.cloudflareBody()); },
+        async syncCloudflare() { if (!this.canSyncCloudflare()) return; return this.cloudflareRequest('sync', 'POST', {}); },
+        async cloudflareRequest(action, method, body) {
+            if (!this.site?.id || this.cfBusy || this.cfDestroyed) return false;
+            const siteID = this.site.id, generation = ++this.cfGeneration, controller = new AbortController();
+            this.cfController = controller; this.cfBusy = action; this.cfError = ''; this.cfNotice = '';
+            if (action === 'test') this.cfTestInfo = null;
+            try {
+                const endpoint = '/websites/' + siteID + '/cloudflare-security' + (['test','sync'].includes(action) ? '/' + action : '');
+                const response = await api(endpoint, {method, body, silent: true, cache: 'no-store', timeout: 45000, signal: controller.signal});
+                if (controller.signal.aborted || generation !== this.cfGeneration || this.cfDestroyed || this.site?.id !== siteID) return false;
+                if (!response?.success) throw new Error(response?.message || t('cloudflare_security.request_failed'));
+                if (action === 'test') {
+                    if (!response.data || Number(response.data.site_id) !== Number(siteID) || response.data.scope !== 'shared_web_bans' || !this.cloudflareZoneIDValid(response.data.zone_id) || !response.data.zone_id || response.data.coverage_error) throw new Error(response.data?.coverage_error || t('cloudflare_security.invalid_response'));
+                    this.cfTestInfo = {zone_id: response.data.zone_id, zone_name: String(response.data.zone_name || ''), website_hostnames: this.cloudflareHostnameList(response.data.website_hostnames)};
+                    this.cfNotice = t('cloudflare_security.test_success');
+                }
+                else {
+                    this.applyCloudflareConfig(response.data, siteID);
+                    if (action === 'save') { this.cfToken = ''; this.cfNotice = t('cloudflare_security.saved'); }
+                    if (action === 'sync') this.cfNotice = t('cloudflare_security.synced');
+                }
+                return true;
+            } catch(error) {
+                if (!controller.signal.aborted && generation === this.cfGeneration && !this.cfDestroyed && this.site?.id === siteID) this.cfError = this.cloudflareError(error);
+                return false;
+            } finally { if (generation === this.cfGeneration) { this.cfBusy = ''; this.cfController = null; } }
+        },
+    };
+}
+</script>
+{{end}}

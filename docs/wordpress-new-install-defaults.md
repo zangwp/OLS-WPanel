@@ -1,0 +1,13 @@
+# Defaults on a new WordPress installation
+
+Fresh WordPress sites created by the panel use a one-time cleanup after the WordPress installation wizard completes. For a recorded official download, this removes the bundled Akismet and Hello Dolly plugins and unused bundled default themes. The current active theme remains; a child theme also keeps its required parent. LiteSpeed Cache, other plugins, custom themes and the panel's other MU plugins remain in place.
+
+The cleanup is prepared only by the new-site creation path. Existing sites, imports, restores and reinstalls do not receive this helper. A normal request or a WordPress update does not trigger cleanup.
+
+Before OpenLiteSpeed first loads a new WordPress virtual host, the deployment also creates standard root permalink rules if `.htaccess` is missing. Existing package-provided or custom rules are preserved, including an existing empty file. The generic deployment path used by reinstalls and imports does not create these rules. This is independent of the official-download-only default-content cleanup.
+
+Official-download origin is recorded by the installer and the panel's package download with the downloaded archive's SHA-256 and byte size, then checked against the actual archive used to create the site. Custom uploaded packages, caches with missing origin records and packages whose digest no longer matches are kept intact. This is a record of the panel's download source, not an independent upstream checksum verification. Older caches are not retroactively labeled as official downloads. Download the official package again from the WordPress package settings to enable cleanup for future new sites using an older cache.
+
+Only exact known bundled names captured from the installation archive are eligible. Before deletion, the helper compares the complete file tree with its original fingerprint, so content edited or added before the wizard completes is retained. Active plugins and active or parent themes are protected. If the active theme cannot be verified, themes are retained rather than risking an unusable site.
+
+The helper uses WordPress's installation-complete `wp_install` hook, claims a one-time database option before removing anything and removes its own MU file. The `_ols_wpanel_default_cleanup` option records `running`, `completed`, `partial` or `skipped`, removed and retained items, and errors. An uploaded or unverified package records `skipped` and its reason without deleting any defaults. Partial failures are logged and do not abort the completed WordPress installation; the helper never repeats cleanup on subsequent visits.

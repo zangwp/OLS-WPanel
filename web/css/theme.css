@@ -198,13 +198,14 @@ textarea.input-field { line-height: 1.7; }
 .access-code { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; padding: 16px; background: var(--panel-surface-soft); border-radius: 7px; margin-top: 12px; font-size: 12px; }
 .access-preview-list { display: grid; gap: 8px; }
 .access-rule .label { margin-bottom: 6px; }
-.access-service-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .access-rule-actions { display: flex; flex-shrink: 0; }
 .access-rule-actions .btn-secondary { min-height: 29px; padding: 5px 9px; font-size: 11px; white-space: nowrap; }
 .cron-jobs { table-layout: fixed; min-width: 880px; }
 .cron-jobs .table-cell, .cron-jobs .table-header { padding-left: 10px; padding-right: 10px; vertical-align: middle; }
-.cron-jobs .cron-actions-column { text-align: right; }
+.cron-jobs .cron-actions-column { text-align: left; }
 .cron-job-actions { align-items: center; justify-content: flex-end; }
+.cron-job-actions.cron-wp-actions { justify-content: space-between; flex-wrap: nowrap; gap: 20px; }
+.cron-wp-actions .cron-site-settings { padding-left: 0; padding-right: 0; }
 .cron-job-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cron-jobs button, .cron-jobs a { white-space: nowrap; }
 .ssh-port-field { width: 200px; max-width: 100%; }

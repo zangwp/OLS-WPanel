@@ -180,10 +180,14 @@ func banScanIPForDuration(db *sql.DB, ip string, reason string, duration time.Du
 		log.Printf("扫描封禁已忽略非公网 IP %s", ip)
 		return
 	}
-	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE ip_address = ? AND unbanned_at IS NULL
-		AND (expires_at IS NULL OR expires_at > datetime('now'))`, ip).Scan(&count)
-	if count > 0 {
+	// Website login mistakes do not gate panel access, so they must not
+	// suppress the panel's independent scan defense either.
+	existing, err := (&LoginAttemptTracker{DB: db}).IsBanned(ip)
+	if err != nil {
+		log.Printf("扫描封禁状态查询失败 ip=%s: %v", ip, err)
+		return
+	}
+	if existing {
 		return
 	}
 

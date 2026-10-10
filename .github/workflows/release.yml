@@ -63,7 +63,7 @@ jobs:
         # actions/setup-go v7.0.0
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.9'
           check-latest: false
           cache: false
 
@@ -276,7 +276,7 @@ jobs:
           go_version="$(go env GOVERSION)"
           required_go_version="$(awk '$1 == "toolchain" { print $2; exit }' go.mod)"
           test -n "$required_go_version"
-          test "$required_go_version" = 'go1.26.8'
+          test "$required_go_version" = 'go1.26.9'
           test "$go_version" = "$required_go_version"
           test -f "$go_root/LICENSE"
           test ! -L "$go_root/LICENSE"
@@ -417,7 +417,7 @@ jobs:
         # actions/setup-go v7.0.0
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.9'
           check-latest: false
           cache: true
 

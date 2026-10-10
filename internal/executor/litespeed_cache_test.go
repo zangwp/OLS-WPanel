@@ -2,6 +2,7 @@ package executor
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -316,6 +317,99 @@ func insertRegenTestWebsite(t *testing.T, domain, olsVHostConfigPath, status str
 		t.Fatalf("last insert id: %v", err)
 	}
 	return int(id)
+}
+
+func TestRegenerationPreservesPersistedPHPChildrenAcrossCacheAndQuotaChanges(t *testing.T) {
+	for _, fixture := range []struct {
+		stored, expected int
+	}{{6, 6}, {12, 12}, {10, 10}, {0, 10}} {
+		t.Run(fmt.Sprintf("persisted_%d", fixture.stored), func(t *testing.T) {
+			openTestDB(t)
+			root := t.TempDir()
+			webRoot, logDir := filepath.Join(root, "site"), filepath.Join(root, "logs")
+			available, enabled := filepath.Join(root, "available"), filepath.Join(root, "enabled")
+			for _, dir := range []string{webRoot, logDir, available, enabled} {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			previousConfig, previousPHPPath, previousSecretsRoot := config.AppConfig, phpRuntimeConfigPath, siteSecretsRoot
+			config.AppConfig = &config.Config{
+				Panel: config.PanelConfig{BackupDir: filepath.Join(root, "backups")},
+				Paths: config.PathsConfig{WWWRoot: root, OLSVHostsAvailable: available, OLSVHostsEnabled: enabled, LSPHPBinary: filepath.Join(root, "lsphp"), LSPHPCLI: filepath.Join(root, "php")},
+			}
+			phpRuntimeConfigPath = filepath.Join(root, "99-ols-wpanel.ini")
+			siteSecretsRoot = filepath.Join(root, "site-secrets")
+			t.Cleanup(func() {
+				config.AppConfig, phpRuntimeConfigPath, siteSecretsRoot = previousConfig, previousPHPPath, previousSecretsRoot
+			})
+			path := filepath.Join(available, "limits.example.com.conf")
+			// Paused configuration uses the same database/renderer path while
+			// allowing these regressions to run without real sockets or OLS.
+			siteID := insertRegenTestWebsite(t, "limits.example.com", path, "paused")
+			socket := filepath.VolumeName(root) + string(filepath.Separator) + "olsw-limits-test.sock"
+			if _, err := database.GetDB().Exec(`UPDATE websites SET web_root=?,log_dir=?,lsphp_socket_path=?,php_version=? WHERE id=?`, webRoot, logDir, socket, PrimaryLSPHPVersion(), siteID); err != nil {
+				t.Fatal(err)
+			}
+			// Keep the real schema's default untouched for older sites whose
+			// deployment did not persist an adaptive value.
+			if fixture.stored != 10 {
+				if _, err := database.GetDB().Exec(`UPDATE websites SET lsphp_max_children=? WHERE id=?`, fixture.stored, siteID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertLimit := func(trigger string) {
+				t.Helper()
+				content, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, directive := range []string{fmt.Sprintf("maxConns               %d\n", fixture.expected), fmt.Sprintf("PHP_LSAPI_CHILDREN=%d\n", fixture.expected)} {
+					if !strings.Contains(string(content), directive) {
+						t.Fatalf("%s discarded stored limit %d: missing %s", trigger, fixture.stored, directive)
+					}
+				}
+				var stored int
+				if err := database.GetDB().QueryRow(`SELECT lsphp_max_children FROM websites WHERE id=?`, siteID).Scan(&stored); err != nil || stored != fixture.stored {
+					t.Fatalf("%s changed the persisted value: %d, %v", trigger, stored, err)
+				}
+				if _, err := os.Lstat(filepath.Join(enabled, filepath.Base(path))); !os.IsNotExist(err) {
+					t.Fatal("regeneration re-enabled a paused site")
+				}
+			}
+			if err := RegenerateSiteOLSConfig(siteID); err != nil {
+				t.Fatal(err)
+			}
+			assertLimit("direct regeneration")
+			cache := filepath.Join(webRoot, ".lscache", "cached-page")
+			if err := os.MkdirAll(filepath.Dir(cache), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cache, []byte("cached"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := ClearSiteCache(siteID); err != nil {
+				t.Fatal(err)
+			}
+			assertLimit("cache clearing")
+			if _, err := os.Stat(cache); !os.IsNotExist(err) {
+				t.Fatal("cache-clearing entry point did not remove the cache")
+			}
+			// Software Management writes PHP quotas then invokes this exact
+			// batch entry point. Exercise the changed quota and limits together.
+			if err := os.WriteFile(phpRuntimeConfigPath, []byte("memory_limit = 512M\nupload_max_filesize = 128M\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := RegenerateAllSitesOLSConfigs(); err != nil {
+				t.Fatal(err)
+			}
+			assertLimit("PHP quota batch regeneration")
+			content, err := os.ReadFile(path)
+			if err != nil || !strings.Contains(string(content), "php_admin_value memory_limit 512M\n") {
+				t.Fatalf("batch regeneration did not apply the new PHP quota: %v", err)
+			}
+		})
+	}
 }
 
 // TestRegenerateAllSitesOLSConfigsKeepsPausedSitesDisabled reproduces the bug where
