@@ -13,7 +13,7 @@
     </div>
 
     <div x-cloak x-show="policyOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" @click.self="closePolicy()" @keydown.escape.window="closePolicy()">
-        <div class="card w-full max-w-6xl max-h-[90vh] flex flex-col" role="dialog" aria-modal="true" aria-labelledby="backup-policy-title">
+        <div class="card backup-policy-dialog w-full max-w-6xl max-h-[90vh] flex flex-col" role="dialog" aria-modal="true" aria-labelledby="backup-policy-title">
             <div class="flex items-start justify-between gap-4 mb-4">
                 <div>
                     <h3 id="backup-policy-title" class="text-lg font-semibold text-white">{{t .Lang "backups.batch_settings_title"}}</h3>
@@ -29,8 +29,8 @@
             <p class="text-xs text-amber-400 mb-4">{{t .Lang "backups.database_schedule_help"}}</p>
 
             <div x-show="policyLoading" class="py-10 text-center text-gray-500">{{t .Lang "backups.loading"}}</div>
-            <div x-show="!policyLoading" class="overflow-auto border border-gray-700 rounded">
-                <table class="w-full min-w-[980px] text-sm">
+            <div x-show="!policyLoading" class="backup-policy-scroll overflow-auto border border-gray-700 rounded">
+                <table class="backup-policy-table w-full text-sm">
                     <thead class="sticky top-0 z-10 bg-gray-800 text-gray-400 border-b border-gray-700">
                         <tr>
                             <th class="px-4 py-3 text-left">{{t .Lang "backups.website"}}</th>
@@ -45,7 +45,7 @@
                     <tbody>
                         <template x-for="site in policySites" :key="site.site_id">
                             <tr class="border-b border-gray-700/70 bg-gray-900/30 align-top last:border-b-0">
-                                <td class="px-4 py-4 font-semibold text-white break-all">
+                                <td class="px-4 py-4 font-semibold text-white">
                                     <span x-text="site.domain"></span>
                                     <span x-show="site.status === 'paused'" class="badge-warning ml-2 text-xs">{{t .Lang "backups.held_with_site"}}</span>
                                 </td>
@@ -231,6 +231,15 @@
 </div>
 
 <style>
+    .backup-policy-dialog { min-width: 0; }
+    .backup-policy-scroll { min-width: 0; max-width: 100%; }
+    .backup-policy-table { min-width: 980px; table-layout: auto; }
+    .backup-policy-table th { white-space: nowrap; }
+    .backup-policy-table th:first-child,
+    .backup-policy-table td:first-child { min-width: 180px; }
+    .backup-policy-table td:first-child { overflow-wrap: anywhere; }
+    .backup-policy-table td:nth-child(5),
+    .backup-policy-table td:nth-child(7) { min-width: 160px; }
     .site-backup-card > summary { list-style: none; }
     .site-backup-card > summary::-webkit-details-marker { display: none; }
     .site-backup-card .chevron-icon { transition: transform 0.15s ease; }

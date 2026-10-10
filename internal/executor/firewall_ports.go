@@ -59,6 +59,9 @@ type FirewallPortStatus struct {
 	AccessEnabled          bool                 `json:"access_enabled"`
 	AccessRules            []FirewallAccessRule `json:"access_rules"`
 	AccessAvailable        bool                 `json:"access_available"`
+	AccessChangeID         string               `json:"access_change_id,omitempty"`
+	AccessChangeState      string               `json:"access_change_state"`
+	AccessChangeError      string               `json:"access_change_error,omitempty"`
 	Backend                string               `json:"backend"`
 	Writable               bool                 `json:"writable"`
 	Warning                string               `json:"warning"`
@@ -93,6 +96,7 @@ type FirewallPortRuleRequest struct {
 
 type FirewallProtectionResult struct {
 	ConfirmationToken string    `json:"confirmation_token"`
+	ChangeID          string    `json:"change_id,omitempty"`
 	Deadline          time.Time `json:"deadline"`
 }
 
@@ -275,14 +279,27 @@ func listManagedRuntime(ctx context.Context, family, table, chain string) (map[s
 }
 
 func detectListeners(ctx context.Context) []FirewallListener {
+	listeners, _ := readFirewallListeners(ctx, false)
+	return listeners
+}
+
+// Display callers may omit unreadable rows. A migration must distinguish an
+// incomplete inspection from a verified absence before retiring its old port.
+func readFirewallListeners(ctx context.Context, requireComplete bool) ([]FirewallListener, error) {
 	out, err := portCommand(ctx, "ss", "-H", "-lntup")
 	if err != nil {
-		return []FirewallListener{}
+		return []FirewallListener{}, fmt.Errorf("读取本机监听失败: %w", err)
 	}
 	seen := make(map[string]FirewallListener)
 	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) < 5 {
+			if requireComplete {
+				return nil, errors.New("本机监听输出不完整，无法验证 SSH 端口")
+			}
 			continue
 		}
 		proto := strings.ToLower(fields[0])
@@ -291,15 +308,24 @@ func detectListeners(ctx context.Context) []FirewallListener {
 		} else if strings.HasPrefix(proto, "udp") {
 			proto = "udp"
 		} else {
+			if requireComplete {
+				return nil, errors.New("本机监听协议无法识别，无法验证 SSH 端口")
+			}
 			continue
 		}
 		address := fields[4]
 		idx := strings.LastIndex(address, ":")
 		if idx < 0 {
+			if requireComplete {
+				return nil, errors.New("本机监听地址无法识别，无法验证 SSH 端口")
+			}
 			continue
 		}
 		port, err := strconv.Atoi(strings.TrimSuffix(address[idx+1:], "]"))
-		if err != nil || port < 1 {
+		if err != nil || port < 1 || port > 65535 {
+			if requireComplete {
+				return nil, errors.New("本机监听端口无法识别，无法验证 SSH 端口")
+			}
 			continue
 		}
 		process := ""
@@ -327,7 +353,7 @@ func detectListeners(ctx context.Context) []FirewallListener {
 		}
 		return items[i].Port < items[j].Port
 	})
-	return items
+	return items, nil
 }
 
 func normalizeListenerAddress(value string) string {
@@ -397,6 +423,8 @@ func loadFirewallPortRules(db *sql.DB) ([]FirewallPortRule, error) {
 }
 
 func GetFirewallPortStatus() (FirewallPortStatus, error) {
+	portRulesMu.Lock()
+	defer portRulesMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	family, table, chain, policy, warning, writable := firewallPortTarget(ctx)
@@ -441,6 +469,7 @@ func GetFirewallPortStatus() (FirewallPortStatus, error) {
 	panelPort, _ := PanelListenEndpoint(config.AppConfig)
 	pending, deadline := firewallProtectionPending()
 	accessEnabled, accessRules, accessErr := readAccessState(ctx)
+	change := inspectFirewallAccessChange(ctx)
 	if accessEnabled {
 		for i := range listeners {
 			if listeners[i].BindScope != "local" {
@@ -451,6 +480,7 @@ func GetFirewallPortStatus() (FirewallPortStatus, error) {
 	canProtect := runtime.GOOS == "linux" && writable && policy == "accept" && systemdRunAvailable()
 	return FirewallPortStatus{
 		AccessEnabled: accessEnabled, AccessRules: accessRules, AccessAvailable: writable && accessErr == nil && systemdRunAvailable(),
+		AccessChangeID: change.ID, AccessChangeState: change.State, AccessChangeError: change.Error,
 		Backend: "nftables", Writable: writable, Warning: warning, InputPolicy: policy, RecommendedPolicy: "drop",
 		SSHPort: detectSSHPort(ctx, listeners), PanelPort: panelPort,
 		ManagedRuleCount: len(rules), AnomalyCount: anomalies,

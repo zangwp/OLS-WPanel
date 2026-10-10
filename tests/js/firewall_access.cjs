@@ -4,6 +4,37 @@ const calls = [];
 const ctx = {t:x=>x, showToast:()=>{}, confirmModal:async()=>true, setTimeout:()=>1, clearTimeout:()=>{}, api:async(path,opts)=>{calls.push(path);return {success:true,data:{confirmation_token:'test',deadline:'2030-01-01'}}}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 (async()=>{
+ const removable=ctx.firewallManager('ports');
+ removable.portStatus={access_available:true,access_enabled:true,ssh_port:2222,panel_port:9443,listeners:[{protocol:'tcp',port:8080,process:'app',bind_scope:'network'},{protocol:'tcp',port:9000,process:'local-app',bind_scope:'local'}],rules:[{protocol:'tcp',port:8443,description:'legacy'}],access_rules:[{protocol:'tcp',port:2222,source:''},{protocol:'tcp',port:9443,source:''},{protocol:'tcp',port:8088,source:'203.0.113.9/32'},{protocol:'tcp',port:8443,source:''},{protocol:'tcp',port:9000,source:''}]};
+ removable.resetAccessRows();
+ const fixed=removable.accessRows.filter(r=>r.fixed);assert.equal(fixed.length,8,'all built-in services must remain available in the editor');
+ for(const row of fixed)assert.equal(removable.canRemoveAccessRow(row),false,'built-in service cannot be removed: '+row.key);
+ const savedCustom=removable.accessRows.find(r=>r.key==='tcp:8088');assert(savedCustom.custom);assert.equal(savedCustom.scope,'specific');assert.equal(savedCustom.sources,'203.0.113.9/32');assert.equal(removable.canRemoveAccessRow(savedCustom),true,'a saved custom port without a listener must be removable after reconstructing the draft');
+ const local=removable.accessRows.find(r=>r.key==='tcp:9000');assert.equal(local.listening,false);assert.equal(local.detected,true);assert.equal(removable.canRemoveAccessRow(local),false,'localhost listeners are detected services even without network exposure');
+ const legacy=removable.accessRows.find(r=>r.key==='tcp:8443');assert.equal(legacy.legacy,true);assert.equal(removable.canRemoveAccessRow(legacy),false,'legacy rule rows are preserved separately from the access policy');
+ assert.equal(removable.canRemoveAccessRow(removable.accessRows.find(r=>r.key==='tcp:8080')),false,'network listeners cannot be removed');
+ removable.accessPreview={rules:removable.accessPayload(),fingerprint:'older-draft'};
+ for(const state of [{accessBusy:true},{accessToken:'pending'},{portSubmitting:true},{portsLoading:true}]){
+  Object.assign(removable,state);removable.removeAccessRow(savedCustom);assert(removable.accessRows.includes(savedCustom));assert.equal(removable.accessDirty,false);assert(removable.accessPreview,'blocked removal must not clear a valid preview');
+  Object.assign(removable,{accessBusy:false,accessToken:'',portSubmitting:false,portsLoading:false});
+ }
+ for(const available of [false,undefined,'true']){removable.portStatus.access_available=available;removable.removeAccessRow(savedCustom);assert(removable.accessRows.includes(savedCustom));assert.equal(removable.accessDirty,false);}
+ removable.portStatus.access_available=true;
+ for(const row of [undefined,null,{}, {key:'tcp:9999',protocol:'tcp',port:9999,custom:true}, {...savedCustom,port:'8088'}, {...savedCustom,protocol:'icmp'}, {...savedCustom,key:'tcp:8089'}]){assert.equal(removable.canRemoveAccessRow(row),false);removable.removeAccessRow(row);}
+ const currentLocal=removable.accessRows.find(r=>r.key==='tcp:9000');currentLocal.detected=false;assert.equal(removable.canRemoveAccessRow(currentLocal),false,'the latest listener status still protects a stale row');
+ legacy.legacy=false;assert.equal(removable.canRemoveAccessRow(legacy),false,'the latest legacy status still protects a stale row');
+ const ssh=removable.accessRows.find(r=>r.key==='tcp:2222');ssh.fixed=false;assert.equal(removable.canRemoveAccessRow(ssh),false,'critical ports remain protected even with stale row metadata');
+ calls.length=0;removable.accessError='previous error';const beforeRemoval=removable.accessRows.length;
+ removable.removeAccessRow(savedCustom);assert.equal(removable.accessRows.length,beforeRemoval-1);assert(!removable.accessPayload().some(r=>r.port===8088));assert.equal(removable.accessDirty,true);assert.equal(removable.accessPreview,null,'removing a row invalidates the preview fingerprint');assert.equal(removable.accessError,'');assert.equal(calls.length,0,'removal edits only the local draft');
+ removable.removeAccessRow(savedCustom);assert.equal(removable.accessRows.length,beforeRemoval-1,'a repeated remove cannot delete another row');assert.equal(calls.length,0);
+ assert(removable.accessPayload().some(r=>r.port===2222));assert(removable.accessPayload().some(r=>r.port===9443));
+ ctx.api=async(path,opts)=>{calls.push(path);return {success:true,data:{rules:opts.body.rules,fingerprint:'removed-draft'}}};await removable.previewAccess();assert.equal(calls[0],'/firewall/ports/access/preview');assert(!removable.accessPreview.rules.some(r=>r.port===8088));assert.equal(removable.accessPreview.fingerprint,'removed-draft');assert(!calls.some(path=>path.match(/\/ports\/[^/]+$/)),'custom removal must never call the legacy rule deletion route');
+ const savedStatus=removable.portStatus;ctx.api=async path=>{calls.push(path);return {success:true,data:savedStatus}};
+ await removable.fetchPortStatus();assert(!removable.accessRows.some(r=>r.port===8088),'a background status read preserves the removed row draft');assert.equal(removable.accessDirty,true);assert.equal(removable.accessPreview,null,'a background read invalidates the prior preview');
+ removable.resetAccessRows();assert(removable.accessRows.some(r=>r.port===8088),'without applying, explicitly resetting to saved policy restores the port');
+ removable.accessCustomPort='8089';removable.addAccessRow();const addedCustom=removable.accessRows.find(r=>r.key==='tcp:8089');assert.equal(removable.canRemoveAccessRow(addedCustom),true);removable.removeAccessRow(addedCustom);assert(!removable.accessRows.some(r=>r.port===8089),'newly added ports can be removed from the draft');
+ removable.accessCustomProtocol='udp';removable.accessCustomPort='9000';removable.addAccessRow();const separateProtocol=removable.accessRows.find(r=>r.key==='udp:9000');assert.equal(removable.canRemoveAccessRow(separateProtocol),true,'a TCP listener does not protect an unrelated UDP custom port');removable.removeAccessRow(separateProtocol);
+ ctx.api=async(path,opts)=>{calls.push(path);return {success:true,data:{confirmation_token:'test',deadline:'2030-01-01'}}};calls.length=0;
  const p=ctx.firewallManager('ports');
  p.resetAccessRows();assert(!p.accessRows.some(r=>r.port===8443),'an unread panel port must not invent a panel listener');
  p.portStatus={ssh_port:2222,panel_port:9443,current_management_ip:'203.0.113.9',listeners:[],rules:[]};p.resetAccessRows();
@@ -36,5 +67,5 @@ vm.createContext(ctx);vm.runInContext(source,ctx);
  assert.equal(p.serviceDisplayName('lshttpd'),'OpenLiteSpeed');assert.equal(p.serviceDisplayName('redis-server'),'Redis');assert.equal(p.serviceDisplayName('mysqld'),'MariaDB');assert.equal(p.serviceDisplayName('https'),'HTTPS');assert.equal(p.serviceDisplayName('My App'),'My App');
  assert.equal(p.serviceDisplayName('litespeed"'),'OpenLiteSpeed');
  const panelPreset=p.portPresets.find(r=>r.key==='panel');p.applyPortPreset(panelPreset);assert.equal(p.portForm.port,7543);p.portStatus.panel_port=0;p.portForm.port=9000;p.applyPortPreset(panelPreset);assert.equal(p.portForm.port,9000,'missing panel endpoint must not replace the draft with 8443');
- console.log('Firewall custom-port validation, preview failures, draft protection and verified save passed');
+ console.log('Firewall custom-port add/remove, saved drafts, protected listeners and built-ins, preview invalidation, blocked mutations and verified save passed');
 })().catch(e=>{console.error(e);process.exit(1)});

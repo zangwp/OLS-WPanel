@@ -60,3 +60,48 @@ func TestIsBannedReportsDatabaseFailure(t *testing.T) {
 		t.Fatalf("banned=%t err=%v, want database error", banned, err)
 	}
 }
+
+func TestPanelFailuresStillBanAfterWordPressLoginBan(t *testing.T) {
+	for _, attemptType := range []string{"basic_auth", "web_login"} {
+		t.Run(attemptType, func(t *testing.T) {
+			db := newScanDefenseTestDB(t)
+			if _, err := db.Exec(`CREATE TABLE login_attempts (ip_address TEXT NOT NULL, attempt_type TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+				t.Fatal(err)
+			}
+			tracker := NewLoginAttemptTracker(db, 3, 1, 1)
+			ip := "203.0.113.10"
+			insertTestBan(t, tracker, ip, "olswpanel-login")
+			calls := 0
+			original := loginAttemptAddPersistBan
+			loginAttemptAddPersistBan = func(got string) error {
+				if got != ip {
+					t.Fatalf("persist IP=%q, want %q", got, ip)
+				}
+				calls++
+				return nil
+			}
+			t.Cleanup(func() { loginAttemptAddPersistBan = original })
+			for i := 0; i < 2; i++ {
+				tracker.RecordAttempt(ip, attemptType)
+			}
+			if banned, err := tracker.IsBanned(ip); err != nil || banned || calls != 0 {
+				t.Fatalf("before threshold: banned=%t err=%v calls=%d", banned, err, calls)
+			}
+			tracker.RecordAttempt(ip, attemptType)
+			if banned, err := tracker.IsBanned(ip); err != nil || !banned || calls != 1 {
+				t.Fatalf("after threshold: banned=%t err=%v calls=%d", banned, err, calls)
+			}
+			tracker.RecordAttempt(ip, attemptType)
+			var panelBans, websiteBans int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE ip_address=? AND source_jail='panel'`, ip).Scan(&panelBans); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM firewall_bans WHERE ip_address=? AND source_jail='olswpanel-login'`, ip).Scan(&websiteBans); err != nil {
+				t.Fatal(err)
+			}
+			if panelBans != 1 || websiteBans != 1 || calls != 1 {
+				t.Fatalf("panel bans=%d website bans=%d persist calls=%d", panelBans, websiteBans, calls)
+			}
+		})
+	}
+}

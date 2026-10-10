@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -19,6 +20,11 @@ var (
 	}
 	persistDocumentRoot       = saveDocumentRoot
 	applyDocumentRootOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
+		return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
+	}
+	applyCDNRealIPTrustedProxies = ApplyOLSTrustedProxyList
+	applyCDNRealIPFail2ban       = ApplyFail2banSettings
+	applyCDNRealIPOLSVHost       = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
 		return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 	}
 )
@@ -150,29 +156,39 @@ func executeSetCDNRealIP(task *Task) TaskResult {
 	} else {
 		oldRenderErr = oldDataErr
 	}
+	restore := func(action string, cause error, restoreVHost bool) TaskResult {
+		var recoveryErrors []error
+		if err := SaveWebsiteCDNRealIPSettings(site.ID, oldEnabled, oldGroupIDs); err != nil {
+			recoveryErrors = append(recoveryErrors, fmt.Errorf("恢复 CDN 数据库设置失败: %w", err), errors.New("可信代理 ACL 无法恢复：数据库设置尚未恢复"))
+		} else if err := applyCDNRealIPTrustedProxies(); err != nil {
+			recoveryErrors = append(recoveryErrors, fmt.Errorf("恢复 OpenLiteSpeed 可信代理 ACL 失败: %w", err))
+		}
+		if restoreVHost {
+			if oldRenderErr != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("恢复原虚拟主机配置无法生成: %w", oldRenderErr))
+			} else if err := applyCDNRealIPOLSVHost(engine, oldVHostConfig, site.OLSVHostConfigPath,
+				olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("恢复原 OpenLiteSpeed 虚拟主机配置失败: %w", err))
+			}
+		}
+		if len(recoveryErrors) != 0 {
+			return taskFailure(action+"，CDN 状态恢复未完成，请人工检查", errors.Join(append([]error{fmt.Errorf("原始错误: %w", cause)}, recoveryErrors...)...))
+		}
+		return taskFailure(action+"，CDN 数据库设置与可信代理 ACL 已恢复", cause)
+	}
 	if err := SaveWebsiteCDNRealIPSettings(site.ID, payload.Enabled, payload.GroupIDs); err != nil {
 		return taskFailure("保存 CDN 真实 IP 设置失败", err)
 	}
-	if err := ApplyOLSTrustedProxyList(); err != nil {
-		_ = SaveWebsiteCDNRealIPSettings(site.ID, oldEnabled, oldGroupIDs)
-		_ = ApplyOLSTrustedProxyList()
-		return taskFailure("CDN 真实 IP 已回滚，OpenLiteSpeed 可信代理配置失败", err)
+	if err := applyCDNRealIPTrustedProxies(); err != nil {
+		return restore("OpenLiteSpeed 可信代理配置失败", err, false)
 	}
-	if err := engine.ApplyOLSVHostConfig(vhostConfig, site.OLSVHostConfigPath,
+	if err := applyCDNRealIPOLSVHost(engine, vhostConfig, site.OLSVHostConfigPath,
 		olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain)); err != nil {
 		log.Printf("应用 OpenLiteSpeed 虚拟主机配置失败: %v", err)
-		_ = SaveWebsiteCDNRealIPSettings(site.ID, oldEnabled, oldGroupIDs)
-		_ = ApplyOLSTrustedProxyList()
-		return taskFailure("应用 OpenLiteSpeed 虚拟主机配置失败", err)
+		return restore("应用 OpenLiteSpeed 虚拟主机配置失败", err, false)
 	}
-	if err := ApplyFail2banSettings(); err != nil {
-		_ = SaveWebsiteCDNRealIPSettings(site.ID, oldEnabled, oldGroupIDs)
-		_ = ApplyOLSTrustedProxyList()
-		if oldRenderErr == nil {
-			_ = engine.ApplyOLSVHostConfig(oldVHostConfig, site.OLSVHostConfigPath,
-				olsVHostEnabledPath(cfg, site.OLSVHostConfigPath, site.Domain))
-		}
-		return taskFailure("CDN 真实 IP 已回滚，Fail2ban 白名单应用失败", err)
+	if err := applyCDNRealIPFail2ban(); err != nil {
+		return restore("Fail2ban 白名单应用失败", err, true)
 	}
 
 	return TaskResult{Success: true, Message: "CDN 真实 IP 设置已保存并生效"}

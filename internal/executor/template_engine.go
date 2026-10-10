@@ -160,7 +160,9 @@ func (e *TemplateEngine) writeOLSVHostConfigFile(configContent string, targetPat
 		backupDir := filepath.Join(e.BackupDir, "openlitespeed")
 		if err := os.MkdirAll(backupDir, 0750); err == nil {
 			backupName := filepath.Base(targetPath) + fmt.Sprintf(".bak.%d", time.Now().UnixNano())
-			_ = os.WriteFile(filepath.Join(backupDir, backupName), old, 0600)
+			if err := os.WriteFile(filepath.Join(backupDir, backupName), old, 0600); err == nil {
+				cleanupOLSVHostConfigBackups(backupDir, targetPath, olsVHostConfigBackupKeepCount)
+			}
 		}
 	}
 	return nil
@@ -178,12 +180,7 @@ func (e *TemplateEngine) RemoveOLSVHostConfig(targetPath string, enabledPath str
 }
 
 func getConfBaseName(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[i+1:]
-		}
-	}
-	return path
+	return filepath.Base(path)
 }
 
 func cleanupOLSVHostConfigBackups(backupDir, targetPath string, keepCount int) int {

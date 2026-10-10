@@ -119,6 +119,8 @@ textarea.input-field { line-height: 1.7; }
 .btn-primary:hover:not(:disabled) { background: #0c5780; border-color: #0c5780; }
 .btn-secondary { color: var(--panel-text); border-color: #cfdae4; background: var(--panel-surface); }
 .btn-secondary:hover:not(:disabled) { background: var(--panel-surface-soft); border-color: #afc2d2; }
+.btn-secondary.firewall-unban-button { color: var(--panel-accent); background: var(--panel-accent-soft); border-color: var(--panel-accent-border); }
+.btn-secondary.firewall-unban-button:hover:not(:disabled) { background: #dcecf6; border-color: var(--panel-accent); }
 .btn-success { --panel-heading: #fff; color: #fff; background: var(--panel-success); }
 .btn-success:hover:not(:disabled) { background: #125d40; }
 .btn-danger { color: var(--panel-danger); border-color: var(--panel-danger-border); background: var(--panel-surface); }
@@ -196,10 +198,20 @@ textarea.input-field { line-height: 1.7; }
 .access-code { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; padding: 16px; background: var(--panel-surface-soft); border-radius: 7px; margin-top: 12px; font-size: 12px; }
 .access-preview-list { display: grid; gap: 8px; }
 .access-rule .label { margin-bottom: 6px; }
+.access-rule-actions { display: flex; flex-shrink: 0; }
+.access-rule-actions .btn-secondary { min-height: 29px; padding: 5px 9px; font-size: 11px; white-space: nowrap; }
 .cron-jobs { table-layout: fixed; min-width: 880px; }
 .cron-jobs .table-cell, .cron-jobs .table-header { padding-left: 10px; padding-right: 10px; vertical-align: middle; }
+.cron-jobs .cron-actions-column { text-align: left; }
+.cron-job-actions { align-items: center; justify-content: flex-end; }
+.cron-job-actions.cron-wp-actions { justify-content: space-between; flex-wrap: nowrap; gap: 20px; }
+.cron-wp-actions .cron-site-settings { padding-left: 0; padding-right: 0; }
 .cron-job-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cron-jobs button, .cron-jobs a { white-space: nowrap; }
+.ssh-port-field { width: 200px; max-width: 100%; }
+.ssh-port-requirement { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+.ssh-port-requirement .btn-secondary { flex-shrink: 0; }
+@media (max-width: 767px) { .ssh-port-field { width: 100%; } }
 
 @media (min-width: 1280px) { .software-config-grid-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 768px) {

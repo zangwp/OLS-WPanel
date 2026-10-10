@@ -23,6 +23,39 @@
 .security-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; border: 1px solid var(--panel-accent-border); border-radius: 7px; background: var(--panel-accent-soft); color: var(--panel-accent); padding: 11px 14px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .security-feedback > span { flex: 1; min-width: 160px; }
 .security-feedback-error { border-color: var(--panel-danger-border); color: var(--panel-danger); background: var(--panel-danger-soft); }
+.security-ip-data { border: 1px solid var(--panel-border); border-radius: 7px; padding: 16px; color: var(--panel-text); }
+.security-ip-data-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.security-ip-data-heading h4 { color: var(--panel-heading); font-size: 14px; font-weight: 650; margin: 0; }
+.security-ip-data-heading > span, .security-ip-data-meta { color: var(--panel-muted); font-size: 12px; }
+.security-ip-data > p { font-size: 12px; line-height: 1.7; margin: 0; }
+.security-ip-data-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 10px; }
+.security-ip-data-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.security-ip-data .security-ip-data-help { color: var(--panel-muted); margin-top: 10px; }
+.security-ip-data-schedule { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 16px; border-top: 1px solid var(--panel-border); padding-top: 14px; }
+.security-ip-data-schedule > label { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.6; color: var(--panel-heading); }
+.security-ip-data-schedule input { margin-top: 4px; }
+.security-ip-data-runtime { display: flex; flex-wrap: wrap; gap: 7px 24px; font-size: 12px; line-height: 1.6; margin: 12px 0 0; }
+.security-ip-data-runtime > div { display: flex; gap: 10px; }
+.security-ip-data-runtime dt { color: var(--panel-muted); }
+.security-ip-data-runtime dd { margin: 0; color: var(--panel-text); }
+.security-ip-data .security-ip-data-warning { color: var(--panel-warning); margin-top: 10px; }
+.security-ip-data-ranges { margin-top: 14px; color: var(--panel-accent); font-size: 12px; line-height: 1.7; }
+.security-ip-data-ranges > summary { width: fit-content; cursor: pointer; }
+.security-ip-data-ranges > textarea { margin-top: 10px; color: var(--panel-text); }
+.security-ip-data-ranges > summary:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 3px; }
+.security-cdn-explanation { border: 1px solid var(--panel-accent-border); border-radius: 7px; background: var(--panel-accent-soft); color: var(--panel-text); padding: 14px; font-size: 13px; line-height: 1.8; }
+.security-cdn-panel .security-cdn-explanation p { margin: 0; color: var(--panel-text); font-weight: 500; }
+.security-cdn-explanation p + p { margin-top: 8px; }
+.security-cdn-builtin { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--panel-border); border-radius: 7px; background: var(--panel-surface-muted); }
+.security-cdn-builtin > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.security-cdn-builtin strong { color: var(--panel-heading); font-size: 14px; }
+.security-cdn-builtin span { color: var(--panel-accent); font-size: 12px; }
+.security-cdn-builtin p { margin: 7px 0 0; color: var(--panel-text); font-size: 12px; line-height: 1.7; }
+.security-cdn-form { border-top: 1px solid var(--panel-border); padding-top: 14px; }
+.security-cdn-form > summary { width: fit-content; color: var(--panel-accent); font-size: 13px; font-weight: 600; cursor: pointer; }
+.security-cdn-form > summary:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 4px; }
+.security-cdn-form-fields { padding-top: 18px; }
+.security-trust-warning { color: var(--panel-warning); font-weight: 500; line-height: 1.7; }
 .security-feedback-warning { border-color: var(--panel-warning-border); color: var(--panel-warning); background: var(--panel-warning-soft); }
 .security-text-link { color: var(--panel-accent); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
 .security-mfa-form { max-width: 700px; }
@@ -74,16 +107,21 @@
 .firewall-access-policy .access-introduction { max-width: 78ch; color: var(--panel-muted); font-size: 13px; line-height: 1.8; }
 .firewall-access-policy .access-workflow { margin: 12px 0 18px; color: var(--panel-muted); font-size: 12px; line-height: 1.7; }
 .firewall-access-policy .access-rules { border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
-.firewall-access-policy .access-rule-head, .firewall-access-policy .access-rule { grid-template-columns: minmax(150px, 1.1fr) minmax(180px, 1fr) minmax(220px, 1.65fr); }
+.firewall-access-policy .access-rule-head, .firewall-access-policy .access-rule { grid-template-columns: minmax(150px, 1.1fr) minmax(180px, 1fr) minmax(220px, 1.5fr) 68px; }
 .firewall-access-policy .access-rule-head { padding: 10px 16px; background: var(--panel-surface-muted); font-weight: 550; }
 .firewall-access-policy .access-rule { padding: 12px 16px; min-height: 70px; }
 .firewall-access-policy .access-rule:last-child { border-bottom: 0; }
+.firewall-access-policy .access-actions-heading { text-align: right; }
+.firewall-access-policy .access-rule-actions { justify-content: flex-end; align-items: center; }
 .firewall-access-policy .access-service-name { display: block; color: var(--panel-heading); font-size: 14px; font-weight: 600; }
 .firewall-access-policy .access-service-meta { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 4px; font-size: 11px; color: var(--panel-muted); font-variant-numeric: tabular-nums; }
 .firewall-access-policy .access-add-row { display: grid; grid-template-columns: 110px minmax(120px, 180px) auto; gap: 12px; align-items: end; padding-top: 18px; }
 .firewall-access-policy .access-add-row button { justify-self: start; }
-.firewall-access-policy .access-action-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--panel-border); }
-@media (max-width: 850px) { .firewall-access-policy .access-rule { grid-template-columns: minmax(0, 1fr); gap: 12px; } .firewall-access-policy .access-rule-head { display: none; } .firewall-access-policy .access-field-label { position: static; width: auto; height: auto; padding: 0; overflow: visible; clip: auto; white-space: normal; } }
+.firewall-access-policy .access-action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--panel-border); }
+.firewall-access-policy .access-save-help { flex-basis: 100%; color: var(--panel-muted); font-size: 12px; line-height: 1.7; }
+.firewall-access-policy .access-save-stage { margin-top: 20px; padding: 18px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--panel-surface-muted); }
+.firewall-access-policy .access-save-verification { border-color: var(--panel-warning-border); background: var(--panel-warning-soft); }
+@media (max-width: 1100px) { .firewall-access-policy .access-rule { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; } .firewall-access-policy .access-scope-field, .firewall-access-policy .access-source-field { grid-column: 1 / -1; } .firewall-access-policy .access-rule-actions { grid-column: 2; grid-row: 1; } .firewall-access-policy .access-rule-head { display: none; } .firewall-access-policy .access-field-label { position: static; width: auto; height: auto; padding: 0; overflow: visible; clip: auto; white-space: normal; } }
 @media (max-width: 520px) { .firewall-access-policy .access-add-row { grid-template-columns: 100px minmax(0, 1fr); } .firewall-access-policy .access-add-row button { grid-column: 1 / -1; width: 100%; } }
 
 .access-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--panel-border); border-radius: 10px; background: var(--panel-surface); }

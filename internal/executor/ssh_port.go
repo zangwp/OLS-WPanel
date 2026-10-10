@@ -171,7 +171,14 @@ func reloadSSHJail(ctx context.Context) error {
 
 func waitSSHListener(ctx context.Context, port int) error {
 	for attempt := 0; attempt < 15; attempt++ {
-		for _, l := range detectListeners(ctx) {
+		listeners, err := readFirewallListeners(ctx, true)
+		if err != nil {
+			return err
+		}
+		for _, l := range listeners {
+			if l.Protocol == "tcp" && l.Port == port && l.Process == "" {
+				return errors.New("无法核对新 SSH 端口的监听进程")
+			}
 			if l.Protocol == "tcp" && l.Port == port && strings.Contains(l.Process, "sshd") {
 				return nil
 			}
@@ -187,8 +194,15 @@ func waitSSHListener(ctx context.Context, port int) error {
 
 func waitSSHRetired(ctx context.Context, port int) error {
 	for attempt := 0; attempt < 15; attempt++ {
+		listeners, err := readFirewallListeners(ctx, true)
+		if err != nil {
+			return err
+		}
 		present := false
-		for _, l := range detectListeners(ctx) {
+		for _, l := range listeners {
+			if l.Protocol == "tcp" && l.Port == port && l.Process == "" {
+				return errors.New("无法核对原 SSH 端口的监听进程，不能确认已关闭")
+			}
 			if l.Protocol == "tcp" && l.Port == port && strings.Contains(l.Process, "sshd") {
 				present = true
 			}

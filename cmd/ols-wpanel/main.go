@@ -228,7 +228,10 @@ func main() {
 
 	if *refreshWhitelist {
 		executor.InitQueue(cfg)
-		log.Printf("白名单刷新结果: %s", executor.RunWhitelistRefresh())
+		result := executor.RunWhitelistRefresh()
+		if exitCode := writeWhitelistRefreshCLIResult(os.Stderr, result.Success, result.Message); exitCode != 0 {
+			os.Exit(exitCode)
+		}
 		return
 	}
 
