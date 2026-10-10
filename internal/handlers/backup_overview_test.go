@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,6 +42,13 @@ func (noopCronMutationLocks) Close() error { return nil }
 func setupBackupOverviewTestDB(t *testing.T) {
 	t.Helper()
 	oldAcquireLocks := acquireCronJobMutationLocks
+	oldAcquireFileLock := acquireFileBackupOperationLock
+	acquireFileBackupOperationLock = func(ctx context.Context) (io.Closer, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return noopCronMutationLocks{}, nil
+	}
 	acquireCronJobMutationLocks = func([]int) (io.Closer, error) {
 		return noopCronMutationLocks{}, nil
 	}
@@ -55,6 +63,7 @@ func setupBackupOverviewTestDB(t *testing.T) {
 		database.Close()
 		database.DB = oldDB
 		acquireCronJobMutationLocks = oldAcquireLocks
+		acquireFileBackupOperationLock = oldAcquireFileLock
 	})
 }
 

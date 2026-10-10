@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.21.5 — 2026-10-10
+
+- Places each website's database and file backups side by side, with independent version selection, timestamps, download, deletion and restore actions. Database and file archives are not presented as a shared snapshot. Sites without backups retain links to immediate backup and task management.
+- Adds asynchronous restoration of registered local full-file archives. Validates archive paths, types, gzip integrity, size limits, disk headroom and WordPress structure before Linux atomic directory exchange; preserves current configuration and panel management code, verifies current permissions and keeps a private pre-restore copy and journal. Failed validation retains the current tree, and failed rollback invalidates stale file-protection evidence. Legacy media increments and remote-only files are explicitly excluded from whole-site restoration.
+- Prevents duplicate database/file restores for one website, resumes active task polling after page reload and treats uncertain or inconsistent results as unconfirmed. Rechecks database ownership and persistent update, migration and maintenance state before destructive database work while retaining dedicated update-failure rollback.
+- Preserves existing panel database backups when multiple backups are created within the same second. Missing local file baselines force a new full backup; errors preserve the existing chain, and explicit baseline deletion clears the incremental marker under the shared backup lock.
+- Corrects WordPress update-policy verification so file modification restrictions do not imply disabled update discovery. Clarifies PHP resource metrics, database retention scope, media-only increments and panel backup management.
+
+Upgrade notes: no database migration is added. File restoration changes files independently of database restoration and retains current wp-config.php. Verify website behavior and clear runtime/CDN caches as needed; restoration does not automatically restart every website. Use the signed update flow and retain existing configuration and private-key backups.
+
 ## v1.21.4 — 2026-10-10
 
 - Uses applied file-protection results, recent availability checks and WordPress inventory samples as dated security evidence. Saved configuration, completed checks and verified request protection remain distinct. Items without an isolated verification action use relevant settings, alerts, check results or backup links instead of asking users to click a missing Verify button.
