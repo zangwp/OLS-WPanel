@@ -70,31 +70,46 @@ function firewallManager(initialTab = 'current') {
             const port = Number(this.accessCustomPort), protocol = this.accessCustomProtocol, key = protocol + ':' + port;
             if (!Number.isInteger(port) || port < 1 || port > 65535) { this.accessError = t('firewall.access_invalid_port'); return; }
             if (this.accessRows.some(r => r.key === key)) { this.accessError = t('firewall.access_duplicate_port'); return; }
-            this.accessRows.push({ key, protocol, port, label: '', scope: this.accessSensitive({port}) ? 'closed' : 'public', sources: '', listening: false });
+            this.accessRows.push({ key, protocol, port, label: '', scope: this.accessSensitive({port}) ? 'closed' : 'public', sources: '', listening: false, custom: true, fixed: false, detected: false, legacy: false });
             this.accessCustomPort = ''; this.markAccessDirty();
+        },
+        canRemoveAccessRow(row) {
+            if (this.accessBusy || this.accessToken || this.portSubmitting || this.portsLoading || this.portStatus?.access_available !== true || !row || !['tcp', 'udp'].includes(row.protocol) || !Number.isInteger(row.port) || row.port < 1 || row.port > 65535 || row.key !== row.protocol + ':' + row.port) return false;
+            const current = this.accessRows.find(candidate => candidate.key === row.key);
+            if (!current?.custom || current.fixed || current.detected || current.legacy || current.protocol !== row.protocol || current.port !== row.port) return false;
+            const fixedPorts = ['tcp:' + (this.portStatus.ssh_port || 22), 'tcp:' + this.portStatus.panel_port, 'tcp:80', 'tcp:443', 'udp:443', 'tcp:3306', 'tcp:6379', 'tcp:7080'];
+            if (fixedPorts.includes(row.key)) return false;
+            return ![...(this.portStatus.listeners || []), ...(this.portStatus.rules || [])].some(rule => rule.protocol === row.protocol && Number(rule.port) === row.port);
+        },
+        removeAccessRow(row) {
+            if (!this.canRemoveAccessRow(row)) return;
+            this.accessRows.splice(this.accessRows.findIndex(candidate => candidate.key === row.key), 1);
+            this.markAccessDirty();
         },
         resetAccessRows() {
             const s = this.portStatus, rows = new Map();
             const panelPort = Number(s.panel_port);
             const panelPortKnown = Number.isInteger(panelPort) && panelPort > 0 && panelPort <= 65535;
-            const add = (protocol, port, label = '') => {
+            const add = (protocol, port, label = '', origin = 'custom') => {
                 const key = protocol + ':' + port;
-                if (!rows.has(key)) rows.set(key, { key, protocol, port, label, scope: 'closed', sources: '', listening: false });
-                return rows.get(key);
+                if (!rows.has(key)) rows.set(key, { key, protocol, port, label, scope: 'closed', sources: '', listening: false, custom: false, fixed: false, detected: false, legacy: false });
+                const row = rows.get(key);
+                row[origin === 'listener' ? 'detected' : origin] = true;
+                return row;
             };
-            add('tcp', s.ssh_port || 22, 'SSH');
-            if (panelPortKnown) add('tcp', panelPort, 'OLS WPanel');
-            add('tcp', 80, 'HTTP'); add('tcp', 443, 'HTTPS'); add('udp', 443, 'HTTP/3');
-            add('tcp', 3306, 'MariaDB'); add('tcp', 6379, 'Redis'); add('tcp', 7080, 'OpenLiteSpeed WebAdmin');
+            add('tcp', s.ssh_port || 22, 'SSH', 'fixed');
+            if (panelPortKnown) add('tcp', panelPort, 'OLS WPanel', 'fixed');
+            add('tcp', 80, 'HTTP', 'fixed'); add('tcp', 443, 'HTTPS', 'fixed'); add('udp', 443, 'HTTP/3', 'fixed');
+            add('tcp', 3306, 'MariaDB', 'fixed'); add('tcp', 6379, 'Redis', 'fixed'); add('tcp', 7080, 'OpenLiteSpeed WebAdmin', 'fixed');
             for (const l of s.listeners || []) {
                 const label = this.serviceDisplayName(l.process) === 'OLS WPanel' && (!panelPortKnown || Number(l.port) !== panelPort) ? '' : l.process || '';
-                const r = add(l.protocol, Number(l.port), label);
+                const r = add(l.protocol, Number(l.port), label, 'listener');
                 r.process = l.process || '';
                 if (l.bind_scope !== 'local') r.listening = true;
             }
             for (const r of s.rules || []) {
                 const label = this.serviceDisplayName(r.description) === 'OLS WPanel' && (!panelPortKnown || Number(r.port) !== panelPort) ? '' : r.description || '';
-                add(r.protocol, Number(r.port), label);
+                add(r.protocol, Number(r.port), label, 'legacy');
             }
             if (s.access_enabled) {
                 for (const rule of s.access_rules || []) {

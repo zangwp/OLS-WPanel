@@ -6,12 +6,13 @@
         <span class="text-sm" :class="accessDirty || accessToken ? 'text-yellow-400' : (portStatus.access_enabled ? 'text-green-400' : 'text-gray-400')" x-text="accessToken ? t('firewall.access_pending') : (accessDirty ? t('firewall.access_unsaved') : (portStatus.access_enabled ? t('firewall.access_active') : t('firewall.access_draft')))"></span>
     </div>
     <p class="access-introduction">{{t .Lang "firewall.access_help"}}</p>
+    <p class="text-xs text-gray-500 mb-4">{{t .Lang "firewall.access_direction_help"}}</p>
     <p class="access-workflow">{{t .Lang "firewall.access_steps"}}</p>
     <fieldset :disabled="accessBusy || portSubmitting || !!accessToken || !portStatus.access_available" @change="markAccessDirty()">
         <div class="access-rules"><div class="access-rule-head text-xs text-gray-400"><span>{{t .Lang "firewall.service_preset"}}</span><span>{{t .Lang "firewall.access_scope"}}</span><span>{{t .Lang "firewall.source_scope"}}</span></div>
             <template x-for="row in accessRows" :key="row.key">
                 <div class="access-rule">
-                    <div><strong class="access-service-name" x-text="serviceDisplayName(row.label) || t('firewall.custom_service')"></strong><p class="access-service-meta"><span x-text="row.port + ' / ' + row.protocol.toUpperCase()"></span><span :class="{ 'is-listening': row.listening }" x-text="row.listening ? t('firewall.access_listening') : t('firewall.access_not_listening')"></span></p></div>
+                    <div><div class="access-service-header"><strong class="access-service-name" x-text="serviceDisplayName(row.label) || t('firewall.custom_service')"></strong><div class="access-rule-actions" x-show="row.custom && !row.fixed && !row.detected && !row.legacy"><button type="button" class="btn-secondary text-xs" @click="removeAccessRow(row)" :disabled="!canRemoveAccessRow(row)" :title="t('firewall.access_remove_help')" :aria-label="t('firewall.access_remove') + ' ' + row.port + ' / ' + row.protocol.toUpperCase()">{{t .Lang "firewall.access_remove"}}</button></div></div><p class="access-service-meta"><span x-text="row.port + ' / ' + row.protocol.toUpperCase()"></span><span :class="{ 'is-listening': row.listening }" x-text="row.listening ? t('firewall.access_listening') : t('firewall.access_not_listening')"></span></p></div>
                     <div><label class="label access-field-label" :for="'access-scope-'+row.key">{{t .Lang "firewall.access_scope"}}</label><select class="input-field text-sm" :id="'access-scope-'+row.key" x-model="row.scope"><option value="closed" x-text="[3306,6379].includes(row.port) ? t('firewall.access_local') : t('firewall.access_closed')"></option><option value="specific">{{t .Lang "firewall.scope_specific"}}</option><option value="public" :disabled="accessSensitive(row)">{{t .Lang "firewall.access_everyone"}}</option></select></div>
                     <div><label class="label access-field-label" :for="'access-source-'+row.key">{{t .Lang "firewall.source_scope"}}</label><input class="input-field text-sm" :id="'access-source-'+row.key" x-show="row.scope==='specific'" x-model.trim="row.sources" @input="markAccessDirty()" :disabled="row.scope!=='specific'" :placeholder="row.scope==='specific' ? t('firewall.access_sources_hint') : '—'"><p x-show="row.scope!=='specific'" class="text-sm text-gray-400 py-2" x-text="row.scope==='public' ? t('firewall.access_public') : t('firewall.access_loopback')"></p></div>
                 </div>
@@ -29,7 +30,7 @@
         <h4 class="font-semibold text-white">{{t .Lang "firewall.access_preview"}}</h4>
         <p class="text-sm text-yellow-400 my-3">{{t .Lang "firewall.access_conflicts"}}</p>
         <div class="access-preview-list"><template x-for="(rule,index) in accessPreview?.rules || []" :key="index"><p class="text-sm text-gray-300" x-text="rule.port + '/' + rule.protocol.toUpperCase() + ' ← ' + (rule.source || t('firewall.access_everyone'))"></p></template></div>
-        <button class="btn-primary mt-4" @click="applyAccess()" :disabled="accessBusy || portSubmitting">{{t .Lang "firewall.access_apply"}}</button>
+        <div class="access-action-row"><button class="btn-primary" @click="applyAccess()" :disabled="accessBusy || portSubmitting">{{t .Lang "firewall.access_apply"}}</button><p class="text-xs text-gray-400">{{t .Lang "firewall.access_apply_help"}}</p></div>
         <details class="mt-3"><summary class="text-sm text-gray-400 cursor-pointer">{{t .Lang "firewall.access_existing"}}</summary><pre class="access-code" x-text="accessPreview?.existing_rules"></pre></details>
     </div>
     <div x-show="accessToken" class="mt-5 border border-yellow-500/40 rounded p-4">

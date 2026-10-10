@@ -19,6 +19,7 @@
         <div class="space-y-8">
             <div class="card" x-data="smtpConfig()" x-init="fetch()">
                 <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "alert.smtp_config"}}</h3>
+                <p class="text-xs text-gray-500 mb-4">{{t .Lang "alert.smtp_outbound_help"}}</p>
                 <p x-show="loading" role="status" class="text-sm text-gray-500 mb-3">{{t .Lang "followup.loading_config"}}</p>
                 <div x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-3"><p x-text="loadError"></p><button type="button" @click="fetch()" :disabled="loading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
                 <p x-show="operationError" role="alert" class="text-sm text-red-400 mb-3" x-text="operationError"></p>

@@ -302,7 +302,7 @@
 
 :where([data-theme="light"]) :is(
     .text-yellow-100, .text-yellow-200, .text-yellow-300, .text-yellow-400,
-    .text-yellow-500
+    .text-yellow-500, .text-yellow-200\/80, .text-yellow-500\/80
 ) { color: var(--panel-warning); }
 
 :where([data-theme="light"]) :is(
@@ -416,7 +416,7 @@
 
 :where([data-theme="light"]) :is(
     .text-red-100, .text-red-200, .text-red-300, .text-red-400,
-    .text-red-500
+    .text-red-500, .text-red-200\/80
 ) { color: var(--panel-danger); }
 
 :where([data-theme="light"]) :is(

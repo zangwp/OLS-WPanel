@@ -2033,16 +2033,20 @@ func TestVPSPageIsReadOnlyAndKeepsFirewallDeepLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firewall = append(append(firewall, controller...), ports...)
+	access, err := os.ReadFile("../../web/templates/firewall_access.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firewall = append(append(append(firewall, controller...), ports...), access...)
 	if !bytes.Contains(firewall, []byte(`new URLSearchParams(window.location.search).get('tab')`)) {
 		t.Fatal("firewall page does not honor the VPS management ports deep link")
 	}
 	for _, required := range [][]byte{
 		[]byte(`source_mode: 'current'`),
 		[]byte(`duration_mode: 'permanent'`),
-		[]byte(`firewall.scope_current_ip`),
 		[]byte(`firewall.scope_specific`),
-		[]byte(`firewall.scope_any`),
+		[]byte(`firewall.access_closed`),
+		[]byte(`firewall.access_everyone`),
 		[]byte(`firewall.confirm_any_source`),
 		[]byte(`'/firewall/ports/access/preview'`),
 		[]byte(`'/firewall/ports/access/apply'`),

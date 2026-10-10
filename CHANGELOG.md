@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.21.3 — 2026-10-10
+
+- Uses the current authenticated panel session for enabled WordPress passwordless sign-in. A single administrator opens directly in a new tab; multiple administrators require an account selection. Settings changes still require the panel password and configured MFA, and expired or revoked sessions cannot issue authorization.
+- Replaces green website domain links with muted blue and a slightly darker hover/focus state. Fixes low-contrast warning text in file protection and panel settings, and gives Unban actions a pale blue background with readable blue text.
+- Keeps backup-policy table headings on one line, improves column sizing and contained scrolling, and aligns scheduled-task actions and their header to the right.
+- Explains why disabled security checks hide verification and why file locks, monitoring and backups require applied-state, execution-record or restoration checks rather than a dedicated Verify action.
+- Adds draft removal for custom port-policy entries while protecting built-in services, detected listeners and legacy records. Clarifies the preview, temporary application and connection-confirmation steps while preserving automatic rollback.
+- Clarifies SSH port replacement and its prerequisites, labels the empty port field with a localized example, and aligns the form. Moves existing legacy firewall records into an advanced disclosure shown only when records exist.
+- Explains that SMTP notifications use outbound connections and do not require inbound mail-port rules in Port Access Policy.
+
 ## v1.21.2 — 2026-10-10
 
 - Consolidates WordPress access into one section, distinguishes ordinary login from panel-authorized sign-in without a website password, and retains panel password/MFA confirmation and the initial setup wizard. Fixes single-administrator selection and cancels pending authorization when leaving the page.
