@@ -1,4 +1,14 @@
-# v1.21.6 发布说明：整站备份与恢复
+# v1.21.7 发布说明：Cloudflare 待命规则
+
+本节记录本次发布范围；发布状态、Linux CI 与签名资产见 [GitHub Releases](https://github.com/zangwp/OLS-WPanel/releases)。
+
+- 已启用的网站即使没有网站封禁 IP，也会创建一条精确匹配已登记域名、但条件永不成立的待命规则。出现封禁 IP 时更新同一个 Rule ID；封禁清空后恢复待命，停用并清理时删除该规则。
+- 面板显示 Rule ID 和当前网站封禁 IP 数量，区分“规则已创建，等待封禁 IP”、等待同步、未知数量及写入失败。测试连接仅证明读取成功，不替代创建规则。
+- 空名单同样校验主域名、已登记别名与 Zone 的完整覆盖。保留规则所有权和不确定响应恢复检查，不修改管理员规则、不添加虚构封禁 IP。
+
+本次没有新增数据库迁移。每个启用的网站会占用一个 Zone 自定义规则名额，即使名单为空。更新后可保存网站 Cloudflare 设置并点击“立即同步”；规则写入成功不代表 DNS 代理或实际拦截已经验证。仍只需 Zone Read 与 Zone WAF Edit 权限。详见 [Cloudflare 网站防护](cloudflare-website-protection.md)。
+
+## 历史记录：v1.21.6 发布说明：整站备份与恢复
 
 本节记录本次发布范围；发布状态、Linux CI 与签名资产见 [GitHub Releases](https://github.com/zangwp/OLS-WPanel/releases)。
 

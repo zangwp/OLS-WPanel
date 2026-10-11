@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.21.7 — 2026-10-11
+
+- Creates an owned Cloudflare standby rule for an enabled website even when the shared website blacklist is empty. Its exact hostname scope and contradictory `ssl and not ssl` condition match no requests. The same rule ID transitions between standby and active IP blocking; explicit disable or website cleanup removes the owned rule.
+- Validates the complete registered hostname and Zone coverage before creating an empty rule. Retains ownership, applied/pending expression fingerprints and uncertain-response recovery checks without modifying administrator rules or adding fabricated blocked IPs.
+- Displays the rule ID and current website-ban count. Distinguishes a created standby rule, pending changes, unknown counts and failed writes; a read-only connection test does not claim that rule creation succeeded. Older empty synchronizations without a rule ID are shown as pending until reconciled.
+- Adds lifecycle, permission-failure, interrupted-response and UI-state regression coverage, including stale responses and malformed status data.
+
+Upgrade notes: no database migration is added. Each enabled website uses one Zone custom-rule slot even with no blocked IPs. After updating, save the website's Cloudflare settings and use Sync now to create or reconcile its rule. A confirmed rule write does not verify DNS proxying or actual request blocking. Token permissions remain Zone Read and Zone WAF Edit; SSH, panel-login and manual server bans remain outside website synchronization.
+
 ## v1.21.6 — 2026-10-11
 
 - Adds immediate whole-site backup and restoration using paired, checksummed database and file components under one backup ID. Uses a controlled maintenance window to pause managed writes, locks the database account and freezes the file tree; refuses unsupported or uncertain states instead of combining independent archives by timestamp.
