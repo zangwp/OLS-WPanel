@@ -11,6 +11,8 @@ const (
 	StatusError    WebsiteStatus = "error"
 	StatusCreating WebsiteStatus = "creating"
 	StatusDeleting WebsiteStatus = "deleting"
+	// Only the whole-site coordinator may leave this durable maintenance state.
+	StatusBackupMaintenance WebsiteStatus = "backup_maintenance"
 )
 
 type Website struct {

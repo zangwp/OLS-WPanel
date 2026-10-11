@@ -687,6 +687,17 @@ func (h *WebsiteHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "site_migration.delete_locked")))
 		return
 	}
+	backupCtx, backupCancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	backupUsage, backupErr := collectWebsiteSiteBackupUsage(backupCtx, site)
+	backupCancel()
+	if backupErr != nil {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "website.delete_backup_check_failed_blocked", i18n.P{"domain": site.Domain})))
+		return
+	}
+	if backupUsage.SiteBackupsDeleteBlocked {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "website.site_backup_delete_blocked")))
+		return
+	}
 
 	payload := &executor.DeleteSitePayload{Site: site}
 	task, queued := enqueueTask(c, executor.TaskDeleteSite, payload)
@@ -701,22 +712,30 @@ func (h *WebsiteHandler) Delete(c *gin.Context) {
 	}
 }
 
-// BackupUsage 返回网站当前的备份数据规模（数据库备份数、文件备份数、是否启用自动备份、
-// 关联计划任务），供前端在删除网站前提醒管理员：面板不会自动删除备份文件，
-// 但会在删除网站时自动删除仍关联该网站的计划任务。
+// BackupUsage includes whole-site points and retained recovery-operation data.
+// An incomplete check must not grant website deletion or domain rebinding.
 func (h *WebsiteHandler) BackupUsage(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("无效的网站ID"))
 		return
 	}
-	if getWebsiteByID(id) == nil {
+	site := getWebsiteByID(id)
+	if site == nil {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("网站不存在"))
 		return
 	}
 
 	db := database.GetDB()
 	usage := models.WebsiteBackupUsage{CronJobs: []models.BackupCronJobRef{}}
+	backupCtx, backupCancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	siteUsage, backupErr := collectWebsiteSiteBackupUsage(backupCtx, site)
+	backupCancel()
+	if backupErr != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.delete_backup_check_failed_blocked", i18n.P{"domain": site.Domain})))
+		return
+	}
 
 	if err := db.QueryRow(`SELECT COUNT(*) FROM db_backups WHERE site_id = ?`, id).Scan(&usage.DBBackupCount); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询数据库备份数量失败"))
@@ -742,13 +761,20 @@ func (h *WebsiteHandler) BackupUsage(c *gin.Context) {
 		var ref models.BackupCronJobRef
 		if err := rows.Scan(&ref.ID, &ref.Name); err != nil {
 			log.Printf("备份使用量检查: 扫描计划任务行失败 site=%d: %v", id, err)
-			continue
+			rows.Close()
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询关联计划任务失败"))
+			return
 		}
 		usage.CronJobs = append(usage.CronJobs, ref)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询关联计划任务失败"))
+		return
+	}
 	rows.Close()
 
-	c.JSON(http.StatusOK, models.SuccessResponse(usage))
+	c.JSON(http.StatusOK, models.SuccessResponse(websiteBackupUsageData{WebsiteBackupUsage: usage, websiteSiteBackupUsage: siteUsage}))
 }
 
 func (h *WebsiteHandler) ToggleStatus(c *gin.Context) {
@@ -1194,6 +1220,13 @@ func (h *WebsiteHandler) UpdateDomains(c *gin.Context) {
 	}
 
 	if targetDomain != site.Domain {
+		backupCtx, backupCancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		backupUsage, backupErr := collectWebsiteSiteBackupUsage(backupCtx, site)
+		backupCancel()
+		if backupErr != nil || backupUsage.SiteBackupsDeleteBlocked {
+			c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "website.site_backup_domain_change_blocked")))
+			return
+		}
 		if conflict, existing := isAliasConflicting(targetDomain, site.ID); conflict {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse("域名 "+targetDomain+" 已被站点 "+existing+" 使用"))
 			return

@@ -9,17 +9,18 @@ const source = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(matc
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
 function setup() {
-    const calls = [], notices = [];
+    const calls = [], notices = [], alerts = [];
     const context = {
         t: (key, values = {}) => key + (values.domain ? ':' + values.domain : ''),
         currentLocale: () => 'en-US', showToast: (...args) => notices.push(args), confirmModal: async () => true,
+        alertModal: async message => alerts.push(message),
         api: async (url, options) => { calls.push({url, options}); return {success:true, data:[]}; },
         window: {innerWidth:800, innerHeight:600}, document: {activeElement:null},
     };
     vm.createContext(context); vm.runInContext(source, context);
     const page = context.websiteList();
     page.$nextTick = callback => callback();
-    return {page, context, calls, notices};
+    return {page, context, calls, notices, alerts};
 }
 
 test('more button and popup aria labels interpolate the domain using the actual translation helper', () => {
@@ -117,6 +118,27 @@ test('delete preserves backup warnings and locks the target before usage and con
     context.api=async(url, options)=>{if(url.endsWith('backup-usage'))return usage.promise;writes++;return {success:true};};
     context.confirmModal=async text=>{dialogs++;message=text;return false;};
     const first=page.deleteSite(site); await page.deleteSite(site); assert.equal(page.siteBusy(site),true);
-    usage.resolve({success:true,data:{db_backup_count:2,file_backup_count:0,auto_backup_enabled:true,cron_jobs:[]}}); await first;
+    usage.resolve({success:true,data:{db_backup_count:2,file_backup_count:0,auto_backup_enabled:true,cron_jobs:[],
+        site_backup_checked:true,site_backups_delete_blocked:false,site_backup_count:0,site_backup_incomplete_count:0,site_backup_attention_count:0,site_backup_unrecognized_count:0}}); await first;
     assert.equal(dialogs,1); assert(message.includes('delete_has_backups_warning')); assert.equal(writes,0); assert.equal(page.websites[0],site); assert.equal(page.siteBusy(site),false);
+});
+
+test('whole-site points, incomplete or unrecognized data block deletion before a destructive confirmation', async () => {
+    for (const counters of [{site_backup_count:1}, {site_backup_count:2,site_backup_incomplete_count:1,site_backup_attention_count:1}, {site_backup_unrecognized_count:1}]) {
+        const {page,context,alerts}=setup(); const site={id:4,domain:'sets.test'}; page.websites=[site]; let writes=0,confirmations=0;
+        context.api=async(url,opts)=>{if(opts?.method==='DELETE'){writes++;return {success:true};}return {success:true,data:{
+            site_backup_checked:true,site_backups_delete_blocked:true,site_backup_count:0,site_backup_incomplete_count:0,site_backup_attention_count:0,site_backup_unrecognized_count:0,...counters}};};
+        context.confirmModal=async()=>{confirmations++;return true;}; await page.deleteSite(site);
+        assert.equal(writes,0); assert.equal(confirmations,0); assert.equal(alerts.length,1); assert(alerts[0].includes('delete_site_backups_blocked'));
+        assert.equal(page.websites[0],site); assert(!page.siteBusy(site));
+    }
+});
+
+test('unconfirmed backup usage never grants deletion, including old or malformed responses', async () => {
+    for (const result of [null, {success:false}, {success:true,data:{db_backup_count:0}}, {success:true,data:{site_backup_checked:true,site_backups_delete_blocked:false,site_backup_count:'0'}}]) {
+        const {page,context,alerts}=setup(); const site={id:5,domain:'unknown.test'}; let writes=0;
+        context.api=async(url,opts)=>{if(opts?.method==='DELETE'){writes++;return {success:true};}if(result===null)throw Error('offline');return result;};
+        await page.deleteSite(site); assert.equal(writes,0); assert.equal(alerts.length,1); assert(alerts[0].includes('delete_backup_check_failed_blocked'));
+        assert(!page.siteBusy(site));
+    }
 });

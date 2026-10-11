@@ -32,9 +32,9 @@
     --chart-cpu: #4f7fa6;
     --chart-memory: #a7783b;
     --chart-disk: #b05d52;
-    --panel-chart-cpu: #4f7fa6;
-    --panel-chart-memory: #a7783b;
-    --panel-chart-load: #b05d52;
+    --panel-chart-cpu: #2563eb;
+    --panel-chart-memory: #ea580c;
+    --panel-chart-load: #16a34a;
 }
 
 html, body { background: var(--panel-bg); }

@@ -936,6 +936,11 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("路径越权"))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: siteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkSiteFileLockWrite(siteID, destPath, false, false); err != nil {
 		respondFileWriteError(c, err)
 		return
@@ -1138,6 +1143,11 @@ func (h *FileHandler) UploadComplete(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("路径越权"))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: session.SiteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkSiteFileLockWrite(session.SiteID, destPath, false, false); err != nil {
 		respondFileWriteError(c, err)
 		return
@@ -1276,6 +1286,11 @@ func (h *FileHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("路径不存在"))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: siteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkSiteFileLockWrite(siteID, fullPath, info.IsDir(), true); err != nil {
 		respondFileWriteError(c, err)
 		return
@@ -1350,6 +1365,21 @@ func (h *FileHandler) Rename(c *gin.Context) {
 		return
 	} else if !os.IsNotExist(err) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("检查目标名称失败"))
+		return
+	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: req.SiteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
+	// The lock may have waited behind a backup or permission transition.
+	// Recheck both protected paths before making the actual rename.
+	if err := checkSiteFileLockWrite(req.SiteID, oldFull, info.IsDir(), true); err != nil {
+		respondFileWriteError(c, err)
+		return
+	}
+	if err := checkSiteFileLockWrite(req.SiteID, newFull, info.IsDir(), false); err != nil {
+		respondFileWriteError(c, err)
 		return
 	}
 
@@ -1438,6 +1468,11 @@ func (h *FileHandler) BatchCompress(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("压缩文件名非法"))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: req.SiteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkSiteFileLockWrite(req.SiteID, zipPath, false, false); err != nil {
 		respondFileWriteError(c, err)
 		return
@@ -1499,6 +1534,11 @@ func (h *FileHandler) Compress(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("压缩文件名非法"))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: siteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkSiteFileLockWrite(siteID, zipPath, false, false); err != nil {
 		respondFileWriteError(c, err)
 		return
@@ -1975,13 +2015,13 @@ func (h *FileHandler) Decompress(c *gin.Context) {
 
 	destDir := filepath.Dir(fullPath)
 	overwrite := c.Query("overwrite") == "1"
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: siteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	lockSite := fileLockSite(siteID)
 	if siteID != 0 {
-		if !executor.TryAcquireSiteFileOpLock(siteID, "archive_extract") {
-			c.JSON(http.StatusConflict, models.ErrorResponse("网站正在执行其它维护操作，请稍后重试"))
-			return
-		}
-		defer executor.ReleaseSiteOpLock(siteID)
 		if err := checkFileMigrationWrite(siteID); err != nil {
 			c.JSON(http.StatusConflict, models.ErrorResponse(err.Error()))
 			return
@@ -2275,6 +2315,13 @@ func (h *FileHandler) Move(c *gin.Context) {
 		respondFileTransferError(c, err)
 		return
 	}
+	lease, admitted := beginFileMutation(c,
+		fileMutationTarget{ID: req.SiteID, Root: srcBase},
+		fileMutationTarget{ID: destSiteID, Root: destBase})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkTransferFileLock(req.SiteID, destSiteID, items, true); err != nil {
 		if isFileLockWriteError(err) {
 			c.JSON(http.StatusLocked, models.ErrorResponse(err.Error()))
@@ -2379,6 +2426,13 @@ func (h *FileHandler) Copy(c *gin.Context) {
 		respondFileTransferError(c, err)
 		return
 	}
+	lease, admitted := beginFileMutation(c,
+		fileMutationTarget{ID: req.SiteID, Root: srcBase},
+		fileMutationTarget{ID: destSiteID, Root: destBase})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkTransferFileLock(req.SiteID, destSiteID, items, false); err != nil {
 		if isFileLockWriteError(err) {
 			c.JSON(http.StatusLocked, models.ErrorResponse(err.Error()))
@@ -2625,6 +2679,11 @@ func (h *FileHandler) CreateDir(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("路径越权"))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: siteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
 	if err := checkSiteFileLockWrite(siteID, fullPath, true, false); err != nil {
 		respondFileWriteError(c, err)
 		return
@@ -2673,6 +2732,20 @@ func (h *FileHandler) FixPermissions(c *gin.Context) {
 		return
 	}
 
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: siteID, Root: site.WebRoot})
+	if !admitted {
+		return
+	}
+	defer lease.Close()
+	site = getWebsiteByID(siteID)
+	if site == nil || site.FileLockEnabled {
+		c.JSON(http.StatusConflict, models.ErrorResponse("网站文件保护状态已变化，请刷新后重试"))
+		return
+	}
+	if err := checkFileMigrationWrite(siteID); err != nil {
+		c.JSON(http.StatusConflict, models.ErrorResponse(err.Error()))
+		return
+	}
 	webRoot := site.WebRoot
 	root, err := os.OpenRoot(webRoot)
 	if err != nil {

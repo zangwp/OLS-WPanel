@@ -41,6 +41,8 @@
 .site-cloudflare-help p { margin: 8px 0; }
 .site-cloudflare-help ol { padding-left: 20px; list-style: decimal; }
 .site-cloudflare-help li { margin: 5px 0; }
+.site-cloudflare-permissions { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--panel-border); border-radius: 6px; background: var(--panel-bg); color: var(--panel-text); font-weight: 600; }
+.site-cloudflare-help .site-cloudflare-permissions p { margin: 4px 0; }
 .site-cloudflare-help a { color: var(--panel-accent); text-decoration: underline; text-underline-offset: 3px; }
 .site-cloudflare-help > summary:focus-visible, .site-cloudflare-help a:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 3px; }
 @media (max-width: 640px) {

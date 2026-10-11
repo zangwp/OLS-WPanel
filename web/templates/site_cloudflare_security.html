@@ -53,7 +53,14 @@
             <p>{{t .Lang "cloudflare_security.what_token"}}</p>
             <ol>
                 <li>{{t .Lang "cloudflare_security.token_step"}} <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">{{t .Lang "cloudflare_security.open_tokens"}}</a></li>
-                <li>{{t .Lang "cloudflare_security.permissions_help"}}</li>
+                <li>
+                    {{t .Lang "cloudflare_security.permissions_help"}}
+                    <div class="site-cloudflare-permissions">
+                        <p>{{t .Lang "cloudflare_security.permission_zone_read"}}</p>
+                        <p>{{t .Lang "cloudflare_security.permission_zone_waf_edit"}}</p>
+                    </div>
+                    <p>{{t .Lang "cloudflare_security.permissions_note"}}</p>
+                </li>
                 <li>{{t .Lang "cloudflare_security.resource_help"}}</li>
                 <li>{{t .Lang "cloudflare_security.id_step"}}</li>
                 <li>{{t .Lang "cloudflare_security.finish_step"}}</li>

@@ -37,6 +37,9 @@ type fileRestoreOps struct {
 	revalidate    func(context.Context) error
 	verifyPrivate func(string) error
 	freeBytes     func(string) (int64, error)
+	// A lock-owning whole-site coordinator may durably record the prospective
+	// rollback path before the single atomic directory exchange.
+	onPrepared func(string) error
 }
 
 type fileRestoreUnresolvedError struct {
@@ -45,9 +48,26 @@ type fileRestoreUnresolvedError struct {
 }
 
 func (e *fileRestoreUnresolvedError) Error() string {
-	return fmt.Sprintf("%v；自动回滚失败，恢复前原目录保留于 %s", e.cause, e.safetyPath)
+	return fmt.Sprintf("%v；自动回滚或持久化结果未确认，待核对目录保留于 %s", e.cause, e.safetyPath)
 }
 func (e *fileRestoreUnresolvedError) Unwrap() error { return e.cause }
+
+// Explicit outcomes let a paired restore journal record a safe failure without
+// inferring filesystem state from an error message or an older journal.
+type fileRestoreUnchangedError struct{ cause error }
+
+func (e *fileRestoreUnchangedError) Error() string { return e.cause.Error() }
+func (e *fileRestoreUnchangedError) Unwrap() error { return e.cause }
+
+type fileRestoreRolledBackError struct {
+	cause      error
+	safetyPath string
+}
+
+func (e *fileRestoreRolledBackError) Error() string {
+	return fmt.Sprintf("%v；原网站文件已自动回滚。失败的恢复目录保留于 %s", e.cause, e.safetyPath)
+}
+func (e *fileRestoreRolledBackError) Unwrap() error { return e.cause }
 
 func executeRestoreFileBackup(task *Task) TaskResult {
 	if task == nil {
@@ -344,14 +364,23 @@ func restoreFullFileArchive(ctx context.Context, site *models.Website, backupID 
 				_ = writeFileRestoreJournal(private, site, backupID, taskID, "rollback_failed", ops.syncDir)
 			} else {
 				retained = true
-				_ = ops.syncDir(filepath.Dir(site.WebRoot))
-				_ = ops.syncDir(private)
-				_ = writeFileRestoreJournal(private, site, backupID, taskID, "rolled_back", ops.syncDir)
-				returnedErr = fmt.Errorf("%w；原网站文件已自动回滚。失败的恢复目录保留于 %s", returnedErr, safety)
+				rollbackErr := errors.Join(ops.syncDir(filepath.Dir(site.WebRoot)), ops.syncDir(private))
+				if rollbackErr == nil {
+					rollbackErr = writeFileRestoreJournal(private, site, backupID, taskID, "rolled_back", ops.syncDir)
+				}
+				if rollbackErr != nil {
+					returnedErr = &fileRestoreUnresolvedError{cause: errors.Join(returnedErr, rollbackErr), safetyPath: safety}
+					_ = writeFileRestoreJournal(private, site, backupID, taskID, "rollback_failed", ops.syncDir)
+				} else {
+					returnedErr = &fileRestoreRolledBackError{cause: returnedErr, safetyPath: safety}
+				}
 			}
 		}
 		if !retained {
 			_ = os.RemoveAll(private)
+		}
+		if returnedErr != nil && !exchanged {
+			returnedErr = &fileRestoreUnchangedError{cause: returnedErr}
 		}
 	}()
 	if err = os.Mkdir(safety, 0700); err != nil {
@@ -393,6 +422,11 @@ func restoreFullFileArchive(ctx context.Context, site *models.Website, backupID 
 	}
 	if err = writeFileRestoreJournal(private, site, backupID, taskID, "prepared", ops.syncDir); err != nil {
 		return "", err
+	}
+	if ops.onPrepared != nil {
+		if err = ops.onPrepared(safety); err != nil {
+			return "", err
+		}
 	}
 	if err = ctx.Err(); err != nil {
 		return "", err

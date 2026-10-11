@@ -58,7 +58,7 @@ func (q *TaskQueue) EnqueueSiteRestoreContext(ctx context.Context, taskType Task
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if taskType != TaskRestoreBackup && taskType != TaskRestoreFileBackup {
+	if taskType != TaskRestoreBackup && taskType != TaskRestoreFileBackup && taskType != TaskRestoreSiteBackup && taskType != TaskCreateSiteBackup && taskType != TaskCreateFileBackup {
 		return nil, errors.New("invalid restore task type")
 	}
 	siteID := taskSiteID(payload)
@@ -71,7 +71,7 @@ func (q *TaskQueue) EnqueueSiteRestoreContext(ctx context.Context, taskType Task
 	default:
 		return nil, ErrTaskQueueFull
 	}
-	if _, active := q.FindActiveTask(siteID, TaskRestoreBackup, TaskRestoreFileBackup); active {
+	if _, active := q.FindActiveTask(siteID, TaskRestoreBackup, TaskRestoreFileBackup, TaskRestoreSiteBackup, TaskCreateSiteBackup, TaskCreateFileBackup); active {
 		return nil, ErrSiteRestoreActive
 	}
 	return q.EnqueueContext(ctx, taskType, payload)

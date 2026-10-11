@@ -364,6 +364,12 @@ func (q *TaskQueue) worker() {
 				result = executeRestoreBackup(task)
 			case TaskRestoreFileBackup:
 				result = executeRestoreFileBackup(task)
+			case TaskCreateFileBackup:
+				result = executeCreateFileBackup(task)
+			case TaskCreateSiteBackup:
+				result = executeCreateSiteBackup(task)
+			case TaskRestoreSiteBackup:
+				result = executeRestoreSiteBackup(task)
 			case TaskSetFileLock:
 				result = executeSetFileLock(task)
 			default:
@@ -457,6 +463,18 @@ func taskSecrets(payload interface{}) []string {
 
 func taskSiteID(payload interface{}) int {
 	switch p := payload.(type) {
+	case *SiteBackupPayload:
+		if p != nil && p.Site != nil {
+			return p.Site.ID
+		}
+	case *RestoreSiteBackupPayload:
+		if p != nil && p.Site != nil {
+			return p.Site.ID
+		}
+	case *CreateFileBackupPayload:
+		if p != nil && p.Site != nil {
+			return p.Site.ID
+		}
 	case *RestoreFileBackupPayload:
 		if p != nil && p.Site != nil {
 			return p.Site.ID
@@ -555,6 +573,18 @@ func logOp(task *Task, result TaskResult) {
 		}
 	case TaskRestoreFileBackup:
 		if p, ok := task.Payload.(*RestoreFileBackupPayload); ok && p.Site != nil {
+			target = p.Site.Domain
+		}
+	case TaskCreateFileBackup:
+		if p, ok := task.Payload.(*CreateFileBackupPayload); ok && p.Site != nil {
+			target = p.Site.Domain
+		}
+	case TaskCreateSiteBackup:
+		if p, ok := task.Payload.(*SiteBackupPayload); ok && p.Site != nil {
+			target = p.Site.Domain
+		}
+	case TaskRestoreSiteBackup:
+		if p, ok := task.Payload.(*RestoreSiteBackupPayload); ok && p.Site != nil {
 			target = p.Site.Domain
 		}
 	case TaskSetFileLock:

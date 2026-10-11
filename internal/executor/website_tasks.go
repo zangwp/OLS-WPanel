@@ -567,6 +567,13 @@ func executeDeleteSite(task *Task) TaskResult {
 	} else if locked {
 		return TaskResult{Success: false, Message: "该网站仍受网站搬家任务保护，不能从网站列表直接删除。请前往「网站搬家」处理该任务"}
 	}
+	// Resolve an existing migration gate before inspecting backup storage:
+	// migrating sites may not yet have a complete local configuration.
+	if blocked, err := HasSiteBackupArtifacts(context.Background(), site); err != nil {
+		return taskFailure("检查整站备份及恢复现场失败", err)
+	} else if blocked {
+		return TaskResult{Message: "网站仍有整站备份或恢复安全记录，请先管理这些记录；不会直接删除网站或安全副本"}
+	}
 	cfg := config.AppConfig
 
 	webRoot, err := managedSubpath(cfg.Paths.WWWRoot, site.WebRoot, "网站目录")
@@ -1009,6 +1016,15 @@ func executeUpdateDomains(task *Task) TaskResult {
 	}
 	if blocked := rejectPausedSiteConfiguration(site.ID); blocked != nil {
 		return *blocked
+	}
+	// Migration and paused-state gates do not depend on backup paths. Check
+	// those first, then keep backup validation fail-closed before any changes.
+	if newDomain := strings.ToLower(strings.TrimSpace(payload.NewDomain)); newDomain != "" && newDomain != site.Domain {
+		if blocked, err := HasSiteBackupArtifacts(context.Background(), site); err != nil {
+			return taskFailure("检查整站备份及恢复现场失败", err)
+		} else if blocked {
+			return TaskResult{Message: "网站仍有整站备份或恢复安全记录，不能更换主域名；附加域名可以单独调整"}
+		}
 	}
 	cfg := config.AppConfig
 

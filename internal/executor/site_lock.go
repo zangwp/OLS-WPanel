@@ -21,6 +21,9 @@ func TryAcquireSiteOpLock(siteID int, reason string) bool {
 	if _, busy := wpSiteOpBusy[siteID]; busy {
 		return false
 	}
+	if siteBackupMaintenanceBlocksSiteOp(siteID) {
+		return false
+	}
 	if db := database.GetDB(); db != nil {
 		active, err := database.MaintenanceWindowActive(db, siteID)
 		if err != nil || active {
@@ -41,6 +44,9 @@ func TryAcquireCompanionDeployLock(siteID int) bool {
 	if _, busy := wpSiteOpBusy[siteID]; busy {
 		return false
 	}
+	if siteBackupMaintenanceBlocksSiteOp(siteID) {
+		return false
+	}
 	wpSiteOpBusy[siteID] = "companion_upgrade"
 	return true
 }
@@ -54,6 +60,9 @@ func TryAcquireSiteFileOpLock(siteID int, reason string) bool {
 	if _, busy := wpSiteOpBusy[siteID]; busy {
 		return false
 	}
+	if siteBackupMaintenanceBlocksSiteOp(siteID) {
+		return false
+	}
 	wpSiteOpBusy[siteID] = reason
 	return true
 }
@@ -65,7 +74,43 @@ func tryAcquireMaintenanceOp(siteID int) bool {
 	if _, busy := wpSiteOpBusy[siteID]; busy {
 		return false
 	}
+	if siteBackupMaintenanceBlocksSiteOp(siteID) {
+		return false
+	}
 	wpSiteOpBusy[siteID] = "maintenance"
+	return true
+}
+
+// Persisted whole-site maintenance survives a process restart. Background SSL
+// renewals and companion/file writers must not regenerate or mutate this site
+// merely because its in-memory slot has disappeared.
+func siteBackupMaintenanceBlocksSiteOp(siteID int) bool {
+	if db := database.GetDB(); db != nil {
+		var status string
+		if err := db.QueryRow(`SELECT status FROM websites WHERE id=?`, siteID).Scan(&status); err != nil {
+			return true
+		}
+		return status == "backup_maintenance"
+	}
+	return false
+}
+
+// Only the journal-checked recovery coordinator can claim this special slot.
+func tryAcquireSiteBackupRecoveryOp(siteID int) bool {
+	wpSiteOpMu.Lock()
+	defer wpSiteOpMu.Unlock()
+	if _, busy := wpSiteOpBusy[siteID]; busy {
+		return false
+	}
+	db := database.GetDB()
+	if db == nil {
+		return false
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM websites WHERE id=?`, siteID).Scan(&status); err != nil || status != "backup_maintenance" {
+		return false
+	}
+	wpSiteOpBusy[siteID] = "site_backup_recovery"
 	return true
 }
 

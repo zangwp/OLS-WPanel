@@ -21,6 +21,7 @@ func TestCrossSiteCopyPermissionFailurePreservesExistingDestination(t *testing.T
 		}
 		t.Run(name, func(t *testing.T) {
 			setupCacheHelperTestDB(t)
+			useFileMutationTestKernel(t)
 			srcRoot, destRoot := t.TempDir(), t.TempDir()
 			source, dest := filepath.Join(srcRoot, "assets"), filepath.Join(destRoot, "assets")
 			if err := os.Mkdir(source, 0700); err != nil {
