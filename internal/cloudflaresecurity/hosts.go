@@ -71,9 +71,6 @@ func checkHostSuffixes(hosts []string, name string) error {
 	return nil
 }
 func expressionForHosts(hosts, ips []string) (string, error) {
-	if len(ips) == 0 {
-		return "", nil
-	}
 	if len(hosts) == 0 {
 		return "", errors.New("Cloudflare 规则缺少网站域名")
 	}
@@ -85,7 +82,13 @@ func expressionForHosts(hosts, ips []string) (string, error) {
 		}
 		predicate = "http.host in {" + strings.Join(quoted, " ") + "}"
 	}
-	text := "(" + predicate + ") and ip.src in {" + strings.Join(ips, " ") + "}"
+	// Keep an owned, verifiable rule even with no bans. The contradictory
+	// documented boolean predicates cannot match HTTP or HTTPS traffic.
+	condition := "(ssl and not ssl)"
+	if len(ips) > 0 {
+		condition = "ip.src in {" + strings.Join(ips, " ") + "}"
+	}
+	text := "(" + predicate + ") and " + condition
 	if len(text) > 4096 {
 		return "", errors.New("Cloudflare 规则表达式超过 4096 字节；所有 IP 与域名均未截断，请改用可用的 IP List 方案")
 	}
@@ -97,15 +100,21 @@ func hostsFromExpression(text string) ([]string, bool) {
 	var raw string
 	var tokens []string
 	if strings.HasPrefix(text, single) {
-		end := strings.Index(text, ") and ip.src in {")
+		end := strings.Index(text, ") and ")
 		if end < 0 {
+			return nil, false
+		}
+		if !ownedCondition(text[end+len(") and "):]) {
 			return nil, false
 		}
 		raw = text[len(single):end]
 		tokens = []string{raw}
 	} else if strings.HasPrefix(text, multiple) {
-		end := strings.Index(text, "}) and ip.src in {")
+		end := strings.Index(text, "}) and ")
 		if end < 0 {
+			return nil, false
+		}
+		if !ownedCondition(text[end+len("}) and "):]) {
 			return nil, false
 		}
 		raw = text[len(multiple):end]
@@ -128,4 +137,8 @@ func hostsFromExpression(text string) ([]string, bool) {
 		hosts = append(hosts, host)
 	}
 	return hosts, len(hosts) > 0
+}
+
+func ownedCondition(condition string) bool {
+	return condition == "(ssl and not ssl)" || strings.HasPrefix(condition, "ip.src in {") && strings.HasSuffix(condition, "}")
 }

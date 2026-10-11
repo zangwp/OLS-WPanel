@@ -84,6 +84,7 @@ type fakeCloudflare struct {
 	failBeforeWrite bool
 	changedHost     string
 	unauthorized    bool
+	writeStatus     int
 	mismatchAccount bool
 	acceptedToken   string
 	requests        []string
@@ -108,6 +109,9 @@ func (f *fakeCloudflare) transport(r *http.Request) (*http.Response, error) {
 	}
 	if f.unauthorized {
 		return apiResponse(403, map[string]string{"echo": testToken}), nil
+	}
+	if f.writeStatus != 0 && r.Method != http.MethodGet {
+		return apiResponse(f.writeStatus, nil), nil
 	}
 	if p == "/zones" && r.Method == http.MethodGet {
 		q := r.URL.Query()
@@ -383,10 +387,19 @@ func TestCloudflareCreatePatchDeleteOnlyOwnedRuleWithOfficialRulesetResponse(t *
 	if _, err = s.Sync(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.rs.Rules) != 1 || ruleHash(fake.rs.Rules[0]) != ruleHash(admin) {
-		t.Fatal("cleanup deleted another rule")
+	if len(fake.rs.Rules) != 2 || ruleHash(fake.rs.Rules[0]) != ruleHash(admin) || fake.rs.Rules[1].Expression != `(http.host eq "example.com") and (ssl and not ssl)` {
+		t.Fatal("standby transition changed another rule or retained bans")
 	}
-	if strings.Join(fake.mutations, ",") != "POST_RULE,PATCH_RULE,DELETE_RULE" {
+	if _, err = s.Save(ctx, 1, Update{Enabled: false, AccountID: testAccount, ZoneID: testZone}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Sync(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.rs.Rules) != 1 || ruleHash(fake.rs.Rules[0]) != ruleHash(admin) {
+		t.Fatal("disabled cleanup deleted another rule")
+	}
+	if strings.Join(fake.mutations, ",") != "POST_RULE,PATCH_RULE,PATCH_RULE,DELETE_RULE" {
 		t.Fatal("unexpected mutation methods", fake.mutations)
 	}
 }

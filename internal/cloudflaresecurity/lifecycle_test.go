@@ -154,7 +154,7 @@ func TestCloudflareDeletingWebsiteOnlyCleansAndRetriesOwnedRule(t *testing.T) {
 	}
 }
 
-func TestCloudflareEmptyBlacklistCleansSavedRuleDespiteCurrentDomainErrors(t *testing.T) {
+func TestCloudflareEmptyBlacklistValidatesCurrentDomainsAndStillAllowsDisabledCleanup(t *testing.T) {
 	for _, scenario := range []string{"invalid-alias", "outside-zone-alias", "changed-primary", "invalid-primary"} {
 		t.Run(scenario, func(t *testing.T) {
 			s := newTestService(t)
@@ -178,9 +178,18 @@ func TestCloudflareEmptyBlacklistCleansSavedRuleDespiteCurrentDomainErrors(t *te
 			if _, err := s.DB.Exec(queries[scenario]); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := s.Sync(ctx, 1); err == nil || len(fake.mutations) != 1 {
+				t.Fatal("standby rule bypassed current domain validation", err)
+			}
+			// Cleanup uses the saved binding even when current domains are invalid.
+			// The normal handler first reads the website, so simulate disabling
+			// the persisted configuration without requiring a valid current host.
+			if _, err := s.DB.Exec(`UPDATE website_cloudflare_security SET enabled=0 WHERE site_id=1`); err != nil {
+				t.Fatal(err)
+			}
 			status, err := s.Sync(ctx, 1)
-			if err != nil || status.RuleID != "" || len(fake.rs.Rules) != 0 || len(status.CoveredHostnames) != 0 {
-				t.Fatal("empty blacklist cleanup blocked by new coverage", status, err)
+			if err != nil || status.SyncStatus != "disabled" || status.RuleID != "" || len(fake.rs.Rules) != 0 || len(status.CoveredHostnames) != 0 {
+				t.Fatal("disabled cleanup blocked by current domain errors", status, err)
 			}
 		})
 	}
