@@ -162,67 +162,126 @@
                 <button type="button" @click.stop.prevent="goToSite(site.site_id)" class="btn-secondary text-xs py-1 px-3 flex-shrink-0">{{t .Lang "backups.view_website"}}</button>
             </summary>
 
-            <p class="text-xs text-gray-500 mt-4 mb-4">{{t .Lang "backups.restore_pair_help"}}</p>
+            <section class="site-backup-primary" :aria-labelledby="'site-backup-title-' + site.site_id">
+                <div class="site-backup-heading">
+                    <div>
+                        <h3 class="font-semibold text-white" :id="'site-backup-title-' + site.site_id">{{t .Lang "backups.site_section_title"}}</h3>
+                        <p class="text-xs text-gray-500 mt-1">{{t .Lang "backups.site_backup_help"}}</p>
+                    </div>
+                    <button @click="startSiteOperation(site, 'site_backup')" :disabled="siteBusy(site) || !siteSupportsWholeBackup(site)" class="btn-primary text-sm">{{t .Lang "backups.backup_site_now"}}</button>
+                </div>
+                <p x-show="!siteSupportsWholeBackup(site) && site.status !== 'backup_maintenance'" class="text-xs text-gray-500 mb-3">{{t .Lang "backups.site_backup_supported_help"}}</p>
+                <p x-show="site.status === 'backup_maintenance'" class="text-xs text-amber-400 mb-3" role="status">{{t .Lang "backups.site_maintenance"}}</p>
+                <div x-show="site.status === 'backup_maintenance'" class="flex flex-wrap items-center gap-2 mb-3">
+                    <button @click="recoverSiteMaintenance(site)" :disabled="!canRecoverMaintenance(site)" class="btn-secondary text-xs">{{t .Lang "backups.recover_maintenance"}}</button>
+                    <button @click="recheckMaintenanceRecovery(site)" :disabled="loading || ['confirming', 'submitting', 'checking'].includes(maintenanceRecoveryStates[site.site_id]?.phase)" class="btn-secondary text-xs">{{t .Lang "backups.refresh_operation_status"}}</button>
+                </div>
+                <p x-show="site.site_backups_error" class="text-xs text-red-400 mb-3" role="alert" x-text="site.site_backups_error"></p>
+                <label class="label" :for="'site-backup-select-' + site.site_id">{{t .Lang "backups.choose_site_backup"}}</label>
+                <select :id="'site-backup-select-' + site.site_id" x-model="siteSelections[site.site_id]" :disabled="siteBusy(site) || !site.site_backups.length" class="input-field w-full text-sm mb-3">
+                    <option value="" disabled>{{t .Lang "backups.no_backups"}}</option>
+                    <template x-for="b in site.site_backups" :key="b.id"><option :value="b.id" x-text="siteBackupOption(b)"></option></template>
+                </select>
+                <template x-if="selectedSiteBackup(site)">
+                    <div>
+                        <div class="flex flex-wrap items-center gap-3 text-xs mb-2">
+                            <span :class="siteSetComplete(selectedSiteBackup(site)) ? 'badge-info' : 'badge-warning'" x-text="t(siteSetComplete(selectedSiteBackup(site)) ? 'backups.site_set_complete' : 'backups.site_set_incomplete')"></span>
+                            <span x-text="t('backups.database_size', {size:formatBytes(selectedSiteBackup(site).db_size || 0)})"></span>
+                            <span x-text="t('backups.files_size', {size:formatBytes(selectedSiteBackup(site).file_size || 0)})"></span>
+                        </div>
+                        <p class="backup-filename text-xs text-gray-500 mb-3"><span>{{t .Lang "backups.site_set_id"}}:</span> <span class="font-mono" x-text="selectedSiteBackup(site).id"></span></p>
+                        <p x-show="selectedSiteBackup(site).message" class="text-xs text-amber-400 mb-3" x-text="selectedSiteBackup(site).message"></p>
+                        <p x-show="selectedSiteBackup(site).state === 'complete' && !selectedSiteBackup(site).local_exists" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.site_set_local_missing"}}</p>
+                        <div class="site-backup-actions">
+                            <button @click="startSiteOperation(site, 'site_restore')" :disabled="siteBusy(site) || !canRestoreSite(site)" class="btn-primary text-xs">{{t .Lang "backups.restore_site"}}</button>
+                            <button @click="downloadSiteBackup(site, 'files')" :disabled="siteBusy(site) || !siteSetAvailable(site)" class="btn-secondary text-xs">{{t .Lang "backups.download_files"}}</button>
+                            <button @click="downloadSiteBackup(site, 'database')" :disabled="siteBusy(site) || !siteSetAvailable(site)" class="btn-secondary text-xs">{{t .Lang "backups.download_database"}}</button>
+                            <button @click="deleteSiteBackup(site)" :disabled="siteBusy(site) || !!site.site_backups_error" class="btn-danger text-xs site-backup-delete">{{t .Lang "backups.delete_site_backup"}}</button>
+                        </div>
+                    </div>
+                </template>
+                <p x-show="!site.site_backups.length && !site.site_backups_error" class="text-xs text-gray-500">{{t .Lang "backups.empty_site_help"}}</p>
+            </section>
+            <details class="backup-specialist">
+                <summary class="cursor-pointer text-sm font-medium text-gray-300">{{t .Lang "backups.single_item_operations"}}</summary>
+                <p class="text-xs text-gray-500 mt-3 mb-4">{{t .Lang "backups.restore_pair_help"}}</p>
             <div class="backup-restore-grid">
                 <section class="backup-restore-column" :aria-labelledby="'db-backup-title-' + site.site_id">
-                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div class="backup-component-heading">
                         <h3 class="font-semibold text-white" :id="'db-backup-title-' + site.site_id">{{t .Lang "backups.db_section_title"}}</h3>
                         <a :href="'/{{.RandomSuffix}}/databases/' + site.site_id" class="text-xs text-blue-400">{{t .Lang "backups.database_backup_management"}}</a>
                     </div>
-                    <label class="label" :for="'db-backup-select-' + site.site_id">{{t .Lang "backups.choose_backup"}}</label>
-                    <select :id="'db-backup-select-' + site.site_id" x-model.number="dbSelections[site.site_id]" :disabled="siteBusy(site) || !site.db_backups.length" class="input-field w-full text-sm mb-3">
-                        <option value="0" disabled>{{t .Lang "backups.no_backups"}}</option>
-                        <template x-for="b in site.db_backups" :key="b.id"><option :value="b.id" x-text="backupOption(b, 'db')"></option></template>
-                    </select>
+                    <div class="backup-version-select">
+                        <label class="label" :for="'db-backup-select-' + site.site_id">{{t .Lang "backups.choose_backup"}}</label>
+                        <select :id="'db-backup-select-' + site.site_id" x-model.number="dbSelections[site.site_id]" :disabled="siteBusy(site) || !site.db_backups.length" class="input-field w-full text-sm">
+                            <option value="0" disabled>{{t .Lang "backups.no_backups"}}</option>
+                            <template x-for="b in site.db_backups" :key="b.id"><option :value="b.id" x-text="backupOption(b, 'db')"></option></template>
+                        </select>
+                    </div>
                     <template x-if="selectedBackup(site, 'db')">
-                        <div>
-                            <p class="backup-filename font-mono text-xs text-gray-400 mb-2" x-text="selectedBackup(site, 'db')?.filename"></p>
-                            <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
-                                <span x-text="formatBytes(selectedBackup(site, 'db')?.file_size || 0)"></span>
-                                <span :class="transportBadgeClass(selectedBackup(site, 'db'))" x-text="transportLabel(selectedBackup(site, 'db'))"></span>
+                        <div class="backup-version-selected">
+                            <div class="backup-version-meta">
+                                <p class="backup-filename font-mono text-xs text-gray-400 mb-2" x-text="selectedBackup(site, 'db')?.filename"></p>
+                                <div class="flex flex-wrap items-center gap-2 text-xs">
+                                    <span x-text="formatBytes(selectedBackup(site, 'db')?.file_size || 0)"></span>
+                                    <span :class="transportBadgeClass(selectedBackup(site, 'db'))" x-text="transportLabel(selectedBackup(site, 'db'))"></span>
+                                </div>
+                                <p x-show="!selectedBackup(site, 'db')?.local_exists" class="text-xs text-amber-400 mt-3">{{t .Lang "backups.restore_remote_db_help"}}</p>
                             </div>
-                            <p x-show="!selectedBackup(site, 'db')?.local_exists" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.restore_remote_db_help"}}</p>
-                            <div class="flex flex-wrap items-center gap-2">
+                            <div class="backup-version-actions">
                                 <button @click="restoreSelected(site, 'db')" :disabled="siteBusy(site) || !selectedBackup(site, 'db')?.local_exists" class="btn-primary text-xs py-1 px-3">{{t .Lang "backups.restore_database"}}</button>
                                 <button @click="downloadDBBackup(site, selectedBackup(site, 'db'))" :disabled="siteBusy(site) || !selectedBackup(site, 'db')?.local_exists" class="btn-secondary text-xs py-1 px-3">{{t .Lang "backups.download"}}</button>
                                 <button @click="deleteDBBackup(site, selectedBackup(site, 'db'))" :disabled="siteBusy(site)" class="btn-danger text-xs py-1 px-3 ml-auto" x-text="selectedBackup(site, 'db')?.local_exists ? t('backups.delete') : t('backups.clean_record')"></button>
                             </div>
                         </div>
                     </template>
-                    <p x-show="!site.db_backups.length" class="text-xs text-gray-500">{{t .Lang "backups.empty_db_help"}}</p>
+                    <p x-show="!site.db_backups.length" class="backup-version-empty text-xs text-gray-500">{{t .Lang "backups.empty_db_help"}}</p>
                 </section>
                 <section class="backup-restore-column" :aria-labelledby="'file-backup-title-' + site.site_id">
-                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div class="backup-component-heading">
                         <h3 class="font-semibold text-white" :id="'file-backup-title-' + site.site_id">{{t .Lang "backups.file_section_title"}}</h3>
-                        <a href="/{{.RandomSuffix}}/cron" class="text-xs text-blue-400">{{t .Lang "backups.file_backup_plan"}}</a>
+                        <button @click="startSiteOperation(site, 'file_backup')" :disabled="siteBusy(site) || site.status !== 'active'" class="btn-secondary text-xs">{{t .Lang "backups.backup_files_now"}}</button>
                     </div>
-                    <label class="label" :for="'file-backup-select-' + site.site_id">{{t .Lang "backups.choose_backup"}}</label>
-                    <select :id="'file-backup-select-' + site.site_id" x-model.number="fileSelections[site.site_id]" :disabled="siteBusy(site) || !site.file_backups.length" class="input-field w-full text-sm mb-3">
-                        <option value="0" disabled>{{t .Lang "backups.no_backups"}}</option>
-                        <template x-for="b in site.file_backups" :key="b.id"><option :value="b.id" x-text="backupOption(b, 'file')"></option></template>
-                    </select>
+                    <div class="backup-version-select">
+                        <label class="label" :for="'file-backup-select-' + site.site_id">{{t .Lang "backups.choose_backup"}}</label>
+                        <select :id="'file-backup-select-' + site.site_id" x-model.number="fileSelections[site.site_id]" :disabled="siteBusy(site) || !site.file_backups.length" class="input-field w-full text-sm">
+                            <option value="0" disabled>{{t .Lang "backups.no_backups"}}</option>
+                            <template x-for="b in site.file_backups" :key="b.id"><option :value="b.id" x-text="backupOption(b, 'file')"></option></template>
+                        </select>
+                    </div>
                     <template x-if="selectedBackup(site, 'file')">
-                        <div>
-                            <p class="backup-filename font-mono text-xs text-gray-400 mb-2" x-text="selectedBackup(site, 'file')?.filename"></p>
-                            <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
-                                <span x-text="formatBytes(selectedBackup(site, 'file')?.file_size || 0)"></span>
-                                <span :class="transportBadgeClass(selectedBackup(site, 'file'))" x-text="transportLabel(selectedBackup(site, 'file'))"></span>
+                        <div class="backup-version-selected">
+                            <div class="backup-version-meta">
+                                <p class="backup-filename font-mono text-xs text-gray-400 mb-2" x-text="selectedBackup(site, 'file')?.filename"></p>
+                                <div class="flex flex-wrap items-center gap-2 text-xs">
+                                    <span x-text="formatBytes(selectedBackup(site, 'file')?.file_size || 0)"></span>
+                                    <span :class="transportBadgeClass(selectedBackup(site, 'file'))" x-text="transportLabel(selectedBackup(site, 'file'))"></span>
+                                </div>
+                                <p x-show="selectedBackup(site, 'file')?.mode !== 'full'" class="text-xs text-amber-400 mt-3">{{t .Lang "backups.restore_incremental_help"}}</p>
+                                <p x-show="!selectedBackup(site, 'file')?.local_exists" class="text-xs text-amber-400 mt-3">{{t .Lang "backups.restore_remote_file_help"}}</p>
                             </div>
-                            <p x-show="selectedBackup(site, 'file')?.mode !== 'full'" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.restore_incremental_help"}}</p>
-                            <p x-show="!selectedBackup(site, 'file')?.local_exists" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.restore_remote_file_help"}}</p>
-                            <div class="flex flex-wrap items-center gap-2">
+                            <div class="backup-version-actions">
                                 <button @click="restoreSelected(site, 'file')" :disabled="siteBusy(site) || !canRestoreFile(site)" class="btn-primary text-xs py-1 px-3">{{t .Lang "backups.restore_files"}}</button>
                                 <button @click="downloadFileBackup(site, selectedBackup(site, 'file'))" :disabled="siteBusy(site) || !selectedBackup(site, 'file')?.local_exists" class="btn-secondary text-xs py-1 px-3">{{t .Lang "backups.download"}}</button>
                                 <button @click="deleteFileBackup(site, selectedBackup(site, 'file'))" :disabled="siteBusy(site)" class="btn-danger text-xs py-1 px-3 ml-auto" x-text="selectedBackup(site, 'file')?.local_exists ? t('backups.delete') : t('backups.clean_record')"></button>
                             </div>
                         </div>
                     </template>
-                    <p x-show="!site.file_backups.length" class="text-xs text-gray-500">{{t .Lang "backups.empty_files_help"}}</p>
+                    <p x-show="!site.file_backups.length" class="backup-version-empty text-xs text-gray-500">{{t .Lang "backups.empty_files_help"}}</p>
+                    <div class="backup-component-help text-xs text-gray-500">
+                        <p>{{t .Lang "backups.file_backup_immediate_help"}}</p>
+                        <a href="/{{.RandomSuffix}}/cron" class="text-blue-400">{{t .Lang "backups.file_backup_plan"}}</a>
+                    </div>
                 </section>
             </div>
+            </details>
             <div x-show="restoreStates[site.site_id]" x-cloak class="mt-4 pt-3 border-t border-gray-700 text-sm" role="status" aria-live="polite">
                 <p :class="restoreStates[site.site_id]?.phase === 'failed' ? 'text-red-400' : 'text-gray-400'" x-text="restoreStates[site.site_id]?.message"></p>
-                <button x-show="restoreStates[site.site_id]?.phase === 'unknown'" @click="resumeSiteRestore(site)" class="btn-secondary text-xs mt-2">{{t .Lang "backups.refresh_restore_status"}}</button>
+                <button x-show="restoreStates[site.site_id]?.phase === 'unknown'" @click="resumeSiteRestore(site)" class="btn-secondary text-xs mt-2">{{t .Lang "backups.refresh_operation_status"}}</button>
+            </div>
+            <div x-show="maintenanceRecoveryStates[site.site_id]" x-cloak class="mt-3 text-sm" role="status" aria-live="polite">
+                <p :class="maintenanceRecoveryStates[site.site_id]?.phase === 'failed' ? 'text-red-400' : 'text-gray-400'" x-text="maintenanceRecoveryStates[site.site_id]?.message"></p>
+                <button x-show="maintenanceRecoveryStates[site.site_id]?.phase === 'unknown' && site.status !== 'backup_maintenance'" @click="recheckMaintenanceRecovery(site)" :disabled="loading" class="btn-secondary text-xs mt-2">{{t .Lang "backups.refresh_operation_status"}}</button>
             </div>
         </details>
     </template>
@@ -244,15 +303,40 @@
     .site-backup-card > summary::-webkit-details-marker { display: none; }
     .site-backup-card .chevron-icon { transition: transform 0.15s ease; }
     .site-backup-card[open] > summary .chevron-icon { transform: rotate(90deg); }
-    .backup-restore-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-    .backup-restore-column { min-width: 0; }
+    .site-backup-primary { margin-top: 20px; }
+    .site-backup-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+    .site-backup-heading > div { min-width: 0; }
+    .site-backup-heading > button { flex-shrink: 0; white-space: nowrap; }
+    .site-backup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .site-backup-actions > button { white-space: nowrap; }
+    .site-backup-delete { margin-left: auto; }
+    .backup-specialist { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--panel-border); }
+    .backup-restore-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
+    .backup-restore-column { min-width: 0; display: grid; grid-row: span 5; grid-template-rows: subgrid; }
     .backup-restore-column + .backup-restore-column { border-left: 1px solid var(--panel-border, #dbe5ef); padding-left: 24px; }
+    .backup-component-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+    .backup-component-heading > h3 { min-width: 0; }
+    .backup-component-heading > button { flex-shrink: 0; white-space: nowrap; }
+    .backup-version-select { grid-row: 2; min-width: 0; }
+    .backup-version-selected { display: grid; grid-row: 3 / span 2; grid-template-rows: subgrid; min-width: 0; }
+    .backup-version-meta { min-width: 0; }
+    .backup-version-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; align-self: start; }
+    .backup-version-actions > button { white-space: nowrap; }
+    .backup-version-empty { grid-row: 3 / span 2; }
+    .backup-component-help { grid-row: 5; display: flex; flex-wrap: wrap; gap: 8px 12px; line-height: 1.6; }
     .backup-filename { overflow-wrap: anywhere; }
+    @supports not (grid-template-rows: subgrid) {
+        .backup-restore-column { display: flex; flex-direction: column; gap: 12px; }
+        .backup-version-selected { display: flex; flex-direction: column; gap: 12px; }
+    }
     @media (max-width: 1023px) {
-        .backup-restore-grid { grid-template-columns: minmax(0, 1fr); }
+        .backup-restore-grid { grid-template-columns: minmax(0, 1fr); row-gap: 20px; }
+        .backup-restore-column { display: flex; flex-direction: column; gap: 12px; }
+        .backup-version-selected { display: flex; flex-direction: column; gap: 12px; }
         .backup-restore-column + .backup-restore-column { border-left: 0; padding-left: 0; border-top: 1px solid var(--panel-border, #dbe5ef); padding-top: 20px; }
     }
     @media (max-width: 639px) {
+        .site-backup-heading { flex-direction: column; gap: 12px; }
         .site-backup-card > summary { flex-wrap: wrap; gap: 12px; }
         .site-backup-card > summary > span { flex: 1 1 100%; flex-wrap: wrap; gap: 8px; }
         .site-backup-card > summary > span > .text-lg { flex: 1 1 calc(100% - 24px); min-width: 0; }
@@ -271,9 +355,12 @@ function backupsOverview() {
         panelBackups: [],
         dbSelections: {},
         fileSelections: {},
+        siteSelections: {},
         restoreStates: {},
         restoreTimers: {},
         backupMutations: {},
+        maintenanceRecoveryStates: {},
+        operationChecks: {},
         alive: true,
         policyOpen: false,
         policyLoading: false,
@@ -286,13 +373,18 @@ function backupsOverview() {
             try {
                 const r = await api('/backups/overview', {timeout:15000, suppressToast:true});
                 if (!r.success || !Array.isArray(r.data?.sites) || !Array.isArray(r.data?.panel_db_backups) ||
-                    r.data.sites.some(site => !Array.isArray(site.db_backups) || !Array.isArray(site.file_backups))) {
+                    r.data.sites.some(site => !Array.isArray(site.db_backups) || !Array.isArray(site.file_backups) ||
+                        !Array.isArray(site.site_backups) || site.site_backups.some(b => typeof b.id !== 'string' || !b.id ||
+                            !['complete', 'incomplete'].includes(b.state) || typeof b.local_exists !== 'boolean'))) {
                     throw new Error(t('backups.overview_load_failed'));
                 }
                 if (!this.alive || epoch !== this.overviewEpoch) return;
                 this.sites = r.data.sites;
                 this.panelBackups = r.data.panel_db_backups;
                 for (const site of this.sites) {
+                    if (!site.site_backups.some(b => b.id === this.siteSelections[site.site_id])) {
+                        this.siteSelections[site.site_id] = site.site_backups.find(b => this.siteSetComplete(b) && b.local_exists)?.id || site.site_backups[0]?.id || '';
+                    }
                     if (!site.db_backups.some(b => b.id === Number(this.dbSelections[site.site_id]))) {
                         this.dbSelections[site.site_id] = site.db_backups[0]?.id || 0;
                     }
@@ -305,6 +397,7 @@ function backupsOverview() {
             finally { if (this.alive && epoch === this.overviewEpoch) this.loading = false; }
             if (!this.overviewError && this.alive && epoch === this.overviewEpoch) {
                 await Promise.allSettled(this.sites.filter(site => !this.restoreStates[site.site_id]).map(site => this.resumeSiteRestore(site)));
+                await Promise.allSettled(this.sites.filter(site => site.status === 'backup_maintenance').map(site => this.checkMaintenanceEligibility(site, epoch)));
             }
         },
         destroy() {
@@ -321,7 +414,147 @@ function backupsOverview() {
             return fmtTime(backup.created_at) + ' · ' + mode;
         },
         siteBusy(site) {
-            return this.loading || !!this.overviewError || !!this.backupMutations[site.site_id] || ['confirming', 'submitting', 'waiting', 'running', 'unknown'].includes(this.restoreStates[site.site_id]?.phase);
+            return this.loading || !!this.overviewError || site.status === 'backup_maintenance' || !!this.backupMutations[site.site_id] ||
+                ['confirming', 'submitting', 'waiting', 'running', 'unknown'].includes(this.restoreStates[site.site_id]?.phase) ||
+                ['confirming', 'submitting', 'checking', 'unknown'].includes(this.maintenanceRecoveryStates[site.site_id]?.phase);
+        },
+        canRecoverMaintenance(site) {
+            return site.status === 'backup_maintenance' && this.operationChecks[site.site_id] === true && !this.loading && !this.overviewError &&
+                !this.backupMutations[site.site_id] && !['confirming', 'submitting', 'waiting', 'running', 'unknown'].includes(this.restoreStates[site.site_id]?.phase) &&
+                !['confirming', 'submitting', 'checking', 'unknown'].includes(this.maintenanceRecoveryStates[site.site_id]?.phase);
+        },
+        async checkMaintenanceEligibility(site, epoch = this.overviewEpoch) {
+            this.operationChecks[site.site_id] = false;
+            try {
+                const r = await api('/websites/' + site.site_id + '/backups/active-operation', {suppressToast:true, timeout:15000});
+                if (!this.alive || epoch !== this.overviewEpoch) return;
+                this.operationChecks[site.site_id] = r.success === true && r.data?.active === false;
+            } catch (e) { if (this.alive && epoch === this.overviewEpoch) this.operationChecks[site.site_id] = false; }
+        },
+        async recoverSiteMaintenance(site) {
+            if (!this.canRecoverMaintenance(site)) return;
+            this.maintenanceRecoveryStates[site.site_id] = {phase:'confirming', message:t('backups.operation_confirming')};
+            const state = this.maintenanceRecoveryStates[site.site_id];
+            let submitted = false;
+            try {
+                const confirmed = await confirmModal(t('backups.confirm_recover_maintenance', {domain:site.domain}));
+                if (!this.alive || this.maintenanceRecoveryStates[site.site_id] !== state) return;
+                if (!confirmed) { delete this.maintenanceRecoveryStates[site.site_id]; return; }
+                state.phase = 'submitting'; state.message = t('backups.recovery_running'); submitted = true;
+                const r = await api('/websites/' + site.site_id + '/site-backups/recover-maintenance', {
+                    method:'POST', body:{confirm_recovery:true}, suppressToast:true, timeout:150000
+                });
+                if (!this.alive || this.maintenanceRecoveryStates[site.site_id] !== state) return;
+                if (!r.success || r.data?.maintenance_recovered !== true) {
+                    state.phase = 'unknown'; state.message = t('backups.recovery_status_unknown');
+                } else {
+                    state.phase = 'success'; state.message = r.data.message || t('backups.recovery_access_active');
+                    showToast(state.message, 'success');
+                }
+            } catch (e) {
+                if (!this.alive || this.maintenanceRecoveryStates[site.site_id] !== state) return;
+                state.phase = submitted && !e.status ? 'unknown' : 'failed';
+                state.message = state.phase === 'unknown' ? t('backups.recovery_status_unknown') : (e.message || t('backups.operation_failed'));
+            } finally {
+                if (this.alive && this.maintenanceRecoveryStates[site.site_id] === state) await this.fetchOverview();
+            }
+        },
+        async recheckMaintenanceRecovery(site) {
+            if (this.loading || ['confirming', 'submitting', 'checking'].includes(this.maintenanceRecoveryStates[site.site_id]?.phase)) return;
+            const previous = this.maintenanceRecoveryStates[site.site_id];
+            this.maintenanceRecoveryStates[site.site_id] = {phase:'checking', message:t('backups.operation_checking')};
+            const state = this.maintenanceRecoveryStates[site.site_id];
+            await this.fetchOverview();
+            if (!this.alive || this.maintenanceRecoveryStates[site.site_id] !== state) return;
+            const current = this.sites.find(s => s.site_id === site.site_id);
+            if (this.overviewError || !current || !['active', 'backup_maintenance'].includes(current.status)) {
+                state.phase = 'unknown'; state.message = t('backups.recovery_status_unknown');
+            } else if (current.status === 'active') {
+                state.phase = 'checked'; state.message = t('backups.recovery_access_active');
+            } else {
+                state.phase = previous?.phase === 'unknown' && this.operationChecks[site.site_id] !== true ? 'unknown' : 'failed';
+                state.message = t('backups.recovery_still_maintenance');
+            }
+        },
+        siteSupportsWholeBackup(site) {
+            return site.site_type === 'wordpress' && site.status === 'active' && typeof site.document_root_subdir === 'string' && !site.document_root_subdir.trim();
+        },
+        selectedSiteBackup(site) {
+            return site.site_backups.find(b => b.id === this.siteSelections[site.site_id]) || null;
+        },
+        siteBackupOption(backup) {
+            return fmtTime(backup.created_at) + ' · ' + t(this.siteSetComplete(backup) ? 'backups.site_set_complete' : 'backups.site_set_incomplete') + ' · ' + backup.id;
+        },
+        siteSetComplete(backup) {
+            return backup?.state === 'complete' && !backup.requires_attention && backup.consistency === 'controlled_quiescence';
+        },
+        siteSetAvailable(site) {
+            const b = this.selectedSiteBackup(site);
+            return !site.site_backups_error && this.siteSetComplete(b) && b.local_exists === true;
+        },
+        canRestoreSite(site) {
+            return this.siteSupportsWholeBackup(site) && this.siteSetAvailable(site);
+        },
+        operationMessage(kind, phase) {
+            const keys = {confirming:'backups.operation_confirming', submitting:'backups.operation_starting', checking:'backups.operation_checking',
+                waiting:'backups.operation_waiting', running:'backups.operation_running', success:'backups.operation_success', failed:'backups.operation_failed',
+                unknown:'backups.operation_status_unknown', missing:'backups.operation_task_missing', inactive:'backups.operation_no_active_task'};
+            const restoreKeys = {checking:'backups.restore_checking', waiting:'backups.restore_waiting', running:'backups.restore_running',
+                success:'backups.restore_success', failed:'backups.restore_failed', unknown:'backups.restore_status_unknown',
+                missing:'backups.restore_task_missing', inactive:'backups.restore_no_active_task'};
+            return t((['db', 'file'].includes(kind) ? restoreKeys[phase] : keys[phase]) || keys.unknown);
+        },
+        async startSiteOperation(site, kind) {
+            if (this.siteBusy(site) || !['site_backup', 'site_restore', 'file_backup'].includes(kind)) return;
+            if ((kind === 'file_backup' && site.status !== 'active') || (kind === 'site_backup' && !this.siteSupportsWholeBackup(site)) ||
+                (kind === 'site_restore' && !this.canRestoreSite(site))) return;
+            const backup = kind === 'site_restore' ? {...this.selectedSiteBackup(site)} : null;
+            this.restoreStates[site.site_id] = {kind, phase:'confirming', message:this.operationMessage(kind, 'confirming'), task_id:''};
+            const state = this.restoreStates[site.site_id];
+            let submitted = false;
+            try {
+                if (kind !== 'file_backup') {
+                    const confirmed = await confirmModal(t(kind === 'site_backup' ? 'backups.confirm_backup_site' : 'backups.confirm_restore_site', {
+                        domain:site.domain, id:backup?.id || '', time:backup ? fmtTime(backup.created_at) : ''
+                    }));
+                    if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                    if (!confirmed) { delete this.restoreStates[site.site_id]; return; }
+                }
+                state.phase = 'submitting'; state.message = this.operationMessage(kind, 'submitting');
+                const path = kind === 'file_backup' ? '/file-backups' : '/site-backups' + (backup ? '/' + encodeURIComponent(backup.id) + '/restore' : '');
+                const body = kind === 'site_backup' ? {confirm_maintenance:true, external_writers_stopped:true} :
+                    kind === 'site_restore' ? {confirm_restore:true, external_writers_stopped:true} : undefined;
+                submitted = true;
+                const r = await api('/websites/' + site.site_id + path, {method:'POST', body, timeout:15000, suppressToast:true});
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                if (!r.success || typeof r.data?.task_id !== 'string' || !r.data.task_id || (r.data.kind && r.data.kind !== kind)) {
+                    state.phase = 'unknown'; state.message = this.operationMessage(kind, 'unknown'); return;
+                }
+                Object.assign(state, {task_id:r.data.task_id, phase:'waiting', message:r.data.message || this.operationMessage(kind, 'waiting')});
+                await this.pollSiteRestore(site, state);
+            } catch (e) {
+                if (!this.alive || this.restoreStates[site.site_id] !== state) return;
+                state.phase = submitted && !e.status ? 'unknown' : 'failed';
+                state.message = state.phase === 'unknown' ? this.operationMessage(kind, 'unknown') : (e.message || this.operationMessage(kind, 'failed'));
+            }
+        },
+        downloadSiteBackup(site, component) {
+            if (this.siteBusy(site) || !this.siteSetAvailable(site) || !['files', 'database'].includes(component)) return;
+            const b = this.selectedSiteBackup(site);
+            window.open(this.apiPrefix() + '/api/websites/' + site.site_id + '/site-backups/' + encodeURIComponent(b.id) + '/download?component=' + component);
+        },
+        async deleteSiteBackup(site) {
+            if (this.siteBusy(site) || site.site_backups_error) return;
+            const selected = this.selectedSiteBackup(site);
+            if (!selected) return;
+            const backup = {...selected};
+            this.backupMutations[site.site_id] = true;
+            try {
+                if (!await confirmModal(t('backups.confirm_delete_site_backup', {domain:site.domain, id:backup.id, time:fmtTime(backup.created_at)}))) return;
+                await api('/websites/' + site.site_id + '/site-backups/' + encodeURIComponent(backup.id), {method:'DELETE'});
+                await this.fetchOverview(); showToast(t('backups.deleted'), 'success');
+            } catch (e) { showToast(e.message, 'error'); }
+            finally { delete this.backupMutations[site.site_id]; }
         },
         canRestoreFile(site) {
             const b = this.selectedBackup(site, 'file');
@@ -365,48 +598,59 @@ function backupsOverview() {
             if (!this.alive) return;
             const previous = this.restoreStates[site.site_id];
             if (previous?.task_id) { await this.pollSiteRestore(site, previous); return; }
-            this.restoreStates[site.site_id] = {kind:'', phase:'unknown', message:t('backups.restore_checking'), task_id:''};
+            this.restoreStates[site.site_id] = {kind:previous?.kind || '', phase:'unknown', message:this.operationMessage(previous?.kind || '', 'checking'), task_id:''};
             const state = this.restoreStates[site.site_id];
             try {
-                const r = await api('/websites/' + site.site_id + '/backups/active-restore', {suppressToast:true, timeout:15000});
+                const r = await api('/websites/' + site.site_id + '/backups/active-operation', {suppressToast:true, timeout:15000});
                 if (!this.alive || this.restoreStates[site.site_id] !== state) return;
                 if (!r.success || typeof r.data?.active !== 'boolean') throw new Error(t('backups.restore_status_unknown'));
                 if (!r.data.active) {
                     if (previous?.phase === 'unknown') {
                         state.phase = 'failed';
-                        state.message = t('backups.restore_no_active_task');
+                        state.message = this.operationMessage(previous.kind, 'inactive');
                     } else delete this.restoreStates[site.site_id];
                     return;
                 }
-                if (!['db', 'file'].includes(r.data.kind) || typeof r.data.task_id !== 'string' || !r.data.task_id || !['waiting', 'running'].includes(r.data.status)) throw new Error(t('backups.restore_status_unknown'));
-                Object.assign(state, {kind:r.data.kind, task_id:r.data.task_id, phase:r.data.status, message:r.data.message || t('backups.restore_waiting')});
+                if (!['db', 'file', 'db_backup', 'site_backup', 'site_restore', 'file_backup'].includes(r.data.kind) || typeof r.data.task_id !== 'string' || !r.data.task_id || !['waiting', 'running'].includes(r.data.status)) throw new Error(t('backups.operation_status_unknown'));
+                Object.assign(state, {kind:r.data.kind, task_id:r.data.task_id, phase:r.data.status, message:r.data.message || this.operationMessage(r.data.kind, r.data.status)});
                 await this.pollSiteRestore(site, state);
             } catch (e) {
                 if (!this.alive || this.restoreStates[site.site_id] !== state) return;
-                state.phase = 'unknown'; state.message = t('backups.restore_status_unknown');
+                state.phase = 'unknown'; state.message = this.operationMessage(state.kind, 'unknown');
             }
         },
         async pollSiteRestore(site, state) {
             if (!this.alive || this.restoreStates[site.site_id] !== state || !state.task_id) return;
             clearTimeout(this.restoreTimers[site.site_id]);
+            if (!['db', 'file', 'db_backup', 'site_backup', 'site_restore', 'file_backup'].includes(state.kind)) {
+                state.phase = 'unknown'; state.message = this.operationMessage(state.kind, 'unknown'); return;
+            }
+            const isLegacy = ['db', 'file'].includes(state.kind);
             const collection = state.kind === 'db' ? 'backups' : 'file-backups';
+            const path = isLegacy ? '/' + collection + '/restore-tasks/' : '/backups/tasks/';
             try {
-                const r = await api('/websites/' + site.site_id + '/' + collection + '/restore-tasks/' + encodeURIComponent(state.task_id), {suppressToast:true, timeout:15000});
+                const r = await api('/websites/' + site.site_id + path + encodeURIComponent(state.task_id), {suppressToast:true, timeout:15000});
                 if (!this.alive || this.restoreStates[site.site_id] !== state) return;
                 if (!r.success || r.data?.task_id !== state.task_id || !['waiting', 'running', 'success', 'failed'].includes(r.data?.status)) throw new Error(t('backups.restore_status_unknown'));
-                if (r.data.status === 'success' && r.data.success !== true) throw new Error(t('backups.restore_status_unknown'));
+                if ((r.data.status === 'success' && r.data.success !== true) ||
+                    (r.data.status === 'failed' && r.data.success !== false)) throw new Error(t('backups.operation_status_unknown'));
+                if (!isLegacy && r.data.kind !== state.kind) throw new Error(t('backups.operation_status_unknown'));
                 state.phase = r.data.status;
-                state.message = r.data.message || t('backups.restore_' + r.data.status);
+                state.message = r.data.message || this.operationMessage(state.kind, r.data.status);
                 if (['waiting', 'running'].includes(state.phase)) {
                     this.restoreTimers[site.site_id] = setTimeout(() => this.pollSiteRestore(site, state), 2000);
-                } else if (state.phase === 'success') {
-                    showToast(state.message, 'success');
+                } else {
+                    if (state.phase === 'success') {
+                        if (state.kind === 'site_backup') delete this.siteSelections[site.site_id];
+                        if (state.kind === 'file_backup') delete this.fileSelections[site.site_id];
+                        showToast(state.message, 'success');
+                    }
                     await this.fetchOverview();
                 }
             } catch (e) {
                 if (!this.alive || this.restoreStates[site.site_id] !== state) return;
                 state.phase = [404, 410].includes(e.status) ? 'failed' : 'unknown';
-                state.message = state.phase === 'failed' ? t('backups.restore_task_missing') : t('backups.restore_status_unknown');
+                state.message = this.operationMessage(state.kind, state.phase === 'failed' ? 'missing' : 'unknown');
             }
         },
         async openPolicy() {
@@ -469,6 +713,7 @@ function backupsOverview() {
         },
         siteSummaryText(site) {
             const parts = [];
+            if (site.site_backups?.length) parts.push(t('backups.summary_site_count', {count:site.site_backups.length}));
             if (site.db_backups && site.db_backups.length) parts.push(t('backups.summary_db_count', { count: site.db_backups.length }));
             if (site.file_backups && site.file_backups.length) parts.push(t('backups.summary_file_count', { count: site.file_backups.length }));
             return parts.length ? parts.join(' · ') : t('backups.no_backups');

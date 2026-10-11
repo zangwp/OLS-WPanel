@@ -8,13 +8,17 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/database"
-	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
 func setupBackupUsageTestDB(t *testing.T) {
 	t.Helper()
 	oldDB := database.DB
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{}
+	config.AppConfig.Panel.BackupDir = t.TempDir()
+	t.Cleanup(func() { config.AppConfig = oldConfig })
 	if err := database.Open(filepath.Join(t.TempDir(), "panel.db")); err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -42,8 +46,8 @@ func setupBackupUsageTestDB(t *testing.T) {
 }
 
 type backupUsageResponse struct {
-	Success bool                      `json:"success"`
-	Data    models.WebsiteBackupUsage `json:"data"`
+	Success bool                   `json:"success"`
+	Data    websiteBackupUsageData `json:"data"`
 }
 
 func TestBackupUsageReturnsZeroWhenNoBackupData(t *testing.T) {
@@ -61,6 +65,9 @@ func TestBackupUsageReturnsZeroWhenNoBackupData(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("mutable backup usage must not be served from a stale cache")
+	}
 	var resp backupUsageResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
@@ -70,6 +77,9 @@ func TestBackupUsageReturnsZeroWhenNoBackupData(t *testing.T) {
 	}
 	if resp.Data.HasBackupData() {
 		t.Fatal("HasBackupData() = true, want false when nothing exists")
+	}
+	if !resp.Data.SiteBackupChecked || resp.Data.SiteBackupsDeleteBlocked {
+		t.Fatalf("empty whole-site storage must be confirmed: %+v", resp.Data)
 	}
 }
 

@@ -557,6 +557,11 @@ func executeDeleteSite(task *Task) TaskResult {
 		return TaskResult{Success: false, Message: "网站维护操作尚未结束"}
 	}
 	defer ReleaseSiteOpLock(site.ID)
+	if blocked, err := HasSiteBackupArtifacts(context.Background(), site); err != nil {
+		return taskFailure("检查整站备份及恢复现场失败", err)
+	} else if blocked {
+		return TaskResult{Message: "网站仍有整站备份或恢复安全记录，请先管理这些记录；不会直接删除网站或安全副本"}
+	}
 	if blocked, err := database.IsAIDevelopmentAccessBlocking(context.Background(), database.GetDB(), int64(site.ID)); err != nil {
 		return TaskResult{Success: false, Message: "检查 AI 开发授权失败"}
 	} else if blocked {
@@ -997,6 +1002,13 @@ func executeUpdateDomains(task *Task) TaskResult {
 		return TaskResult{Success: false, Message: "网站维护操作尚未结束"}
 	}
 	defer ReleaseSiteOpLock(site.ID)
+	if newDomain := strings.ToLower(strings.TrimSpace(payload.NewDomain)); newDomain != "" && newDomain != site.Domain {
+		if blocked, err := HasSiteBackupArtifacts(context.Background(), site); err != nil {
+			return taskFailure("检查整站备份及恢复现场失败", err)
+		} else if blocked {
+			return TaskResult{Message: "网站仍有整站备份或恢复安全记录，不能更换主域名；附加域名可以单独调整"}
+		}
+	}
 	if blocked, err := database.IsAIDevelopmentAccessBlocking(context.Background(), database.GetDB(), int64(site.ID)); err != nil {
 		return TaskResult{Success: false, Message: "检查 AI 开发授权失败"}
 	} else if blocked {

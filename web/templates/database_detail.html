@@ -132,7 +132,7 @@
                             <th class="py-2 text-left whitespace-nowrap">{{t .Lang "website.size"}}</th>
                             <th class="py-2 text-left whitespace-nowrap">{{t .Lang "website.time"}}</th>
                             <th class="py-2 text-left whitespace-nowrap">{{t .Lang "website.type"}}</th>
-                            <th class="py-2 text-left w-40">{{t .Lang "website.actions"}}</th>
+                            <th class="py-2 text-left whitespace-nowrap database-backup-action-cell">{{t .Lang "website.actions"}}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -142,11 +142,11 @@
                                 <td class="py-2 text-xs whitespace-nowrap" x-text="formatBytes(b.file_size)"></td>
                                 <td class="py-2 text-xs whitespace-nowrap" x-text="formatDateTime(b.created_at)"></td>
                                 <td class="py-2 whitespace-nowrap"><span :class="b.auto ? 'badge-info' : 'badge-success'" class="text-xs" x-text="b.auto ? t('website.backup_auto') : t('website.backup_manual')"></span></td>
-                                <td class="py-2">
-                                    <div class="flex flex-wrap gap-1">
-                                        <button @click="downloadBackup(b)" class="btn-primary text-xs py-1 px-2">{{t .Lang "website.download"}}</button>
-                                        <button @click="restoreBackup(b)" :disabled="restoreBusy()" class="btn-danger text-xs py-1 px-2" x-text="restoringId === b.id ? restoreStatusLabel() : t('website.restore')"></button>
-                                        <button @click="deleteBackup(b)" :disabled="restoreBusy()" class="btn-secondary text-xs py-1 px-2">{{t .Lang "website.delete"}}</button>
+                                <td class="py-2 database-backup-action-cell">
+                                    <div class="database-backup-actions">
+                                        <button @click="downloadBackup(b)" class="btn-secondary text-xs py-1 px-2">{{t .Lang "website.download"}}</button>
+                                        <button @click="restoreBackup(b)" :disabled="restoreBusy()" class="btn-secondary text-xs py-1 px-2 database-backup-restore" x-text="restoringId === b.id ? restoreStatusLabel() : t('website.restore')"></button>
+                                        <button @click="deleteBackup(b)" :disabled="restoreBusy()" class="btn-danger text-xs py-1 px-2 database-backup-delete">{{t .Lang "website.delete"}}</button>
                                     </div>
                                 </td>
                             </tr>
@@ -260,6 +260,13 @@
     </div>
 </div>
 
+<style>
+    .database-backup-action-cell { min-width: 230px; width: 25%; padding-left: 20px; }
+    .database-backup-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+    .database-backup-actions > button { flex-shrink: 0; white-space: nowrap; font-weight: 500; }
+    .database-backup-actions .database-backup-restore { color: var(--panel-accent); }
+    .database-backup-actions .database-backup-delete { margin-left: auto; }
+</style>
 <script>
 function databaseDetail() {
     return {

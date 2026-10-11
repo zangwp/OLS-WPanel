@@ -88,6 +88,9 @@ var i18nKeys = []string{
 	"cloudflare_security.token_step",
 	"cloudflare_security.open_tokens",
 	"cloudflare_security.permissions_help",
+	"cloudflare_security.permission_zone_read",
+	"cloudflare_security.permission_zone_waf_edit",
+	"cloudflare_security.permissions_note",
 	"cloudflare_security.resource_help",
 	"cloudflare_security.id_step",
 	"cloudflare_security.finish_step",
@@ -474,6 +477,47 @@ var i18nKeys = []string{
 	"website.ssl_precheck_warning",
 	"backups.backup_auto",
 	"backups.backup_manual",
+	"backups.site_section_title",
+	"backups.site_backup_help",
+	"backups.backup_site_now",
+	"backups.restore_site",
+	"backups.choose_site_backup",
+	"backups.site_set_id",
+	"backups.site_set_complete",
+	"backups.site_set_incomplete",
+	"backups.site_set_local_missing",
+	"backups.database_size",
+	"backups.files_size",
+	"backups.download_files",
+	"backups.download_database",
+	"backups.delete_site_backup",
+	"backups.empty_site_help",
+	"backups.site_backup_supported_help",
+	"backups.site_maintenance",
+	"backups.single_item_operations",
+	"backups.backup_files_now",
+	"backups.file_backup_immediate_help",
+	"backups.confirm_backup_site",
+	"backups.confirm_restore_site",
+	"backups.confirm_delete_site_backup",
+	"backups.operation_confirming",
+	"backups.operation_starting",
+	"backups.operation_checking",
+	"backups.operation_waiting",
+	"backups.operation_running",
+	"backups.operation_success",
+	"backups.operation_failed",
+	"backups.operation_status_unknown",
+	"backups.operation_no_active_task",
+	"backups.operation_task_missing",
+	"backups.refresh_operation_status",
+	"backups.summary_site_count",
+	"backups.recover_maintenance",
+	"backups.confirm_recover_maintenance",
+	"backups.recovery_running",
+	"backups.recovery_status_unknown",
+	"backups.recovery_access_active",
+	"backups.recovery_still_maintenance",
 	"backups.authorize_delete_tasks",
 	"backups.authorize_rebuild_tasks",
 	"backups.batch_saved",
@@ -1024,6 +1068,11 @@ var i18nKeys = []string{
 	"website.delete_has_backups_warning",
 	"website.delete_backup_check_failed_warning",
 	"website.backup_conflict_db_count",
+	"website.backup_conflict_site_count",
+	"website.backup_conflict_site_unrecognized_count",
+	"website.delete_site_backups_blocked",
+	"website.delete_backup_check_failed_blocked",
+	"website.site_backup_delete_blocked",
 	"website.backup_conflict_file_count",
 	"website.backup_conflict_auto_enabled",
 	"website.backup_conflict_cron_jobs",
@@ -2280,6 +2329,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 
 	pluginGroup := r.Group(prefix)
 	pluginGroup.Use(middleware.RandomPath(suffix))
+	pluginGroup.Use(handlers.WebsiteBackupMaintenanceGuard())
 	pluginGroup.GET("/api/sites/find", cacheHelper.FindByDomain)
 	pluginGroup.POST("/api/sites/companion/update", cacheHelper.UpdateCompanionPlugin)
 	maintenanceHandler := &handlers.MaintenanceHandler{}
@@ -2302,6 +2352,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 		c.Next()
 	})
 	protected.Use(middleware.CSRF())
+	protected.Use(handlers.WebsiteBackupMaintenanceGuard())
 	protected.GET("/api/websites/:id/maintenance", maintenanceHandler.Panel)
 	protected.PUT("/api/websites/:id/maintenance", maintenanceHandler.Panel)
 	protected.POST("/api/websites/:id/maintenance/relock", maintenanceHandler.Panel)
@@ -2315,6 +2366,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	// layers, but do not apply the panel API CSRF header requirement to its HTML forms.
 	adminerTool := panelGroup.Group("")
 	adminerTool.Use(middleware.SessionRequired())
+	adminerTool.Use(handlers.WebsiteBackupMaintenanceGuard())
 	adminerHandler := &handlers.AdminerHandler{}
 	adminerTool.Any("/tools/adminer/:id", adminerHandler.Proxy)
 	adminerTool.Any("/tools/adminer/:id/*path", adminerHandler.Proxy)
@@ -2439,6 +2491,14 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	backupHandler := &handlers.BackupHandler{}
 	protected.GET("/api/websites/:id/backups", backupHandler.List)
 	protected.POST("/api/websites/:id/backups", backupHandler.Create)
+	protected.POST("/api/websites/:id/site-backups", backupHandler.CreateSiteBackup)
+	protected.POST("/api/websites/:id/site-backups/recover-maintenance", backupHandler.RecoverSiteBackupMaintenance)
+	protected.POST("/api/websites/:id/site-backups/:bid/restore", backupHandler.RestoreSiteBackup)
+	protected.DELETE("/api/websites/:id/site-backups/:bid", backupHandler.DeleteSiteBackup)
+	protected.GET("/api/websites/:id/site-backups/:bid/download", backupHandler.DownloadSiteBackup)
+	protected.POST("/api/websites/:id/file-backups", backupHandler.CreateFileBackup)
+	protected.GET("/api/websites/:id/backups/tasks/:task_id", backupHandler.BackupOperationStatus)
+	protected.GET("/api/websites/:id/backups/active-operation", backupHandler.ActiveBackupOperation)
 	protected.DELETE("/api/websites/:id/backups/:bid", backupHandler.Delete)
 	protected.GET("/api/websites/:id/backups/:bid/download", backupHandler.Download)
 	protected.POST("/api/websites/:id/backups/:bid/restore", backupHandler.Restore)
