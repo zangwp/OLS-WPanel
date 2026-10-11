@@ -213,7 +213,20 @@ function websiteList() {
                     const usageResp = await api('/websites/' + site.id + '/backup-usage', { silent: true });
                     if (usageResp.success) {
                         const usage = usageResp.data;
+                        const countKeys = ['site_backup_count', 'site_backup_incomplete_count', 'site_backup_attention_count', 'site_backup_unrecognized_count'];
+                        if (!usage || usage.site_backup_checked !== true || typeof usage.site_backups_delete_blocked !== 'boolean' ||
+                            countKeys.some(key => !Number.isInteger(usage[key]) || usage[key] < 0)) {
+                            throw new Error(t('website.delete_backup_check_failed_blocked', {domain:site.domain}));
+                        }
                         const items = [];
+                        if (usage.site_backup_count > 0) items.push(t('website.backup_conflict_site_count', {
+                            count:usage.site_backup_count, incomplete:usage.site_backup_incomplete_count, attention:usage.site_backup_attention_count
+                        }));
+                        if (usage.site_backup_unrecognized_count > 0) items.push(t('website.backup_conflict_site_unrecognized_count', {count:usage.site_backup_unrecognized_count}));
+                        if (usage.site_backups_delete_blocked || usage.site_backup_count > 0 || usage.site_backup_unrecognized_count > 0) {
+                            await alertModal(t('website.delete_site_backups_blocked', {domain:site.domain, items:items.join('\n')}));
+                            return;
+                        }
                         if (usage.db_backup_count > 0) items.push(t('website.backup_conflict_db_count', { count: usage.db_backup_count }));
                         if (usage.file_backup_count > 0) items.push(t('website.backup_conflict_file_count', { count: usage.file_backup_count }));
                         if (usage.auto_backup_enabled) items.push(t('website.backup_conflict_auto_enabled'));
@@ -223,11 +236,10 @@ function websiteList() {
                         if (items.length) {
                             confirmMsg = t('website.delete_has_backups_warning', { domain: site.domain, items: items.join('\n') });
                         }
-                    } else {
-                        confirmMsg = t('website.delete_backup_check_failed_warning', { domain: site.domain });
-                    }
+                    } else throw new Error(t('website.delete_backup_check_failed_blocked', {domain:site.domain}));
                 } catch (e) {
-                    confirmMsg = t('website.delete_backup_check_failed_warning', { domain: site.domain });
+                    await alertModal(t('website.delete_backup_check_failed_blocked', {domain:site.domain}));
+                    return;
                 }
                 if (!await confirmModal(confirmMsg)) return;
                 try {

@@ -33,6 +33,10 @@ type SiteBackupOverview struct {
 	SiteID                int                  `json:"site_id"`
 	Domain                string               `json:"domain"`
 	Status                string               `json:"status"`
+	SiteType              string               `json:"site_type"`
+	DocumentRootSubdir    string               `json:"document_root_subdir"`
+	SiteBackups           []models.SiteBackup  `json:"site_backups"`
+	SiteBackupsError      string               `json:"site_backups_error,omitempty"`
 	RemoteStatus          string               `json:"remote_status"`
 	RemoteRebuildRequired bool                 `json:"remote_rebuild_required"`
 	RemoteMessage         string               `json:"remote_message"`
@@ -48,27 +52,33 @@ func GetBackupOverview(c *gin.Context) {
 
 	sites := []SiteBackupOverview{}
 	siteIndex := map[int]int{}
+	siteBindings := map[int]*models.Website{}
 
-	rows, err := db.Query(`SELECT id, domain, status FROM websites ORDER BY domain`)
+	rows, err := db.Query(`SELECT id,domain,status,site_type,document_root_subdir,web_root,db_name,db_user,system_user FROM websites ORDER BY domain`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询网站列表失败"))
 		return
 	}
 	for rows.Next() {
 		var id int
-		var domain, status string
-		if err := rows.Scan(&id, &domain, &status); err != nil {
+		var domain, status, siteType, documentRoot, webRoot, dbName, dbUser, systemUser string
+		if err := rows.Scan(&id, &domain, &status, &siteType, &documentRoot, &webRoot, &dbName, &dbUser, &systemUser); err != nil {
 			log.Printf("备份总览: 扫描网站列表行失败: %v", err)
 			continue
 		}
 		siteIndex[id] = len(sites)
+		siteBindings[id] = &models.Website{ID: id, Domain: domain, Status: models.WebsiteStatus(status), SiteType: siteType,
+			DocumentRootSubdir: documentRoot, WebRoot: webRoot, DBName: dbName, DBUser: dbUser, SystemUser: systemUser}
 		sites = append(sites, SiteBackupOverview{
-			SiteID:       id,
-			Domain:       domain,
-			Status:       status,
-			RemoteStatus: "unknown",
-			DBBackups:    []OverviewDBBackup{},
-			FileBackups:  []OverviewFileBackup{},
+			SiteID:             id,
+			Domain:             domain,
+			Status:             status,
+			SiteType:           siteType,
+			DocumentRootSubdir: documentRoot,
+			SiteBackups:        []models.SiteBackup{},
+			RemoteStatus:       "unknown",
+			DBBackups:          []OverviewDBBackup{},
+			FileBackups:        []OverviewFileBackup{},
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -154,6 +164,19 @@ func GetBackupOverview(c *gin.Context) {
 		return
 	}
 	fileRows.Close()
+	// Old independent records are never inferred to be one recovery point.
+	// Complete points are recorded by the coordinated executor in private
+	// manifests, independently from the ordinary backup rotation policies.
+	for i := range sites {
+		points, err := listSiteBackupSets(c.Request.Context(), siteBindings[sites[i].SiteID])
+		if err != nil {
+			log.Printf("备份总览: 网站 %d 整站备份清单读取失败: %v", sites[i].SiteID, err)
+			sites[i].SiteBackupsError = "整站备份清单未能完整读取，请检查备份目录和维护状态"
+		}
+		if points != nil {
+			sites[i].SiteBackups = points
+		}
+	}
 
 	panelBackupDir := filepath.Join(cfg.Panel.BackupDir, "panel-db")
 	panelBackups, err := database.ListDBBackups(panelBackupDir)

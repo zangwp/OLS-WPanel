@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.21.6 — 2026-10-11
+
+- Adds immediate whole-site backup and restoration using paired, checksummed database and file components under one backup ID. Uses a controlled maintenance window to pause managed writes, locks the database account and freezes the file tree; refuses unsupported or uncertain states instead of combining independent archives by timestamp.
+- Retains private pre-restore copies of both components and a persistent operation journal. A failed restore rolls both components back; incomplete or unconfirmed recovery keeps maintenance active. Access recovery validates the current journal and never reports an interrupted restore as successful.
+- Serializes file mutations and backups, including file-manager writes and remote imports. Prevents website deletion or main-domain changes while whole-site backup or recovery data remain, or their state cannot be verified. Checks existing migration protection before inspecting backup paths so migrating sites retain the correct blocking reason.
+- Fixes double gzip compression of whole-site database exports. Adds a real subprocess roundtrip through export, decompression and restore input, plus failed-export and cancellation cleanup coverage.
+- Adds immediate full-file backup without creating a scheduled task. Aligns database and file backup selectors, metadata and actions, improves mobile layout, and places database backup actions on one row with deletion separated. Clarifies that showing five database backups is a display limit; configured retention counts manual and automatic backups together.
+- Uses bright blue, orange and green for dashboard resource curves and corresponding legends and progress bars. Lists the two required Cloudflare Token zone permissions separately and clarifies resource scope and existing additional permissions.
+
+Upgrade notes: no database migration is added. Whole-site backup points and restore safety copies are local only, without automatic rotation or legacy remote synchronization; delete old backup points explicitly. Independent database and file archives remain separate versions. Linux CI and local regression checks do not substitute for a restore rehearsal on the target VPS. See the operations and recovery guide for supported configurations and maintenance recovery.
+
 ## v1.21.5 — 2026-10-10
 
 - Places each website's database and file backups side by side, with independent version selection, timestamps, download, deletion and restore actions. Database and file archives are not presented as a shared snapshot. Sites without backups retain links to immediate backup and task management.

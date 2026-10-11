@@ -94,6 +94,16 @@ func (h *FileHandler) RemoteImport(c *gin.Context) {
 		c.JSON(http.StatusForbidden, models.ErrorResponse(i18n.TE(c.Request, "files.path_out_of_bounds")))
 		return
 	}
+	lease, admitted := beginFileMutation(c, fileMutationTarget{ID: *req.SiteID, Root: basePath})
+	if !admitted {
+		return
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			_ = lease.Close()
+		}
+	}()
 	// The destination is resolved and checked before the asynchronous download starts.
 	// runRemoteImport writes only this exact path; any future extraction or additional
 	// destination must perform its own file-lock check before writing.
@@ -125,7 +135,10 @@ func (h *FileHandler) RemoteImport(c *gin.Context) {
 	}
 
 	task := createRemoteImportTask(filename, lang)
-	go runRemoteImport(task.ID, u.String(), req.AllowInsecureTLS, *req.SiteID, destPath, siteRoot, systemUser)
+	transferred = true
+	startFileMutationWorker(lease, func() {
+		runRemoteImport(task.ID, u.String(), req.AllowInsecureTLS, *req.SiteID, destPath, siteRoot, systemUser)
+	})
 
 	c.JSON(http.StatusOK, models.SuccessResponse(taskSnapshot(task.ID)))
 }

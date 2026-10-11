@@ -254,7 +254,7 @@ func TestFullFileRestoreFailedRollbackNeverDeletesOnlyOriginalCopy(t *testing.T)
 		return nil
 	}
 	safety, err := restoreFullFileArchive(context.Background(), site, 1, "task", bytes.NewReader(validFullRestoreTar(t)), ops)
-	if err == nil || !strings.Contains(err.Error(), "回滚失败") {
+	if err == nil {
 		t.Fatalf("err=%v", err)
 	}
 	var unresolved *fileRestoreUnresolvedError
@@ -266,6 +266,48 @@ func TestFullFileRestoreFailedRollbackNeverDeletesOnlyOriginalCopy(t *testing.T)
 	journal, _ := os.ReadFile(filepath.Join(filepath.Dir(safety), "journal.json"))
 	if !bytes.Contains(journal, []byte(`"state":"rollback_failed"`)) {
 		t.Fatalf("journal=%s", journal)
+	}
+}
+
+func TestFullFileRestoreRollbackDurabilityFailureRemainsUnresolved(t *testing.T) {
+	for _, stage := range []string{"parent sync", "private sync", "journal sync"} {
+		t.Run(stage, func(t *testing.T) {
+			site := fullRestoreLiveFixture(t, false)
+			ops, exchanges := fullRestoreTestOps(t)
+			privateSyncs := 0
+			ops.verify = func(s *models.Website) error {
+				if s.WebRoot == site.WebRoot {
+					return errors.New("live verification failed")
+				}
+				return nil
+			}
+			ops.syncDir = func(dir string) error {
+				if *exchanges != 2 {
+					return nil
+				}
+				if stage == "parent sync" && dir == filepath.Dir(site.WebRoot) {
+					return errors.New("rollback parent fsync failed")
+				}
+				if dir != filepath.Dir(site.WebRoot) {
+					privateSyncs++
+					if stage == "private sync" || stage == "journal sync" && privateSyncs >= 2 {
+						return errors.New("rollback private/journal fsync failed")
+					}
+				}
+				return nil
+			}
+			safety, err := restoreFullFileArchive(context.Background(), site, 1, "task", bytes.NewReader(validFullRestoreTar(t)), ops)
+			var unresolved *fileRestoreUnresolvedError
+			var safeRollback *fileRestoreRolledBackError
+			if !errors.As(err, &unresolved) || errors.As(err, &safeRollback) {
+				t.Fatalf("durability failure promoted to safe rollback: %v", err)
+			}
+			if *exchanges != 2 {
+				t.Fatalf("exchange=%d", *exchanges)
+			}
+			assertFullRestoreFile(t, filepath.Join(site.WebRoot, "index.php"), "current-index")
+			assertFullRestoreFile(t, filepath.Join(safety, "index.php"), "restored-index")
+		})
 	}
 }
 

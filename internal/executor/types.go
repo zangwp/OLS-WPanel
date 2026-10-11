@@ -30,6 +30,9 @@ const (
 	TaskCreateBackup      TaskType = "create_backup"
 	TaskRestoreBackup     TaskType = "restore_backup"
 	TaskRestoreFileBackup TaskType = "restore_file_backup"
+	TaskCreateFileBackup  TaskType = "create_file_backup"
+	TaskCreateSiteBackup  TaskType = "create_site_backup"
+	TaskRestoreSiteBackup TaskType = "restore_site_backup"
 	TaskSetFileLock       TaskType = "set_file_lock"
 )
 
@@ -168,4 +171,19 @@ type RestoreBackupPayload struct {
 type RestoreFileBackupPayload struct {
 	Site     *models.Website `json:"-"`
 	BackupID int             `json:"backup_id"`
+}
+
+type CreateFileBackupPayload struct {
+	Site *models.Website `json:"-"`
+}
+
+type SiteBackupPayload struct {
+	Site                          *models.Website `json:"-"`
+	ConfirmExternalWritersStopped bool            `json:"-"`
+}
+
+type RestoreSiteBackupPayload struct {
+	Site                          *models.Website `json:"-"`
+	BackupID                      string          `json:"backup_id"`
+	ConfirmExternalWritersStopped bool            `json:"-"`
 }
