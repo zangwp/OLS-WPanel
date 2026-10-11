@@ -123,13 +123,33 @@ func (s *Service) Get(ctx context.Context, id int) (Status, error) {
 		cfg.Hostname = host
 	}
 	s.populateWebsiteStatus(ctx, &cfg)
-	if ips, err := s.activeIPs(ctx); err == nil {
-		cfg.ActiveIPCount = len(ips)
-		cfg.ActiveIPCountKnown = true
-	}
+	s.populateBanStatus(ctx, &cfg)
 	return cfg.Status, nil
 }
+
+func (s *Service) populateBanStatus(ctx context.Context, cfg *storedConfig) {
+	ips, err := s.activeIPs(ctx)
+	if err != nil {
+		return
+	}
+	cfg.ActiveIPCount = len(ips)
+	cfg.ActiveIPCountKnown = true
+	if cfg.Enabled && cfg.RuleID != "" && cfg.SyncStatus == "synced" {
+		// The current blacklist can change between reconciliations (including
+		// immediately after a successful write). Do not claim the remote rule
+		// is on standby or fully synced until its verified hash matches.
+		text, err := expressionForHosts(cfg.WebsiteHostnames, ips)
+		if err != nil || ruleHash(desiredRule(*cfg, text)) != cfg.AppliedHash {
+			cfg.SyncStatus = "pending"
+		}
+	}
+}
 func (s *Service) populateWebsiteStatus(ctx context.Context, cfg *storedConfig) {
+	// Older releases reported an empty desired set as synced without a rule.
+	// Such configurations now need the standby rule created by the next sync.
+	if cfg.Enabled && cfg.SyncStatus == "synced" && cfg.RuleID == "" {
+		cfg.SyncStatus = "pending"
+	}
 	hosts, err := s.websiteHosts(ctx, cfg.SiteID)
 	if err != nil {
 		cfg.CoverageError = err.Error()
@@ -457,15 +477,13 @@ func (s *Service) Sync(ctx context.Context, id int) (Status, error) {
 		if err != nil {
 			return Status{}, s.fail(ctx, id, err)
 		}
-		// An empty blacklist must release the old owned rule even if a newly
-		// configured hostname/alias is invalid. Cleanup uses only its saved binding.
-		if len(ips) > 0 {
-			if hostErr != nil {
-				return Status{}, s.coverageFail(ctx, id, hostErr)
-			}
-			if cfg.Hostname != host {
-				return Status{}, s.fail(ctx, id, errors.New("网站域名已变更，请关闭并清理原域名规则后重新配置"))
-			}
+		// Standby rules require the same exact website binding as active rules.
+		// Only explicit disabled/deleting cleanup may ignore changed hostnames.
+		if hostErr != nil {
+			return Status{}, s.coverageFail(ctx, id, hostErr)
+		}
+		if cfg.Hostname != host {
+			return Status{}, s.fail(ctx, id, errors.New("网站域名已变更，请关闭并清理原域名规则后重新配置"))
 		}
 	}
 	token, err := s.open(id, cfg.Ciphertext)
@@ -478,7 +496,7 @@ func (s *Service) Sync(ctx context.Context, id int) (Status, error) {
 	}
 	cfg.ZoneName = z.Name
 	text := ""
-	if cfg.Enabled && len(ips) > 0 {
+	if cfg.Enabled {
 		hosts, err := s.websiteHosts(ctx, id)
 		if err != nil {
 			return Status{}, s.coverageFail(ctx, id, err)
@@ -507,8 +525,8 @@ func (s *Service) Sync(ctx context.Context, id int) (Status, error) {
 		return Status{}, s.fail(ctx, id, err)
 	}
 	if errors.Is(err, ErrAPIAbsent) {
-		if !cfg.Enabled || len(ips) == 0 {
-			return s.finish(ctx, cfg, "disabled_or_empty", "", "", "")
+		if !cfg.Enabled {
+			return s.finish(ctx, cfg, "disabled", "", "", "")
 		}
 		if err = s.pending(ctx, id, ruleHash(wanted), "", nil); err != nil {
 			return Status{}, err
@@ -543,17 +561,13 @@ func (s *Service) Sync(ctx context.Context, id int) (Status, error) {
 			current = &rs.Rules[i]
 		}
 	}
-	if !cfg.Enabled || len(ips) == 0 {
+	if !cfg.Enabled {
 		if current != nil {
 			if err = s.Client.request(ctx, token, http.MethodDelete, "/zones/"+cfg.ZoneID+"/rulesets/"+rs.ID+"/rules/"+current.ID, nil, nil); err != nil && !errors.Is(err, ErrAPIAbsent) {
 				return Status{}, s.fail(ctx, id, err)
 			}
 		}
-		state := "synced"
-		if !cfg.Enabled {
-			state = "disabled"
-		}
-		return s.finish(ctx, cfg, state, "", "", "")
+		return s.finish(ctx, cfg, "disabled", "", "", "")
 	}
 	if current != nil && ruleHash(*current) == ruleHash(wanted) {
 		return s.finish(ctx, cfg, "synced", rs.ID, current.ID, ruleHash(wanted))
@@ -613,12 +627,6 @@ func (s *Service) coverageFail(ctx context.Context, id int, err error) error {
 	return s.fail(ctx, id, err)
 }
 func (s *Service) finish(ctx context.Context, cfg storedConfig, state, rulesetID, ruleID, hash string) (Status, error) {
-	if state == "disabled_or_empty" {
-		state = "synced"
-		if !cfg.Enabled {
-			state = "disabled"
-		}
-	}
 	if ruleID == "" {
 		cfg.CoveredHostnames = []string{}
 	}
@@ -632,10 +640,7 @@ func (s *Service) finish(ctx context.Context, cfg storedConfig, state, rulesetID
 		return Status{}, err
 	}
 	s.populateWebsiteStatus(ctx, &result)
-	if ips, err := s.activeIPs(ctx); err == nil {
-		result.ActiveIPCount = len(ips)
-		result.ActiveIPCountKnown = true
-	}
+	s.populateBanStatus(ctx, &result)
 	return result.Status, nil
 }
 func (s *Service) SyncAll(ctx context.Context) error {

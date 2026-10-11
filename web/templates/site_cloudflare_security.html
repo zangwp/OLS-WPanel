@@ -32,8 +32,11 @@
             <div><dt>{{t .Lang "cloudflare_security.detected_zone"}}</dt><dd x-text="cloudflareZoneName()"></dd></div>
             <div><dt>{{t .Lang "cloudflare_security.status"}}</dt><dd x-text="cloudflareStatusLabel()"></dd></div>
             <div><dt>{{t .Lang "cloudflare_security.last_sync"}}</dt><dd x-text="cloudflareSyncTime()"></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.active_ip_count"}}</dt><dd x-text="cloudflareActiveIPCount()"></dd></div>
+            <div class="site-cloudflare-coverage"><dt>Rule ID</dt><dd class="font-mono" x-text="cfConfig.rule_id || t('cloudflare_security.rule_pending')"></dd></div>
             <div class="site-cloudflare-coverage"><dt>{{t .Lang "cloudflare_security.covered_hostnames"}}</dt><dd x-text="cfConfig.covered_hostnames?.length ? cfConfig.covered_hostnames.join(', ') : t('cloudflare_security.coverage_pending')"></dd></div>
         </dl>
+        <p class="site-cloudflare-muted" x-show="cloudflareStatus() === 'ready'" x-cloak>{{t .Lang "cloudflare_security.standby_help"}}</p>
         <p class="site-cloudflare-muted" x-show="cfTestInfo">{{t .Lang "cloudflare_security.zone_test_result"}}</p>
         <p class="site-cloudflare-error" x-show="cfConfig.coverage_error && !cfError" x-text="cfConfig.coverage_error"></p>
         <p class="site-cloudflare-error" x-show="cfConfig.last_error && !cfError && cfConfig.last_error !== cfConfig.coverage_error" x-text="cfConfig.last_error"></p>
@@ -105,19 +108,28 @@ function siteCloudflareSecurity() {
         cloudflareBindingLocked() { return !!this.cfConfig.cleanup_required || !!this.cfConfig.rule_id || this.cfConfig.sync_status === 'removal_required'; },
         canSyncCloudflare() { return this.cfLoaded && !this.cfBusy && !this.cloudflareDirty() && (this.cfConfig.enabled || this.cloudflareBindingLocked()); },
         applyCloudflareConfig(data, siteID) {
-            if (!data || Number(data.site_id) !== Number(siteID) || typeof data.hostname !== 'string' || !data.hostname || data.scope !== 'shared_web_bans' || typeof data.enabled !== 'boolean' || typeof data.token_configured !== 'boolean' || typeof data.account_id !== 'string' || !this.cloudflareZoneIDValid(data.zone_id)) throw new Error(t('cloudflare_security.invalid_response'));
+            if (!data || Number(data.site_id) !== Number(siteID) || typeof data.hostname !== 'string' || !data.hostname || data.scope !== 'shared_web_bans' || typeof data.enabled !== 'boolean' || typeof data.token_configured !== 'boolean' || typeof data.account_id !== 'string' || !this.cloudflareZoneIDValid(data.zone_id) || !this.cloudflareZoneIDValid(data.rule_id) || typeof data.active_ip_count_known !== 'boolean' || !Number.isSafeInteger(data.active_ip_count) || data.active_ip_count < 0) throw new Error(t('cloudflare_security.invalid_response'));
             const websiteHostnames = this.cloudflareHostnameList(data.website_hostnames);
             const coveredHostnames = this.cloudflareHostnameList(data.covered_hostnames);
-            this.cfConfig = {site_id: data.site_id, hostname: data.hostname, enabled: data.enabled, account_id: data.account_id, zone_id: data.zone_id, zone_name: String(data.zone_name || ''), token_configured: data.token_configured, cleanup_required: !!data.cleanup_required, rule_id: String(data.rule_id || ''), sync_status: String(data.sync_status || ''), last_sync_at: String(data.last_sync_at || ''), last_error: String(data.last_error || ''), website_hostnames: websiteHostnames, covered_hostnames: coveredHostnames, coverage_error: String(data.coverage_error || '')};
+            this.cfConfig = {site_id: data.site_id, hostname: data.hostname, enabled: data.enabled, account_id: data.account_id, zone_id: data.zone_id, zone_name: String(data.zone_name || ''), token_configured: data.token_configured, cleanup_required: !!data.cleanup_required, rule_id: data.rule_id, sync_status: String(data.sync_status || ''), last_sync_at: String(data.last_sync_at || ''), last_error: String(data.last_error || ''), website_hostnames: websiteHostnames, covered_hostnames: coveredHostnames, coverage_error: String(data.coverage_error || ''), active_ip_count: data.active_ip_count, active_ip_count_known: data.active_ip_count_known};
             this.cfForm = {enabled: data.enabled, account_id: data.account_id}; this.cfLoaded = true; this.cfTestInfo = null;
         },
         cloudflareHostnameList(value) { if (value === undefined) return []; if (!Array.isArray(value) || value.some(hostname => typeof hostname !== 'string' || !hostname)) throw new Error(t('cloudflare_security.invalid_response')); return [...new Set(value)]; },
         cloudflareZoneIDValid(value) { return typeof value === 'string' && (value === '' || /^[a-fA-F0-9]{32}$/.test(value)); },
         cloudflareZoneName() { return this.cfTestInfo?.zone_name || this.cfConfig.zone_name || ((this.cfTestInfo?.zone_id || this.cfConfig.zone_id) ? t('cloudflare_security.zone_name_pending') : t('cloudflare_security.zone_pending')); },
         cloudflareWebsiteHostnames() { return this.cfConfig.website_hostnames?.length ? this.cfConfig.website_hostnames : (this.site?.domain ? [this.site.domain] : []); },
+        cloudflareActiveIPCount() { return this.cfLoaded && this.cfConfig.active_ip_count_known ? String(this.cfConfig.active_ip_count) : t('cloudflare_security.active_ip_count_unknown'); },
+        cloudflareStatus() {
+            if (!this.cfLoaded) return 'unknown';
+            if (this.cfError || this.cfConfig.last_error || this.cfConfig.coverage_error) return 'error';
+            if (this.cfConfig.enabled && this.cfConfig.sync_status === 'synced') {
+                if (!this.cfConfig.rule_id) return 'rule_missing';
+                if (this.cfConfig.active_ip_count_known && this.cfConfig.active_ip_count === 0) return 'ready';
+            }
+            return this.cfConfig.sync_status;
+        },
         cloudflareStatusLabel() {
-            if (!this.cfLoaded) return t('cloudflare_security.status_unknown');
-            const key = 'cloudflare_security.status_' + this.cfConfig.sync_status;
+            const key = 'cloudflare_security.status_' + this.cloudflareStatus();
             const label = t(key);
             return label !== key ? label : t('cloudflare_security.status_unknown');
         },
@@ -151,7 +163,10 @@ function siteCloudflareSecurity() {
                 else {
                     this.applyCloudflareConfig(response.data, siteID);
                     if (action === 'save') { this.cfToken = ''; this.cfNotice = t('cloudflare_security.saved'); }
-                    if (action === 'sync') this.cfNotice = t('cloudflare_security.synced');
+                    if (action === 'sync') {
+                        if (this.cloudflareStatus() === 'error') throw new Error(this.cfConfig.last_error || this.cfConfig.coverage_error || t('cloudflare_security.request_failed'));
+                        this.cfNotice = !this.cfConfig.enabled && !this.cloudflareBindingLocked() && this.cfConfig.sync_status === 'disabled' ? t('cloudflare_security.rule_removed') : this.cloudflareStatusLabel();
+                    }
                 }
                 return true;
             } catch(error) {
