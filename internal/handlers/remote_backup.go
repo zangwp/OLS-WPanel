@@ -303,6 +303,10 @@ func TestRemoteBackup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("请先填写远程服务器地址"))
 		return
 	}
+	if err := executor.RequireSSHBackupDependencies(authType); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()+"；请在软件管理中补齐备份工具"))
+		return
+	}
 	if err := executor.ValidateRemoteBackupSettings(host, port, username, authType, remotePath); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
 		return

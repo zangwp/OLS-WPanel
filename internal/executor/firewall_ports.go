@@ -95,9 +95,12 @@ type FirewallPortRuleRequest struct {
 }
 
 type FirewallProtectionResult struct {
-	ConfirmationToken string    `json:"confirmation_token"`
-	ChangeID          string    `json:"change_id,omitempty"`
-	Deadline          time.Time `json:"deadline"`
+	ConfirmationToken     string    `json:"confirmation_token"`
+	ChangeID              string    `json:"change_id,omitempty"`
+	Deadline              time.Time `json:"deadline"`
+	RequiresConfirmation  bool      `json:"requires_confirmation"`
+	RequiresSSHValidation bool      `json:"requires_ssh_validation"`
+	Saved                 bool      `json:"saved"`
 }
 
 type managedRuleRuntime struct {
@@ -847,7 +850,7 @@ func EnableFirewallProtection(managementIP string) (FirewallProtectionResult, er
 	protectionMu.Unlock()
 	rollback = false
 	recordOperationLog("firewall_protection_enable", "inet/filter/input", "pending", "rollback_deadline="+deadline.UTC().Format(time.RFC3339))
-	return FirewallProtectionResult{ConfirmationToken: token, Deadline: deadline}, nil
+	return FirewallProtectionResult{ConfirmationToken: token, Deadline: deadline, RequiresConfirmation: true}, nil
 }
 
 func persistCurrentNftablesRules(ctx context.Context) error {

@@ -43,6 +43,7 @@
                 <div class="mb-3">
                     <label for="alert-smtp_user" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.sender_email"}}</label>
                     <input id="alert-smtp_user" type="text" x-model="cfg.smtp_user" class="input-field text-sm">
+                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "alert.sender_email_help"}}</p>
                 </div>
                 <div class="mb-3">
                     <label for="alert-smtp_pass" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.password_or_token"}}</label>
@@ -51,6 +52,7 @@
                 <div class="mb-3">
                     <label for="alert-admin_email" class="text-sm text-gray-300 mb-1 block">{{t .Lang "alert.admin_email"}}</label>
                     <input id="alert-admin_email" type="text" x-model="cfg.admin_email" class="input-field text-sm" placeholder="admin@example.com">
+                    <p class="text-xs text-gray-500 mt-1">{{t .Lang "alert.admin_email_help"}}</p>
                 </div>
                 <p class="text-xs text-amber-400 mb-3">{{t .Lang "alert.smtp_transfer_warning"}}</p>
                 <div class="flex flex-wrap gap-3">

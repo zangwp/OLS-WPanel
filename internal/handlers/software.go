@@ -25,6 +25,7 @@ type SoftwareHandler struct{}
 
 var softwareGuardSnapshot = executor.GetGuardStatus
 var softwareSetServiceState = executor.SetServiceState
+var softwareClearOPcache = executor.ClearOPcache
 
 var runSoftwareShellCommand = func(command string) ([]byte, error) {
 	return exec.Command("bash", "-c", command).CombinedOutput()
@@ -107,7 +108,9 @@ func (h *SoftwareHandler) DevelopmentTools(c *gin.Context) {
 }
 
 func (h *SoftwareHandler) PHPRuntimes(c *gin.Context) {
-	c.JSON(http.StatusOK, models.SuccessResponse(executor.ListLSPHPRuntimes()))
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	c.JSON(http.StatusOK, models.SuccessResponse(executor.ListLSPHPRuntimesContext(ctx)))
 }
 
 func (h *SoftwareHandler) InstallPHPRuntime(c *gin.Context) {
@@ -619,7 +622,7 @@ func (h *SoftwareHandler) Recommend(c *gin.Context) {
 // 台服务器上其它所有站点的短暂性能抖动）。
 func (h *SoftwareHandler) ClearOpcache(c *gin.Context) {
 	lang := softwareLang(c)
-	if err := executor.ClearOPcache(); err != nil {
+	if err := softwareClearOPcache(); err != nil {
 		log.Printf("清空 OPcache 失败: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, "software.opcache_clear_failed", i18n.P{"error": err.Error()})))
 		return

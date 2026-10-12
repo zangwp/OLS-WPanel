@@ -1,12 +1,36 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 )
+
+const softwareProbeOutputLimit = 512 * 1024
+
+var errSoftwareProbeOutputLimit = errors.New("software probe output exceeds limit")
+
+type softwareProbeOutput struct {
+	bytes.Buffer
+	exceeded bool
+}
+
+func (output *softwareProbeOutput) Write(data []byte) (int, error) {
+	written := len(data)
+	remaining := softwareProbeOutputLimit - output.Len()
+	if len(data) > remaining {
+		output.exceeded = true
+		data = data[:remaining]
+	}
+	_, _ = output.Buffer.Write(data)
+	// Drain excess output until the short command deadline. Returning an error
+	// here can strand the producer on a full pipe before exec.Wait completes.
+	return written, nil
+}
 
 type softwareProbeRunner func(context.Context, string, ...string) ([]byte, error)
 
@@ -49,14 +73,19 @@ func newSoftwareProbeCache(run softwareProbeRunner) *softwareProbeCache {
 func boundedSoftwareRead(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.WaitDelay = time.Second
-	out, err := cmd.CombinedOutput()
+	var output softwareProbeOutput
+	cmd.Stdout, cmd.Stderr = &output, &output
+	err := cmd.Run()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	if err != nil {
 		return nil, err // Partial stderr/stdout is never an installed version.
 	}
-	return out, nil
+	if output.exceeded {
+		return nil, errSoftwareProbeOutputLimit
+	}
+	return output.Bytes(), nil
 }
 
 var softwareReadCache = newSoftwareProbeCache(boundedSoftwareRead)
