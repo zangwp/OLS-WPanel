@@ -63,13 +63,9 @@ o update          更新 / 修复面板
 o uninstall       卸载面板，保留网站、数据库与共享软件
 ```
 
-Swap 入口为 `o → 5. 系统设置 → 3. Swap 管理`，只管理 OLS WPanel 标记的 `/swapfile`，保留已有分区、zram 和外部文件。调整容量会检查临时新文件的完整磁盘占用，并核验运行状态；失败时恢复原文件与配置。删除受管文件保留当前系统 swappiness。
+维护命令需 root 权限，终端菜单目前使用中文。DNS、Swap、SSH 与更新说明见 [终端维护指南](docs/verified-install.md#first-login-and-server-maintenance)，备份恢复与卸载检查见 [日常维护与恢复](docs/operations-and-recovery.md)。
 
-DNS 入口为 `o → 4. 网络设置 → 1. DNS 设置与检测`，支持运行中的 `systemd-resolved` 和普通 `/etc/resolv.conf` 文件。普通文件首次应用前需确认接管，保存原内容、权限和锁定状态；保留 search/options，支持恢复接管前配置。自定义地址需全部通过检测，普通文件最多 3 个，resolved 最多 4 个。DHCP、cloud-init、NetworkManager、resolvconf 和未识别的符号链接保持只读，页面显示具体原因。
-
-时区菜单支持系统可用的 IANA 时区；系统语言工具缺失时可确认安装 locales。SSH 端口变更保留旧端口，要求通过新端口另开 SSH 连接执行返回的 `o ssh-confirm` 命令；独立守护任务在未确认时自动恢复。`o check-update` 分别显示 GitHub 最新发布与短入口实际目标版本，`o update` 不会降级到落后的入口版本。
-
-卸载前会列出删除范围，输入 `Y`（或 `y`）确认，回车取消。卸载后退出管理菜单并移除 `o` / `O` 命令。更新脚本使用已发布的签名安装入口。
+变更 SSH 端口时请保留当前连接，并在新端口另开 SSH 连接执行返回的 `o ssh-confirm` 命令。
 
 ## 文档
 

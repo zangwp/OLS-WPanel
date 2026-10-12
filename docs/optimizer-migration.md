@@ -2,7 +2,7 @@
 
 OLS WPanel no longer installs or automatically upgrades the standalone OLS WPanel Optimizer. Existing sites are migrated explicitly rather than deleting running plugins during a panel restart.
 
-1. Upgrade the panel to v1.14.0.
+1. Upgrade the panel to the latest stable release.
 2. Close any temporary maintenance window and disable site file protection in Website Details.
 3. Open Cache & Performance and select **Migrate and remove old Optimizer**.
 4. Re-enable the required file-protection mode after migration.
