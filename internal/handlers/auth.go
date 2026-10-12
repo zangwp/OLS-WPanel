@@ -48,18 +48,17 @@ type AuthHandler struct {
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
-	accountAuthenticationMu.Lock()
-	defer accountAuthenticationMu.Unlock()
 	c.Header("Cache-Control", "no-store")
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
 	var req models.LoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindAccountRequest(c, &req); err != nil {
 		if !h.recordLoginFailure(c, req.Username) {
 			return
 		}
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "auth.provide_credentials")))
 		return
 	}
+	accountAuthenticationMu.Lock()
+	defer accountAuthenticationMu.Unlock()
 
 	var hash string
 	var adminID int64

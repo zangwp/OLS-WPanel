@@ -35,6 +35,8 @@ type LogAnalysisFinding struct {
 }
 
 type LogAnalysisDetail struct {
+	Truncated                  bool                  `json:"truncated"`
+	BytesScanned               int64                 `json:"bytes_scanned"`
 	Kind                       string                `json:"kind"`
 	Value                      string                `json:"value"`
 	Total                      int                   `json:"total"`

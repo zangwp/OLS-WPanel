@@ -36,9 +36,10 @@ type alertRule struct {
 }
 
 type alertManager struct {
-	mu     sync.Mutex
-	rules  []*alertRule
-	stopCh chan struct{}
+	mu       sync.Mutex
+	rules    []*alertRule
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 type alertCheckResult struct {
@@ -123,9 +124,21 @@ func StartAlertMonitor(currentVersion string) {
 	go alertMgr.loop()
 }
 
+// StopAlertMonitor cancels availability requests and prevents another monitor
+// cycle from starting. Other alert integrations retain their own timeouts.
+func StopAlertMonitor() {
+	alertMgr.stopOnce.Do(func() { close(alertMgr.stopCh) })
+}
+
 func (m *alertManager) loop() {
 	// Initial check without sending (warm up)
-	time.Sleep(30 * time.Second)
+	warmup := time.NewTimer(30 * time.Second)
+	defer warmup.Stop()
+	select {
+	case <-warmup.C:
+	case <-m.stopCh:
+		return
+	}
 	m.runChecks()
 
 	ticker := time.NewTicker(60 * time.Second)
@@ -141,6 +154,11 @@ func (m *alertManager) loop() {
 }
 
 func (m *alertManager) runChecks() {
+	select {
+	case <-m.stopCh:
+		return
+	default:
+	}
 	go runWPAnomalyChecks()
 	go runWPCodeIntegrityChecks()
 
@@ -165,7 +183,7 @@ func (m *alertManager) runChecks() {
 	if runtimeReady["alert_site"] && isRuleEnabled("alert_site") {
 		siteResultCh = make(chan alertCheckResult, 1)
 		go func() {
-			siteResultCh <- checkSitesState()
+			siteResultCh <- checkSitesStateWithStop(m.stopCh)
 		}()
 	}
 	var sslResultCh chan alertCheckResult
@@ -1194,11 +1212,17 @@ func newSiteAvailabilityHTTPClient() *http.Client {
 }
 
 func checkSitesState() alertCheckResult {
+	return checkSitesStateContext(context.Background())
+}
+
+func checkSitesStateContext(parent context.Context) alertCheckResult {
+	ctx, cancel := context.WithTimeout(parent, siteAvailabilityBatchTimeout)
+	defer cancel()
 	db := database.GetDB()
 	if db == nil {
 		return unknownAlertCheck(errors.New("database unavailable"))
 	}
-	rows, err := db.Query(`SELECT id, domain, ssl_enabled, monitoring_interval FROM websites WHERE status = 'active' AND monitoring_enabled = 1`)
+	rows, err := db.QueryContext(ctx, `SELECT id, domain, ssl_enabled, monitoring_interval FROM websites WHERE status = 'active' AND monitoring_enabled = 1`)
 	if err != nil {
 		return unknownAlertCheck(fmt.Errorf("query monitored sites: %w", err))
 	}
@@ -1241,14 +1265,7 @@ func checkSitesState() alertCheckResult {
 		}
 	}
 
-	type checkTarget struct {
-		id       string
-		domain   string
-		url      string
-		ssl      bool
-		interval int
-	}
-	var toCheck []checkTarget
+	var toCheck []siteAvailabilityTarget
 	var msgs []string
 	var unconfirmedFailures []string
 	for _, s := range sites {
@@ -1262,13 +1279,12 @@ func checkSitesState() alertCheckResult {
 			}
 			continue
 		}
-		siteLastCheck[s.id] = time.Now()
 		proto := "http"
 		if s.ssl == 1 {
 			proto = "https"
 		}
 		url := proto + "://" + s.domain + "/?wp_hc=" + strconv.FormatInt(time.Now().Unix(), 10)
-		toCheck = append(toCheck, checkTarget{id: s.id, domain: s.domain, url: url, ssl: s.ssl == 1, interval: s.interval})
+		toCheck = append(toCheck, siteAvailabilityTarget{id: s.id, domain: s.domain, url: url, ssl: s.ssl == 1, interval: s.interval})
 	}
 
 	if len(toCheck) == 0 {
@@ -1284,28 +1300,14 @@ func checkSitesState() alertCheckResult {
 	httpClient := newSiteAvailabilityHTTPClient()
 	defer httpClient.CloseIdleConnections()
 
-	type result struct {
-		id     string
-		domain string
-		code   int
-		err    error
-		target checkTarget
-	}
-	resultCh := make(chan result, len(toCheck))
-	for _, t := range toCheck {
-		go func(t checkTarget) {
-			resp, err := httpClient.Get(t.url)
-			if err != nil {
-				resultCh <- result{id: t.id, domain: t.domain, err: err, target: t}
-				return
-			}
-			resp.Body.Close()
-			resultCh <- result{id: t.id, domain: t.domain, code: resp.StatusCode, target: t}
-		}(t)
-	}
-
-	for range toCheck {
-		r := <-resultCh
+	results, complete := checkSiteAvailabilityTargets(ctx, httpClient, toCheck, siteLastCheck)
+	for _, r := range results {
+		// Batch cancellation is an uncompleted observation, not evidence that
+		// the website failed. Do not postpone its next scheduled attempt.
+		if r.canceled {
+			continue
+		}
+		siteLastCheck[r.id] = time.Now()
 		if r.err != nil {
 			msg := fmt.Sprintf("%s 无法访问 (%v)", r.domain, r.err)
 			siteFailureMessages[r.id] = msg
@@ -1331,6 +1333,9 @@ func checkSitesState() alertCheckResult {
 		recordWebsiteAvailabilityObservation(r.id, r.domain, r.target.ssl, r.target.interval, r.code, siteFailureCounts[r.id], time.Now())
 	}
 
+	if !complete {
+		return unknownAlertCheck(errors.New("site availability batch interrupted; remaining sites will be retried"))
+	}
 	if len(msgs) > 0 {
 		return firingAlertCheck(strings.Join(msgs, "；"))
 	}

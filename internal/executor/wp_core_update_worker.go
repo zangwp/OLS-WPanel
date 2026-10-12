@@ -368,25 +368,21 @@ func (w *WPCoreUpdateWorker) run(ctx context.Context, done chan struct{}) {
 		w.sweep(ctx)
 	}()
 	defer func() { <-sweepDone }()
+	idle := newWorkerIdlePoll(w.pollInterval, wpUpdateWake)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		if w.processOne(ctx) {
+			idle.reset()
 			// task 刚完成（站点名额释放），立即推进批量派发下一项，不必等 30s sweep。
 			w.tickBatchOrchestrator()
 			continue
 		}
-		// 空闲轮询时也推进一次，保证批量首项在 pollInterval 内被派发。
+		// 入队会唤醒 worker；限时空闲轮询和 30s sweep 兜底外部进程提交。
 		w.tickBatchOrchestrator()
-		timer := time.NewTimer(w.pollInterval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+		if !idle.wait(ctx) {
 			return
-		case <-timer.C:
 		}
 	}
 }
@@ -417,8 +413,8 @@ func (w *WPCoreUpdateWorker) sweep(ctx context.Context) {
 	}
 }
 
-// tickBatchOrchestrator 推进批量派发。worker 主循环在每次 processOne 后调用（1s 节奏 +
-// task 完成即触发），sweep 作为 30s 兜底；batchOrchestrator.Tick 内部有互斥锁防并发。
+// tickBatchOrchestrator 推进批量派发。入队唤醒和 task 完成触发，
+// 空闲轮询及 sweep 作为 30s 兜底；Tick 内部有互斥锁防并发。
 func (w *WPCoreUpdateWorker) tickBatchOrchestrator() {
 	if w.batchOrchestrator != nil {
 		w.batchOrchestrator.Tick(context.Background())

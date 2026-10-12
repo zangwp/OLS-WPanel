@@ -10,12 +10,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/executor"
 )
 
-func collectVPSOverview() VPSOverview {
+func collectVPSOverview(ctx context.Context) VPSOverview {
 	hostname, _ := os.Hostname()
 	osInfo := readKeyValueFile("/etc/os-release", "=")
 	osName := strings.TrimSpace(osInfo["PRETTY_NAME"])
@@ -35,37 +34,45 @@ func collectVPSOverview() VPSOverview {
 		services = append(services, VPSService{
 			Name:    service.name,
 			Unit:    service.unit,
-			Active:  systemctlState("is-active", service.unit),
-			Enabled: systemctlState("is-enabled", service.unit),
+			Active:  systemctlState(ctx, "is-active", service.unit),
+			Enabled: systemctlState(ctx, "is-enabled", service.unit),
 		})
+	}
+	if ctx.Err() != nil {
+		return VPSOverview{Services: services}
 	}
 
 	swapStatus, _ := executor.GetSwapStatus()
-	return VPSOverview{
+	status := VPSOverview{
 		Identity: VPSIdentity{
 			Addresses:      vpsHostAddresses(),
-			Uptime:         runHostCommand("uptime", "-p"),
+			Uptime:         runHostCommand(ctx, "uptime", "-p"),
 			Hostname:       fallback(hostname, "unknown"),
 			OS:             fallback(osName, "Linux"),
-			Kernel:         fallback(runHostCommand("uname", "-r"), "unknown"),
+			Kernel:         fallback(runHostCommand(ctx, "uname", "-r"), "unknown"),
 			Architecture:   runtime.GOARCH,
 			CPUModel:       fallback(readCPUModel(), "unknown"),
 			CPUCores:       runtime.NumCPU(),
-			Virtualization: fallback(runHostCommand("systemd-detect-virt"), "none"),
+			Virtualization: fallback(runHostCommand(ctx, "systemd-detect-virt"), "unknown"),
 		},
 		Stats: collectCurrentStats(),
 		Tuning: VPSTuning{
 			CongestionControl: fallback(readOneLine("/proc/sys/net/ipv4/tcp_congestion_control"), "unknown"),
 			DefaultQDisc:      fallback(readOneLine("/proc/sys/net/core/default_qdisc"), "unknown"),
 			Nameservers:       readNameservers(),
-			Timezone:          readTimezone(),
-			NTPSynchronized:   runHostCommand("timedatectl", "show", "--property=NTPSynchronized", "--value") == "yes",
+			Timezone:          readTimezone(ctx),
+			NTPSynchronized:   readNTPSynchronized(ctx),
 			RebootRequired:    regularFileExists("/var/run/reboot-required"),
 		},
 		Services: services,
 		Swap:     swapStatus,
-		DNS:      executor.GetDNSStatus(),
 	}
+	if ctx.Err() == nil {
+		// The existing DNS manager keeps its own internal limits; avoid starting
+		// it once the overview request budget has already expired.
+		status.DNS = executor.GetDNSStatus()
+	}
+	return status
 }
 
 func readKeyValueFile(path, separator string) map[string]string {
@@ -127,11 +134,11 @@ func readNameservers() []string {
 	return result
 }
 
-func readTimezone() string {
+func readTimezone(ctx context.Context) string {
 	if value := readOneLine("/etc/timezone"); value != "" {
 		return value
 	}
-	if value := runHostCommand("timedatectl", "show", "--property=Timezone", "--value"); value != "" {
+	if value := runHostCommand(ctx, "timedatectl", "show", "--property=Timezone", "--value"); value != "" {
 		return value
 	}
 	return "unknown"
@@ -143,21 +150,6 @@ func readOneLine(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.SplitN(string(data), "\n", 2)[0])
-}
-
-func runHostCommand(name string, args ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	output, _ := hostCommandContext(ctx, name, args...).CombinedOutput()
-	return strings.TrimSpace(string(output))
-}
-
-func systemctlState(operation, unit string) string {
-	state := strings.SplitN(runHostCommand("systemctl", operation, unit), "\n", 2)[0]
-	if state == "" {
-		return "unknown"
-	}
-	return state
 }
 
 func fallback(value, replacement string) string {

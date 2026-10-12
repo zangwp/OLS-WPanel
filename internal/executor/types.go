@@ -153,8 +153,9 @@ type ManualBanPayload struct {
 }
 
 type CreateBackupPayload struct {
-	Site *models.Website `json:"-"`
-	Auto bool            `json:"auto"`
+	Site          *models.Website              `json:"-"`
+	Auto          bool                         `json:"auto"`
+	SiteOperation *DatabaseBackupSiteOperation `json:"-"`
 }
 
 type RestoreBackupPayload struct {

@@ -116,8 +116,8 @@ func acquireSiteBackupCronLocks(ctx context.Context, site *models.Website) (io.C
 func runSiteBackupSQL(ctx context.Context, password, query string) (string, error) {
 	bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(bounded, mariaDBClient(), "--batch", "--raw", "--skip-column-names", "-u", "root", "-e", query)
-	cmd.Env = append(os.Environ(), "MYSQL_PWD="+password)
+	cmd := exec.CommandContext(bounded, mariaDBClient(), databaseImportClientArgs("root", "--raw", "--skip-column-names", "-e", query)...)
+	cmd.Env = databaseImportEnvironment(password)
 	cmd.WaitDelay = time.Second
 	output := newBoundedCronOutput(256 << 10)
 	cmd.Stdout = output

@@ -26,20 +26,26 @@ func enqueueTask(c *gin.Context, taskType executor.TaskType, payload interface{}
 		task, err = executor.GlobalQueue.EnqueueContext(c.Request.Context(), taskType, payload)
 	}
 	if err != nil {
-		requestErr := c.Request.Context().Err()
-		switch {
-		case errors.Is(requestErr, context.Canceled), errors.Is(err, context.Canceled):
-			// The peer has gone away, so there is no useful response to write.
-		case errors.Is(requestErr, context.DeadlineExceeded), errors.Is(err, context.DeadlineExceeded):
-			c.JSON(http.StatusGatewayTimeout, models.ErrorResponse("请求已超时，请稍后重试"))
-		case errors.Is(err, executor.ErrSiteRestoreActive):
-			c.JSON(http.StatusConflict, models.ErrorResponse("该网站已有备份或恢复任务正在排队或运行，请等待完成"))
-		case errors.Is(err, executor.ErrTaskQueueFull), errors.Is(err, executor.ErrTaskQueueUnavailable):
-			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse("任务队列繁忙，请稍后重试"))
-		default:
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse("任务入队失败"))
-		}
+		writeTaskAdmissionError(c, err)
 		return nil, false
 	}
 	return task, true
+}
+
+func writeTaskAdmissionError(c *gin.Context, err error) {
+	requestErr := c.Request.Context().Err()
+	switch {
+	case errors.Is(requestErr, context.Canceled), errors.Is(err, context.Canceled):
+		// The peer has gone away, so there is no useful response to write.
+	case errors.Is(requestErr, context.DeadlineExceeded), errors.Is(err, context.DeadlineExceeded):
+		c.JSON(http.StatusGatewayTimeout, models.ErrorResponse("请求已超时，请稍后重试"))
+	case errors.Is(err, executor.ErrSiteRestoreActive):
+		c.JSON(http.StatusConflict, models.ErrorResponse("该网站已有备份或恢复任务正在排队或运行，请等待完成"))
+	case errors.Is(err, executor.ErrPanelOperationsClosed):
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse(err.Error()))
+	case errors.Is(err, executor.ErrTaskQueueFull), errors.Is(err, executor.ErrTaskQueueUnavailable):
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse("任务队列繁忙，请稍后重试"))
+	default:
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("任务入队失败"))
+	}
 }

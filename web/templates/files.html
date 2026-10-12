@@ -305,6 +305,24 @@
 function fileManager() {
     return {
         sites: [],
+        disposed: false, listController: null, directorySizeControllers: {},
+        remoteImportController: null, remoteImportGeneration: 0, remoteImportLocation: null,
+        uploadController: null,
+        destroy() {
+            this.disposed = true;
+            this.loadRequestID++;
+            this.remoteImportGeneration++;
+            if (this.listController) this.listController.abort();
+            Object.values(this.directorySizeControllers).forEach(controller => controller.abort());
+            if (this.remoteImportController) this.remoteImportController.abort();
+            if (this.uploadController) this.uploadController.abort();
+            if (this.remoteImportTimer) clearTimeout(this.remoteImportTimer);
+            this.listController = null;
+            this.directorySizeControllers = {};
+            this.remoteImportController = null;
+            this.uploadController = null;
+            this.remoteImportTimer = null;
+        },
         sitesLoading: true,
         sitesLoadFailed: false,
         deepLinkFailed: false,
@@ -386,19 +404,22 @@ function fileManager() {
         },
         async calculateDirectorySize(siteID, path) {
             const key = this.directorySizeKey(siteID, path);
-            if (this.directorySizes[key]?.loading) return;
+            if (this.directorySizes[key]?.loading || this.disposed) return;
+            const controller = new AbortController();
+            this.directorySizeControllers[key] = controller;
+            const current = () => !this.disposed && !controller.signal.aborted;
             this.directorySizes[key] = { loading: true };
             try {
-                const r = await api('/files/size?site_id=' + encodeURIComponent(siteID) + '&path=' + encodeURIComponent(path), { timeout: 65000, suppressToast: true });
+                const r = await api('/files/size?site_id=' + encodeURIComponent(siteID) + '&path=' + encodeURIComponent(path), { timeout: 65000, silent: true, signal: controller.signal });
+                if (!current()) return;
                 this.directorySizes[key] = {
                     loading: false,
                     size: r.data?.size || 0,
                     calculated_at: r.data?.calculated_at || ''
                 };
             } catch(e) {
-                this.directorySizes[key] = { loading: false };
-                showToast(e.message, 'error');
-            }
+                if (current()) { this.directorySizes[key] = { loading: false }; showToast(e.message, 'error'); }
+            } finally { if (this.directorySizeControllers[key] === controller) delete this.directorySizeControllers[key]; }
         },
         get filteredSites() {
             const query = this.siteSearch.toLowerCase();
@@ -520,6 +541,9 @@ function fileManager() {
             return this.loadEntries(target);
         },
         async loadEntries(target = {}) {
+            if (this.disposed) return;
+            if (this.listController) this.listController.abort();
+            const controller = new AbortController(); this.listController = controller;
             const requestID = ++this.loadRequestID;
             const siteID = target.siteID ?? this.selectedSite;
             const path = target.path ?? this.currentPath;
@@ -556,8 +580,8 @@ function fileManager() {
                         + '&sort_by=' + encodeURIComponent(this.sortBy)
                         + '&sort_dir=' + encodeURIComponent(this.sortDir);
                 }
-                const r = await api(url, { suppressToast: true });
-                if (requestID !== this.loadRequestID) return;
+                const r = await api(url, { silent: true, timeout: 15000, signal: controller.signal });
+                if (this.disposed || controller.signal.aborted || requestID !== this.loadRequestID) return;
                 if (r.success) {
                     const entries = r.data.files || [];
                     // Commit the displayed location and its rows together. A pending
@@ -583,9 +607,9 @@ function fileManager() {
                     }
                 }
             } catch(e) {
-                if (requestID === this.loadRequestID) this.loadError = e.message;
+                if (!this.disposed && !controller.signal.aborted && requestID === this.loadRequestID) this.loadError = e.message;
             } finally {
-                if (requestID === this.loadRequestID) this.loadingFiles = false;
+                if (requestID === this.loadRequestID && !this.disposed) { this.loadingFiles = false; this.listController = null; }
             }
         },
         goPage(p) {
@@ -645,6 +669,7 @@ function fileManager() {
             return downloaded + ' / ' + total;
         },
         async startRemoteImport() {
+            if (this.disposed || this.remoteImporting) return;
             if (!this.hasSelectedRoot()) {
                 showToast(t('files.select_website_first'), 'error');
                 return;
@@ -654,6 +679,8 @@ function fileManager() {
                 showToast(t('files.select_website_first'), 'error');
                 return;
             }
+            const generation = ++this.remoteImportGeneration;
+            this.remoteImportLocation = this.locationSnapshot();
             this.remoteImporting = true;
             try {
                 const r = await api('/files/remote-import', {
@@ -665,19 +692,28 @@ function fileManager() {
                         path: this.currentPath
                     }
                 });
+                if (this.disposed || generation !== this.remoteImportGeneration) return;
                 this.remoteImportStatus = r.data;
-                this.pollRemoteImport(r.data.id);
+                this.pollRemoteImport(r.data.id, generation);
             } catch(e) {
-                this.remoteImporting = false;
+                if (!this.disposed && generation === this.remoteImportGeneration) this.remoteImporting = false;
             }
         },
-        async pollRemoteImport(id) {
+        async pollRemoteImport(id, generation = this.remoteImportGeneration) {
+            if (this.disposed || generation !== this.remoteImportGeneration) return;
+            if (this.remoteImportTimer) clearTimeout(this.remoteImportTimer);
+            this.remoteImportTimer = null;
+            if (this.remoteImportController) this.remoteImportController.abort();
+            const controller = new AbortController(); this.remoteImportController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && generation === this.remoteImportGeneration;
             try {
-                const r = await api('/files/remote-import/' + encodeURIComponent(id));
+                const r = await api('/files/remote-import/' + encodeURIComponent(id), { silent: true, timeout: 15000, signal: controller.signal });
+                if (!current()) return;
                 this.remoteImportStatus = r.data;
                 if (r.data?.status === 'success') {
                     this.remoteImporting = false;
-                    this.loadFiles();
+                    if (this.remoteImportLocation) this.refreshLocation(this.remoteImportLocation);
+                    else this.loadFiles();
                     showToast(r.data.message || t('files.remote_import_completed'), 'success');
                     return;
                 }
@@ -687,13 +723,13 @@ function fileManager() {
                     return;
                 }
             } catch(e) {
-                this.remoteImporting = false;
+                if (current()) { this.remoteImporting = false; showToast(e.message, 'error'); }
                 return;
-            }
-            this.remoteImportTimer = setTimeout(() => this.pollRemoteImport(id), 1000);
+            } finally { if (this.remoteImportController === controller) this.remoteImportController = null; }
+            if (current()) this.remoteImportTimer = setTimeout(() => this.pollRemoteImport(id, generation), 1000);
         },
         async uploadFile() {
-            if (!this.uploadTarget || this.uploading || this.loadingFiles) return;
+            if (!this.uploadTarget || this.uploading || this.loadingFiles || this.disposed) return;
             if (!this.hasSelectedRoot()) {
                 showToast(t('files.select_website_first'), 'error');
                 return;
@@ -714,12 +750,14 @@ function fileManager() {
                 return;
             }
 
+            if (this.disposed) return;
+            const controller = new AbortController(); this.uploadController = controller;
             this.uploading = true;
             this.uploadProgress = 0;
 
             try {
                 const initRes = await fetch(prefix + '/api/files/upload/init', {
-                    method: 'POST',
+                    method: 'POST', signal: controller.signal,
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                     body: JSON.stringify({
                         filename: name,
@@ -756,7 +794,7 @@ function fileManager() {
                     for (let retry = 0; retry < 3; retry++) {
                         try {
                             const chunkRes = await fetch(prefix + '/api/files/upload/chunk', {
-                                method: 'POST',
+                                method: 'POST', signal: controller.signal,
                                 headers: { 'X-CSRF-Token': csrfToken },
                                 body: fd
                             });
@@ -765,6 +803,7 @@ function fileManager() {
                             lastError = this.apiMessage(chunkData, '');
                             if (retry < 2) await new Promise(r => setTimeout(r, 1000 * (retry + 1)));
                         } catch(e) {
+                            if (controller.signal.aborted || this.disposed) throw e;
                             lastError = e.message || '';
                             if (retry < 2) await new Promise(r => setTimeout(r, 1000 * (retry + 1)));
                         }
@@ -778,11 +817,12 @@ function fileManager() {
                 }
 
                 const completeRes = await fetch(prefix + '/api/files/upload/complete', {
-                    method: 'POST',
+                    method: 'POST', signal: controller.signal,
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                     body: JSON.stringify({ upload_id: uploadID, site_id: siteID, path: target.path })
                 });
                 const completeData = await completeRes.json();
+                if (this.disposed || controller.signal.aborted) return;
                 if (completeData.success) {
                     this.uploadTarget = null;
                     document.querySelector('input[type="file"]').value = '';
@@ -792,9 +832,11 @@ function fileManager() {
                     showToast(this.apiMessage(completeData, t('files.upload_merge_failed')), 'error');
                 }
             } catch(e) {
-                showToast(t('files.upload_failed_with_error', { error: e.message }), 'error');
+                if (!this.disposed && !controller.signal.aborted) showToast(t('files.upload_failed_with_error', { error: e.message }), 'error');
+            } finally {
+                if (this.uploadController === controller) this.uploadController = null;
+                this.uploading = false;
             }
-            this.uploading = false;
         },
         async fixPermissions() {
             const target = this.locationSnapshot();

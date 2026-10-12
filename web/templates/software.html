@@ -7,11 +7,13 @@
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "software.page_help"}}</p>
         </div>
         <div class="flex flex-wrap gap-2">
+            <button type="button" @click="fetchList(true)" :disabled="listLoading" class="btn-secondary text-sm">{{t .Lang "common.refresh"}}</button>
             <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "software.manage_service_updates"}}</a>
             <button @click="showHelp = true" class="btn-secondary text-sm">{{t .Lang "software.wp_config_advice"}}</button>
         </div>
     </div>
 
+    <p x-show="listError" x-text="listError" role="status" class="text-sm text-red-400 mb-3"></p>
     <nav class="software-tabs mb-6" aria-label="{{t .Lang "nav.software"}}">
         <button type="button" @click="activeSection = 'runtime'" :class="{ 'active': activeSection === 'runtime' }">{{t .Lang "software.tab_runtime"}}</button>
         <button type="button" @click="activeSection = 'tuning'" :class="{ 'active': activeSection === 'tuning' }">{{t .Lang "software.tab_tuning"}}</button>
@@ -52,6 +54,7 @@
             <h3 class="text-lg font-semibold text-white">{{t .Lang "software.service_status"}}</h3>
             <div class="flex items-center gap-3">
                 <span class="text-xs text-gray-500">{{t .Lang "software.auto_check_30s"}}</span>
+                <button type="button" @click="fetchStatus(true)" class="btn-secondary text-xs">{{t .Lang "common.refresh"}}</button>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -239,13 +242,13 @@
         </div>
     </div>
 
-    <div x-show="logModal.open" class="modal-overlay" @click.self="logModal.open = false">
+    <div x-show="logModal.open" class="modal-overlay" @click.self="closeLog()">
         <div class="modal-content" style="max-width: 56rem;">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-bold text-white" x-text="t('software.log_title', { name: logModal.title })"></h3>
                 <div class="flex items-center space-x-3">
-                    <button @click="clearLog()" class="btn-danger text-xs py-1 px-2">{{t .Lang "software.clear_log"}}</button>
-                    <button @click="logModal.open = false" class="text-gray-400 hover:text-white text-xl">&times;</button>
+                    <button @click="clearLog()" :disabled="logModal.loading || logModal.clearing" class="btn-danger text-xs py-1 px-2">{{t .Lang "software.clear_log"}}</button>
+                    <button @click="closeLog()" class="text-gray-400 hover:text-white text-xl">&times;</button>
                 </div>
             </div>
             <pre x-text="logModal.content" class="w-full rounded p-3 text-xs font-mono overflow-auto" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border); color: var(--panel-muted); max-height: 500px; white-space: pre-wrap; word-break: break-all;"></pre>
@@ -267,13 +270,13 @@ function processGuard() {
             if (this.pollTimer !== null) clearTimeout(this.pollTimer);
             this.pollTimer = null;
         },
-        async fetchStatus() {
+        async fetchStatus(fresh = false) {
             if (this.disposed) return;
             if (this.pollTimer !== null) clearTimeout(this.pollTimer);
             this.pollTimer = null;
             const requestID = ++this.statusRequestID;
             try {
-                const r = await api('/software/guard');
+                const r = await api('/software/guard' + (fresh ? '?fresh=1' : ''));
                 if (this.disposed || requestID !== this.statusRequestID) return;
                 if (r.success) {
                     (r.data || []).forEach(s => s._acting = !!this.actingServices[s.service]);
@@ -312,19 +315,41 @@ function processGuard() {
 
 function softwareManager() {
     return {
-        software: [],
+        software: [], disposed: false, listLoading: false, listError: '', listRequestID: 0, listController: null,
+        logRequestID: 0, logController: null,
+        closeLog() {
+            this.logRequestID++;
+            if (this.logController) this.logController.abort();
+            this.logController = null;
+            this.logModal.open = false;
+            this.logModal.loading = false;
+        },
+        destroy() {
+            this.disposed = true;
+            this.listRequestID++;
+            if (this.listController) this.listController.abort();
+            this.listController = null;
+            this.closeLog();
+        },
         phpRuntimes: [],
         developmentTools: [], toolsError: '', toolsLoading: false,
         activeSection: 'runtime',
         showHelp: false,
         clearingOpcache: false,
-        logModal: { open: false, title: '', content: '' },
+        logModal: { open: false, title: '', content: '', loading: false, clearing: false },
         configurableSoftware() {
             return this.software.filter(sw => ['PHP', 'OpenLiteSpeed', 'MariaDB', 'Redis'].includes(sw.name));
         },
-        async fetchList() {
+        async fetchList(fresh = false) {
+            if (this.disposed || (this.listLoading && !fresh)) return;
+            if (this.listController) this.listController.abort();
+            const controller = new AbortController(), requestID = ++this.listRequestID;
+            this.listController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && requestID === this.listRequestID;
+            this.listLoading = true; this.listError = '';
             try {
-                const r = await api('/software');
+                const r = await api('/software' + (fresh ? '?fresh=1' : ''), { silent: true, timeout: 30000, signal: controller.signal });
+                if (!current()) return;
                 if (r.success) {
                     this.software = (r.data || []).map(sw => {
                         sw._saving = false;
@@ -333,8 +358,11 @@ function softwareManager() {
                         return sw;
                     });
                 }
-            } catch(e) {}
+            } catch(e) { if (current()) this.listError = e.message; }
+            finally { if (current()) { this.listLoading = false; this.listController = null; } }
+            if (!current()) return;
             await this.fetchPHPRuntimes();
+            if (!current()) return;
             await this.fetchDevelopmentTools();
         },
         async fetchPHPRuntimes() {
@@ -349,7 +377,7 @@ function softwareManager() {
             try {
                 const r = await api('/software/php-runtimes/install', { method: 'POST', body: { version: runtime.version }, timeout: 1800000 });
                 showToast(r.data?.message || t('software.php_runtime_installed', { version: runtime.version }), 'success');
-                await this.fetchList();
+                await this.fetchList(true);
             } catch(e) { showToast(e.message, 'error'); }
             finally { runtime._installing = false; }
         },
@@ -375,23 +403,34 @@ function softwareManager() {
             finally { tool._installing = false; }
         },
         async viewLog(name) {
+            if (this.disposed) return;
+            if (this.logController) this.logController.abort();
+            const controller = new AbortController(), requestID = ++this.logRequestID;
+            this.logController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && requestID === this.logRequestID && this.logModal.title === name && this.logModal.open;
             this.logModal.title = name;
             this.logModal.content = t('software.log_loading');
-            this.logModal.open = true;
+            this.logModal.open = true; this.logModal.loading = true;
             try {
-                const r = await api('/software/log?name=' + encodeURIComponent(name) + '&lines=200');
-                this.logModal.content = r.success ? r.data.content : t('software.log_load_failed');
-            } catch(e) { this.logModal.content = t('software.log_load_failed_with_error', { error: e.message }); }
+                const r = await api('/software/log?name=' + encodeURIComponent(name) + '&lines=200', { silent: true, timeout: 15000, signal: controller.signal });
+                if (current()) this.logModal.content = r.success ? r.data.content : t('software.log_load_failed');
+            } catch(e) { if (current()) this.logModal.content = t('software.log_load_failed_with_error', { error: e.message }); }
+            finally { if (current()) { this.logModal.loading = false; this.logController = null; } }
         },
         async clearLog() {
-            if (!await confirmModal(t('software.confirm_clear_log', { name: this.logModal.title }))) return;
+            if (this.disposed || !this.logModal.open || this.logModal.loading || this.logModal.clearing) return;
+            const name = this.logModal.title, requestID = this.logRequestID;
+            const current = () => !this.disposed && this.logModal.open && name === this.logModal.title && requestID === this.logRequestID;
+            if (!await confirmModal(t('software.confirm_clear_log', { name })) || !current() || this.logModal.clearing) return;
+            this.logModal.clearing = true;
             try {
-                const r = await api('/software/log?name=' + encodeURIComponent(this.logModal.title), { method: 'DELETE' });
-                if (r.success) {
+                const r = await api('/software/log?name=' + encodeURIComponent(name), { method: 'DELETE' });
+                if (current() && r.success) {
                     this.logModal.content = t('software.log_cleared_placeholder');
-                    showToast(r.data?.message || t('software.log_cleared', { name: this.logModal.title }), 'success');
+                    showToast(r.data?.message || t('software.log_cleared', { name }), 'success');
                 }
-            } catch(e) { showToast(e.message, 'error'); }
+            } catch(e) { if (current()) showToast(e.message, 'error'); }
+            finally { this.logModal.clearing = false; }
         },
         async saveConfig(sw) {
             if (sw._saving) return;
