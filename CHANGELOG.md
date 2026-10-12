@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.0.1 — 2026-10-12
+
+- Adds bounded, cached LSPHP extension and OPcache configuration checks, backup dependency checks and cron service status. Failed probes remain unknown; CLI probes do not claim to measure live website-worker cache statistics.
+- Repairs only missing backup tools through an allowlisted, simulated and version-pinned APT plan. Rejects plans that alter installed packages and preserves server-owned installation work when a browser navigates away.
+- Rebuilds detached PHP OPcache through the managed restart marker instead of assuming an OpenLiteSpeed restart clears worker caches. Preserves unsaved performance settings during refresh.
+- Saves ordinary inbound-port changes directly when existing SSH and panel access remain covered. Retains timed confirmation for management-access restrictions; makes SSH port entry independent of the initial policy step while retaining new-session verification and rollback.
+- Removes mail inbound-port shortcuts and explains SMTP sender, authorization code and administrator recipient settings. Alert delivery uses outbound SMTP connections.
+
+Upgrade notes: no database migration is added. Existing backup retention and custom port rules are preserved. Environment probes and local preview checks do not replace target-VPS SSH, firewall, package installation or SMTP delivery verification. See [operations and recovery](docs/operations-and-recovery.md).
+
 ## v2.0.0 — 2026-10-12
 
 - Audits every panel module and fixes stale responses, hidden WordPress table rendering, settings component request isolation, lost update responses and misleading failure/duration states. Preserves persistent task tracking after navigation and refresh.

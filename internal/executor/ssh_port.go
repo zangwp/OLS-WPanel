@@ -107,9 +107,9 @@ func inspectSSHPort(ctx context.Context) SSHPortStatus {
 	if !owned {
 		return fail("配置端口与实际 SSH 监听不一致")
 	}
-	enabled, _, e := readAccessState(ctx)
-	if e != nil || !enabled {
-		return fail("请先应用上方端口访问策略，才能联动迁移 SSH 放行来源")
+	_, _, e = sshMigrationAccessState(ctx, s.Port)
+	if e != nil {
+		return fail(e.Error())
 	}
 	_, _, _, _, warning, writable := firewallPortTarget(ctx)
 	if !writable {
@@ -249,7 +249,7 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 	if net.ParseIP(managementIP) == nil {
 		return SSHPortChange{}, errors.New("无法识别管理 IP")
 	}
-	_, rules, e := readAccessState(ctx)
+	accessExists, rules, e := sshMigrationAccessState(ctx, s.Port)
 	if e != nil {
 		return SSHPortChange{}, e
 	}
@@ -301,7 +301,7 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 			_ = os.RemoveAll(dir)
 		}
 	}()
-	for name, data := range map[string]string{"original": string(original), "dual": dual, "final": final, "dual.nft": accessRulesScript(dualRules, true), "final.nft": accessRulesScript(finalRules, true)} {
+	for name, data := range map[string]string{"original": string(original), "dual": dual, "final": final, "dual.nft": accessRulesScript(dualRules, accessExists), "final.nft": accessRulesScript(finalRules, true)} {
 		if e = os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); e != nil {
 			return SSHPortChange{}, e
 		}
@@ -318,9 +318,12 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 			return SSHPortChange{}, err
 		}
 	}
-	prior, e := portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
-	if e != nil {
-		return SSHPortChange{}, e
+	prior := ""
+	if accessExists {
+		prior, e = portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
+		if e != nil {
+			return SSHPortChange{}, e
+		}
 	}
 	if e = os.WriteFile(filepath.Join(dir, "restore.nft"), []byte("add table inet "+accessTable+"\ndelete table inet "+accessTable+"\n"+prior+"\n"), 0600); e != nil {
 		return SSHPortChange{}, e

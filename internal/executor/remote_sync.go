@@ -777,6 +777,12 @@ func syncBackupToRsyncContext(ctx context.Context, localFile string, source Back
 	}
 
 	// 用 /. 标记分离备份根目录和相对路径，rsync -R 保留 ./ 之后的结构
+	if err := RequireSSHBackupDependencies(authType); err != nil {
+		message := err.Error() + "；请在软件管理中补齐备份工具"
+		syncLog("", message, "failed")
+		updateBackupTransportStatus(source, siteID, filename, "failed", message)
+		return false
+	}
 	src := backupsRoot + "/./" + relPath
 	dest := fmt.Sprintf("%s@%s:%s/", username, host, remotePath)
 

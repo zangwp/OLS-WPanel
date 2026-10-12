@@ -126,11 +126,15 @@ func ResolveLSPHPRuntime(version string, requireInstalled bool) (LSPHPRuntime, e
 }
 
 func ListLSPHPRuntimes() []LSPHPRuntime {
+	return ListLSPHPRuntimesContext(context.Background())
+}
+
+func ListLSPHPRuntimesContext(ctx context.Context) []LSPHPRuntime {
 	runtimes := make([]LSPHPRuntime, 0, len(supportedLSPHPVersions))
 	for _, version := range supportedLSPHPVersions {
 		runtime, _ := lsphpRuntimeForVersion(version)
 		if db := database.GetDB(); db != nil {
-			_ = db.QueryRow(`SELECT COUNT(*) FROM websites WHERE COALESCE(NULLIF(php_version,''), '8.3') = ?`, version).Scan(&runtime.ActiveSites)
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM websites WHERE COALESCE(NULLIF(php_version,''), '8.3') = ?`, version).Scan(&runtime.ActiveSites)
 		}
 		runtimes = append(runtimes, runtime)
 	}
