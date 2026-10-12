@@ -3866,6 +3866,10 @@ log_install_stage ""
 print_install_summary() {
     local heading="" warning="" reset=""
     local rule="------------------------------------------------------------"
+    local columns="${COLUMNS:-80}" terminal_size=""
+    if [[ -t 1 ]] && terminal_size=$(stty size < /dev/tty 2>/dev/null); then
+        columns="${terminal_size##* }"
+    fi
     if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
         heading="$BOLD"
         warning="$YELLOW"
@@ -3874,8 +3878,8 @@ print_install_summary() {
 
     printf '\n%b%s%b\n' "$heading" "OLS WPanel / 安装完成" "$reset"
     printf '%s\n' "$rule"
-    printf '  版本  %s\n  状态  %s\n' "$INSTALLER_RELEASE_VERSION" "$STATUS"
-    printf '  主脚本耗时  %s 秒\n' "$((SECONDS - INSTALL_STARTED_SECONDS))"
+    printf '  版本  %s    状态  %s\n' "$INSTALLER_RELEASE_VERSION" "$STATUS"
+    printf '  耗时  %s 秒（主安装脚本）\n' "$((SECONDS - INSTALL_STARTED_SECONDS))"
     printf '\n'
     if $REPAIR_MODE; then
         printf '%s\n' "更新 / 修复完成，登录地址与账号密码保持不变。" "输入 o 查看当前登录地址。"
@@ -3891,10 +3895,19 @@ print_install_summary() {
         fi
         printf '\n%s\n' "$rule"
         printf '%b%s%b\n' "$heading" "登录凭据 / 仅显示一次，请立即保存" "$reset"
-        printf '\n%b%s%b\n' "$heading" "1. 浏览器身份验证" "$reset"
-        printf '  用户名\n    %s\n  密码\n    %s\n' "$BASIC_USER" "$BASIC_PASS"
-        printf '\n%b%s%b\n' "$heading" "2. 面板账户登录" "$reset"
-        printf '  用户名\n    %s\n  密码\n    %s\n' "$WEB_USER" "$WEB_PASS"
+        if [[ "$columns" =~ ^[0-9]{1,4}$ ]] && ((10#$columns >= 68)); then
+            printf '%s\n' '┌────────────────────┬──────────────────┬──────────────────────────┐'
+            printf '%s\n' '│ 登录步骤           │ 用户名           │ 密码                     │'
+            printf '%s\n' '├────────────────────┼──────────────────┼──────────────────────────┤'
+            printf '│ 1. 浏览器身份验证  │ %-16s │ %-24s │\n' "$BASIC_USER" "$BASIC_PASS"
+            printf '│ 2. 面板账户登录    │ %-16s │ %-24s │\n' "$WEB_USER" "$WEB_PASS"
+            printf '%s\n' '└────────────────────┴──────────────────┴──────────────────────────┘'
+        else
+            printf '\n%b%s%b\n' "$heading" "1. 浏览器身份验证" "$reset"
+            printf '  用户名\n    %s\n  密码\n    %s\n' "$BASIC_USER" "$BASIC_PASS"
+            printf '\n%b%s%b\n' "$heading" "2. 面板账户登录" "$reset"
+            printf '  用户名\n    %s\n  密码\n    %s\n' "$WEB_USER" "$WEB_PASS"
+        fi
         printf '\n%s\n' "打开登录地址后，先完成浏览器身份验证，再登录面板。"
     fi
     if ! $PORT_OK && ! $REPAIR_INACTIVE_HEALTH_VERIFIED; then
