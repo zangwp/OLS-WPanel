@@ -461,7 +461,25 @@ function firewallManager(initialTab = 'current') {
             for (let i = start; i <= end; i++) pages.push(i);
             return pages;
         },
-        banLevelText(l) { return [t('firewall.ban_level_empty'), t('firewall.ban_level_rate_limit'), t('firewall.ban_level_10m'), t('firewall.ban_level_24h'), t('firewall.ban_level_30d'), t('firewall.ban_level_permanent')][l] || t('firewall.unknown'); },
+        banLevelText(l, ban = null) {
+            if (Number(l) === 4 && ban) {
+                const parseTime = value => {
+                    if (typeof value !== 'string' || !value.trim()) return NaN;
+                    const text = value.trim();
+                    return Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(text) ? text.replace(' ', 'T') + 'Z' : text);
+                };
+                const seconds = Math.round((parseTime(ban.expires_at) - parseTime(ban.banned_at)) / 1000);
+                if (Number.isSafeInteger(seconds) && seconds > 0) {
+                    const units = [[86400, 'day'], [3600, 'hour'], [60, 'minute'], [1, 'second']];
+                    // Round only sub-second storage differences; never infer a
+                    // fixed duration from the historical severity bucket.
+                    const [divisor, unit] = units.find(([divisor]) => seconds % divisor === 0);
+                    const duration = new Intl.NumberFormat(currentLocale(), {style: 'unit', unit, unitDisplay: 'long'}).format(seconds / divisor);
+                    return t('firewall.ban_level_duration', {duration});
+                }
+            }
+            return [t('firewall.ban_level_empty'), t('firewall.ban_level_rate_limit'), t('firewall.ban_level_10m'), t('firewall.ban_level_24h'), t('firewall.ban_level_30d'), t('firewall.ban_level_permanent')][l] || t('firewall.unknown');
+        },
         banLevelClass(l) { return ['','badge-info','badge-warning','badge-danger','badge-danger','badge-danger'][l] || 'badge-info'; },
         riskClass(level) {
             if (level === '高' || level === 'high') return 'badge-danger';

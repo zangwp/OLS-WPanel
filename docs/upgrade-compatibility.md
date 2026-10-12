@@ -61,4 +61,12 @@ The panel no longer provides a second WordPress page-cache switch. It prepares s
 
 ## Release and installation entry
 
+### v2.0.0 upgrade
+
+No schema migration is added. Saved retention counts, site protection settings, Cloudflare bindings and automatic-update policies are retained. Updates and panel database restores now refuse admission while managed queue/site work is active; wait for those operations to finish instead of restarting the service to bypass the gate.
+
+Database restore SQL executes under an owned, schema-limited identity. Unsupported privileged dumps fail rather than falling back to root. Preserve the private `DataDir/database-import-identities/` ownership receipts along with panel data (BackupDir is used when DataDir is unset); locked accounts referenced by restored DEFINER objects remain required. Existing database users are not automatically stripped of historical grants. Review the [database recovery boundaries](operations-and-recovery.md) before recovery or an account migration.
+
+Custom database password changes preserve literal special characters and return only a fixed mask. A started client that fails or times out has an unconfirmed outcome; reconcile the website/database connection before assuming the old password was restored. Ordinary task shutdown is bounded and cannot guarantee completion after an external forced stop or power loss.
+
 GitHub publication and the Cloudflare short-entry deployment are separate operations. A new GitHub Release does not change the deployed installer endpoint by itself. Until the endpoint is updated, use the explicit signed version in the [verified installation guide](verified-install.md) for a reproducible install or repair. Never replace versioned assets with mutable branch downloads.

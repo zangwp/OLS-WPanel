@@ -1799,7 +1799,12 @@ func (h *WebsiteHandler) UpdateWPAdministrator(c *gin.Context) {
 		return
 	}
 
-	backupTask, queued := enqueueTask(c, executor.TaskCreateBackup, &executor.CreateBackupPayload{Site: site, Auto: false})
+	backupOperation := executor.CaptureDatabaseBackupSiteOperation(site.ID)
+	if backupOperation == nil {
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "website.wp_admin_site_busy")))
+		return
+	}
+	backupTask, queued := enqueueTask(c, executor.TaskCreateBackup, &executor.CreateBackupPayload{Site: site, Auto: false, SiteOperation: backupOperation})
 	if !queued {
 		return
 	}

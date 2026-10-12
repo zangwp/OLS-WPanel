@@ -1,6 +1,6 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 function script(file){return [...fs.readFileSync('web/templates/'+file,'utf8').matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1].replace(/{{[\s\S]*?}}/g,'translated')).join('\n');}
-let calls=[];const ctx={t:x=>x,showToast:()=>{},confirmModal:async()=>true,api:async p=>{calls.push(p);return {success:true,data:p==='/software'?[{name:'MariaDB',configs:[{key:'innodb_buffer_pool_size',value:'742M'}]}]:[]};}};
+let calls=[];const ctx={AbortController,t:x=>x,showToast:()=>{},confirmModal:async()=>true,api:async p=>{calls.push(p);return {success:true,data:p==='/software'?[{name:'MariaDB',configs:[{key:'innodb_buffer_pool_size',value:'742M'}]}]:[]};}};
 vm.createContext(ctx);vm.runInContext(script('software.html'),ctx);
 (async()=>{
  let page=ctx.softwareManager();await page.fetchList();assert(!calls.some(x=>x.includes('/recommend')));assert.equal(page.software[0]._showRecommendations,false);

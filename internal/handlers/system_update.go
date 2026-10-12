@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/config"
@@ -23,33 +22,15 @@ type SystemUpdateHandler struct {
 
 type systemPackage = executor.SystemPackageCandidate
 
-var sysPkgCache struct {
-	mu       sync.Mutex
-	expireAt time.Time
-	pkgs     []systemPackage
-}
+var sysPkgCache readCache[[]systemPackage]
 
 func (h *SystemUpdateHandler) Check(c *gin.Context) {
-	sysPkgCache.mu.Lock()
-	if c.Query("fresh") != "1" && time.Now().Before(sysPkgCache.expireAt) {
-		pkgs := sysPkgCache.pkgs
-		sysPkgCache.mu.Unlock()
-		c.JSON(http.StatusOK, models.SuccessResponse(systemUpdateCheckResponse(pkgs)))
-		return
-	}
-	sysPkgCache.mu.Unlock()
-
-	pkgs, err := getUpgradablePackages()
+	pkgs, err := sysPkgCache.get(c.Request.Context(), "system-packages", c.Query("fresh") == "1", 5*time.Minute, 2*time.Minute, executor.ReadSystemPackageCandidates)
 	if err != nil {
 		log.Printf("查询系统更新失败: %v", err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "settings.system_update_check_failed")))
 		return
 	}
-
-	sysPkgCache.mu.Lock()
-	sysPkgCache.expireAt = time.Now().Add(5 * time.Minute)
-	sysPkgCache.pkgs = pkgs
-	sysPkgCache.mu.Unlock()
 
 	c.JSON(http.StatusOK, models.SuccessResponse(systemUpdateCheckResponse(pkgs)))
 }
@@ -114,10 +95,7 @@ func (h *SystemUpdateHandler) Update(c *gin.Context) {
 func (h *SystemUpdateHandler) Status(c *gin.Context) {
 	status := executor.ReconcileSystemPackageUpdateStatus(h.Config)
 	if status.Status == "success" {
-		sysPkgCache.mu.Lock()
-		sysPkgCache.expireAt = time.Time{}
-		sysPkgCache.pkgs = nil
-		sysPkgCache.mu.Unlock()
+		sysPkgCache.invalidateFor(status.ID + ":" + status.UpdatedAt)
 		executor.ClearSystemUpdateAlertCache()
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(systemUpdateStatusResponse(c, status)))

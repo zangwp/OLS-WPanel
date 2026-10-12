@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.0 — 2026-10-12
+
+- Audits every panel module and fixes stale responses, hidden WordPress table rendering, settings component request isolation, lost update responses and misleading failure/duration states. Preserves persistent task tracking after navigation and refresh.
+- Imports database restores through owned, schema-limited identities instead of interpreting uploaded SQL as root. Validates grants and current identity before clearing data, rebinds DEFINER objects and retains existing rollback copies. Escapes wildcard schema names for newly created or migrated database accounts; historical accounts are not silently revoked.
+- Serializes independent database backups with same-site restoration. Allows administrator safety backups to inherit only the current operation's private in-memory ownership. Coordinates queued/site work, panel updates, panel database restore and bounded shutdown admission.
+- Preserves quotes, backslashes, Unicode and dollar signs in custom database passwords, rejects invalid text before writing configuration, returns a fixed mask, and reports started-client failure as unconfirmed rather than claiming rollback.
+- Bounds dashboard responses to 1200 actual peak/valley samples with real timestamps and server timezone. Adds shared resource/metadata caches and in-flight merging, lazy settings reads, idle worker wakeups/backoff, bounded availability monitoring, process probes and log scans.
+- Pins remote-import connections to validated resolved addresses with bounded IPv4/IPv6 fallback. Reads bounded login/MFA request bodies outside the authentication lock. Treats WP-Cron HTTP errors as failures and displays actual ban durations and truncated log details.
+
+Upgrade notes: no database migration is added and existing retention settings are preserved. Independent database/file archives remain separate; whole-site backup points and restore safety copies still require explicit local management. Retain panel configuration, database and separate MFA/Cloudflare keys before updating. Restores requiring unsupported privileges fail instead of retrying as root; locked importer identities referenced by restored DEFINER objects are retained. A password command whose result is unconfirmed requires database/website connection reconciliation. Native Linux CI and signed release verification do not replace a restore rehearsal or external-service checks on the target VPS. See [module audit](docs/v2.0-audit.md) and [operations and recovery](docs/operations-and-recovery.md).
+
 ## v1.21.7 — 2026-10-11
 
 - Creates an owned Cloudflare standby rule for an enabled website even when the shared website blacklist is empty. Its exact hostname scope and contradictory `ssl and not ssl` condition match no requests. The same rule ID transitions between standby and active IP blocking; explicit disable or website cleanup removes the owned rule.

@@ -88,11 +88,11 @@
                     <div x-show="currentPage().error" class="mt-3 rounded border border-red-800 bg-red-950/40 p-3 text-sm text-red-200" x-text="currentPage().error"></div>
                     <div x-show="currentPage().loading" class="py-6 text-center text-sm text-gray-400">{{t .Lang "wp_inventory.loading"}}</div>
 
-                    <div x-show="activeTab !== 'updates' && activeTab !== 'backups' && !currentPage().loading" class="mt-4 overflow-x-auto">
+                    <div x-show="(activeTab === 'plugins' || activeTab === 'themes') && !currentPage().loading" class="mt-4 overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead><tr><th class="table-header">{{t .Lang "wp_inventory.column_name"}}</th><th class="table-header">{{t .Lang "wp_inventory.column_key"}}</th><th class="table-header">{{t .Lang "wp_inventory.column_version"}}</th><th class="table-header">{{t .Lang "wp_inventory.column_status"}}</th></tr></thead>
                             <tbody>
-                                <template x-for="item in currentPage().items" :key="item.type + ':' + item.key">
+                                <template x-for="item in (activeTab === 'plugins' || activeTab === 'themes') ? currentPage().items : []" :key="item.type + ':' + item.key">
                                     <tr class="table-row">
                                         <td class="table-cell text-white" x-text="item.name || item.key"></td>
                                         <td class="table-cell break-all font-mono text-xs" x-text="item.key"></td>
@@ -118,7 +118,7 @@
                         <table class="w-full text-sm">
                             <thead><tr><th class="table-header">{{t .Lang "wp_inventory.column_type"}}</th><th class="table-header">{{t .Lang "wp_inventory.column_key"}}</th><th class="table-header">{{t .Lang "wp_inventory.column_version"}}</th><th class="table-header">{{t .Lang "wp_inventory.column_target_version"}}</th><th class="table-header text-right">{{t .Lang "wp_plugin_update.column_action"}}</th></tr></thead>
                             <tbody>
-                                <template x-for="item in currentPage().items" :key="item.type + ':' + item.key + ':' + item.target_version + ':' + item.locale">
+                                <template x-for="item in activeTab === 'updates' ? pages.updates.items : []" :key="item.type + ':' + item.key + ':' + item.target_version + ':' + item.locale">
                                     <tr class="table-row">
                                         <td class="table-cell"><span class="badge-info" x-text="typeLabel(item.type)"></span></td>
                                         <td class="table-cell break-all font-mono text-xs" x-text="item.key"></td>
@@ -141,7 +141,7 @@
                             <table class="w-full text-sm">
                                 <thead><tr><th class="table-header">{{t .Lang "wp_update_backup.column_time"}}</th><th class="table-header">{{t .Lang "wp_update_backup.column_component"}}</th><th class="table-header">{{t .Lang "wp_update_backup.column_version"}}</th><th class="table-header">{{t .Lang "wp_update_backup.column_kind"}}</th><th class="table-header">{{t .Lang "wp_update_backup.column_size"}}</th><th class="table-header text-right">{{t .Lang "wp_update_backup.column_action"}}</th></tr></thead>
                                 <tbody>
-                                    <template x-for="backup in currentPage().items" :key="backup.backup_id">
+                                    <template x-for="backup in activeTab === 'backups' ? pages.backups.items : []" :key="backup.backup_id">
                                         <tr class="table-row">
                                             <td class="table-cell whitespace-nowrap" x-text="fmtTime(backup.created_at)"></td>
                                             <td class="table-cell"><span class="badge-info" x-text="typeLabel(backup.component_type)"></span><div class="mt-1 break-all font-mono text-xs text-gray-400" x-text="backup.component_key"></div></td>
@@ -163,7 +163,7 @@
                     <div x-show="activeTab === 'logs' && !currentPage().loading" class="mt-4">
                         <p class="mb-3 text-sm text-gray-400">{{t .Lang "wp_update_log.description"}}</p>
                         <div class="space-y-3">
-                            <template x-for="task in currentPage().items" :key="task.task_id">
+                            <template x-for="task in activeTab === 'logs' ? pages.logs.items : []" :key="task.task_id">
                                 <div class="rounded border border-gray-700 bg-gray-950/40 p-4">
                                     <div class="flex flex-wrap items-center justify-between gap-2">
                                         <div class="flex flex-wrap items-center gap-2 text-sm">

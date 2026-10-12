@@ -57,7 +57,7 @@ func TestDiagnoseSendsPreparedPromptAndRestoresAliases(t *testing.T) {
 
 	oldBuild, oldCall := buildAIDiagnosticPrompt, callAIChat
 	t.Cleanup(func() { buildAIDiagnosticPrompt, callAIChat = oldBuild, oldCall })
-	buildAIDiagnosticPrompt = func(*models.Website, string) (string, string, error) {
+	buildAIDiagnosticPrompt = func(context.Context, *models.Website, string) (string, string, error) {
 		return "system", `198.51.100.8 token=secret /www/wwwroot/privacy.example/error.log 2001:db8::8`, nil
 	}
 	var sentPrompt string

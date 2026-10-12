@@ -1,13 +1,17 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/database"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
+	"github.com/zangwp/OLS-WPanel/internal/i18n"
 	"github.com/zangwp/OLS-WPanel/internal/models"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +23,8 @@ type UpdateHandler struct {
 	Config         *config.Config
 }
 
+var panelReleaseCheckCache readCache[*executor.GithubRelease]
+
 func getGithubProxy() string {
 	var v string
 	database.GetDB().QueryRow("SELECT svalue FROM security_settings WHERE skey = 'github_proxy'").Scan(&v)
@@ -26,13 +32,17 @@ func getGithubProxy() string {
 }
 
 func (h *UpdateHandler) Check(c *gin.Context) {
-	latest, err := executor.FetchLatestPanelRelease(getGithubProxy())
+	proxy := getGithubProxy()
+	latest, err := panelReleaseCheckCache.get(c.Request.Context(), proxy, c.Query("fresh") == "1", 5*time.Minute, 20*time.Second,
+		func(ctx context.Context) (*executor.GithubRelease, error) {
+			return executor.FetchLatestPanelReleaseContext(ctx, proxy)
+		})
 	if err != nil {
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 			"current_version": h.CurrentVersion,
 			"latest_version":  "",
 			"has_update":      false,
-			"error":           "获取版本信息失败",
+			"error":           i18n.TE(c.Request, "settings.update_check_failed"),
 		}))
 		return
 	}
@@ -69,7 +79,7 @@ func (h *UpdateHandler) Update(c *gin.Context) {
 	})
 	if err != nil {
 		code := http.StatusInternalServerError
-		if strings.Contains(err.Error(), "已有更新任务") {
+		if errors.Is(err, executor.ErrPanelOperationsBusy) || errors.Is(err, executor.ErrPanelOperationsClosed) || strings.Contains(err.Error(), "已有更新任务") {
 			code = http.StatusConflict
 		} else if strings.Contains(err.Error(), "已经是最新版本") || strings.Contains(err.Error(), "仅支持 Linux") {
 			code = http.StatusBadRequest

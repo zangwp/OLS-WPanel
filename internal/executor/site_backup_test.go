@@ -426,8 +426,8 @@ func TestSiteBackupRestoreKeepsReadOnlyUntilPreparedAndRollsBackBoth(t *testing.
 				return nil
 			}
 			siteBackupSQL = func(_ context.Context, _ string, q string) (string, error) {
-				if strings.HasPrefix(q, "SELECT TABLE_NAME") {
-					return "wp_posts", nil
+				if strings.HasPrefix(q, "SELECT statement FROM") {
+					return "DROP TABLE IF EXISTS `site_db`.`wp_posts`;", nil
 				}
 				if strings.Contains(q, "DROP TABLE") {
 					dbValue = ""

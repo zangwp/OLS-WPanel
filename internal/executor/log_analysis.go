@@ -3,6 +3,7 @@ package executor
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -74,12 +75,21 @@ type logAnalysisAccumulator struct {
 // AnalyzeWebsiteLogs scans all current and rotated site logs and keeps only
 // records whose own timestamp falls inside the requested interval.
 func AnalyzeWebsiteLogs(site *models.Website, startAt, endAt time.Time, db *sql.DB, lang string) (*models.LogAnalysisReport, error) {
+	return AnalyzeWebsiteLogsContext(context.Background(), site, startAt, endAt, db, lang)
+}
+
+func AnalyzeWebsiteLogsContext(ctx context.Context, site *models.Website, startAt, endAt time.Time, db *sql.DB, lang string) (*models.LogAnalysisReport, error) {
 	if site == nil || site.ID <= 0 {
 		return nil, fmt.Errorf("website not found")
 	}
 	if !startAt.Before(endAt) || endAt.Sub(startAt) > 7*24*time.Hour {
 		return nil, fmt.Errorf("invalid analysis time range")
 	}
+	ctx, release, err := acquireLogAnalysisScan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	cleanDir := filepath.Clean(site.LogDir)
 	if !filepath.IsAbs(cleanDir) {
 		return nil, fmt.Errorf("invalid site log directory")
@@ -126,12 +136,15 @@ func AnalyzeWebsiteLogs(site *models.Website, startAt, endAt time.Time, db *sql.
 			report.Truncated = true
 			break
 		}
-		if err := acc.scanFile(path, startAt, endAt); err != nil {
-			continue
+		if err := acc.scanFileContext(ctx, path, startAt, endAt); err != nil {
+			return nil, fmt.Errorf("scan %s: %w", filepath.Base(path), err)
 		}
 		report.FilesScanned++
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	report.UniqueIPs = len(acc.uniqueIPs)
 	report.StatusCodes = sortedCounts(acc.status, 0)
 	report.HourlyRequests = sortedNamedCounts(acc.hourly)
@@ -185,6 +198,13 @@ func sortLogFilesNewestFirst(files []string) {
 }
 
 func (a *logAnalysisAccumulator) scanFile(path string, startAt, endAt time.Time) error {
+	return a.scanFileContext(context.Background(), path, startAt, endAt)
+}
+
+func (a *logAnalysisAccumulator) scanFileContext(ctx context.Context, path string, startAt, endAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	a.lastLineTime = time.Time{}
 	f, err := os.Open(path)
 	if err != nil {
@@ -204,6 +224,9 @@ func (a *logAnalysisAccumulator) scanFile(path string, startAt, endAt time.Time)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	base := filepath.Base(path)
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		line := scanner.Text()
 		a.report.BytesScanned += int64(len(line) + 1)
 		a.report.LinesScanned++
@@ -217,7 +240,10 @@ func (a *logAnalysisAccumulator) scanFile(path string, startAt, endAt time.Time)
 			a.consumeError(line, base, startAt, endAt)
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func (a *logAnalysisAccumulator) consumeAccess(line string, security bool, startAt, endAt time.Time) {

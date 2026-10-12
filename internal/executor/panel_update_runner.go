@@ -126,6 +126,16 @@ func ExecutePanelUpdate(opts PanelUpdateOptions) (*GithubRelease, error) {
 		return nil, fmt.Errorf("已有面板维护操作正在执行，请稍后再试")
 	}
 	defer panelLifecycleMu.Unlock()
+	releaseOperations, err := panelOperations.beginUpdate()
+	if err != nil {
+		return nil, err
+	}
+	restarting := false
+	defer func() {
+		if !restarting {
+			releaseOperations()
+		}
+	}()
 	watchdogPlanPath := ""
 	watchdogPlanTransferred := false
 	watchdogPlanPreserve := false
@@ -294,6 +304,10 @@ func ExecutePanelUpdate(opts PanelUpdateOptions) (*GithubRelease, error) {
 	}
 
 	if opts.UseWatchdog && plan.PlanPath != "" {
+		// A failed launch/ready handshake does not prove the independent unit
+		// has stopped. It may still restart/roll back this process, so never
+		// reopen writer admission after handing it a rollback plan.
+		restarting = true
 		if err := startUpdateWatchdog(plan); err != nil {
 			preservePlan, recoveryErr := recoverBinaryAfterWatchdogStartFailure(backupPath, err, replaceInstalledPanelBinary)
 			watchdogPlanPreserve = preservePlan
@@ -304,9 +318,15 @@ func ExecutePanelUpdate(opts PanelUpdateOptions) (*GithubRelease, error) {
 
 	setPanelUpdateStep("restart", "正在重启面板...", 98)
 	recordPanelUpdateStage(trigger, latest.TagName, "restart", "running", "二进制替换完成，正在重启 ols-wpanel")
+	restarting = true
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		_ = exec.Command("systemctl", "restart", "ols-wpanel").Run()
+		if err := exec.Command("systemctl", "restart", "ols-wpanel").Run(); err != nil {
+			// The watchdog may still stop/roll back this process. Keep admission
+			// closed rather than let new writes enter an uncertain restart.
+			setPanelUpdateFailed("面板重启命令失败，任务入口保持关闭；请检查更新守护与服务状态")
+			log.Printf("面板更新重启命令失败: %v", err)
+		}
 	}()
 
 	setPanelUpdateCompleted("更新文件已替换，面板正在重启并等待健康检查...")
@@ -1018,11 +1038,17 @@ func recordPanelUpdateStage(trigger, targetVersion, stage, status, message strin
 	}
 	recordOperationLog("panel_"+trigger+"_update", target, status, stage+": "+message)
 	if trigger == "auto" {
-		setSecuritySetting("panel_auto_update_last_target_version", targetVersion)
+		// A busy scheduler tick is not an update attempt. Preserve the release
+		// maturity timestamp and retry on the next scheduler tick.
+		if stage != "busy" {
+			setSecuritySetting("panel_auto_update_last_target_version", targetVersion)
+			setSecuritySetting("panel_auto_update_last_attempt_at", time.Now().Format(time.RFC3339))
+		} else {
+			setSecuritySetting("panel_auto_update_last_check_at", "")
+		}
 		setSecuritySetting("panel_auto_update_last_status", status)
 		setSecuritySetting("panel_auto_update_last_stage", stage)
 		setSecuritySetting("panel_auto_update_last_error", message)
-		setSecuritySetting("panel_auto_update_last_attempt_at", time.Now().Format(time.RFC3339))
 	}
 }
 
@@ -1038,6 +1064,10 @@ func runPanelAutoUpdateCheck(currentVersion, configPath string, cfg *config.Conf
 		return
 	}
 	if !shouldFetchForAutoUpdate(settings, time.Now()) {
+		return
+	}
+	if err := panelOperations.updateBlocker(); err != nil {
+		recordPanelUpdateStage("auto", settings.LastTargetVersion, "busy", "skipped", err.Error())
 		return
 	}
 	setSecuritySetting("panel_auto_update_last_check_at", time.Now().Format(time.RFC3339))
@@ -1074,6 +1104,13 @@ func runPanelAutoUpdateCheck(currentVersion, configPath string, cfg *config.Conf
 		Config:         cfg,
 		UseWatchdog:    true,
 	})
+	if errors.Is(err, ErrPanelOperationsBusy) || errors.Is(err, ErrPanelOperationsClosed) {
+		recordPanelUpdateStage("auto", latest.TagName, "busy", "skipped", err.Error())
+		// Work arrived during release lookup. Retry at the scheduler's next
+		// interval instead of consuming the once-a-day metadata check budget.
+		setSecuritySetting("panel_auto_update_last_check_at", "")
+		return
+	}
 	if err != nil && err != errWaitingSignature {
 		sendPanelUpdateMail(false, latest.TagName, readSecuritySetting("panel_auto_update_last_stage"), err.Error())
 	}

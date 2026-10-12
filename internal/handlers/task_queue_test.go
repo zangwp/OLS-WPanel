@@ -16,6 +16,14 @@ func TestEnqueueTaskMapsAdmissionErrors(t *testing.T) {
 	oldQueue := executor.GlobalQueue
 	t.Cleanup(func() { executor.GlobalQueue = oldQueue })
 
+	t.Run("panel restarting", func(t *testing.T) {
+		ctx, recorder := enqueueTaskTestContext(context.Background())
+		writeTaskAdmissionError(ctx, executor.ErrPanelOperationsClosed)
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("closed admission status=%d, body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+
 	t.Run("queue unavailable", func(t *testing.T) {
 		executor.GlobalQueue = nil
 		ctx, recorder := enqueueTaskTestContext(context.Background())

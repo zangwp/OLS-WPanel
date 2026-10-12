@@ -89,16 +89,16 @@
             <div x-show="activeSection === 'general'" class="settings-server-fields">
             <div>
             <div class="mb-4">
-                <label class="label">{{t .Lang "settings.panel_title"}}</label>
+                <label for="panel-title" class="label">{{t .Lang "settings.panel_title"}}</label>
                 <div class="flex space-x-2">
-                    <input type="text" x-model="panelTitle" class="input-field flex-1">
+                    <input id="panel-title" type="text" x-model="panelTitle" class="input-field flex-1">
                     <button @click="saveBasic" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
                 </div>
             </div>
             <div class="mb-4">
-                <label class="label">{{t .Lang "settings.hostname"}}</label>
+                <label for="server-hostname" class="label">{{t .Lang "settings.hostname"}}</label>
                 <div class="flex space-x-2">
-                    <input type="text" x-model="hostname" class="input-field flex-1">
+                    <input id="server-hostname" type="text" x-model="hostname" class="input-field flex-1">
                     <button @click="saveServerSetting('hostname', hostname)" :disabled="!hostname" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
                 </div>
             </div>
@@ -159,10 +159,10 @@
             <details class="mb-5 rounded border border-gray-700 p-4" style="background-color: var(--panel-surface-muted);">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "settings.advanced_download_settings"}}</summary>
             <div class="mt-4">
-                <label class="label">{{t .Lang "settings.github_proxy"}}</label>
+                <label for="github-proxy" class="label">{{t .Lang "settings.github_proxy"}}</label>
                 <p class="text-xs text-gray-500 mb-2">{{t .Lang "settings.github_proxy_help"}}</p>
                 <div class="flex space-x-2">
-                    <input type="text" x-model="githubProxy" placeholder="https://your-github-proxy.example" class="input-field flex-1">
+                    <input id="github-proxy" type="text" x-model="githubProxy" placeholder="https://your-github-proxy.example" class="input-field flex-1">
                     <button @click="testProxy()" :disabled="proxyTesting" class="btn-secondary text-sm" x-text="proxyTesting ? t('settings.testing') : t('settings.test')"></button>
                     <button @click="saveServerSetting('github_proxy', githubProxy)" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
                 </div>
@@ -172,7 +172,7 @@
 
             <hr class="my-4 border-gray-700">
 
-            <div x-data="versionCheck()" x-init="scheduleCheck()">
+            <div x-data="versionCheck()">
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-sm text-gray-400">{{t .Lang "settings.panel_version"}}</span>
                     <span class="version-pill text-sm font-mono px-2 py-0.5" x-text="currentVersion"></span>
@@ -183,7 +183,7 @@
                 </div>
                 <div class="flex items-center space-x-3">
                     <button @click="checkUpdate()" :disabled="checking" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.check_updates')"></button>
-                    <button @click="doUpdate()" x-show="hasUpdate" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.update_now')"></button>
+                    <button @click="doUpdate()" x-show="hasUpdate" :disabled="updating || confirming" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.update_now')"></button>
                 </div>
                 <div x-show="updating || updateStatus.running || updateStatus.completed || updateStatus.error" class="mt-3 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                     <div class="flex items-center justify-between mb-2">
@@ -280,7 +280,7 @@
                 </div>
                 <div class="flex flex-wrap items-center gap-3 py-2" style="background-color: var(--panel-surface);">
                     <button @click="check(true)" :disabled="checking || updating" class="btn-secondary text-xs" x-text="checking ? t('settings.checking') : t('settings.refresh')"></button>
-                    <button @click="doUpdate()" x-show="count > 0" :disabled="updating" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.one_click_update')"></button>
+                    <button @click="doUpdate()" x-show="count > 0" :disabled="updating || confirming" class="btn-primary text-xs" x-text="updating ? t('settings.updating') : t('settings.one_click_update')"></button>
                 </div>
                 <p x-show="count > 0" class="text-xs text-yellow-500 mt-2">{{t .Lang "settings.system_update_warning"}}</p>
                 <p x-show="lastMessage && !msg" x-cloak class="mt-3 text-xs text-gray-500">
@@ -293,7 +293,7 @@
                         <p class="text-sm" :class="updating ? 'text-blue-400' : (failed ? 'text-red-400' : (remainingCount > 0 ? 'text-yellow-400' : 'text-green-400'))" x-text="msg"></p>
                         <div class="flex shrink-0 items-center gap-2">
                             <span x-show="stage" class="text-xs text-gray-500 font-mono" x-text="stage"></span>
-                            <button x-show="!updating" type="button" @click="dismissStatus()" class="text-xs text-gray-400 hover:text-white" title="{{t .Lang "settings.dismiss_status"}}">×</button>
+                            <button x-show="!updating" type="button" @click="dismissStatus()" class="text-xs text-gray-400 hover:text-white" title="{{t .Lang "settings.dismiss_status"}}" aria-label="{{t .Lang "settings.dismiss_status"}}">×</button>
                         </div>
                     </div>
                     <pre x-show="(failed || remainingCount > 0) && detail" class="mt-2 rounded p-2 text-xs whitespace-pre-wrap break-words overflow-auto" style="max-height: 10rem;" x-text="detail"></pre>
@@ -304,7 +304,7 @@
     </div>
 
     <div id="wordpress-package" x-show="activeSection === 'wordpress'" x-cloak class="mb-6">
-        <div class="card" x-data="wpPackage()" x-init="fetchStatus()">
+        <div class="card" x-data="wpPackage()">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "settings.wp_package"}}</h3>
             <p class="text-xs text-gray-500 mb-4">{{t .Lang "settings.wp_package_help"}}</p>
 
@@ -312,7 +312,7 @@
                 <div class="p-3 rounded mb-4" style="background-color: var(--panel-surface-muted);">
                     <div class="flex items-center justify-between mb-2">
                         <span class="text-xs text-gray-400">{{t .Lang "settings.local_package_status"}}</span>
-                <span class="text-xs font-medium" :class="pkg.available ? 'text-green-400' : 'text-yellow-400'" x-text="pkg.available ? t('settings.package_ready') : t('settings.package_not_installed')"></span>
+                <span class="text-xs font-medium" :class="pkg.available ? 'text-green-400' : 'text-yellow-400'" x-text="!loaded ? t('common.loading') : (pkg.available ? t('settings.package_ready') : t('settings.package_not_installed'))"></span>
                     </div>
                     <template x-if="pkg.available">
                         <div class="space-y-1">
@@ -330,12 +330,13 @@
                             </div>
                         </div>
                     </template>
-                    <template x-if="!pkg.available">
+                    <template x-if="loaded && !pkg.available">
                         <p class="text-xs text-yellow-400">{{t .Lang "settings.local_package_missing"}}</p>
                     </template>
                 </div>
 
-                <div class="flex items-center space-x-3">
+                <p x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-3" x-text="loadError"></p>
+                <div class="flex flex-wrap items-center gap-3">
                     <button @click="downloadPkg()" :disabled="downloading" class="btn-secondary text-sm" x-text="downloading ? t('settings.downloading') : t('settings.online_download')"></button>
                     <label class="btn-primary text-sm cursor-pointer" :class="uploading ? 'opacity-50 cursor-not-allowed' : ''">
                         <span x-text="uploading ? t('settings.uploading') : t('settings.upload_package')"></span>
@@ -353,7 +354,7 @@
                             <p class="text-xs text-gray-500">{{t .Lang "settings.wp_package_auto_check_help"}}</p>
                         </div>
                         <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
-                            <input type="checkbox" x-model="autoCheck.enabled" @change="saveAutoCheck">
+                            <input type="checkbox" x-model="autoCheck.enabled" @change="saveAutoCheck" :disabled="!loaded">
                             <span x-text="autoCheck.enabled ? t('settings.enabled') : t('settings.disabled')"></span>
                         </label>
                     </div>
@@ -381,6 +382,9 @@
         <p class="text-gray-400 text-xs mb-2">{{t .Lang "settings.panel_db_backup_help"}}</p>
         <p class="text-gray-500 text-xs mb-3">{{t .Lang "settings.mfa_backup_help"}}</p>
         <p class="text-yellow-500/80 text-xs mb-4">{{t .Lang "settings.panel_db_backup_warning"}}</p>
+        <p x-show="restoreStatusError" x-cloak role="alert" class="text-sm text-red-400 mb-3"><span x-text="restoreStatusError"></span> <button type="button" @click="resumeRestore()" :disabled="restorePolling" class="underline">{{t .Lang "common.retry"}}</button></p>
+        <p x-show="loading" x-cloak role="status" class="text-sm text-gray-400 mb-3">{{t .Lang "common.loading"}}</p>
+        <p x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-3"><span x-text="loadError"></span> <button type="button" @click="fetchBackups()" class="underline">{{t .Lang "common.retry"}}</button></p>
         <div class="overflow-x-auto">
             <table class="w-full">
                 <thead class="border-b border-gray-700">
@@ -404,7 +408,7 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="backups.length === 0">
+                    <tr x-show="loaded && !loading && !loadError && backups.length === 0">
                         <td colspan="4" class="table-cell text-center text-gray-500 py-6">{{t .Lang "settings.no_backup_records"}}</td>
                     </tr>
                 </tbody>
@@ -412,13 +416,13 @@
         </div>
     </div>
 
-    <div id="operation-logs" x-show="activeSection === 'logs'" x-cloak class="card" x-data="operationLogs()" x-init="fetchLogs()">
+    <div id="operation-logs" x-show="activeSection === 'logs'" x-cloak class="card" x-data="operationLogs()">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "settings.recent_operation_logs"}}</h3>
             <button type="button" @click="fetchLogs" class="btn-secondary text-sm">{{t .Lang "settings.refresh_logs"}}</button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-            <input type="search" x-model.debounce.400ms="query" @input="applyFilters" class="input-field text-sm" placeholder="{{t .Lang "settings.log_search_placeholder"}}" maxlength="64">
+            <input type="search" x-model="query" @input.debounce.400ms="applyFilters()" class="input-field text-sm" placeholder="{{t .Lang "settings.log_search_placeholder"}}" aria-label="{{t .Lang "settings.log_search_placeholder"}}" maxlength="64">
             <select x-model="statusFilter" @change="applyFilters" class="input-field text-sm" aria-label="{{t .Lang "settings.filter_status"}}">
                 <option value="">{{t .Lang "settings.all_statuses"}}</option>
                 <option value="success">{{t .Lang "settings.success"}}</option>
@@ -435,6 +439,8 @@
                 </select>
             </label>
         </div>
+        <p x-show="loading" x-cloak role="status" class="text-sm text-gray-400 mb-3">{{t .Lang "common.loading"}}</p>
+        <p x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-3" x-text="loadError"></p>
         <div class="overflow-x-auto">
             <table class="w-full">
                 <thead class="border-b border-gray-700">
@@ -459,7 +465,7 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="logs.length === 0">
+                    <tr x-show="loaded && !loading && !loadError && logs.length === 0">
                         <td colspan="4" class="table-cell text-center text-gray-500 py-8">{{t .Lang "settings.no_operation_logs"}}</td>
                     </tr>
                 </tbody>
@@ -479,8 +485,66 @@
 </div>
 
 <script>
+function settingsSectionActive(component, section) {
+    return (typeof component.activeSection === 'undefined' || component.activeSection === section) &&
+        (typeof document === 'undefined' || !document.hidden);
+}
+
+// Retain each component's drafts and task state while loading its ordinary reads on demand.
+function watchSettingsSection(component, section, load, pause = () => {}, ttl = 30000) {
+    let stopped = false, loadedAt = 0, pending = false, reactivate = false;
+    const activate = async () => {
+        if (stopped) return;
+        if (!settingsSectionActive(component, section)) { pause(); return; }
+        if (pending) { reactivate = true; return; }
+        if (loadedAt && Date.now() - loadedAt < ttl) return;
+        pending = true;
+        try { if (await load() !== false && !stopped) loadedAt = Date.now(); }
+        finally { pending = false; if (reactivate) { reactivate = false; activate(); } }
+    };
+    const unwatch = typeof component.$watch === 'function' ? component.$watch('activeSection', activate) : null;
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', activate);
+    return {
+        ready: activate(),
+        invalidate() { loadedAt = 0; },
+        destroy() {
+            stopped = true;
+            if (typeof unwatch === 'function') unwatch();
+            if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', activate);
+            pause();
+        }
+    };
+}
+
+function cancelSettingsRead(component) {
+    component.readGeneration = (component.readGeneration || 0) + 1;
+    component.readController?.abort();
+    component.readController = null;
+    component.loading = false;
+}
+
+async function settingsRead(component, path, timeout = 15000) {
+    cancelSettingsRead(component);
+    const generation = component.readGeneration;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    component.readController = controller;
+    component.loading = true;
+    try {
+        const result = await api(path, { silent: true, timeout, ...(controller ? { signal: controller.signal } : {}) });
+        if (component.readGeneration !== generation) return null;
+        if (!result.success) throw new Error(result.message || t('common.request_failed'));
+        return result;
+    } catch (error) {
+        if (component.readGeneration !== generation || error.name === 'AbortError' || error.code === 'request_cancelled') return null;
+        throw error;
+    } finally {
+        if (component.readGeneration === generation) { component.readController = null; component.loading = false; }
+    }
+}
+
 function wpPackage() {
     return {
+        readGeneration: 0, readController: null,
         pkg: { available: false, size_text: '', updated_at: '', version: '' },
         autoCheck: { enabled: true, lastCheckAt: '', lastStatus: '', lastError: '', remoteVersion: '' },
         downloading: false,
@@ -488,9 +552,14 @@ function wpPackage() {
         deleting: false,
         msg: '',
         msgOk: false,
+        loaded: false, loading: false, loadError: '', sectionLoader: null,
+        init() { this.sectionLoader = watchSettingsSection(this, 'wordpress', () => this.fetchStatus(), () => cancelSettingsRead(this)); },
+        destroy() { this.sectionLoader?.destroy(); },
         async fetchStatus() {
+            this.loadError = '';
             try {
-                const r = await api('/settings/wp-package');
+                const r = await settingsRead(this, '/settings/wp-package');
+                if (!r) return false;
                 if (r.success) {
                     this.pkg = r.data;
                     const ac = r.data.auto_check || {};
@@ -499,8 +568,11 @@ function wpPackage() {
                     this.autoCheck.lastStatus = ac.wp_package_last_check_status || '';
                     this.autoCheck.lastError = ac.wp_package_last_check_error || '';
                     this.autoCheck.remoteVersion = ac.wp_package_last_remote_version || '';
+                    this.loaded = true;
+                    return true;
                 }
-            } catch(e) {}
+            } catch(e) { this.loadError = e.message || t('common.request_failed'); }
+            return false;
         },
         autoCheckStatusText() {
             const map = {
@@ -612,13 +684,18 @@ function panelSettings() {
         },
         pw: { old: '', new1: '', new2: '', basic: '', basicCurrent: '', basicCode: '', code: '' },
         timeTimer: null,
-        destroy() { if (this.timeTimer) clearInterval(this.timeTimer); },
+        hashListener: null,
+        destroy() {
+            if (this.timeTimer) clearInterval(this.timeTimer);
+            if (this.hashListener) window.removeEventListener('hashchange', this.hashListener);
+        },
         initPage() {
             this.activeSection = this.sectionFromHash();
             this.fetchSettings();
-            window.addEventListener('hashchange', () => {
+            this.hashListener = () => {
                 this.activeSection = this.sectionFromHash();
-            });
+            };
+            window.addEventListener('hashchange', this.hashListener);
         },
         sectionFromHash() {
             const aliases = {
@@ -645,7 +722,7 @@ function panelSettings() {
             this.accountLoaded = false;
             this.accountLoadError = '';
             try {
-                const r = await api('/settings');
+                const r = await api('/settings', { timeout: 15000 });
                 if (!r.success) throw new Error(r.message || t('settings.account_load_failed'));
                 if (r.success) {
                     if (typeof r.data?.username !== 'string' || !r.data.username || typeof r.data.basic_auth_user !== 'string') throw new Error(t('settings.account_load_failed'));
@@ -680,7 +757,7 @@ function panelSettings() {
             } catch(e) { this.accountLoadError = e.message || t('settings.account_load_failed'); }
             this.tickTime();
             if (this.timeTimer) clearInterval(this.timeTimer);
-this.timeTimer = setInterval(() => this.tickTime(), 1000);
+            this.timeTimer = setInterval(() => { if (settingsSectionActive(this, 'general')) this.tickTime(); }, 1000);
         },
         tickTime() {
             if (this.serverTimeBase) {
@@ -689,10 +766,10 @@ this.timeTimer = setInterval(() => this.tickTime(), 1000);
                 const opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
                 if (this.timezone) opts.timeZone = this.timezone;
                 try {
-                    this.serverTime = d.toLocaleString('zh-CN', opts);
+                    this.serverTime = d.toLocaleString(typeof currentLocale === 'function' ? currentLocale() : 'zh-CN', opts);
                 } catch (e) {
                     delete opts.timeZone;
-                    this.serverTime = d.toLocaleString('zh-CN', opts);
+                    this.serverTime = d.toLocaleString(typeof currentLocale === 'function' ? currentLocale() : 'zh-CN', opts);
                 }
             }
         },
@@ -807,24 +884,36 @@ this.timeTimer = setInterval(() => this.tickTime(), 1000);
 }
 function versionCheck() {
     return {
+        readGeneration: 0, readController: null, loading: false,
         currentVersion: "{{.PanelVersion}}",
         latestVersion: "",
         releaseNotes: "",
         hasUpdate: false,
         checking: false,
         updating: false,
+        confirming: false, reloadTimer: null,
         updateError: "",
         updateStatus: { running: false, completed: false, stage: "idle", message: "", percent: 0, download_percent: 0, downloaded_bytes: 0, total_bytes: 0, has_total: false, error: "" },
         pollTimer: null,
         updateStarting: false,
         pollStartedAt: 0,
         maxPollMs: 12 * 60 * 1000,
-        scheduleCheck() {
-            deferTask(() => this.fetchVersion(), 1000);
+        sectionLoader: null, statusLoading: false, disposed: false,
+        init() {
+            this.sectionLoader = watchSettingsSection(this, 'updates', async () => {
+                await this.fetchUpdateStatus();
+                if (this.updateStatus.running && !this.pollTimer) { this.updating = true; this.startStatusPolling(false); }
+                return this.fetchVersion();
+            }, () => cancelSettingsRead(this), 60000);
         },
-        async fetchVersion() {
+        destroy() { this.disposed = true; this.sectionLoader?.destroy(); if (this.pollTimer) clearInterval(this.pollTimer); clearTimeout(this.reloadTimer); },
+        scheduleCheck() {
+            return this.fetchVersion();
+        },
+        async fetchVersion(fresh = false) {
             try {
-                const r = await api("/update/check", { timeout: 15000 });
+                const r = await settingsRead(this, "/update/check" + (fresh ? '?fresh=1' : ''), 22000);
+                if (!r) return false;
                 if (r.success) {
                     this.currentVersion = r.data.current_version;
                     this.latestVersion = r.data.latest_version || "";
@@ -838,9 +927,10 @@ return !this.updateError;
 return false;
         },
         async checkUpdate() {
+            if (this.checking || this.updating) return;
             this.checking = true;
             this.updateError = "";
-            const checked = await this.fetchVersion();
+            const checked = await this.fetchVersion(true);
             if (checked && !this.hasUpdate && !this.updateError) showToast(t('settings.up_to_date_message'), "success");
             this.checking = false;
         },
@@ -867,13 +957,11 @@ return false;
             return this.updateStatus.message || t('settings.preparing_update');
         },
         async fetchUpdateStatus() {
-            const prefix = document.body.dataset.panelPrefix || "";
+            if (this.statusLoading || this.disposed) return;
+            this.statusLoading = true;
             try {
-                const resp = await fetch(prefix + "/api/update/status", {
-                    headers: { "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]')?.content || "" },
-                });
-                if (!resp.ok) throw new Error("status " + resp.status);
-                const r = await resp.json();
+                const r = await api('/update/status', { silent: true, timeout: 10000 });
+                if (this.disposed) return;
                 if (r.success) {
                     const nextStatus = Object.assign({}, this.updateStatus, r.data || {});
                     if (this.updateStarting && !nextStatus.running) {
@@ -887,14 +975,13 @@ return false;
                     }
                 }
             } catch(e) {
-                if (this.updating) {
+                if (!this.disposed && this.updating) {
                     this.updateStatus = Object.assign({}, this.updateStatus, {
                         running: true,
-                        message: t('settings.panel_restarting'),
-                        percent: Math.max(this.progressPercent(), 98),
+                        message: t('settings.update_status_waiting'),
                     });
                 }
-            }
+            } finally { this.statusLoading = false; }
             if (this.updating && this.pollStartedAt && Date.now() - this.pollStartedAt > this.maxPollMs) {
                 if (this.pollTimer) {
                     clearInterval(this.pollTimer);
@@ -908,33 +995,41 @@ return false;
                 });
             }
         },
-        startStatusPolling() {
+        startStatusPolling(expectStart = true) {
             if (this.pollTimer) clearInterval(this.pollTimer);
-            this.updateStarting = true;
+            this.updateStarting = expectStart;
             this.pollStartedAt = Date.now();
             this.fetchUpdateStatus();
             this.pollTimer = setInterval(() => this.fetchUpdateStatus(), 1000);
         },
         async doUpdate() {
-            if (!await confirmModal(t('settings.confirm_update_version', { version: this.latestVersion }))) return;
+            if (this.updating || this.checking || this.confirming || this.disposed) return;
+            this.confirming = true;
+            let confirmed;
+            try { confirmed = await confirmModal(t('settings.confirm_update_version', { version: this.latestVersion })); }
+            finally { this.confirming = false; }
+            if (!confirmed || this.disposed || this.updating) return;
             this.updating = true;
             this.updateError = "";
             this.updateStatus = { running: true, completed: false, stage: "fetch_release", message: t('settings.preparing_update'), percent: 5, download_percent: 0, downloaded_bytes: 0, total_bytes: 0, has_total: false, error: "" };
             this.startStatusPolling();
             try {
                 const r = await api("/update/do", { method: "POST" });
+                if (this.disposed) return;
                 this.updateStarting = false;
                 await this.fetchUpdateStatus();
-                if (!this.updateStatus.completed) {
-                    this.updateStatus = Object.assign({}, this.updateStatus, { running: false, completed: true, message: this.updateStatus.message || t('settings.update_completed_restart'), percent: 100, error: "" });
-                }
                 showToast(r.data?.message || t('settings.update_started'), "success");
                 this.updateError = t('settings.update_completed_refresh');
-                setTimeout(() => { location.reload(); }, 3000);
+                this.reloadTimer = setTimeout(() => { if (!this.disposed) location.reload(); }, 3000);
             } catch(e) {
+                if (this.disposed) return;
                 this.updateStarting = false;
                 await this.fetchUpdateStatus();
                 this.updateError = e.message;
+                if (this.updateStatus.running || this.updateStatus.completed) {
+                    showToast(e.message, "error");
+                    return;
+                }
                 this.updateStatus = Object.assign({}, this.updateStatus, { running: false, error: this.updateStatus.error || e.message });
                 showToast(e.message, "error");
                 this.updating = false;
@@ -946,18 +1041,29 @@ return false;
 
 function dbBackup() {
     return {
+        readGeneration: 0, readController: null,
         backups: [],
         backingUp: false,
         restoring: false,
+        loaded: false, loading: false, loadError: '', sectionLoader: null, disposed: false,
+        restoreStatusError: '', restorePolling: false, restoreConfirming: false,
         async init() {
-            await this.fetchBackups();
+            this.sectionLoader = watchSettingsSection(this, 'backups', () => this.fetchBackups(), () => cancelSettingsRead(this));
             const restoreID = localStorage.getItem('olsWPanelDBRestoreID') || localStorage.getItem('yubWPanelDBRestoreID');
             if (restoreID) await this.waitForRestore(restoreID);
         },
+        destroy() { this.disposed = true; this.sectionLoader?.destroy(); },
         async fetchBackups() {
-            try { const r = await api('/settings/db-backup'); if (r.success) this.backups = r.data || []; } catch(e) {}
+            this.loadError = '';
+            try {
+                const r = await settingsRead(this, '/settings/db-backup');
+                if (!r) return false;
+                this.backups = r.data || []; this.loaded = true;
+                return true;
+            } catch(e) { this.loadError = e.message || t('common.request_failed'); return false; }
         },
         async doBackup() {
+            if (this.backingUp || this.restoring) return;
             this.backingUp = true;
             try {
                 const r = await api('/settings/db-backup', { method: 'POST' });
@@ -971,7 +1077,12 @@ function dbBackup() {
             window.open(prefix + '/api/settings/db-backup/' + encodeURIComponent(filename) + '/download');
         },
         async doRestore(filename) {
-            if (!await confirmModal(t('settings.confirm_restore_db_backup'))) return;
+            if (this.restoring || this.backingUp || this.restoreConfirming) return;
+            this.restoreConfirming = true;
+            let confirmed;
+            try { confirmed = await confirmModal(t('settings.confirm_restore_db_backup')); }
+            finally { this.restoreConfirming = false; }
+            if (!confirmed) return;
             this.restoring = true;
             try {
                 const r = await api('/settings/db-backup/restore', { method: 'POST', body: { filename } });
@@ -985,14 +1096,21 @@ function dbBackup() {
             }
         },
         async waitForRestore(restoreID) {
+            if (this.restorePolling || this.disposed) return;
             this.restoring = true;
+            this.restorePolling = true;
+            this.restoreStatusError = '';
+            try {
             for (let i = 0; i < 90; i++) {
+                if (this.disposed) return;
                 try {
-                    const r = await api('/settings/db-backup/restore-status', { silent: true });
+                    const r = await api('/settings/db-backup/restore-status', { silent: true, timeout: 10000 });
+                    if (this.disposed) return;
                     const status = r.data || {};
                     if (status.id === restoreID && status.status !== 'running' && status.status !== 'idle') {
                         localStorage.removeItem('olsWPanelDBRestoreID');
                         localStorage.removeItem('yubWPanelDBRestoreID');
+                        this.restoring = false;
                         showToast(status.message || t('settings.restoring'), status.status === 'success' ? 'success' : 'error');
                         setTimeout(() => location.reload(), 1500);
                         return;
@@ -1000,8 +1118,12 @@ function dbBackup() {
                 } catch(e) {}
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
-            this.restoring = false;
-            showToast(t('settings.panel_db_restore_status_unknown'), 'error');
+            this.restoreStatusError = t('settings.panel_db_restore_status_unknown');
+            } finally { this.restorePolling = false; }
+        },
+        resumeRestore() {
+            const restoreID = localStorage.getItem('olsWPanelDBRestoreID') || localStorage.getItem('yubWPanelDBRestoreID');
+            if (restoreID) return this.waitForRestore(restoreID);
         },
         async doDelete(filename) {
             if (!await confirmModal(t('settings.confirm_delete_backup'))) return;
@@ -1016,6 +1138,7 @@ function dbBackup() {
 
 function operationLogs() {
     return {
+        readGeneration: 0, readController: null,
         logs: [],
         logPage: 1,
         logTotalPages: 1,
@@ -1023,19 +1146,27 @@ function operationLogs() {
         query: '',
         statusFilter: '',
         perPage: 10,
+        loaded: false, loading: false, loadError: '', sectionLoader: null,
+        init() { this.sectionLoader = watchSettingsSection(this, 'logs', () => this.fetchLogs(), () => cancelSettingsRead(this)); },
+        destroy() { this.sectionLoader?.destroy(); },
         async fetchLogs() {
+            this.loadError = '';
             try {
                 const params = new URLSearchParams({ page: String(this.logPage), per_page: String(this.perPage) });
                 if (this.statusFilter) params.set('status', this.statusFilter);
                 if (this.query.trim()) params.set('q', this.query.trim());
-                const r = await api('/settings/logs?' + params.toString());
+                const r = await settingsRead(this, '/settings/logs?' + params.toString());
+                if (!r) return false;
                 if (r.success) {
                     this.logs = r.data?.data || r.data || [];
                     this.logTotal = r.data?.total || this.logs.length;
                     this.logPage = r.data?.page || 1;
                     this.logTotalPages = r.data?.total_pages || 1;
+                    this.loaded = true;
+                    return true;
                 }
-            } catch(e) { console.error('fetchLogs error:', e); }
+            } catch(e) { this.loadError = e.message || t('common.request_failed'); }
+            return false;
         },
         applyFilters() {
             this.logPage = 1;
@@ -1102,6 +1233,7 @@ function operationLogs() {
 }
 function systemUpdate() {
     return {
+        readGeneration: 0, readController: null, loading: false,
         packages: [],
         filter: 'all',
         listOpen: false,
@@ -1109,6 +1241,7 @@ function systemUpdate() {
         checked: false,
         checking: false,
         updating: false,
+        confirming: false,
         msg: '',
         ok: false,
         failed: false,
@@ -1121,6 +1254,8 @@ function systemUpdate() {
         successTimer: null,
         lastMessage: '',
         lastUpdatedAt: '',
+        lastTerminalKey: '',
+        sectionLoader: null, disposed: false,
         isSecurity(pkg) {
             return String(pkg && pkg.repo || '').toLowerCase().includes('security');
         },
@@ -1136,16 +1271,21 @@ function systemUpdate() {
             return this.packages;
         },
         init() {
-            this.resume(true);
-            this.scheduleCheck();
+            this.sectionLoader = watchSettingsSection(this, 'updates', async () => {
+                await this.resume(true);
+                return this.check();
+            }, () => cancelSettingsRead(this), 60000);
         },
+        destroy() { this.disposed = true; this.sectionLoader?.destroy(); clearTimeout(this.pollTimer); clearTimeout(this.successTimer); },
         scheduleCheck() {
-            deferTask(() => this.check(), 1600);
+            return this.check();
         },
         async check(fresh = false) {
+            if (this.checking) return false;
             this.checking = true;
             try {
-                const r = await api('/system/updates' + (fresh ? '?fresh=1' : ''));
+                const r = await settingsRead(this, '/system/updates' + (fresh ? '?fresh=1' : ''), 130000);
+                if (!r) return false;
                 if (r.success) {
                     this.packages = r.data.packages || [];
                     this.count = r.data.count || 0;
@@ -1153,21 +1293,24 @@ function systemUpdate() {
                     this.packageCatalogURL = r.data.package_catalog_url || '';
                     this.checked = true;
                 }
-            } catch(e) { showToast(e.message, 'error'); }
-            this.checking = false;
+                return true;
+            } catch(e) { showToast(e.message, 'error'); return false; }
+            finally { this.checking = false; }
         },
         packageDetailsURL(name) {
             return this.packageCatalogURL + encodeURIComponent(name);
         },
         async resume(initial = false) {
+            if (this.disposed) return;
             this.pollTimer = null;
             try {
-                const r = await api('/system/updates/status');
+                const r = await api('/system/updates/status', { silent: true, timeout: 10000 });
+                if (this.disposed) return;
                 if (!r.success || !r.data) return;
-                this.applyStatus(r.data, initial);
+                await this.applyStatus(r.data, initial);
             } catch(e) {
                 console.error('system update status error:', e);
-                if (this.updating && !this.pollTimer) {
+                if (!this.disposed && this.updating && !this.pollTimer) {
                     this.pollTimer = setTimeout(() => this.resume(false), 3000);
                 }
             }
@@ -1209,9 +1352,12 @@ function systemUpdate() {
                     this.resume(false);
                 }, 1500);
             } else if (status.status === 'success') {
-                this.check(true);
+                const terminalKey = JSON.stringify([status.id || '', status.updated_at || '', status.message || '', this.remainingCount]);
+                const needsRefresh = !initial && (wasUpdating || this.lastTerminalKey !== terminalKey);
+                this.lastTerminalKey = terminalKey;
                 if (this.msg && this.remainingCount === 0) this.scheduleSuccessDismiss();
                 else if (this.remainingCount > 0) { clearTimeout(this.successTimer); this.successTimer = null; }
+                if (needsRefresh) return this.check(true);
             }
         },
         scheduleSuccessDismiss() {
@@ -1234,7 +1380,12 @@ function systemUpdate() {
             return parsed.toLocaleString();
         },
         async doUpdate() {
-            if (!await confirmModal(t('settings.confirm_system_update'))) return;
+            if (this.updating || this.confirming || this.disposed) return;
+            this.confirming = true;
+            let confirmed;
+            try { confirmed = await confirmModal(t('settings.confirm_system_update')); }
+            finally { this.confirming = false; }
+            if (!confirmed || this.disposed || this.updating) return;
             clearTimeout(this.successTimer);
             this.successTimer = null;
             this.updating = true;
@@ -1246,8 +1397,10 @@ function systemUpdate() {
             this.msg = t('settings.system_update_status_queued');
             try {
                 const r = await api('/system/updates/do', { method: 'POST' });
+                if (this.disposed) return;
                 if (r.success) this.applyStatus(r.data, false);
             } catch(e) {
+                if (this.disposed) return;
                 await this.resume(false);
                 if (!this.failed) {
                     this.ok = false;
@@ -1266,15 +1419,21 @@ function systemUpdate() {
 <script>
 function panelCertificateSettings() {
     return {
+        readGeneration: 0, readController: null, loading: false,
         domain: '', status: { running: false }, timer: null, refreshing: false,
         checking: false, starting: false, message: '', verified: false, errorDetails: null, domainRevision: 0,
+        sectionLoader: null,
         async init() {
-            const initialDomain = this.domain, initialRevision = this.domainRevision;
-            await this.refresh();
-            if (this.domain === initialDomain && this.domainRevision === initialRevision) this.domain = this.status.domain || '';
-            this.timer = setInterval(() => { if (!document.hidden) this.refresh(); }, 30000);
+            this.sectionLoader = watchSettingsSection(this, 'general', async () => {
+                const initialDomain = this.domain, initialRevision = this.domainRevision;
+                const refreshed = await this.refresh();
+                if (refreshed && !this.domain && this.domain === initialDomain && this.domainRevision === initialRevision) this.domain = this.status.domain || '';
+                return refreshed;
+            }, () => { if (!this.status.running) cancelSettingsRead(this); });
+            this.timer = setInterval(() => { if (this.status.running || settingsSectionActive(this, 'general')) this.refresh(); }, 30000);
+            await this.sectionLoader.ready;
         },
-        destroy() { if (this.timer) clearInterval(this.timer); },
+        destroy() { this.sectionLoader?.destroy(); cancelSettingsRead(this); if (this.timer) clearInterval(this.timer); },
         invalidateDomainVerification() { this.domainRevision++; this.verified = false; this.message = ''; this.errorDetails = null; },
         panelEndpointLabel() {
             const port = Number(this.status.port);
@@ -1305,10 +1464,10 @@ function panelCertificateSettings() {
             return Object.entries(labels).filter(([key]) => details[key] !== undefined && details[key] !== null && details[key] !== '' && ['string', 'number'].includes(typeof details[key])).map(([key, label]) => t(label) + ': ' + String(details[key]).replace(/^ipv([46])$/i, 'IPv$1')).join('\n');
         },
         async refresh() {
-            if (this.refreshing) return;
+            if (this.refreshing) return false;
             this.refreshing = true;
-            try { const r = await api('/settings/panel-certificate', { silent: true }); this.status = r.data || {}; }
-            catch (e) { this.message = this.certificateErrorText(e.code, e.message); this.verified = false; }
+            try { const r = await settingsRead(this, '/settings/panel-certificate'); if (!r) return false; this.status = r.data || {}; return true; }
+            catch (e) { this.message = this.certificateErrorText(e.code, e.message); this.verified = false; return false; }
             finally { this.refreshing = false; }
         },
         async check() {

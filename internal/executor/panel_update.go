@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,12 +25,20 @@ type GithubRelease struct {
 }
 
 func FetchLatestPanelRelease(proxy string) (*GithubRelease, error) {
+	return FetchLatestPanelReleaseContext(context.Background(), proxy)
+}
+
+func FetchLatestPanelReleaseContext(ctx context.Context, proxy string) (*GithubRelease, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", config.ReleaseRepoOwner, config.ReleaseRepoName)
 	if proxy != "" {
 		apiURL = proxy + "/" + apiURL
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(apiURL)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("版本请求地址无效: %w", err)
+	}
+	resp, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("网络请求失败: %w", err)
 	}

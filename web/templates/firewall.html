@@ -318,7 +318,7 @@
                                 </div>
                             </td>
                             <td class="table-cell">
-                                <span :class="banLevelClass(ban.ban_level)" x-text="banLevelText(ban.ban_level)"></span>
+                                <span :class="banLevelClass(ban.ban_level)" x-text="banLevelText(ban.ban_level, ban)"></span>
                             </td>
                             <td class="table-cell text-sm">
                                 <div class="w-64 truncate" :title="ban.reason || '--'" x-text="ban.reason || '--'"></div>
@@ -380,7 +380,7 @@
                         <tr class="border-b border-gray-700/50">
                             <td class="table-cell font-mono text-sm" x-text="h.ip_address"></td>
                             <td class="table-cell">
-                                <span :class="['','badge-info','badge-warning','badge-danger','badge-danger','badge-danger'][h.ban_level]" x-text="banLevelText(h.ban_level)"></span>
+                                <span :class="['','badge-info','badge-warning','badge-danger','badge-danger','badge-danger'][h.ban_level]" x-text="banLevelText(h.ban_level, h)"></span>
                             </td>
                             <td class="table-cell text-sm">
                                 <div class="w-64 truncate" :title="h.reason || '--'" x-text="h.reason || '--'"></div>

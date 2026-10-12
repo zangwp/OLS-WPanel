@@ -19,17 +19,23 @@ import (
 )
 
 type TaskQueue struct {
-	queue           chan *Task
-	running         atomic.Bool
-	mu              sync.Mutex
-	taskCount       int
-	tasks           map[string]*Task
-	cleanupStop     chan struct{}
-	cleanupDone     chan struct{}
-	cleanupStopOnce sync.Once
-	admissionOnce   sync.Once
-	admissionSlots  chan struct{}
-	enqueueTimeout  time.Duration
+	queue             chan *Task
+	running           atomic.Bool
+	mu                sync.Mutex
+	taskCount         int
+	tasks             map[string]*Task
+	cleanupStop       chan struct{}
+	cleanupDone       chan struct{}
+	cleanupStopOnce   sync.Once
+	admissionOnce     sync.Once
+	admissionSlots    chan struct{}
+	enqueueTimeout    time.Duration
+	lifecycle         *panelOperationLifecycle
+	lifecycleReleases map[string]func()
+	closing           bool
+	changed           chan struct{}
+	closed            chan struct{}
+	executeTask       func(*Task) TaskResult
 }
 
 const (
@@ -51,8 +57,9 @@ var GlobalQueue *TaskQueue
 
 func InitQueue(cfg *config.Config) *TaskQueue {
 	q := &TaskQueue{
-		queue: make(chan *Task, taskQueueCapacity),
-		tasks: make(map[string]*Task),
+		queue:     make(chan *Task, taskQueueCapacity),
+		tasks:     make(map[string]*Task),
+		lifecycle: panelOperations,
 	}
 	GlobalQueue = q
 	go q.worker()
@@ -135,6 +142,16 @@ func (q *TaskQueue) EnqueueContext(ctx context.Context, taskType TaskType, paylo
 		return nil, ctx.Err()
 	default:
 	}
+	release, err := q.operationLifecycle().acquire()
+	if err != nil {
+		return nil, err
+	}
+	admitted := false
+	defer func() {
+		if !admitted {
+			release()
+		}
+	}()
 
 	task := newTask(taskType, payload)
 	handle := *task
@@ -146,7 +163,10 @@ func (q *TaskQueue) EnqueueContext(ctx context.Context, taskType TaskType, paylo
 	// goroutines are between their capacity check and send. Registration and
 	// the non-blocking send happen while holding q.mu so the worker cannot
 	// observe the task before its polling record exists.
-	if q.tryAdmitTask(task) {
+	if accepted, err := q.tryAdmitTask(task, release); err != nil {
+		return nil, err
+	} else if accepted {
+		admitted = true
 		return &handle, nil
 	}
 
@@ -165,7 +185,10 @@ func (q *TaskQueue) EnqueueContext(ctx context.Context, taskType TaskType, paylo
 		// Capacity may have opened after the first fast-path attempt. Give it one
 		// final chance before rejecting the request because all waiter slots are
 		// occupied.
-		if q.tryAdmitTask(task) {
+		if accepted, err := q.tryAdmitTask(task, release); err != nil {
+			return nil, err
+		} else if accepted {
+			admitted = true
 			return &handle, nil
 		}
 		return nil, ErrTaskQueueFull
@@ -175,9 +198,15 @@ func (q *TaskQueue) EnqueueContext(ctx context.Context, taskType TaskType, paylo
 		return nil, err
 	}
 	q.mu.Lock()
+	if q.closing {
+		q.mu.Unlock()
+		return nil, ErrTaskQueueUnavailable
+	}
 	q.pruneCompletedLocked(time.Now())
 	q.taskCount++
 	q.tasks[task.ID] = task
+	q.registerLifecycleLocked(task.ID, release)
+	closed := q.closed
 	q.mu.Unlock()
 
 	enqueueTimeout := q.enqueueTimeout
@@ -188,6 +217,10 @@ func (q *TaskQueue) EnqueueContext(ctx context.Context, taskType TaskType, paylo
 	defer timer.Stop()
 	select {
 	case q.queue <- task:
+		admitted = true
+	case <-closed:
+		q.removeUnqueuedTask(task.ID)
+		return nil, ErrTaskQueueUnavailable
 	case <-ctx.Done():
 		q.removeUnqueuedTask(task.ID)
 		return nil, ctx.Err()
@@ -199,28 +232,35 @@ func (q *TaskQueue) EnqueueContext(ctx context.Context, taskType TaskType, paylo
 	return &handle, nil
 }
 
-func (q *TaskQueue) tryAdmitTask(task *Task) bool {
+func (q *TaskQueue) tryAdmitTask(task *Task, release func()) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.closing {
+		return false, ErrTaskQueueUnavailable
+	}
 	q.pruneCompletedLocked(time.Now())
 	q.taskCount++
 	q.tasks[task.ID] = task
+	q.registerLifecycleLocked(task.ID, release)
 	select {
 	case q.queue <- task:
-		return true
+		return true, nil
 	default:
 		delete(q.tasks, task.ID)
+		delete(q.lifecycleReleases, task.ID)
 		q.taskCount--
-		return false
+		return false, nil
 	}
 }
 
 func (q *TaskQueue) removeUnqueuedTask(id string) {
 	q.mu.Lock()
-	if _, ok := q.tasks[id]; ok {
+	if task, ok := q.tasks[id]; ok && task.Status == TaskStatusWaiting {
 		delete(q.tasks, id)
+		delete(q.lifecycleReleases, id)
 		if q.taskCount > 0 {
 			q.taskCount--
+			q.notifyChangedLocked()
 		}
 	}
 	q.mu.Unlock()
@@ -303,11 +343,30 @@ func (q *TaskQueue) IsRunning() bool {
 }
 
 func (q *TaskQueue) worker() {
-	for task := range q.queue {
+	q.mu.Lock()
+	if q.closed == nil {
+		q.closed = make(chan struct{})
+	}
+	closed := q.closed
+	q.mu.Unlock()
+	for {
+		var task *Task
+		select {
+		case task = <-q.queue:
+			if task == nil {
+				return
+			}
+		case <-closed:
+			return
+		}
 		func() {
-			q.running.Store(true)
 			q.mu.Lock()
+			if task.Status != TaskStatusWaiting {
+				q.mu.Unlock()
+				return
+			}
 			task.Status = TaskStatusRunning
+			q.running.Store(true)
 			task.UpdatedAt = time.Now()
 			q.mu.Unlock()
 
@@ -323,57 +382,61 @@ func (q *TaskQueue) worker() {
 					q.finalizeTask(task, result)
 				}
 			}()
-			switch task.Type {
-			case TaskCreateSite:
-				result = executeCreateSite(task)
-			case TaskDeleteSite:
-				result = executeDeleteSite(task)
-			case TaskPauseSite:
-				result = executePauseSite(task)
-			case TaskEnableSite:
-				result = executeEnableSite(task)
-			case TaskRefreshWhitelist:
-				result = executeRefreshWhitelist(task)
-			case TaskUnbanIP:
-				result = executeUnbanIP(task)
-			case TaskEnableSSL:
-				result = executeEnableSSL(task)
-			case TaskRemoveSSL:
-				result = executeRemoveSSL(task)
-			case TaskChangeDBPassword:
-				result = executeChangeDBPassword(task)
-			case TaskUpdateDomains:
-				result = executeUpdateDomains(task)
-			case TaskSetAccessLogMode:
-				result = executeSetAccessLogMode(task)
-			case TaskSetCDNRealIP:
-				result = executeSetCDNRealIP(task)
-			case TaskSetDocumentRoot:
-				result = executeSetDocumentRoot(task)
-			case TaskRenewSSL:
-				result = executeRenewSSL(task)
-			case TaskRenderCron:
-				result = executeRenderCron(task)
-			case TaskRunCron:
-				result = executeRunCron(task)
-			case TaskManualBan:
-				result = executeManualBan(task)
-			case TaskCreateBackup:
-				result = executeCreateBackup(task)
-			case TaskRestoreBackup:
-				result = executeRestoreBackup(task)
-			case TaskRestoreFileBackup:
-				result = executeRestoreFileBackup(task)
-			case TaskCreateFileBackup:
-				result = executeCreateFileBackup(task)
-			case TaskCreateSiteBackup:
-				result = executeCreateSiteBackup(task)
-			case TaskRestoreSiteBackup:
-				result = executeRestoreSiteBackup(task)
-			case TaskSetFileLock:
-				result = executeSetFileLock(task)
-			default:
-				result = TaskResult{Success: false, Message: "未知任务类型: " + string(task.Type)}
+			if q.executeTask != nil {
+				result = q.executeTask(task)
+			} else {
+				switch task.Type {
+				case TaskCreateSite:
+					result = executeCreateSite(task)
+				case TaskDeleteSite:
+					result = executeDeleteSite(task)
+				case TaskPauseSite:
+					result = executePauseSite(task)
+				case TaskEnableSite:
+					result = executeEnableSite(task)
+				case TaskRefreshWhitelist:
+					result = executeRefreshWhitelist(task)
+				case TaskUnbanIP:
+					result = executeUnbanIP(task)
+				case TaskEnableSSL:
+					result = executeEnableSSL(task)
+				case TaskRemoveSSL:
+					result = executeRemoveSSL(task)
+				case TaskChangeDBPassword:
+					result = executeChangeDBPassword(task)
+				case TaskUpdateDomains:
+					result = executeUpdateDomains(task)
+				case TaskSetAccessLogMode:
+					result = executeSetAccessLogMode(task)
+				case TaskSetCDNRealIP:
+					result = executeSetCDNRealIP(task)
+				case TaskSetDocumentRoot:
+					result = executeSetDocumentRoot(task)
+				case TaskRenewSSL:
+					result = executeRenewSSL(task)
+				case TaskRenderCron:
+					result = executeRenderCron(task)
+				case TaskRunCron:
+					result = executeRunCron(task)
+				case TaskManualBan:
+					result = executeManualBan(task)
+				case TaskCreateBackup:
+					result = executeCreateBackup(task)
+				case TaskRestoreBackup:
+					result = executeRestoreBackup(task)
+				case TaskRestoreFileBackup:
+					result = executeRestoreFileBackup(task)
+				case TaskCreateFileBackup:
+					result = executeCreateFileBackup(task)
+				case TaskCreateSiteBackup:
+					result = executeCreateSiteBackup(task)
+				case TaskRestoreSiteBackup:
+					result = executeRestoreSiteBackup(task)
+				case TaskSetFileLock:
+					result = executeSetFileLock(task)
+				default:
+					result = TaskResult{Success: false, Message: "未知任务类型: " + string(task.Type)}
+				}
 			}
 
 			finalized = true
@@ -392,6 +455,8 @@ func (q *TaskQueue) finalizeTask(task *Task, result TaskResult) {
 
 	q.mu.Lock()
 	resultCh := task.ResultCh
+	release := q.lifecycleReleases[task.ID]
+	delete(q.lifecycleReleases, task.ID)
 	if result.Success {
 		task.Status = TaskStatusSuccess
 	} else {
@@ -405,7 +470,12 @@ func (q *TaskQueue) finalizeTask(task *Task, result TaskResult) {
 		q.taskCount--
 	}
 	q.pruneCompletedLocked(task.UpdatedAt)
+	q.running.Store(false)
+	q.notifyChangedLocked()
 	q.mu.Unlock()
+	if release != nil {
+		release()
+	}
 
 	deliverTaskResult(task.ID, resultCh, result)
 }

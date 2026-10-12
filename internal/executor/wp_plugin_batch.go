@@ -105,6 +105,7 @@ func (s *wpUpdateStore) createPluginBatch(ctx context.Context, siteID int, creat
 	if err := tx.Commit(); err != nil {
 		return WPUpdateBatch{}, err
 	}
+	signalWorker(wpUpdateWake)
 	return s.getBatch(ctx, id)
 }
 

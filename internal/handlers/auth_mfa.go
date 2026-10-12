@@ -136,22 +136,24 @@ type mfaCredentialRequest struct {
 	Code            string `json:"code" binding:"max=128"`
 }
 
-func (h *AuthHandler) mfaRequest(c *gin.Context) (mfaCredentialRequest, int64, string, bool) {
+func (h *AuthHandler) mfaRequest(c *gin.Context) (mfaCredentialRequest, bool) {
 	c.Header("Cache-Control", "no-store")
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
 	var req mfaCredentialRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindAccountRequest(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "auth.invalid_security_request")))
-		return req, 0, "", false
+		return req, false
 	}
-	id, username, ok := h.passwordForSensitive(c, req.CurrentPassword)
-	return req, id, username, ok
+	return req, true
 }
 
 func (h *AuthHandler) MFASetup(c *gin.Context) {
+	req, ok := h.mfaRequest(c)
+	if !ok {
+		return
+	}
 	accountAuthenticationMu.Lock()
 	defer accountAuthenticationMu.Unlock()
-	_, id, username, ok := h.mfaRequest(c)
+	id, username, ok := h.passwordForSensitive(c, req.CurrentPassword)
 	if !ok {
 		return
 	}
@@ -165,9 +167,13 @@ func (h *AuthHandler) MFASetup(c *gin.Context) {
 }
 
 func (h *AuthHandler) MFAConfirm(c *gin.Context) {
+	req, ok := h.mfaRequest(c)
+	if !ok {
+		return
+	}
 	accountAuthenticationMu.Lock()
 	defer accountAuthenticationMu.Unlock()
-	req, id, username, ok := h.mfaRequest(c)
+	id, username, ok := h.passwordForSensitive(c, req.CurrentPassword)
 	if !ok {
 		return
 	}
@@ -182,9 +188,13 @@ func (h *AuthHandler) MFAConfirm(c *gin.Context) {
 }
 
 func (h *AuthHandler) MFADisable(c *gin.Context) {
+	req, ok := h.mfaRequest(c)
+	if !ok {
+		return
+	}
 	accountAuthenticationMu.Lock()
 	defer accountAuthenticationMu.Unlock()
-	req, id, username, ok := h.mfaRequest(c)
+	id, username, ok := h.passwordForSensitive(c, req.CurrentPassword)
 	if !ok {
 		return
 	}
@@ -197,9 +207,13 @@ func (h *AuthHandler) MFADisable(c *gin.Context) {
 }
 
 func (h *AuthHandler) MFARecoveryCodes(c *gin.Context) {
+	req, ok := h.mfaRequest(c)
+	if !ok {
+		return
+	}
 	accountAuthenticationMu.Lock()
 	defer accountAuthenticationMu.Unlock()
-	req, id, username, ok := h.mfaRequest(c)
+	id, username, ok := h.passwordForSensitive(c, req.CurrentPassword)
 	if !ok {
 		return
 	}

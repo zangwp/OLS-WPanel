@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -48,9 +47,7 @@ var aiReadWPDiagnosticOptions = ReadWPDiagnosticOptions
 
 var aiProviderRetryDelay = 800 * time.Millisecond
 
-var aiRunProcessList = func() ([]byte, error) {
-	return exec.Command("ps", "-eo", "user:32,%cpu,%mem,comm").Output()
-}
+var aiRunProcessList = runAIProcessList
 
 var aiHTTPProbeClient = &http.Client{
 	Timeout: 5 * time.Second,
@@ -133,6 +130,15 @@ type aiLogSnippet struct {
 }
 
 func BuildAIDiagnosticPrompt(site *models.Website, symptom string) (systemPrompt, userPrompt string, err error) {
+	return BuildAIDiagnosticPromptContext(context.Background(), site, symptom)
+}
+
+// BuildAIDiagnosticPromptContext propagates cancellation to the process resource
+// probe. Existing filesystem and service probes keep their own local budgets.
+func BuildAIDiagnosticPromptContext(requestContext context.Context, site *models.Website, symptom string) (systemPrompt, userPrompt string, err error) {
+	if err := requestContext.Err(); err != nil {
+		return "", "", err
+	}
 	if site == nil {
 		return "", "", fmt.Errorf("网站不存在")
 	}
@@ -183,7 +189,10 @@ func BuildAIDiagnosticPrompt(site *models.Website, symptom string) (systemPrompt
 		OutputSchema: aiOutputSchema(),
 	}
 	if aiIsPerformanceSymptom(symptom) {
-		ctx.PerformanceSummary = aiPerformanceSummary(site)
+		ctx.PerformanceSummary = aiPerformanceSummaryContext(requestContext, site)
+	}
+	if err := requestContext.Err(); err != nil {
+		return "", "", err
 	}
 	ctx.LocalChecks = aiLocalChecks(ctx)
 
@@ -1549,6 +1558,10 @@ func aiHTTPStatusFamily(statusCode int) string {
 }
 
 func aiPerformanceSummary(site *models.Website) map[string]interface{} {
+	return aiPerformanceSummaryContext(context.Background(), site)
+}
+
+func aiPerformanceSummaryContext(ctx context.Context, site *models.Website) map[string]interface{} {
 	result := map[string]interface{}{
 		"checked": true,
 		"panel_optimization": map[string]interface{}{
@@ -1559,7 +1572,7 @@ func aiPerformanceSummary(site *models.Website) map[string]interface{} {
 			"access_log_mode":         "",
 		},
 		"server_resource_summary": aiServerResourceSummary(),
-		"site_resource_summary":   aiSiteResourceSummary(site),
+		"site_resource_summary":   aiSiteResourceSummaryContext(ctx, site),
 		"wordpress_structure":     aiWPPerformanceStructure(site),
 		"limitations": []string{
 			"当前 access.log 使用 combined 格式，不包含 request_time，无法仅凭访问日志证明单个请求耗时。",
@@ -1713,6 +1726,10 @@ type aiPHPSiteResource struct {
 }
 
 func aiSiteResourceSummary(site *models.Website) map[string]interface{} {
+	return aiSiteResourceSummaryContext(context.Background(), site)
+}
+
+func aiSiteResourceSummaryContext(ctx context.Context, site *models.Website) map[string]interface{} {
 	result := map[string]interface{}{
 		"checked": false,
 	}
@@ -1723,7 +1740,7 @@ func aiSiteResourceSummary(site *models.Website) map[string]interface{} {
 	}
 	result["active_site_count"] = aiWebsiteCount(db, "active")
 	result["total_site_count"] = aiWebsiteCount(db, "")
-	resources, err := aiCollectPHPSiteResources(db)
+	resources, err := aiCollectPHPSiteResourcesContext(ctx, db)
 	if err != nil {
 		result["message"] = err.Error()
 		return result
@@ -1747,7 +1764,11 @@ func aiWebsiteCount(db *sql.DB, status string) int {
 }
 
 func aiCollectPHPSiteResources(db *sql.DB) ([]aiPHPSiteResource, error) {
-	out, err := aiRunProcessList()
+	return aiCollectPHPSiteResourcesContext(context.Background(), db)
+}
+
+func aiCollectPHPSiteResourcesContext(ctx context.Context, db *sql.DB) ([]aiPHPSiteResource, error) {
+	out, err := aiRunProcessList(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("读取 LSPHP 进程资源失败: %v", err)
 	}
@@ -1778,7 +1799,7 @@ func aiCollectPHPSiteResources(db *sql.DB) ([]aiPHPSiteResource, error) {
 	}
 	result := make([]aiPHPSiteResource, 0, len(agg))
 	for _, item := range agg {
-		_ = db.QueryRow("SELECT id, domain FROM websites WHERE system_user = ?", item.User).Scan(&item.SiteID, &item.Domain)
+		_ = db.QueryRowContext(ctx, "SELECT id, domain FROM websites WHERE system_user = ?", item.User).Scan(&item.SiteID, &item.Domain)
 		if item.Domain == "" {
 			continue
 		}

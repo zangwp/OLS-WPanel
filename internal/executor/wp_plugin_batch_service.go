@@ -88,6 +88,7 @@ func (s *WPPluginBatchService) ListForSite(ctx context.Context, siteID int) ([]m
 // interrupted_unknown 状态的任务不允许回滚——执行结果本身不确定，贸然恢复文件/数据库
 // 可能覆盖掉一次其实已经成功的更新，只能通过 Ignore acknowledgment 掉。
 func (s *WPPluginBatchService) Rollback(ctx context.Context, siteID int, taskID string) error {
+	defer signalWorker(wpUpdateWake)
 	task, err := s.loadBatchTaskForDecision(ctx, siteID, taskID)
 	if err != nil {
 		return err
@@ -108,6 +109,7 @@ func (s *WPPluginBatchService) Rollback(ctx context.Context, siteID int, taskID 
 //     siteHasBlockingTask 当作阻塞任务，批量必须有办法处置掉它，否则会卡住整个批量
 //     后续的插件，违反"某一项失败不阻塞其它项"的设计目标。
 func (s *WPPluginBatchService) Ignore(ctx context.Context, siteID int, taskID string) error {
+	defer signalWorker(wpUpdateWake)
 	task, err := s.loadBatchTaskForDecision(ctx, siteID, taskID)
 	if err != nil {
 		return err

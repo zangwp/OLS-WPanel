@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/executor"
+	"github.com/zangwp/OLS-WPanel/internal/i18n"
 	"github.com/zangwp/OLS-WPanel/internal/models"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +33,7 @@ type VPSTuning struct {
 	DefaultQDisc      string   `json:"default_qdisc"`
 	Nameservers       []string `json:"nameservers"`
 	Timezone          string   `json:"timezone"`
-	NTPSynchronized   bool     `json:"ntp_synchronized"`
+	NTPSynchronized   *bool    `json:"ntp_synchronized"`
 	RebootRequired    bool     `json:"reboot_required"`
 }
 
@@ -52,7 +55,15 @@ type VPSOverview struct {
 }
 
 func (h *VPSHandler) Overview(c *gin.Context) {
-	status := collectVPSOverview()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+	defer cancel()
+	status := collectVPSOverview(ctx)
+	if ctx.Err() != nil {
+		if c.Request.Context().Err() == nil {
+			c.JSON(http.StatusGatewayTimeout, models.ErrorResponse(i18n.TE(c.Request, "vps.load_failed")))
+		}
+		return
+	}
 	status.IPPriority = executor.GetIPPriorityStatus()
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }

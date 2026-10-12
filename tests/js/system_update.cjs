@@ -12,7 +12,7 @@ assert.equal(page.remainingCount, 1);
 assert.match(page.detail, /linux-image-amd64/);
 assert.equal(page.msg, 'Some packages remain');
 assert.equal(page.successTimer, null);
-assert.equal(refreshes, 1);
+assert.equal(refreshes, 0, 'an initial historic success must not force another package probe');
 page.applyStatus({status:'running', message:'Installing', remaining_count:0});
 assert.equal(page.updating, true);
 page.applyStatus({status:'success', message:'Completed', remaining_count:0});

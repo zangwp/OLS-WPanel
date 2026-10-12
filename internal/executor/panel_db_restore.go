@@ -88,6 +88,16 @@ func StartPanelDBRestore(cfg *config.Config, backupPath string) (PanelDBRestoreS
 		return PanelDBRestoreStatus{}, errors.New("已有面板维护操作正在执行")
 	}
 	defer panelLifecycleMu.Unlock()
+	releaseOperations, err := panelOperations.beginUpdate()
+	if err != nil {
+		return PanelDBRestoreStatus{}, err
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			releaseOperations()
+		}
+	}()
 	if SnapshotPanelUpdateStatus().Running {
 		return PanelDBRestoreStatus{}, errors.New("面板正在更新，请稍后再恢复")
 	}
@@ -131,6 +141,9 @@ func StartPanelDBRestore(cfg *config.Config, backupPath string) (PanelDBRestoreS
 		_ = os.Remove(planPath)
 		return PanelDBRestoreStatus{}, fmt.Errorf("启动独立恢复任务失败: %w", err)
 	}
+	// The independent unit will stop this process before replacing SQLite. Keep
+	// admission closed even after returning the HTTP response.
+	handedOff = true
 	return status, nil
 }
 

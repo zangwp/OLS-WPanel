@@ -42,6 +42,7 @@ type GuardService struct {
 
 type ProcessGuard struct {
 	mu         sync.RWMutex
+	opMu       sync.Mutex // Serialize service changes without blocking cached status reads.
 	services   []*GuardService
 	stopCh     chan struct{}
 	firstRun   bool
@@ -88,8 +89,9 @@ func GetGuardStatus() []GuardService {
 }
 
 func SetServiceState(serviceName, action string) error {
+	guard.opMu.Lock()
+	defer guard.opMu.Unlock()
 	guard.mu.Lock()
-	defer guard.mu.Unlock()
 
 	var s *GuardService
 	for _, svc := range guard.services {
@@ -99,11 +101,13 @@ func SetServiceState(serviceName, action string) error {
 		}
 	}
 	if s == nil {
+		guard.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrUnknownGuardService, serviceName)
 	}
 
 	oldPaused := s.Paused
 	oldRunning := s.Running
+	guard.mu.Unlock()
 	if state := readGuardServiceState(serviceName); state.valid {
 		oldRunning = state.active
 	}
@@ -128,16 +132,19 @@ func SetServiceState(serviceName, action string) error {
 		}
 		return err
 	}
+	guard.mu.Lock()
 	s.Paused = action == "stop"
 	s.Running = wantActive
 	if err := guard.savePaused(); err != nil {
 		s.Paused = oldPaused
 		s.Running = oldRunning
+		guard.mu.Unlock()
 		if compensateErr := compensateGuardServiceState(serviceName, oldRunning); compensateErr != nil {
 			return fmt.Errorf("保存服务守护状态失败: %v；恢复服务原状态失败: %v", err, compensateErr)
 		}
 		return fmt.Errorf("保存服务守护状态失败，服务已恢复原状态: %w", err)
 	}
+	guard.mu.Unlock()
 	return nil
 }
 
@@ -186,22 +193,32 @@ func (pg *ProcessGuard) checkAll() {
 	for _, s := range pg.services {
 		pg.check(s)
 	}
+	pg.opMu.Lock()
 	pg.firstRun = false
+	pg.opMu.Unlock()
 }
 
 func (pg *ProcessGuard) check(s *GuardService) {
-	pg.mu.Lock()
+	pg.opMu.Lock()
+	operationLocked := true
+	defer func() {
+		if operationLocked {
+			pg.opMu.Unlock()
+		}
+	}()
 	state := readGuardServiceState(s.ServiceName)
 	if !state.valid {
-		pg.mu.Unlock()
 		return
 	}
+	pg.mu.Lock()
 	active := state.active
 	wasRunning := s.Running
 	s.Running = active
 
 	if s.Paused {
 		pg.mu.Unlock()
+		pg.opMu.Unlock()
+		operationLocked = false
 		if active {
 			logIncident(s, "unexpected_active", s.Name+" 在暂停守护期间被外部启动", false)
 		}
@@ -230,8 +247,10 @@ func (pg *ProcessGuard) check(s *GuardService) {
 			pg.mu.Unlock()
 			return
 		}
+		pg.mu.Unlock()
 		_, _ = guardCommand("systemctl", "start", s.ServiceName)
 		recovered = readGuardServiceState(s.ServiceName).active
+		pg.mu.Lock()
 		s.Running = recovered
 		if wasRunning {
 			s.Restarts++
@@ -242,6 +261,8 @@ func (pg *ProcessGuard) check(s *GuardService) {
 		}
 	}
 	pg.mu.Unlock()
+	pg.opMu.Unlock()
+	operationLocked = false
 
 	if incidentEvent != "" {
 		message := diagnoseServiceIncident(s, incidentState, recovered)
