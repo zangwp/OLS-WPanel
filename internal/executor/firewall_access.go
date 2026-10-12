@@ -18,12 +18,14 @@ import (
 const accessRollbackUnit = "ols-wpanel-access-rollback"
 
 type FirewallAccessPreview struct {
-	Rules         []FirewallAccessRule `json:"rules"`
-	Fingerprint   string               `json:"fingerprint"`
-	Script        string               `json:"script"`
-	ExistingRules string               `json:"existing_rules"`
-	SSHPort       int                  `json:"ssh_port"`
-	PanelPort     int                  `json:"panel_port"`
+	Rules                 []FirewallAccessRule `json:"rules"`
+	Fingerprint           string               `json:"fingerprint"`
+	Script                string               `json:"script"`
+	ExistingRules         string               `json:"existing_rules"`
+	SSHPort               int                  `json:"ssh_port"`
+	PanelPort             int                  `json:"panel_port"`
+	RequiresConfirmation  bool                 `json:"requires_confirmation"`
+	RequiresSSHValidation bool                 `json:"requires_ssh_validation"`
 }
 
 // Protected by portRulesMu. The independent systemd timer survives panel exit.
@@ -43,23 +45,28 @@ var accessNftLookPath = exec.LookPath
 var accessRunDirectory = "/run"
 
 func readAccessState(ctx context.Context) (bool, []FirewallAccessRule, error) {
+	exists, rules, _, err := readAccessTableState(ctx)
+	return exists, rules, err
+}
+
+func readAccessTableState(ctx context.Context) (bool, []FirewallAccessRule, string, error) {
 	out, err := portCommand(ctx, "nft", "--stateless", "list", "tables")
 	if err != nil {
-		return false, nil, errors.New("无法读取 nftables 表")
+		return false, nil, "", errors.New("无法读取 nftables 表")
 	}
 	if !strings.Contains(out, "table inet "+accessTable+"\n") && !strings.HasSuffix(out, "table inet "+accessTable) {
-		return false, []FirewallAccessRule{}, nil
+		return false, []FirewallAccessRule{}, "", nil
 	}
 	out, err = portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
 	if err != nil {
-		return false, nil, err
+		return false, nil, "", err
 	}
 	rules := []FirewallAccessRule{}
 	for _, m := range accessCommentRE.FindAllStringSubmatch(out, -1) {
 		p, _ := strconv.Atoi(m[2])
 		rules = append(rules, FirewallAccessRule{Protocol: m[1], Port: p, Source: m[3]})
 	}
-	return true, rules, nil
+	return true, rules, out, nil
 }
 
 func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (FirewallAccessPreview, error) {
@@ -81,7 +88,7 @@ func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (F
 	if err != nil {
 		return FirewallAccessPreview{}, err
 	}
-	exists, _, err := readAccessState(ctx)
+	exists, previousRules, previousTable, err := readAccessTableState(ctx)
 	if err != nil {
 		return FirewallAccessPreview{}, err
 	}
@@ -89,7 +96,8 @@ func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (F
 	if err != nil {
 		return FirewallAccessPreview{}, err
 	}
-	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(out, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel}, nil
+	requiresConfirmation := !exists || !accessTableMatchesManagedPolicy(previousTable, previousRules) || !accessManagementPreserved(previousRules, rules, ssh, panel)
+	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(out, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel, RequiresConfirmation: requiresConfirmation}, nil
 }
 
 func PreviewFirewallAccess(req FirewallAccessRequest, ip string) (FirewallAccessPreview, error) {
@@ -125,6 +133,9 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	}
 	if req.Fingerprint == "" || req.Fingerprint != preview.Fingerprint {
 		return FirewallProtectionResult{}, errors.New("规则或选择已变化，请重新预览")
+	}
+	if !preview.RequiresConfirmation {
+		return saveFirewallAccessWithoutConfirmation(ctx, preview)
 	}
 	dir, err := os.MkdirTemp(accessRunDirectory, "ols-access-*")
 	if err != nil {
@@ -194,7 +205,61 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	pendingAccess.sshPort = preview.SSHPort
 	pendingAccess.panelPort = preview.PanelPort
 	recordOperationLog("firewall_access_apply", accessTable, "success", "waiting for manual confirmation")
-	return FirewallProtectionResult{ConfirmationToken: token, ChangeID: change.ID, Deadline: pendingAccess.deadline.Add(-15 * time.Second)}, nil
+	return FirewallProtectionResult{ConfirmationToken: token, ChangeID: change.ID, Deadline: pendingAccess.deadline.Add(-15 * time.Second), RequiresConfirmation: true}, nil
+}
+
+func saveFirewallAccessWithoutConfirmation(ctx context.Context, preview FirewallAccessPreview) (FirewallProtectionResult, error) {
+	// Capture again before writing; external changes cannot be classified from
+	// a stale preview even though panel writes are serialized by portRulesMu.
+	exists, previousRules, previous, err := readAccessTableState(ctx)
+	if err != nil || !exists || !accessTableMatchesManagedPolicy(previous, previousRules) ||
+		!accessManagementPreserved(previousRules, preview.Rules, preview.SSHPort, preview.PanelPort) {
+		return FirewallProtectionResult{}, errors.New("访问策略已变化，请重新预览")
+	}
+	bootState, _ := portCommand(ctx, "systemctl", "is-enabled", "nftables")
+	if bootState != "enabled" && bootState != "disabled" {
+		return FirewallProtectionResult{}, errors.New("无法确认 nftables 开机状态，未修改规则")
+	}
+	dir, err := os.MkdirTemp(accessRunDirectory, "ols-access-save-*")
+	if err != nil {
+		return FirewallProtectionResult{}, err
+	}
+	defer os.RemoveAll(dir)
+	apply, rollback := filepath.Join(dir, "apply.nft"), filepath.Join(dir, "rollback.nft")
+	for path, content := range map[string]string{
+		apply:    preview.Script,
+		rollback: "add table inet " + accessTable + "\ndelete table inet " + accessTable + "\n" + previous + "\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			return FirewallProtectionResult{}, err
+		}
+	}
+	if output, err := portCommand(ctx, "nft", "--check", "--file", apply); err != nil {
+		return FirewallProtectionResult{}, fmt.Errorf("规则校验失败: %s", output)
+	}
+	if output, err := portCommand(ctx, "systemctl", "enable", "nftables"); err != nil {
+		return FirewallProtectionResult{}, fmt.Errorf("无法启用开机加载，未修改规则: %s", output)
+	}
+	restore := func(cause error) (FirewallProtectionResult, error) {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		output, restoreErr := portCommand(restoreCtx, "nft", "--file", rollback)
+		if bootState == "disabled" {
+			_, _ = portCommand(restoreCtx, "systemctl", "disable", "nftables")
+		}
+		if restoreErr != nil {
+			return FirewallProtectionResult{}, fmt.Errorf("保存失败且即时恢复失败，请通过 SSH 检查规则: %s (%v)", output, cause)
+		}
+		return FirewallProtectionResult{}, cause
+	}
+	if output, err := portCommand(ctx, "nft", "--file", apply); err != nil {
+		return restore(fmt.Errorf("规则应用失败: %s", output))
+	}
+	if err := persistAccessRules(ctx); err != nil {
+		return restore(err)
+	}
+	recordOperationLog("firewall_access_save", accessTable, "success", "saved; management sources preserved")
+	return FirewallProtectionResult{Saved: true}, nil
 }
 
 func ConfirmFirewallAccess(token string) error {

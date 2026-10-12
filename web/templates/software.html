@@ -1,13 +1,13 @@
 {{template "base" .}}
 {{define "software_content"}}
-<div x-data="softwareManager()" x-init="fetchList()">
+<div x-data="softwareManager()" x-init="fetchList(); deferTask(() => fetchHealth(), 350)">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-5">
         <div>
             <h1 class="page-title">{{t .Lang "nav.software"}}</h1>
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "software.page_help"}}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-            <button type="button" @click="fetchList(true)" :disabled="listLoading" class="btn-secondary text-sm">{{t .Lang "common.refresh"}}</button>
+            <button type="button" @click="refreshAll()" :disabled="listLoading || healthLoading" class="btn-secondary text-sm">{{t .Lang "common.refresh"}}</button>
             <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "software.manage_service_updates"}}</a>
             <button @click="showHelp = true" class="btn-secondary text-sm">{{t .Lang "software.wp_config_advice"}}</button>
         </div>
@@ -28,7 +28,7 @@
             </div>
             <a href="/{{.RandomSuffix}}/websites" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.assign_php_per_site"}}</a>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
             <template x-for="runtime in phpRuntimes" :key="runtime.version">
                 <div class="runtime-detail rounded border border-gray-700 p-4">
                     <div class="flex items-start justify-between gap-3">
@@ -43,6 +43,30 @@
                         <span x-show="runtime.installed" class="badge-success text-xs">{{t .Lang "software.installed"}}</span>
                         <button x-show="!runtime.installed" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button>
                     </div>
+                    <details x-show="runtime.installed" class="software-extension-details">
+                        <summary>
+                            <span>{{t .Lang "software.php_extensions"}}</span>
+                            <span :class="healthBadge(runtimeHealth(runtime.version).state)" x-text="healthLabel(runtimeHealth(runtime.version).state)"></span>
+                        </summary>
+                        <p x-show="runtimeHealth(runtime.version).state === 'unknown'" class="software-health-help" x-text="phpHealthReason(runtimeHealth(runtime.version).reason)"></p>
+                        <div class="software-extension-list" tabindex="0" role="region" aria-label="{{t .Lang "software.php_extensions"}}">
+                            <template x-for="extension in healthExtensions(runtime.version)" :key="extension.name">
+                                <div class="software-extension-item">
+                                    <span><span x-text="extension.name"></span><small x-show="extension.importance === 'required'">{{t .Lang "software.extension_required"}}</small></span>
+                                    <span :class="healthBadge(extension.state)" x-text="healthLabel(extension.state)"></span>
+                                </div>
+                            </template>
+                        </div>
+                        <div x-show="runtimeHealth(runtime.version).opcache" class="software-opcache-config">
+                            <p class="font-medium">{{t .Lang "software.opcache_configuration"}}</p>
+                            <dl>
+                                <div><dt>{{t .Lang "software.opcache_enabled"}}</dt><dd x-text="opcacheValue(runtime.version, 'enabled')"></dd></div>
+                                <div><dt>{{t .Lang "software.opcache_capacity"}}</dt><dd x-text="opcacheValue(runtime.version, 'memory_mb')"></dd></div>
+                                <div><dt>{{t .Lang "software.opcache_files"}}</dt><dd x-text="opcacheValue(runtime.version, 'max_files')"></dd></div>
+                            </dl>
+                            <p class="software-health-help">{{t .Lang "software.opcache_metrics_scope"}}</p>
+                        </div>
+                    </details>
                 </div>
             </template>
         </div>
@@ -97,6 +121,55 @@
         <div class="mt-3 pt-3 border-t border-gray-800 text-xs text-gray-500">
             {{t .Lang "software.process_guard_help"}}
         </div>
+    </div>
+    <div class="card mb-6">
+        <div class="software-health-heading">
+            <div>
+                <h3 class="text-lg font-semibold text-white">{{t .Lang "software.environment_health"}}</h3>
+                <p class="software-health-help">{{t .Lang "software.environment_health_help"}}</p>
+            </div>
+            <button type="button" @click="fetchHealth(true)" :disabled="healthLoading || dependencyInstalling" class="btn-secondary text-xs" x-text="healthLoading ? t('software.health_checking') : t('software.health_refresh')"></button>
+        </div>
+        <p x-show="healthError" x-text="healthError" role="status" class="text-sm text-red-400 mb-3"></p>
+        <p x-show="!health && !healthError" class="software-health-help">{{t .Lang "software.health_checking"}}</p>
+        <div x-show="health" class="software-health-grid">
+            <div class="software-health-block">
+                <div class="software-health-heading">
+                    <h4 class="font-semibold">{{t .Lang "software.backup_dependencies"}}</h4>
+                    <span :class="healthBadge(health?.backup?.status)" x-text="healthLabel(health?.backup?.status)"></span>
+                </div>
+                <p class="software-health-help" x-text="backupModeHelp()"></p>
+                <p x-show="health?.backup?.configuration_status === 'error'" class="software-health-help">{{t .Lang "software.backup_configuration_unknown"}}</p>
+                <div class="software-dependency-list">
+                    <template x-for="dependency in (health?.backup?.dependencies || [])" :key="dependency.id">
+                        <div class="software-extension-item">
+                            <span><span x-text="dependency.name"></span><small x-text="dependency.required ? t('software.dependency_required') : t('software.dependency_optional')"></small></span>
+                            <span :class="healthBadge(dependency.status === 'missing' && !dependency.required ? 'optional' : dependency.status)" x-text="dependency.status === 'missing' && !dependency.required ? t('software.dependency_optional_missing') : healthLabel(dependency.status)"></span>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="missingDependencyPackages().length && health?.backup?.configuration_status === 'ok'" class="software-dependency-repair">
+                    <p class="software-health-help" x-text="t('software.backup_packages_missing', { packages: missingDependencyPackages().join(', ') })"></p>
+                    <button type="button" @click="installBackupDependencies()" :disabled="dependencyInstalling || healthLoading" class="btn-secondary text-xs" x-text="dependencyInstalling ? t('software.installing') : t('software.backup_dependencies_repair')"></button>
+                </div>
+                <a href="/{{.RandomSuffix}}/backups/remote-settings" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.backup_settings"}}</a>
+            </div>
+            <div class="software-health-block">
+                <div class="software-health-heading">
+                    <h4 class="font-semibold">{{t .Lang "software.cron_health"}}</h4>
+                    <span :class="healthBadge(health?.cron?.state)" x-text="healthLabel(health?.cron?.state)"></span>
+                </div>
+                <p class="software-health-help">{{t .Lang "software.cron_health_help"}}</p>
+                <dl class="software-cron-facts">
+                    <div><dt>{{t .Lang "software.cron_autostart"}}</dt><dd x-text="healthLabel(health?.cron?.enabled)"></dd></div>
+                    <div><dt>{{t .Lang "software.cron_unit"}}</dt><dd x-text="health?.cron?.unit || 'cron.service'"></dd></div>
+                </dl>
+                <p x-show="health?.cron?.state !== 'running'" class="software-health-help">{{t .Lang "software.cron_attention"}}</p>
+                <p class="software-health-help">{{t .Lang "software.cron_timer_scope"}}</p>
+                <a href="/{{.RandomSuffix}}/cron" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.cron_view_tasks"}}</a>
+            </div>
+        </div>
+        <p x-show="health?.checked_at" class="software-health-updated" x-text="t('software.health_checked_at', { time: healthCheckedAt() })"></p>
     </div>
     <div class="card mb-6">
         <div class="mb-4">
@@ -317,6 +390,8 @@ function softwareManager() {
     return {
         software: [], disposed: false, listLoading: false, listError: '', listRequestID: 0, listController: null,
         logRequestID: 0, logController: null,
+        health: null, healthLoading: false, healthError: '', healthRequestID: 0, healthController: null, dependencyInstalling: false,
+        runtimeRequestID: 0, runtimeController: null, toolsRequestID: 0, toolsController: null,
         closeLog() {
             this.logRequestID++;
             if (this.logController) this.logController.abort();
@@ -329,6 +404,10 @@ function softwareManager() {
             this.listRequestID++;
             if (this.listController) this.listController.abort();
             this.listController = null;
+            this.healthRequestID++; this.runtimeRequestID++; this.toolsRequestID++;
+            for (const name of ['healthController', 'runtimeController', 'toolsController']) {
+                this[name]?.abort(); this[name] = null;
+            }
             this.closeLog();
         },
         phpRuntimes: [],
@@ -337,6 +416,78 @@ function softwareManager() {
         showHelp: false,
         clearingOpcache: false,
         logModal: { open: false, title: '', content: '', loading: false, clearing: false },
+        async refreshAll() {
+            if (this.disposed) return;
+            await Promise.all([this.fetchList(true), this.fetchHealth(true)]);
+        },
+        runtimeHealth(version) {
+            return this.health?.php?.find(runtime => runtime.version === version) || { state: this.healthLoading ? 'checking' : 'unknown', extensions: [], reason: '' };
+        },
+        healthExtensions(version) {
+            return [...this.runtimeHealth(version).extensions].sort((left, right) => {
+                const priority = extension => extension.state === 'missing' ? 0 : extension.state === 'unknown' ? 1 : extension.importance === 'required' ? 2 : 3;
+                return priority(left) - priority(right);
+            });
+        },
+        healthLabel(state) {
+            const keys = { ok: 'software.health_ready', installed: 'software.health_ready', loaded: 'software.health_loaded', warning: 'software.health_attention',
+                missing: 'software.health_missing', error: 'software.health_failed', checking: 'software.health_checking', running: 'software.running', stopped: 'software.stopped', enabled: 'software.health_enabled', disabled: 'software.health_disabled', static: 'software.health_static' };
+            return t(keys[state] || 'software.health_unknown');
+        },
+        healthBadge(state) {
+            return ['ok', 'installed', 'loaded', 'running'].includes(state) ? 'badge-success text-xs' :
+                ['warning', 'missing', 'stopped', 'error'].includes(state) ? 'badge-warning text-xs' : 'badge-info text-xs';
+        },
+        phpHealthReason(reason) {
+            return t(reason === 'configuration_unavailable' || reason === 'configuration_mismatch' ? 'software.php_configuration_unknown' : 'software.php_probe_unknown');
+        },
+        opcacheValue(version, key) {
+            const value = this.runtimeHealth(version).opcache?.[key];
+            if (value === undefined || value === null) return t('software.health_unknown');
+            if (key === 'enabled') return t(value ? 'software.health_enabled' : 'software.health_disabled');
+            return String(value) + (key === 'memory_mb' ? ' MB' : '');
+        },
+        backupModeHelp() {
+            const backup = this.health?.backup;
+            return t(!backup?.remote_enabled ? 'software.backup_local_dependencies_help' : backup.remote_type === 's3' ?
+                'software.backup_s3_dependencies_help' : 'software.backup_ssh_dependencies_help');
+        },
+        missingDependencyPackages() {
+            const backup = this.health?.backup;
+            return [...new Set((backup?.dependencies || []).filter(dependency =>
+                dependency.required && dependency.status === 'missing' && (backup?.missing_required || []).includes(dependency.id)
+            ).map(dependency => dependency.package))];
+        },
+        healthCheckedAt() {
+            const time = new Date(this.health?.checked_at);
+            return Number.isNaN(time.getTime()) ? '' : time.toLocaleString(document.documentElement.lang || 'zh-CN');
+        },
+        async fetchHealth(fresh = false) {
+            if (this.disposed || (this.healthLoading && !fresh)) return;
+            this.healthController?.abort();
+            const controller = new AbortController(), requestID = ++this.healthRequestID;
+            this.healthController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && requestID === this.healthRequestID;
+            this.healthLoading = true; this.healthError = '';
+            try {
+                const result = await api('/software/health' + (fresh ? '?fresh=1' : ''), { silent: true, timeout: 15000, signal: controller.signal });
+                if (!result.success) throw Error(result.message || t('software.health_load_failed'));
+                if (current()) this.health = result.data;
+            } catch(error) { if (current()) this.healthError = error.message; }
+            finally { if (current()) { this.healthLoading = false; this.healthController = null; } }
+        },
+        async installBackupDependencies() {
+            if (this.disposed || this.dependencyInstalling || this.healthLoading || !this.missingDependencyPackages().length || this.health?.backup?.configuration_status !== 'ok') return;
+            if (!await confirmModal(t('software.backup_dependencies_install_confirm', { packages: this.missingDependencyPackages().join(', ') }))) return;
+            if (this.disposed || this.dependencyInstalling) return;
+            this.dependencyInstalling = true;
+            try {
+                const result = await api('/software/backup-dependencies/install', { method: 'POST', body: {}, timeout: 660000 });
+                if (!result.success) throw Error(result.message || t('software.backup_dependencies_install_failed'));
+                if (!this.disposed) showToast(result.data?.message || t('software.backup_dependencies_installed'), 'success');
+            } catch(error) { if (!this.disposed) showToast(error.message, 'error'); }
+            finally { this.dependencyInstalling = false; await this.fetchHealth(true); }
+        },
         configurableSoftware() {
             return this.software.filter(sw => ['PHP', 'OpenLiteSpeed', 'MariaDB', 'Redis'].includes(sw.name));
         },
@@ -352,55 +503,72 @@ function softwareManager() {
                 if (!current()) return;
                 if (r.success) {
                     this.software = (r.data || []).map(sw => {
+                        const previous = this.software.find(old => old.name === sw.name);
+                        if (previous?._saving) return previous;
                         sw._saving = false;
                         sw._recommending = false; sw._showRecommendations = false;
-                        (sw.configs || []).forEach(cfg => { cfg._value = cfg.value; cfg._recommended = ''; });
+                        (sw.configs || []).forEach(cfg => {
+                            const old = previous?.configs?.find(item => item.key === cfg.key);
+                            cfg._value = old && old._value !== old.value ? old._value : cfg.value;
+                            cfg._recommended = old?._recommended ?? '';
+                        });
                         return sw;
                     });
                 }
             } catch(e) { if (current()) this.listError = e.message; }
             finally { if (current()) { this.listLoading = false; this.listController = null; } }
             if (!current()) return;
-            await this.fetchPHPRuntimes();
-            if (!current()) return;
-            await this.fetchDevelopmentTools();
+            await Promise.all([this.fetchPHPRuntimes(), this.fetchDevelopmentTools(fresh)]);
         },
         async fetchPHPRuntimes() {
+            if (this.disposed) return;
+            this.runtimeController?.abort();
+            const controller = new AbortController(), requestID = ++this.runtimeRequestID;
+            this.runtimeController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && requestID === this.runtimeRequestID;
             try {
-                const r = await api('/software/php-runtimes');
-                if (r.success) this.phpRuntimes = (r.data || []).map(runtime => ({ ...runtime, _installing: false }));
+                const r = await api('/software/php-runtimes', { silent: true, signal: controller.signal });
+                if (current() && r.success) this.phpRuntimes = (r.data || []).map(runtime => ({ ...runtime, _installing: !!this.phpRuntimes.find(old => old.version === runtime.version)?._installing }));
             } catch(e) {}
+            finally { if (current()) this.runtimeController = null; }
         },
         async installPHPRuntime(runtime) {
+            if (this.disposed || runtime._installing) return;
             if (!await confirmModal(t('software.php_runtime_install_confirm', { version: runtime.version }))) return;
+            if (this.disposed || runtime._installing) return;
             runtime._installing = true;
             try {
                 const r = await api('/software/php-runtimes/install', { method: 'POST', body: { version: runtime.version }, timeout: 1800000 });
                 showToast(r.data?.message || t('software.php_runtime_installed', { version: runtime.version }), 'success');
-                await this.fetchList(true);
+                await this.refreshAll();
             } catch(e) { showToast(e.message, 'error'); }
-            finally { runtime._installing = false; }
+            finally { runtime._installing = false; const current = this.phpRuntimes.find(item => item.version === runtime.version); if (current) current._installing = false; }
         },
-        async fetchDevelopmentTools() {
-            if (this.toolsLoading) return;
+        async fetchDevelopmentTools(fresh = false) {
+            if (this.disposed || (this.toolsLoading && !fresh)) return;
+            this.toolsController?.abort();
+            const controller = new AbortController(), requestID = ++this.toolsRequestID;
+            this.toolsController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && requestID === this.toolsRequestID;
             this.toolsLoading = true; this.toolsError = '';
             try {
-                const r = await api('/software/development-tools');
+                const r = await api('/software/development-tools', { silent: true, signal: controller.signal });
                 if (!r.success) throw Error(r.message || 'Unable to load tool status');
-                this.developmentTools = (r.data || []).map(tool => ({ ...tool, _installing: false }));
-            } catch(e) { this.toolsError = e.message; this.developmentTools = []; }
-            finally { this.toolsLoading = false; }
+                if (current()) this.developmentTools = (r.data || []).map(tool => ({ ...tool, _installing: !!this.developmentTools.find(old => old.id === tool.id)?._installing }));
+            } catch(e) { if (current()) this.toolsError = e.message; }
+            finally { if (current()) { this.toolsLoading = false; this.toolsController = null; } }
         },
         async installDevelopmentTool(tool) {
-            if (tool.state !== 'missing') return;
+            if (this.disposed || tool._installing || tool.state !== 'missing') return;
             if (!await confirmModal(t('software.development_tool_install_confirm', { tool: tool.name }))) return;
+            if (this.disposed || tool._installing) return;
             tool._installing = true;
             try {
                 const r = await api('/software/development-tools/install', { method: 'POST', body: { id: tool.id }, timeout: 600000 });
                 showToast(r.data?.message || t('software.development_tool_installed'), 'success');
                 await this.fetchDevelopmentTools();
             } catch(e) { showToast(e.message, 'error'); }
-            finally { tool._installing = false; }
+            finally { tool._installing = false; const current = this.developmentTools.find(item => item.id === tool.id); if (current) current._installing = false; }
         },
         async viewLog(name) {
             if (this.disposed) return;

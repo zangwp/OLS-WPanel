@@ -3074,11 +3074,16 @@ apt-get install -y \
     iproute2 \
     openlitespeed \
     mariadb-server \
+    mariadb-client \
     redis-server \
     redis-tools \
     fail2ban \
     nftables \
+    rsync \
+    openssh-client \
     sshpass \
+    tar \
+    gzip \
     rsyslog \
     cron \
     lsphp85 \
@@ -3110,6 +3115,12 @@ fi
 log_info "基础组件安装完成"
 else
     log_info "repair模式保留APT源和现有软件包，不执行安装或升级"
+    if ! command -v rsync >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1 || \
+       ! command -v sshpass >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1 || \
+       ! command -v gzip >/dev/null 2>&1 || ! command -v mysql >/dev/null 2>&1 || \
+       ! command -v mysqldump >/dev/null 2>&1; then
+        log_warn "检测到备份命令未完整安装；请在软件页面检查备份依赖，并按当前备份配置补装缺失依赖"
+    fi
 fi
 
 if ! $REPAIR_MODE; then

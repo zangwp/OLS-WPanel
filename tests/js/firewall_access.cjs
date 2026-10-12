@@ -10,8 +10,8 @@ vm.createContext(ctx);vm.runInContext(source,ctx);
  const fixed=removable.accessRows.filter(r=>r.fixed);assert.equal(fixed.length,8,'all built-in services must remain available in the editor');
  for(const row of fixed)assert.equal(removable.canRemoveAccessRow(row),false,'built-in service cannot be removed: '+row.key);
  const savedCustom=removable.accessRows.find(r=>r.key==='tcp:8088');assert(savedCustom.custom);assert.equal(savedCustom.scope,'specific');assert.equal(savedCustom.sources,'203.0.113.9/32');assert.equal(removable.canRemoveAccessRow(savedCustom),true,'a saved custom port without a listener must be removable after reconstructing the draft');
- const local=removable.accessRows.find(r=>r.key==='tcp:9000');assert.equal(local.listening,false);assert.equal(local.detected,true);assert.equal(removable.canRemoveAccessRow(local),false,'localhost listeners are detected services even without network exposure');
- const legacy=removable.accessRows.find(r=>r.key==='tcp:8443');assert.equal(legacy.legacy,true);assert.equal(removable.canRemoveAccessRow(legacy),false,'legacy rule rows are preserved separately from the access policy');
+ const local=removable.accessRows.find(r=>r.key==='tcp:9000');assert.equal(local.listening,false);assert.equal(local.detected,true);assert.equal(removable.canRemoveAccessRow(local),true,'a managed custom inbound rule can be removed without stopping its localhost listener');
+ const legacy=removable.accessRows.find(r=>r.key==='tcp:8443');assert.equal(legacy.legacy,true);assert.equal(removable.canRemoveAccessRow(legacy),true,'a managed custom access entry can be removed while its independent legacy rule remains untouched');
  assert.equal(removable.canRemoveAccessRow(removable.accessRows.find(r=>r.key==='tcp:8080')),false,'network listeners cannot be removed');
  removable.accessPreview={rules:removable.accessPayload(),fingerprint:'older-draft'};
  for(const state of [{accessBusy:true},{accessToken:'pending'},{portSubmitting:true},{portsLoading:true}]){
@@ -21,8 +21,8 @@ vm.createContext(ctx);vm.runInContext(source,ctx);
  for(const available of [false,undefined,'true']){removable.portStatus.access_available=available;removable.removeAccessRow(savedCustom);assert(removable.accessRows.includes(savedCustom));assert.equal(removable.accessDirty,false);}
  removable.portStatus.access_available=true;
  for(const row of [undefined,null,{}, {key:'tcp:9999',protocol:'tcp',port:9999,custom:true}, {...savedCustom,port:'8088'}, {...savedCustom,protocol:'icmp'}, {...savedCustom,key:'tcp:8089'}]){assert.equal(removable.canRemoveAccessRow(row),false);removable.removeAccessRow(row);}
- const currentLocal=removable.accessRows.find(r=>r.key==='tcp:9000');currentLocal.detected=false;assert.equal(removable.canRemoveAccessRow(currentLocal),false,'the latest listener status still protects a stale row');
- legacy.legacy=false;assert.equal(removable.canRemoveAccessRow(legacy),false,'the latest legacy status still protects a stale row');
+ const currentLocal=removable.accessRows.find(r=>r.key==='tcp:9000');currentLocal.detected=false;assert.equal(removable.canRemoveAccessRow(currentLocal),true,'observed listener metadata does not prevent removing its managed inbound rule');
+ legacy.legacy=false;assert.equal(removable.canRemoveAccessRow(legacy),true,'independent legacy metadata does not prevent removing its managed access entry');
  const ssh=removable.accessRows.find(r=>r.key==='tcp:2222');ssh.fixed=false;assert.equal(removable.canRemoveAccessRow(ssh),false,'critical ports remain protected even with stale row metadata');
  calls.length=0;removable.accessError='previous error';const beforeRemoval=removable.accessRows.length;
  removable.removeAccessRow(savedCustom);assert.equal(removable.accessRows.length,beforeRemoval-1);assert(!removable.accessPayload().some(r=>r.port===8088));assert.equal(removable.accessDirty,true);assert.equal(removable.accessPreview,null,'removing a row invalidates the preview fingerprint');assert.equal(removable.accessError,'');assert.equal(calls.length,0,'removal edits only the local draft');
@@ -67,5 +67,5 @@ vm.createContext(ctx);vm.runInContext(source,ctx);
  assert.equal(p.serviceDisplayName('lshttpd'),'OpenLiteSpeed');assert.equal(p.serviceDisplayName('redis-server'),'Redis');assert.equal(p.serviceDisplayName('mysqld'),'MariaDB');assert.equal(p.serviceDisplayName('https'),'HTTPS');assert.equal(p.serviceDisplayName('My App'),'My App');
  assert.equal(p.serviceDisplayName('litespeed"'),'OpenLiteSpeed');
  const panelPreset=p.portPresets.find(r=>r.key==='panel');p.applyPortPreset(panelPreset);assert.equal(p.portForm.port,7543);p.portStatus.panel_port=0;p.portForm.port=9000;p.applyPortPreset(panelPreset);assert.equal(p.portForm.port,9000,'missing panel endpoint must not replace the draft with 8443');
- console.log('Firewall custom-port add/remove, saved drafts, protected listeners and built-ins, preview invalidation, blocked mutations and verified save passed');
+ console.log('Firewall custom-port add/remove, saved drafts, managed listener entries, protected built-ins, preview invalidation, blocked mutations and guarded save passed');
 })().catch(e=>{console.error(e);process.exit(1)});

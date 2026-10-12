@@ -157,3 +157,17 @@ func TestSoftwareReadCommandCancelsActualChildProcess(t *testing.T) {
 		t.Fatal("subprocess cancellation exceeded its budget")
 	}
 }
+
+func TestSoftwareReadOutputLimitRejectsPartialEvidence(t *testing.T) {
+	var output softwareProbeOutput
+	chunk := make([]byte, softwareProbeOutputLimit+1)
+	if n, err := output.Write(chunk); err != nil || n != len(chunk) {
+		t.Fatalf("must drain producer output: %d %v", n, err)
+	}
+	if !output.exceeded || output.Len() != softwareProbeOutputLimit {
+		t.Fatalf("unbounded capture: exceeded=%v size=%d", output.exceeded, output.Len())
+	}
+	if n, err := output.Write(chunk); err != nil || n != len(chunk) || output.Len() != softwareProbeOutputLimit {
+		t.Fatal("overflow capture grew or stopped draining")
+	}
+}
