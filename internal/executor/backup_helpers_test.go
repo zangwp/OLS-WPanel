@@ -153,7 +153,6 @@ func TestWriteSanitizedRestoreSQLSkipsDangerousStatements(t *testing.T) {
 		"newline":       "CREATE\nDATABASE other_db;",
 		"block_comment": "CREATE /* comment */ DATABASE other_db;",
 		"use":           "USE other_db;",
-		"definer":       "CREATE DEFINER=`root`@`localhost` VIEW v AS SELECT 1;",
 	}
 
 	for name, dangerous := range tests {

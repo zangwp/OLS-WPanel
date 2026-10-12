@@ -545,7 +545,7 @@ func runCronJob(jobID int, scheduled bool) TaskResult {
 		}
 	} else if job.taskType == "wp_cron" {
 		url := "https://" + job.command + "/wp-cron.php?doing_wp_cron"
-		out, execErr = runCronCommand(ctx, "curl", "-k", "-s", "-o", "/dev/null", url)
+		out, execErr = runWordPressCronRequest(ctx, url)
 	} else if job.runAsUser != "" {
 		out, execErr = runCronCommand(ctx, "runuser", "-u", job.runAsUser, "--", "bash", "-c", job.command)
 	} else {
@@ -592,6 +592,13 @@ func runCronJob(jobID int, scheduled bool) TaskResult {
 		Message: fmt.Sprintf("任务 %s 执行%s", job.name, map[bool]string{true: "成功", false: "失败"}[execErr == nil]),
 		Data:    map[string]interface{}{"output": out, "status": status, "run_at": now},
 	}
+}
+
+// Keep the existing origin TLS policy while making HTTP failures and stalled
+// requests fail the job instead of recording a successful invocation.
+func runWordPressCronRequest(ctx context.Context, url string) (string, error) {
+	return runCronCommand(ctx, "curl", "-k", "-sS", "--fail",
+		"--connect-timeout", "10", "--max-time", "120", "-o", os.DevNull, url)
 }
 
 func appendCronGateError(jobID int, message string) {

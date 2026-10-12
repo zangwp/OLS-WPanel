@@ -15,6 +15,7 @@ function setup(overrides = {}) {
     const timers = new Map();
     let nextTimer = 0;
     const context = {
+        AbortController,
         t: key => key, showToast() {}, confirmModal: async () => true,
         setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; },
         clearTimeout: id => timers.delete(id),
@@ -74,6 +75,20 @@ test('service actions maintain one polling chain and destroy cancels it', async 
     assert.equal(timers.size, 0);
     await guard.fetchStatus();
     assert.equal(timers.size, 0);
+});
+
+test('manual guard refresh bypasses only version cache and ordinary polls keep the default URL', async () => {
+    const calls = [];
+    const { context, timers } = setup({ api: async url => {
+        calls.push(url);
+        return { success: true, data: [] };
+    } });
+    const guard = context.processGuard();
+    await guard.fetchStatus(true);
+    await guard.fetchStatus();
+    assert.deepEqual(calls, ['/software/guard?fresh=1', '/software/guard']);
+    assert.equal(timers.size, 1);
+    guard.destroy();
 });
 
 test('late status responses cannot overwrite new status or restart polling after destroy', async () => {

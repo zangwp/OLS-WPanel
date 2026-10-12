@@ -13,7 +13,7 @@
             <div class="card space-y-4">
                 <div>
                     <label class="label">{{t .Lang "log_analysis.website"}}</label>
-                    <select x-model="siteID" @change="loadHistory()" class="input-field w-full">
+                    <select x-model="siteID" @change="onSiteChange()" class="input-field w-full">
                         <option value="">{{t .Lang "log_analysis.select_website"}}</option>
                         <template x-for="site in websites" :key="site.id">
                             <option :value="String(site.id)" x-text="site.domain"></option>
@@ -123,11 +123,12 @@
         </div>
     </div>
 
-    <div x-show="detailOpen" x-cloak class="fixed inset-0 z-50 bg-gray-900 overflow-auto" @keydown.escape.window="detailOpen = false">
+    <div x-show="detailOpen" x-cloak class="fixed inset-0 z-50 bg-gray-900 overflow-auto" @keydown.escape.window="closeDetails()">
         <div class="w-full min-h-screen p-4 md:p-6">
-            <div class="flex justify-between gap-4 items-start mb-5"><div><h3 class="text-xl font-semibold text-white" x-text="detailTitle"></h3><p class="text-xs text-gray-500 mt-1">{{t .Lang "log_analysis.detail_current_logs_help"}}</p></div><button @click="detailOpen = false" class="text-gray-400 hover:text-white text-2xl">&times;</button></div>
+            <div class="flex justify-between gap-4 items-start mb-5"><div><h3 class="text-xl font-semibold text-white" x-text="detailTitle"></h3><p class="text-xs text-gray-500 mt-1">{{t .Lang "log_analysis.detail_current_logs_help"}}</p></div><button @click="closeDetails()" class="text-gray-400 hover:text-white text-2xl">&times;</button></div>
             <div x-show="detailLoading" class="py-16 text-center text-gray-400">{{t .Lang "log_analysis.detail_loading"}}</div>
             <template x-if="detail && !detailLoading"><div>
+                <p x-show="detail.truncated" role="status" class="text-xs text-yellow-400 mb-3">{{t .Lang "log_analysis.truncated"}}</p>
                 <div class="flex flex-wrap justify-between items-center gap-3 mb-5"><div class="flex gap-2"><button @click="detailView = 'overview'" class="btn-secondary text-xs" :class="detailView === 'overview' ? 'bg-blue-600' : ''">{{t .Lang "log_analysis.detail_overview"}}</button><button @click="detailView = 'logs'" class="btn-secondary text-xs" :class="detailView === 'logs' ? 'bg-blue-600' : ''">{{t .Lang "log_analysis.detail_raw_logs"}}</button></div><div x-show="aiReady" class="text-right"><button @click="analyzeDetail()" :disabled="detailAILoading" class="btn-primary text-xs" x-text="detailAILoading ? t('log_analysis.detail_ai_running') : t('log_analysis.detail_ai')"></button><p class="text-xs text-blue-300 mt-1">{{t .Lang "log_analysis.ai_privacy_help"}}</p></div></div>
 
                 <div x-show="detailView === 'overview'" class="space-y-6">
@@ -156,6 +157,46 @@
 <script>
 function logAnalysisPage() {
     return {
+        disposed: false, jobVersion: 0, historyVersion: 0, detailVersion: 0, diagnosticVersion: 0,
+        jobController: null, historyController: null, detailController: null,
+        stopPolling() {
+            clearTimeout(this.pollTimer);
+            this.pollTimer = null;
+            if (this.jobController) this.jobController.abort();
+            this.jobController = null;
+        },
+        beginJobView() {
+            this.stopPolling();
+            this.closeDetails();
+            this.diagnosticVersion++;
+            this.detailAILoading = false;
+            return ++this.jobVersion;
+        },
+        jobCurrent(version, siteID) {
+            return !this.disposed && version === this.jobVersion && String(siteID) === String(this.siteID);
+        },
+        onSiteChange() {
+            this.beginJobView();
+            this.running = false;
+            this.job = null;
+            this.report = null;
+            this.history = [];
+            return this.loadHistory();
+        },
+        closeDetails() {
+            this.detailVersion++;
+            if (this.detailController) this.detailController.abort();
+            this.detailController = null;
+            this.detailLoading = false;
+            this.detailOpen = false;
+        },
+        destroy() {
+            this.disposed = true;
+            this.beginJobView();
+            this.historyVersion++;
+            if (this.historyController) this.historyController.abort();
+            this.historyController = null;
+        },
         websites: [], siteID: '', range: '24h', customStart: '', customEnd: '', aiReady: false,
         running: false, job: null, report: null, history: [], pollTimer: null,
         detailOpen: false, detailLoading: false, detailKind: '', detailValue: '', detailTitle: '', detail: null, detailView: 'overview', detailAILoading: false,
@@ -179,25 +220,56 @@ function logAnalysisPage() {
             return { start, end };
         },
         async startAnalysis() {
+            if (this.disposed || this.running || !this.siteID) return;
             const values = this.rangeValues();
             if (!values.start || !values.end || isNaN(values.start) || isNaN(values.end)) { showToast('{{t .Lang "log_analysis.invalid_range"}}', 'error'); return; }
+            const siteID = this.siteID, version = this.beginJobView();
             this.running = true; this.job = null; this.report = null;
             try {
-                const r = await api('/log-analysis', { method: 'POST', body: { site_id: Number(this.siteID), start_at: values.start.toISOString(), end_at: values.end.toISOString() } });
-                await this.pollJob(r.data.id);
-            } catch (e) { this.running = false; showToast(e.message || t('log_analysis.start_failed'), 'error'); }
+                // The server owns the analysis job; changing views only stops reads.
+                const r = await api('/log-analysis', { method: 'POST', body: { site_id: Number(siteID), start_at: values.start.toISOString(), end_at: values.end.toISOString() } });
+                if (this.jobCurrent(version, siteID)) await this.pollJob(r.data.id, version);
+            } catch (e) {
+                if (this.jobCurrent(version, siteID)) { this.running = false; showToast(e.message || t('log_analysis.start_failed'), 'error'); }
+            }
         },
-        async pollJob(id) {
-            clearTimeout(this.pollTimer);
+        async pollJob(id, version = this.jobVersion, notify = true) {
+            const siteID = this.siteID;
+            if (!this.jobCurrent(version, siteID)) return;
+            this.stopPolling();
+            const controller = new AbortController();
+            this.jobController = controller;
+            const current = () => this.jobCurrent(version, siteID) && !controller.signal.aborted && this.jobController === controller;
             try {
-                const r = await api('/log-analysis/' + id); this.job = r.data; this.report = r.data.local_report || null;
-                if (['pending','running'].includes(r.data.status)) { this.running = true; this.pollTimer = setTimeout(() => this.pollJob(id), 1500); return; }
-                this.running = false; await this.loadHistory();
-                showToast(r.data.status === 'completed' ? t('log_analysis.analysis_finished') : t('log_analysis.analysis_failed'), r.data.status === 'completed' ? 'success' : 'error');
-            } catch (e) { this.running = false; showToast(t('log_analysis.load_failed'), 'error'); }
+                const r = await api('/log-analysis/' + id, { silent: true, timeout: 15000, signal: controller.signal });
+                if (!current()) return;
+                this.job = r.data; this.report = r.data.local_report || null;
+                if (['pending','running'].includes(r.data.status)) {
+                    this.running = true;
+                    this.pollTimer = setTimeout(() => this.pollJob(id, version), 1500);
+                    return;
+                }
+                this.running = false;
+                await this.loadHistory();
+                if (current() && notify) showToast(r.data.status === 'completed' ? t('log_analysis.analysis_finished') : t('log_analysis.analysis_failed'), r.data.status === 'completed' ? 'success' : 'error');
+            } catch (e) {
+                if (current()) { this.running = false; showToast(t('log_analysis.load_failed'), 'error'); }
+            }
         },
-        async loadHistory() { if (!this.siteID) { this.history = []; return; } try { const r = await api('/log-analysis?site_id=' + encodeURIComponent(this.siteID)); this.history = r.data || []; } catch (_) {} },
-        async loadJob(id) { const r = await api('/log-analysis/' + id); this.job = r.data; this.report = r.data.local_report || null; this.running = ['pending','running'].includes(r.data.status); if (this.running) this.pollJob(id); },
+        async loadHistory() {
+            const siteID = this.siteID, version = ++this.historyVersion;
+            if (this.historyController) this.historyController.abort();
+            const controller = new AbortController(); this.historyController = controller;
+            if (!siteID || this.disposed) { this.history = []; return; }
+            try {
+                const r = await api('/log-analysis?site_id=' + encodeURIComponent(siteID), { silent: true, timeout: 15000, signal: controller.signal });
+                if (!this.disposed && !controller.signal.aborted && version === this.historyVersion && String(siteID) === String(this.siteID)) this.history = r.data || [];
+            } catch (_) {}
+        },
+        async loadJob(id) {
+            if (this.disposed) return;
+            return this.pollJob(id, this.beginJobView(), false);
+        },
         statusCount(code) { const item = (this.report?.status_codes || []).find(entry => entry.name === code); return item ? item.count : 0; },
         identifiedBotRequests() { return (this.report?.bots || []).reduce((total, bot) => total + Number(bot.count || 0), 0); },
         categoryPercent(count) { const total = Number(this.report?.access_requests || 0); return total > 0 ? Number(count || 0) * 100 / total : 0; },
@@ -206,10 +278,45 @@ function logAnalysisPage() {
         categoryLabel(key) { if (key === 'security_rejected') return t('log_analysis.category_security_rejected'); if (key === 'identified_automation') return t('log_analysis.category_identified_automation'); if (key === 'http_error') return t('log_analysis.category_http_error'); if (key === 'wordpress_endpoint') return t('log_analysis.category_wordpress_endpoint'); if (key === 'static_asset') return t('log_analysis.category_static_asset'); if (key === 'page_like') return t('log_analysis.category_page_like'); return t('log_analysis.category_other'); },
         categoryColor(key) { if (key === 'security_rejected') return 'bg-red-500'; if (key === 'identified_automation') return 'bg-purple-500'; if (key === 'http_error') return 'bg-orange-500'; if (key === 'wordpress_endpoint') return 'bg-blue-500'; if (key === 'static_asset') return 'bg-cyan-500'; if (key === 'page_like') return 'bg-green-500'; return 'bg-gray-500'; },
         trafficExplanation() { return t('log_analysis.traffic_explanation', { requests: this.report?.access_requests || 0, ips: this.report?.unique_ips || 0, blocked: this.statusCount('444'), bots: this.identifiedBotRequests() }); },
-        async openDetails(kind, value, title) { this.detailOpen = true; this.detailKind = kind; this.detailValue = value; this.detailTitle = title; this.detail = null; this.detailView = 'overview'; await this.loadDetailPage(1); },
-        async loadDetailPage(page) { if (!this.job?.id || page < 1) return; this.detailLoading = true; try { const query = new URLSearchParams({ kind: this.detailKind, value: this.detailValue, page: String(page), page_size: '20' }); const r = await api('/log-analysis/' + this.job.id + '/details?' + query); this.detail = r.data; } catch (e) { showToast(e.message || t('log_analysis.detail_load_failed'), 'error'); } finally { this.detailLoading = false; } },
+        async openDetails(kind, value, title) {
+            if (this.disposed || !this.job?.id) return;
+            this.closeDetails();
+            this.detailOpen = true; this.detailKind = kind; this.detailValue = value;
+            this.detailTitle = title; this.detail = null; this.detailView = 'overview';
+            await this.loadDetailPage(1);
+        },
+        async loadDetailPage(page) {
+            if (!this.job?.id || page < 1 || this.disposed || !this.detailOpen) return;
+            const jobID = this.job.id, version = ++this.detailVersion, jobVersion = this.jobVersion;
+            const kind = this.detailKind, value = this.detailValue;
+            if (this.detailController) this.detailController.abort();
+            const controller = new AbortController(); this.detailController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && version === this.detailVersion
+                && jobVersion === this.jobVersion && jobID === this.job?.id && this.detailOpen;
+            this.detailLoading = true;
+            try {
+                const query = new URLSearchParams({ kind, value, page: String(page), page_size: '20' });
+                const r = await api('/log-analysis/' + jobID + '/details?' + query, { silent: true, timeout: 15000, signal: controller.signal });
+                if (current()) this.detail = r.data;
+            } catch (e) { if (current()) showToast(e.message || t('log_analysis.detail_load_failed'), 'error'); }
+            finally { if (current()) { this.detailLoading = false; this.detailController = null; } }
+        },
         async analyzeDetail() { await this.openDiagnostic(this.detailKind, this.detailValue); },
-        async openDiagnostic(kind, value) { if (!this.job?.id) return; this.detailAILoading = true; try { const r = await api('/log-analysis/' + this.job.id + '/diagnostic-session', { method: 'POST', body: { kind: kind || '', value: value || '' }, timeout: 210000 }); const d = r.data || {}; if (d.status === 'failed') throw new Error(d.error_message || t('log_analysis.detail_ai_failed')); const prefix = document.body.dataset.panelPrefix || ''; window.location.href = prefix + '/ai-diagnostics?site_id=' + encodeURIComponent(d.site_id) + '&session_id=' + encodeURIComponent(d.session_id); } catch (e) { showToast(e.message || t('log_analysis.detail_ai_failed'), 'error'); } finally { this.detailAILoading = false; } },
+        async openDiagnostic(kind, value) {
+            if (!this.job?.id || this.disposed || this.detailAILoading) return;
+            const jobID = this.job.id, jobVersion = this.jobVersion, version = ++this.diagnosticVersion;
+            const current = () => !this.disposed && version === this.diagnosticVersion && jobVersion === this.jobVersion && this.job?.id === jobID;
+            this.detailAILoading = true;
+            try {
+                const r = await api('/log-analysis/' + jobID + '/diagnostic-session', { method: 'POST', body: { kind: kind || '', value: value || '' }, timeout: 210000 });
+                if (!current()) return;
+                const d = r.data || {};
+                if (d.status === 'failed') throw new Error(d.error_message || t('log_analysis.detail_ai_failed'));
+                const prefix = document.body.dataset.panelPrefix || '';
+                window.location.href = prefix + '/ai-diagnostics?site_id=' + encodeURIComponent(d.site_id) + '&session_id=' + encodeURIComponent(d.session_id);
+            } catch (e) { if (current()) showToast(e.message || t('log_analysis.detail_ai_failed'), 'error'); }
+            finally { if (current()) this.detailAILoading = false; }
+        },
         eventTypeText(value) { if (value === 'xmlrpc_blocked') return t('log_analysis.security_event_xmlrpc_blocked'); if (value === 'wp_login_failed') return t('log_analysis.security_event_wp_login_failed'); if (value === 'sqli_blocked') return t('log_analysis.security_event_sqli_blocked'); if (value === 'sensitive_file_scan') return t('log_analysis.security_event_sensitive_file_scan'); if (value === 'sqli_probe') return t('log_analysis.security_event_sqli_probe'); if (value === 'fake_search_bot') return t('log_analysis.security_event_fake_search_bot'); if (value === 'suspicious_php') return t('log_analysis.security_event_suspicious_php'); if (value === 'client_ip_spoof') return t('log_analysis.security_event_client_ip_spoof'); return value; },
         formatTime(value) { return value ? new Date(value).toLocaleString() : '--'; },
         statusText(status) { return status === 'completed' ? '{{t .Lang "log_analysis.completed"}}' : status === 'failed' ? '{{t .Lang "log_analysis.failed"}}' : '{{t .Lang "log_analysis.running"}}'; },

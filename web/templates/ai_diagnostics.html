@@ -255,6 +255,30 @@
 function aiDiagnosticsPage() {
     return {
         websites: [],
+        disposed: false, siteVersion: 0, diagnosisRequestID: 0, followupRequestID: 0,
+        reads: {},
+        beginRead(key) {
+            if (this.reads[key]) this.reads[key].abort();
+            const controller = new AbortController();
+            this.reads[key] = controller;
+            return controller;
+        },
+        cancelReads() {
+            Object.values(this.reads).forEach(controller => controller.abort());
+            this.reads = {};
+        },
+        readCurrent(key, controller, siteID, version) {
+            return !this.disposed && !controller.signal.aborted && this.reads[key] === controller
+                && this.siteVersion === version && String(this.selectedSiteID) === String(siteID);
+        },
+        destroy() {
+            this.disposed = true;
+            this.siteVersion++;
+            this.diagnosisRequestID++;
+            this.followupRequestID++;
+            this.cancelReads();
+            this.stopWaitTimer();
+        },
         selectedSiteID: '',
         symptom: 'site_500',
         symptoms: [
@@ -359,6 +383,14 @@ function aiDiagnosticsPage() {
             return this.websites.find(site => String(site.id) === String(this.selectedSiteID));
         },
         async onSiteChange() {
+            this.siteVersion++;
+            this.diagnosisRequestID++;
+            this.followupRequestID++;
+            this.cancelReads();
+            this.stopWaitTimer();
+            // Only the displayed request is detached; persisted AI work continues.
+            this.diagnosing = false;
+            this.sendingFollowup = false;
             this.report = null;
             this.rawText = '';
             this.currentSessionID = null;
@@ -410,17 +442,22 @@ function aiDiagnosticsPage() {
             try { return new Date(value).toLocaleString('zh-CN'); } catch(e) { return value; }
         },
         async fetchSessions() {
-            if (!this.selectedSiteID) {
-                this.sessions = [];
-                return;
-            }
+            if (this.disposed) return;
+            const siteID = this.selectedSiteID, version = this.siteVersion;
+            const controller = this.beginRead('sessions');
+            if (!siteID) { this.sessions = []; return; }
             try {
-                const r = await api('/websites/' + this.selectedSiteID + '/ai/sessions', { silent: true });
-                if (r.success) this.sessions = r.data || [];
+                const r = await api('/websites/' + siteID + '/ai/sessions', { silent: true, timeout: 15000, signal: controller.signal });
+                if (this.readCurrent('sessions', controller, siteID, version) && r.success) this.sessions = r.data || [];
             } catch(e) {}
         },
         async runDiagnosis() {
-            if (!this.selectedSiteID) return;
+            if (!this.selectedSiteID || this.diagnosing || this.disposed) return;
+            const siteID = this.selectedSiteID, version = this.siteVersion;
+            const requestID = ++this.diagnosisRequestID;
+            const current = () => !this.disposed && version === this.siteVersion
+                && String(siteID) === String(this.selectedSiteID) && requestID === this.diagnosisRequestID;
+            this.cancelReads();
             this.diagnosing = true;
             this.startWaitTimer();
             this.error = '';
@@ -433,11 +470,12 @@ function aiDiagnosticsPage() {
             this.followupText = '';
             this.diagnosisCollapsed = false;
             try {
-                const r = await api('/websites/' + this.selectedSiteID + '/ai/diagnose', {
+                const r = await api('/websites/' + siteID + '/ai/diagnose', {
                     method: 'POST',
                     body: { symptom: this.symptom },
                     timeout: 210000
                 });
+                if (!current()) return;
                 const d = r.data || {};
                 if (d.status === 'failed') {
                     this.error = d.error_message || t('ai_diagnostics.diagnosis_failed');
@@ -450,16 +488,16 @@ function aiDiagnosticsPage() {
                     this.report = d.report || null;
                     this.rawText = d.raw_text || '';
                     this.diagnosisCollapsed = false;
-                    await this.loadSession(this.currentSessionID);
+                    await this.loadSession(this.currentSessionID, true);
+                    if (!current()) return;
                     showToast(t('ai_diagnostics.diagnosis_completed'), 'success');
                 }
-                await this.fetchSessions();
+                if (current()) await this.fetchSessions();
             } catch(e) {
-                this.error = e.message;
-                showToast(e.message, 'error');
+                if (current()) { this.error = e.message; showToast(e.message, 'error'); }
+            } finally {
+                if (current()) { this.stopWaitTimer(); this.diagnosing = false; }
             }
-            this.stopWaitTimer();
-            this.diagnosing = false;
         },
         startWaitTimer() {
             this.stopWaitTimer();
@@ -478,10 +516,21 @@ function aiDiagnosticsPage() {
             if (this.elapsedSeconds < 70) return t('ai_diagnostics.waiting_analysis');
             return t('ai_diagnostics.waiting_long');
         },
-        async loadSession(sessionID) {
-            if (!this.selectedSiteID || !sessionID) return;
+        async loadSession(sessionID, fromWrite = false) {
+            if (!this.selectedSiteID || !sessionID || this.disposed) return;
+            if (!fromWrite) {
+                this.diagnosisRequestID++;
+                this.followupRequestID++;
+                this.stopWaitTimer();
+                this.diagnosing = false;
+                this.sendingFollowup = false;
+            }
+            const siteID = this.selectedSiteID, version = this.siteVersion;
+            const controller = this.beginRead('session');
+            if (this.reads.messages) this.reads.messages.abort();
             try {
-                const r = await api('/websites/' + this.selectedSiteID + '/ai/sessions/' + sessionID);
+                const r = await api('/websites/' + siteID + '/ai/sessions/' + sessionID, { silent: true, timeout: 15000, signal: controller.signal });
+                if (!this.readCurrent('session', controller, siteID, version)) return;
                 if (r.success) {
                     this.currentSessionID = sessionID;
                     this.sessionDetail = r.data;
@@ -491,21 +540,20 @@ function aiDiagnosticsPage() {
                     this.error = r.data.error_message || '';
                     this.diagnosisCollapsed = false;
                     await this.fetchMessages();
-                    if (this.error) showToast(this.error, 'error');
+                    if (this.readCurrent('session', controller, siteID, version) && this.error) showToast(this.error, 'error');
                 }
             } catch(e) {
-                this.error = e.message;
-                showToast(e.message, 'error');
+                if (this.readCurrent('session', controller, siteID, version)) { this.error = e.message; showToast(e.message, 'error'); }
             }
         },
         async fetchMessages() {
-            if (!this.selectedSiteID || !this.currentSessionID) {
-                this.messages = [];
-                return;
-            }
+            if (this.disposed) return;
+            const siteID = this.selectedSiteID, sessionID = this.currentSessionID, version = this.siteVersion;
+            const controller = this.beginRead('messages');
+            if (!siteID || !sessionID) { this.messages = []; return; }
             try {
-                const r = await api('/websites/' + this.selectedSiteID + '/ai/sessions/' + this.currentSessionID + '/messages', { silent: true });
-                if (r.success) {
+                const r = await api('/websites/' + siteID + '/ai/sessions/' + sessionID + '/messages', { silent: true, timeout: 15000, signal: controller.signal });
+                if (this.readCurrent('messages', controller, siteID, version) && sessionID === this.currentSessionID && r.success) {
                     this.messages = r.data || [];
                     if (this.messages.length > 0) this.diagnosisCollapsed = true;
                     this.scrollMessagesToBottom();
@@ -541,17 +589,22 @@ function aiDiagnosticsPage() {
             });
         },
         async sendFollowup() {
-            if (!this.selectedSiteID || !this.currentSessionID || !this.followupText.trim()) return;
+            if (!this.selectedSiteID || !this.currentSessionID || !this.followupText.trim() || this.sendingFollowup || this.disposed) return;
+            const siteID = this.selectedSiteID, sessionID = this.currentSessionID, version = this.siteVersion;
+            const requestID = ++this.followupRequestID;
+            const current = () => !this.disposed && version === this.siteVersion && requestID === this.followupRequestID
+                && String(siteID) === String(this.selectedSiteID) && sessionID === this.currentSessionID;
             this.sendingFollowup = true;
             this.error = '';
             const content = this.followupText.trim();
             this.followupText = '';
             try {
-                const r = await api('/websites/' + this.selectedSiteID + '/ai/sessions/' + this.currentSessionID + '/messages', {
+                const r = await api('/websites/' + siteID + '/ai/sessions/' + sessionID + '/messages', {
                     method: 'POST',
                     body: { content },
                     timeout: 210000
                 });
+                if (!current()) return;
                 const d = r.data || {};
                 if (d.status === 'failed') {
                     this.error = d.error_message || t('ai_diagnostics.followup_failed');
@@ -564,16 +617,14 @@ function aiDiagnosticsPage() {
                 } else {
                     this.messages = d.messages || [];
                     if (this.messages.length > 0) this.diagnosisCollapsed = true;
-                    await this.loadSession(this.currentSessionID);
+                    await this.loadSession(sessionID, true);
+                    if (!current()) return;
                     this.scrollMessagesToBottom();
                     showToast(t('ai_diagnostics.reply_ready'), 'success');
                 }
             } catch(e) {
-                this.error = e.message;
-                this.followupText = content;
-                showToast(e.message, 'error');
-            }
-            this.sendingFollowup = false;
+                if (current()) { this.error = e.message; this.followupText = content; showToast(e.message, 'error'); }
+            } finally { if (current()) this.sendingFollowup = false; }
         }
     }
 }

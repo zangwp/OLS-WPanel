@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"context"
 	"os"
 	"runtime"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
-func collectVPSOverview() VPSOverview {
+func collectVPSOverview(context.Context) VPSOverview {
 	hostname, _ := os.Hostname()
 	return VPSOverview{
 		Identity: VPSIdentity{Hostname: hostname, OS: runtime.GOOS, Architecture: runtime.GOARCH, CPUCores: runtime.NumCPU()},

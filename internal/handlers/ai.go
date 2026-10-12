@@ -21,7 +21,7 @@ import (
 // aiDiagnosisMu prevents concurrent diagnoses for the same site within one process.
 var aiDiagnosisMu sync.Map
 
-var buildAIDiagnosticPrompt = executor.BuildAIDiagnosticPrompt
+var buildAIDiagnosticPrompt = executor.BuildAIDiagnosticPromptContext
 var callAIChat = executor.CallAIChat
 
 const (
@@ -187,7 +187,9 @@ func (h *AIHandler) Diagnose(c *gin.Context) {
 	}
 	updateAISessionStatus(sessionID, models.AISessionRunning, "")
 
-	systemPrompt, userPrompt, err := buildAIDiagnosticPrompt(site, req.Symptom)
+	collectCtx, collectCancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	systemPrompt, userPrompt, err := buildAIDiagnosticPrompt(collectCtx, site, req.Symptom)
+	collectCancel()
 	if err != nil {
 		failAISession(sessionID, err.Error(), len(userPrompt), 0)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.collect_context_failed")))

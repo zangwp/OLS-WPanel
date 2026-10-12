@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -309,23 +308,16 @@ func clearSiteBackupDatabase(ctx context.Context, site *models.Website, password
 	if current.Status != models.StatusBackupMaintenance || current.DBName != site.DBName || current.DBUser != site.DBUser || current.WebRoot != site.WebRoot {
 		return errors.New("整站协调器不再持有此站点数据库绑定")
 	}
-	tables, err := siteBackupSQL(ctx, password, fmt.Sprintf("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='%s' AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME", site.DBName))
+	if !databaseRestoreNameAllowed(site.DBName) {
+		return errors.New("不能安全清理未知数据库")
+	}
+	dropSQL, err := siteBackupSQL(ctx, password, databaseRestoreDropQuery(site.DBName))
 	if err != nil {
 		return err
 	}
-	var drop strings.Builder
-	drop.WriteString("SET FOREIGN_KEY_CHECKS=0;\n")
-	for _, table := range strings.Split(tables, "\n") {
-		if table == "" {
-			continue
-		}
-		if !isValidMySQLIdentifier(table) {
-			return errors.New("不能安全清理未知数据库表名")
-		}
-		fmt.Fprintf(&drop, "DROP TABLE `%s`.`%s`;\n", site.DBName, table)
-	}
-	drop.WriteString("SET FOREIGN_KEY_CHECKS=1;\n")
-	_, err = siteBackupSQL(ctx, password, drop.String())
+	// Drop routines/views/events as well as tables so a dump cannot CALL an
+	// existing root-definer object to escape its schema-limited identity.
+	_, err = siteBackupSQL(ctx, password, "SET FOREIGN_KEY_CHECKS=0;\n"+dropSQL+"\nSET FOREIGN_KEY_CHECKS=1;\n")
 	return err
 }
 

@@ -10,6 +10,33 @@ import (
 	"time"
 )
 
+func TestGuardStatusDoesNotWaitForSlowServiceQuery(t *testing.T) {
+	oldGuard, oldCommand := guard, guardCommand
+	service := &GuardService{Name: "Test", ServiceName: "fixture", Running: true, Paused: true}
+	guard = &ProcessGuard{services: []*GuardService{service}}
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	guardCommand = func(_ string, _ ...string) ([]byte, error) {
+		close(entered)
+		<-release
+		return []byte("ActiveState=inactive\nNRestarts=0\n"), nil
+	}
+	go func() { guard.check(service); close(done) }()
+	<-entered
+	status := make(chan []GuardService, 1)
+	go func() { status <- GetGuardStatus() }()
+	select {
+	case snapshot := <-status:
+		if len(snapshot) != 1 || !snapshot[0].Running {
+			t.Error("lost last confirmed snapshot")
+		}
+	case <-time.After(time.Second):
+		t.Error("status waited for systemctl")
+	}
+	close(release)
+	<-done
+	guard, guardCommand = oldGuard, oldCommand
+}
+
 func TestProcessGuardLoadsLegacyLSWSPausedState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guard-paused.json")
 	data, err := json.Marshal(map[string]bool{"lsws": true})
@@ -182,7 +209,7 @@ func TestUnexpectedActiveDoesNotCreateAbnormalAlert(t *testing.T) {
 	}
 }
 
-func TestProcessGuardReadsStateAfterAcquiringLock(t *testing.T) {
+func TestProcessGuardReadsStateAfterAcquiringOperationLock(t *testing.T) {
 	oldCommand := guardCommand
 	called := make(chan struct{}, 1)
 	guardCommand = func(_ string, _ ...string) ([]byte, error) {
@@ -193,7 +220,7 @@ func TestProcessGuardReadsStateAfterAcquiringLock(t *testing.T) {
 
 	pg := &ProcessGuard{firstRun: true}
 	service := &GuardService{Name: "MariaDB", ServiceName: "mariadb"}
-	pg.mu.Lock()
+	pg.opMu.Lock()
 	done := make(chan struct{})
 	go func() {
 		pg.check(service)
@@ -202,11 +229,11 @@ func TestProcessGuardReadsStateAfterAcquiringLock(t *testing.T) {
 
 	select {
 	case <-called:
-		pg.mu.Unlock()
+		pg.opMu.Unlock()
 		t.Fatal("service state was read before acquiring the process guard lock")
 	case <-time.After(30 * time.Millisecond):
 	}
-	pg.mu.Unlock()
+	pg.opMu.Unlock()
 
 	select {
 	case <-done:

@@ -72,17 +72,19 @@
             </div>
         </div>
         <div class="overview-chart-frame"><canvas id="metricsCanvas" class="w-full" height="280" role="img" aria-label="{{t .Lang "dashboard.history_trend"}}"></canvas></div>
+        <p id="metricsSummary" class="text-xs text-gray-400 mt-3" hidden></p>
+        <p id="metricsError" class="text-xs text-yellow-300 mt-3" role="status" hidden></p>
     </div>
 
     <div class="card overview-section overview-resources" x-data="siteResources()" x-init="initFetch()">
         <div class="overview-section-heading">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "dashboard.site_resources"}}</h3>
             <div class="overview-section-tools">
-                <span class="text-xs text-gray-500" x-show="since" x-text="since"></span>
-                <button @click="fetch()" class="btn-secondary text-xs py-1 px-3">{{t .Lang "dashboard.refresh"}}</button>
+                <span class="text-xs text-gray-500" x-show="since" x-text="since" :title="t('dashboard.sample_time')"></span>
+                <button @click="fetch(true)" :disabled="loading" :aria-busy="loading" class="btn-secondary text-xs py-1 px-3">{{t .Lang "dashboard.refresh"}}</button>
             </div>
         </div>
-        <p x-show="error" class="text-xs text-yellow-300 mb-3" x-text="t('dashboard.data_stale') + ': ' + error"></p>
+        <p x-show="error" class="text-xs text-yellow-300 mb-3" role="status" x-text="(loaded ? t('dashboard.data_stale') : t('dashboard.resources_unavailable')) + ': ' + error"></p>
         <div class="overview-table-scroll" tabindex="0" role="region" aria-label="{{t .Lang "dashboard.site_resources"}}">
             <table class="overview-resources-table w-full text-sm">
                 <thead class="border-b border-gray-700 text-gray-400">
@@ -104,8 +106,11 @@
                             <td class="py-2 text-right font-mono text-gray-400" x-text="s.proc_count"></td>
                         </tr>
                     </template>
-                    <tr x-show="sites.length === 0">
+                    <tr x-show="loaded && sites.length === 0">
                         <td colspan="4" class="py-4 text-center text-gray-500">{{t .Lang "dashboard.no_running_site_processes"}}</td>
+                    </tr>
+                    <tr x-show="!loaded">
+                        <td colspan="4" class="py-4 text-center text-gray-500" x-text="loading ? t('common.loading') : t('dashboard.resources_unavailable')"></td>
                     </tr>
                 </tbody>
             </table>
@@ -189,19 +194,78 @@ function dashboardStats() {
 (function() {
     let chart = null;
     let metricsRequestID = 0;
+    let metricsController = null;
+    let metricsTimestamps = [];
+    let metricsTimes = [];
+    let metricsRange = '24h';
+
+    function metricAxisLabel(value) {
+        if (!metricsTimes.length) return chart?.data.labels[value] || '';
+        // Find the most recent sample's offset, retaining server-local time
+        // even if the selected range crosses a daylight-saving transition.
+        let low = 0, high = metricsTimes.length;
+        while (low < high) {
+            const middle = (low + high) >>> 1;
+            if (metricsTimes[middle] <= value) low = middle + 1; else high = middle;
+        }
+        const timestamp = metricsTimestamps[Math.max(0, low - 1)];
+        const zone = /([+-])(\d{2}):(\d{2})$/.exec(timestamp);
+        const offset = zone ? (Number(zone[2]) * 60 + Number(zone[3])) * (zone[1] === '-' ? -1 : 1) : 0;
+        const date = new Date(Number(value) + offset * 60000);
+        if (!Number.isFinite(date.getTime())) return '';
+        const iso = date.toISOString();
+        return metricsRange === '24h' ? iso.slice(11, 16) : iso.slice(5, 10) + ' ' + iso.slice(11, 16);
+    }
+
+    function metricStatus(id, message) {
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.textContent = message || '';
+        element.hidden = !message;
+    }
+
+    function cancelMetricsRequest() {
+        metricsRequestID++;
+        if (metricsController) metricsController.abort();
+        metricsController = null;
+    }
 
     async function fetchMetrics(range) {
+        if (metricsController) metricsController.abort();
+        const controller = new AbortController();
+        metricsController = controller;
         const requestID = ++metricsRequestID;
         try {
-            const resp = await api('/dashboard/metrics?range=' + (range || '24h'));
-            if (requestID === metricsRequestID && resp.success && chart) {
+            const resp = await api('/dashboard/metrics?range=' + (range || '24h'), { silent: true, timeout: 15000, signal: controller.signal });
+            if (requestID === metricsRequestID && !controller.signal.aborted && resp.success && chart) {
                 chart.data.labels = resp.data.labels || [];
-                chart.data.datasets[0].data = resp.data.cpu || [];
-                chart.data.datasets[1].data = resp.data.memory || [];
-                chart.data.datasets[2].data = resp.data.load || [];
+                metricsTimestamps = resp.data.timestamps || [];
+                metricsRange = range || '24h';
+                metricsTimes = metricsTimestamps.map(timestamp => new Date(timestamp).getTime());
+                const series = [resp.data.cpu || [], resp.data.memory || [], resp.data.load || []];
+                const realTimes = metricsTimes.length > 0 && metricsTimes.length === chart.data.labels.length && metricsTimes.every(Number.isFinite) && series.every(values => values.length === metricsTimes.length);
+                if (!realTimes) metricsTimes = [];
+                chart.options.scales.x.type = realTimes ? 'linear' : 'category';
+                chart.options.scales.x.min = realTimes ? metricsTimes[0] : undefined;
+                chart.options.scales.x.max = realTimes ? metricsTimes[metricsTimes.length - 1] : undefined;
+                series.forEach((values, index) => {
+                    chart.data.datasets[index].data = realTimes ? values.map((y, i) => ({ x: metricsTimes[i], y })) : values;
+                });
+                metricStatus('metricsSummary', resp.data.reduced ? t('dashboard.chart_reduced_note', {
+                    samples: resp.data.sample_count, shown: resp.data.displayed_points,
+                    minutes: Math.ceil(resp.data.bucket_seconds / 60),
+                }) : '');
+                metricStatus('metricsError', '');
                 chart.update('none');
             }
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            if (requestID === metricsRequestID && !controller.signal.aborted) {
+                const prefix = chart?.data.labels.length ? t('dashboard.data_stale') : t('dashboard.history_load_failed');
+                metricStatus('metricsError', prefix + ': ' + (e.message || t('dashboard.history_load_failed')));
+            }
+        } finally {
+            if (requestID === metricsRequestID) metricsController = null;
+        }
     }
 
     function initChart() {
@@ -219,9 +283,9 @@ function dashboardStats() {
             data: {
                 labels: [],
                 datasets: [
-                    { label: 'CPU %', borderColor: cpuColor, backgroundColor: cpuColor, borderWidth: 2, data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
-                    { label: t('dashboard.chart_memory'), borderColor: memoryColor, backgroundColor: memoryColor, borderWidth: 2, data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
-                    { label: t('dashboard.chart_load'), borderColor: loadColor, backgroundColor: loadColor, borderWidth: 2, data: [], tension: 0.3, pointRadius: 0, pointHoverRadius: 5 },
+                    { label: 'CPU %', borderColor: cpuColor, backgroundColor: cpuColor, borderWidth: 2, data: [], tension: 0, pointRadius: 0, pointHoverRadius: 5 },
+                    { label: t('dashboard.chart_memory'), borderColor: memoryColor, backgroundColor: memoryColor, borderWidth: 2, data: [], tension: 0, pointRadius: 0, pointHoverRadius: 5 },
+                    { label: t('dashboard.chart_load'), borderColor: loadColor, backgroundColor: loadColor, borderWidth: 2, data: [], tension: 0, pointRadius: 0, pointHoverRadius: 5 },
                 ]
             },
             options: {
@@ -234,7 +298,8 @@ function dashboardStats() {
                 },
                 scales: {
                     x: {
-                        ticks: { color: labelColor, maxTicksLimit: 12, maxRotation: 0, padding: 8 },
+                        type: 'category',
+                        ticks: { color: labelColor, maxTicksLimit: 12, maxRotation: 0, padding: 8, callback: metricAxisLabel },
                         grid: { display: false },
                         border: { display: false }
                     },
@@ -251,7 +316,9 @@ function dashboardStats() {
                         intersect: false,
                         callbacks: {
                             title: function(items) {
-                                return t('dashboard.tooltip_time', { time: items[0].label });
+                                const timestamp = metricsTimestamps[items[0].dataIndex];
+                                const time = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(timestamp) ? timestamp.replace('T', ' ') : items[0].label;
+                                return t('dashboard.tooltip_time', { time });
                             },
                             label: function(item) {
                                 return item.dataset.label + ': ' + item.parsed.y.toFixed(2);
@@ -266,6 +333,7 @@ function dashboardStats() {
 
     // Expose for Alpine button clicks
     window.fetchMetrics = fetchMetrics;
+    window.addEventListener('pagehide', cancelMetricsRequest);
     // Deferred app and Chart scripts finish before DOMContentLoaded.
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initChart, { once: true });
@@ -279,19 +347,53 @@ function siteResources() {
         sites: [],
         since: '',
         timer: null,
-error: '',
-        async fetch() {
+        error: '',
+        loaded: false,
+        loading: false,
+        controller: null,
+        generation: 0,
+        destroyed: false,
+        pageHideHandler: null,
+        async fetch(fresh = false) {
+            if (this.loading || this.destroyed) return;
+            const controller = new AbortController();
+            const generation = ++this.generation;
+            this.controller = controller;
+            this.loading = true;
+            const current = () => !this.destroyed && !controller.signal.aborted && generation === this.generation;
             try {
-                const r = await api('/dashboard/site-resources');
-                if (!r.success) return;
-this.sites = r.data || [];
-this.error = '';
-                const now = new Date();
-                this.since = now.toLocaleTimeString(currentLocale());
-            } catch(e) { this.error = e.message; }
+                const r = await api('/dashboard/site-resources' + (fresh ? '?fresh=1' : ''), { silent: true, timeout: 15000, signal: controller.signal });
+                if (!current()) return;
+                if (!r.success || !Array.isArray(r.data)) throw new Error(t('dashboard.site_resources_load_failed'));
+                this.sites = r.data;
+                this.loaded = true;
+                this.error = '';
+                const sampledAt = r.sampled_at ? new Date(r.sampled_at) : null;
+                this.since = sampledAt && Number.isFinite(sampledAt.getTime()) ? sampledAt.toLocaleTimeString(currentLocale()) : '';
+            } catch(e) {
+                if (current()) this.error = e.message || t('dashboard.site_resources_load_failed');
+            } finally {
+                if (generation === this.generation) { this.loading = false; this.controller = null; }
+            }
         },
-        destroy() { if (this.timer) clearInterval(this.timer); },
+        cancelRequest() {
+            this.generation++;
+            if (this.controller) this.controller.abort();
+            this.controller = null;
+            this.loading = false;
+        },
+        destroy() {
+            this.destroyed = true;
+            this.cancelRequest();
+            if (this.timer) clearInterval(this.timer);
+            this.timer = null;
+            if (this.pageHideHandler) window.removeEventListener('pagehide', this.pageHideHandler);
+            this.pageHideHandler = null;
+        },
         initFetch() {
+            if (this.timer || this.destroyed) return;
+            this.pageHideHandler = () => this.cancelRequest();
+            window.addEventListener('pagehide', this.pageHideHandler);
             this.fetch();
             this.timer = setInterval(() => { if (!document.hidden) this.fetch(); }, 30000);
         }

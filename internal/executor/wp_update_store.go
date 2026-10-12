@@ -315,6 +315,7 @@ func (s *wpUpdateStore) sealPlan(ctx context.Context, id, sha256, verification, 
 	if err := tx.Commit(); err != nil {
 		return WPUpdateTask{}, err
 	}
+	signalWorker(wpUpdateWake)
 	return s.getTask(ctx, id)
 }
 

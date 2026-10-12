@@ -703,7 +703,7 @@ func TestBuildAIDiagnosticPromptIncludesPerformanceSummary(t *testing.T) {
 	setupAIPerformanceTestDB(t)
 
 	oldRunProcessList := aiRunProcessList
-	aiRunProcessList = func() ([]byte, error) {
+	aiRunProcessList = func(context.Context) ([]byte, error) {
 		return []byte(strings.Join([]string{
 			"USER                              %CPU %MEM COMMAND",
 			"wp_demo                           37.5  5.5 lsphp83",
@@ -791,7 +791,7 @@ func TestBuildAIDiagnosticPromptForbidsDuplicatePageCacheWhenLiteSpeedEnabled(t 
 	stubAIHTTPProbe(t, 200, 302)
 
 	oldRunProcessList := aiRunProcessList
-	aiRunProcessList = func() ([]byte, error) {
+	aiRunProcessList = func(context.Context) ([]byte, error) {
 		return []byte("USER                              %CPU %MEM COMMAND\nwp_demo                            2.0  1.0 lsphp83\n"), nil
 	}
 	t.Cleanup(func() { aiRunProcessList = oldRunProcessList })

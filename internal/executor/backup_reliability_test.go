@@ -75,6 +75,9 @@ func TestDatabaseBackupProcessHelper(t *testing.T) {
 		fail(err.Error())
 	}
 	sql := string(input)
+	if databaseImportTestAdmin(sql) {
+		os.Exit(0)
+	}
 	state := ""
 	switch {
 	case strings.Contains(sql, "INVALID_IMPORT"):
@@ -131,7 +134,7 @@ func setupDatabaseRestoreTest(t *testing.T, sql string) (*Task, string, string) 
 	oldCommand, oldPassword, oldConfig := databaseBackupCommand, restoreBackupPassword, config.AppConfig
 	databaseBackupCommand = backupTestCommand
 	restoreBackupPassword = func() string { return "test-password" }
-	config.AppConfig = &config.Config{Panel: config.PanelConfig{BackupDir: root}}
+	config.AppConfig = &config.Config{Panel: config.PanelConfig{DataDir: root, BackupDir: root}}
 	t.Cleanup(func() {
 		databaseBackupCommand, restoreBackupPassword, config.AppConfig = oldCommand, oldPassword, oldConfig
 	})
@@ -165,6 +168,23 @@ func TestExecuteRestoreBackupStopsBeforeDeleteWhenSnapshotFails(t *testing.T) {
 	}
 	if got, err := os.ReadFile(state); err != nil || string(got) != "original" {
 		t.Fatalf("database changed despite failed safety snapshot: %q, %v", got, err)
+	}
+}
+
+func TestExecuteRestoreBackupIdentityFailureDoesNotClearOriginalDatabase(t *testing.T) {
+	for _, failure := range []string{"OLS_IMPORT_TEST_CREATE_FAIL", "OLS_IMPORT_TEST_GRANTS_FAIL", "OLS_IMPORT_TEST_ISOLATION_FAIL", "OLS_IMPORT_TEST_AUTH_FAIL"} {
+		t.Run(failure, func(t *testing.T) {
+			task, state, _ := setupDatabaseRestoreTest(t, "CREATE TABLE replacement (id int); -- REPLACEMENT\n")
+			t.Setenv(failure, "1")
+			result := executeRestoreBackup(task)
+			if result.Success || !strings.Contains(result.Message, "数据库未修改") {
+				t.Fatalf("result=%#v", result)
+			}
+			body, err := os.ReadFile(state)
+			if err != nil || string(body) != "original" {
+				t.Fatalf("original data changed before identity verification: %q %v", body, err)
+			}
+		})
 	}
 }
 

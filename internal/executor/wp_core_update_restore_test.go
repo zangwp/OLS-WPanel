@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"github.com/zangwp/OLS-WPanel/internal/config"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -15,7 +16,19 @@ func TestRestoreWPCoreDatabaseUsesBoundedArgumentsAndSanitizedDump(t *testing.T)
 	dir := t.TempDir()
 	audit := filepath.Join(dir, "stdin.sql")
 	mysql := filepath.Join(dir, "mysql")
-	script := "#!/bin/bash\nif [[ \"$*\" == *INFORMATION_SCHEMA* ]]; then echo 'DROP TABLE IF EXISTS `wp_posts`;'; exit 0; fi\ncat > \"" + audit + "\"\n"
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{Panel: config.PanelConfig{DataDir: dir, BackupDir: dir}}
+	t.Cleanup(func() { config.AppConfig = oldConfig })
+	script := "#!/bin/bash\ninput=$(cat)\ncase \"$input\" in\n" +
+		"'CREATE USER '*) exit 0;;\n" +
+		"'GRANT '*) printf '%s' \"$input\" > '" + filepath.Join(dir, "grants") + "'; exit 0;;\n" +
+		"'SHOW GRANTS FOR '*) account=${input#SHOW GRANTS FOR }; account=${account%;}; printf 'GRANT USAGE ON *.* TO %s\\n' \"$account\"; grant=$(cat '" + filepath.Join(dir, "grants") + "'); printf '%s\\n' \"${grant%;}\"; exit 0;;\n" +
+		"'SELECT IF('*) printf 'OK\\n'; exit 0;;\n" +
+		"'SELECT CONCAT(CURRENT_USER()'*) previous=''; for arg in \"$@\"; do if [[ \"$previous\" == '-u' ]]; then printf '%s@localhost\\t0\\n' \"$arg\"; exit 0; fi; previous=$arg; done; exit 1;;\n" +
+		"'ALTER USER '*|'DROP USER '*) exit 0;;\n" +
+		"'SELECT COUNT(*) FROM ('*) printf '0\\n'; exit 0;;\n" +
+		"'SELECT statement FROM '*) printf 'DROP TABLE IF EXISTS `wordpress_db`.`wp_posts`;\\n'; exit 0;;\n" +
+		"esac\nprintf '%s\\n' \"$input\" >> '" + audit + "'\n"
 	if err := os.WriteFile(mysql, []byte(script), 0555); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +53,7 @@ func TestRestoreWPCoreDatabaseUsesBoundedArgumentsAndSanitizedDump(t *testing.T)
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, want := range []string{"SET FOREIGN_KEY_CHECKS=0", "DROP TABLE IF EXISTS `wp_posts`", "CREATE TABLE `wp_posts`", "SET FOREIGN_KEY_CHECKS=1"} {
+	for _, want := range []string{"SET FOREIGN_KEY_CHECKS=0", "DROP TABLE IF EXISTS `wordpress_db`.`wp_posts`", "CREATE TABLE `wp_posts`", "SET FOREIGN_KEY_CHECKS=1"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("restore input missing %q: %s", want, text)
 		}

@@ -122,6 +122,7 @@ func (w *WPInventoryWorker) Stop(ctx context.Context) error {
 func (w *WPInventoryWorker) run(ctx context.Context) {
 	defer close(w.done)
 	completed := 0
+	idle := newWorkerIdlePoll(w.pollInterval, wpInventoryWake)
 	for {
 		if ctx.Err() != nil {
 			return
@@ -134,16 +135,11 @@ func (w *WPInventoryWorker) run(ctx context.Context) {
 			}
 		}
 		if hadJob {
+			idle.reset()
 			continue
 		}
-		timer := time.NewTimer(w.pollInterval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+		if !idle.wait(ctx) {
 			return
-		case <-timer.C:
 		}
 	}
 }

@@ -3,6 +3,7 @@ package executor
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -20,29 +21,41 @@ const logAnalysisDetailMaxPageSize = 100
 
 // AnalyzeWebsiteLogDetails rescans access logs for one drill-down dimension.
 func AnalyzeWebsiteLogDetails(site *models.Website, startAt, endAt time.Time, db *sql.DB, kind, value string, page, pageSize int) (*models.LogAnalysisDetail, error) {
-	if site == nil || site.ID <= 0 || !startAt.Before(endAt) || endAt.Sub(startAt) > 7*24*time.Hour {
-		return nil, fmt.Errorf("invalid log analysis detail request")
-	}
+	return AnalyzeWebsiteLogDetailsContext(context.Background(), site, startAt, endAt, db, kind, value, page, pageSize)
+}
+
+// ValidateLogAnalysisDetailSelection validates the dimension without rereading
+// website logs (for example when creating a diagnostic conversation).
+func ValidateLogAnalysisDetailSelection(kind, value string) error {
 	if kind != "status" && kind != "path" && kind != "bot" && kind != "ip" && kind != "category" {
-		return nil, fmt.Errorf("invalid detail kind")
+		return fmt.Errorf("invalid detail kind")
 	}
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 500 {
-		return nil, fmt.Errorf("invalid detail value")
+		return fmt.Errorf("invalid detail value")
 	}
 	if kind == "status" {
-		if len(value) != 3 {
-			return nil, fmt.Errorf("invalid status code")
-		}
-		if _, err := strconv.Atoi(value); err != nil {
-			return nil, fmt.Errorf("invalid status code")
+		code, err := strconv.Atoi(value)
+		if err != nil || len(value) != 3 || code < 100 || code > 599 {
+			return fmt.Errorf("invalid status code")
 		}
 	}
 	if kind == "ip" && net.ParseIP(value) == nil {
-		return nil, fmt.Errorf("invalid IP address")
+		return fmt.Errorf("invalid IP address")
 	}
 	if kind == "category" && !validLogTrafficCategory(value) {
-		return nil, fmt.Errorf("invalid traffic category")
+		return fmt.Errorf("invalid traffic category")
+	}
+	return nil
+}
+
+func AnalyzeWebsiteLogDetailsContext(ctx context.Context, site *models.Website, startAt, endAt time.Time, db *sql.DB, kind, value string, page, pageSize int) (*models.LogAnalysisDetail, error) {
+	if site == nil || site.ID <= 0 || !startAt.Before(endAt) || endAt.Sub(startAt) > 7*24*time.Hour {
+		return nil, fmt.Errorf("invalid log analysis detail request")
+	}
+	value = strings.TrimSpace(value)
+	if err := ValidateLogAnalysisDetailSelection(kind, value); err != nil {
+		return nil, err
 	}
 	if page < 1 {
 		page = 1
@@ -50,6 +63,11 @@ func AnalyzeWebsiteLogDetails(site *models.Website, startAt, endAt time.Time, db
 	if pageSize < 1 || pageSize > logAnalysisDetailMaxPageSize {
 		pageSize = 20
 	}
+	ctx, release, err := acquireLogAnalysisScan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	cleanDir := filepath.Clean(site.LogDir)
 	if !filepath.IsAbs(cleanDir) {
@@ -85,12 +103,14 @@ func AnalyzeWebsiteLogDetails(site *models.Website, startAt, endAt time.Time, db
 	seenBots := map[string]struct{}{}
 	var bytesScanned int64
 	for _, path := range files {
-		if bytesScanned >= logAnalysisMaxBytes {
+		if bytesScanned >= logAnalysisDetailMaxBytes {
+			result.Truncated = true
 			break
 		}
-		_ = scanLogAnalysisDetailFile(path, func(line string) bool {
+		err := scanLogAnalysisDetailFileContext(ctx, path, func(line string) bool {
 			bytesScanned += int64(len(line) + 1)
-			if bytesScanned > logAnalysisMaxBytes {
+			if bytesScanned > logAnalysisDetailMaxBytes {
+				result.Truncated = true
 				return false
 			}
 			m := combinedLogPattern.FindStringSubmatch(line)
@@ -140,7 +160,14 @@ func AnalyzeWebsiteLogDetails(site *models.Website, startAt, endAt time.Time, db
 			}
 			return true
 		})
+		if err != nil {
+			return nil, fmt.Errorf("scan %s: %w", filepath.Base(path), err)
+		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result.BytesScanned = bytesScanned
 	result.UniqueIPs = len(ips)
 	result.UniquePaths = len(paths)
 	result.TopPaths = sortedCounts(paths, logAnalysisTopLimit)
@@ -149,7 +176,10 @@ func AnalyzeWebsiteLogDetails(site *models.Website, startAt, endAt time.Time, db
 	result.Methods = sortedCounts(methods, logAnalysisTopLimit)
 	result.Hourly = sortedNamedCounts(hourly)
 	result.IPPathPairs = sortedCounts(ipPathPairs, logAnalysisTopLimit)
-	result.TopIPs = buildLogAnalysisIPDetails(db, site.ID, ips, startAt, endAt)
+	result.TopIPs = buildLogAnalysisIPDetailsContext(ctx, db, site.ID, ips, startAt, endAt)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -165,13 +195,17 @@ func normalizeUserAgent(value string) string {
 }
 
 func buildLogAnalysisIPDetails(db *sql.DB, siteID int, counts map[string]int, startAt, endAt time.Time) []models.LogAnalysisIPDetail {
+	return buildLogAnalysisIPDetailsContext(context.Background(), db, siteID, counts, startAt, endAt)
+}
+
+func buildLogAnalysisIPDetailsContext(ctx context.Context, db *sql.DB, siteID int, counts map[string]int, startAt, endAt time.Time) []models.LogAnalysisIPDetail {
 	ranked := sortedCounts(counts, logAnalysisTopLimit)
 	items := make([]models.LogAnalysisIPDetail, 0, len(ranked))
 	for _, rankedIP := range ranked {
 		item := models.LogAnalysisIPDetail{IPAddress: rankedIP.Name, Count: rankedIP.Count, SecurityEventTypes: []string{}}
 		if db != nil {
 			var expires sql.NullString
-			_ = db.QueryRow(`SELECT reason,source_jail,expires_at FROM firewall_bans
+			_ = db.QueryRowContext(ctx, `SELECT reason,source_jail,expires_at FROM firewall_bans
 				WHERE ip_address=? AND unbanned_at IS NULL AND (expires_at IS NULL OR expires_at > datetime('now'))
 				ORDER BY banned_at DESC,id DESC LIMIT 1`, rankedIP.Name).Scan(&item.CurrentBanReason, &item.CurrentBanSource, &expires)
 			if item.CurrentBanSource != "" || item.CurrentBanReason != "" || expires.Valid {
@@ -179,7 +213,7 @@ func buildLogAnalysisIPDetails(db *sql.DB, siteID int, counts map[string]int, st
 				item.CurrentBanExpires = expires.String
 			}
 			var started, ended, historicalExpires sql.NullString
-			_ = db.QueryRow(`SELECT reason,source_jail,banned_at,expires_at,unbanned_at,ban_count
+			_ = db.QueryRowContext(ctx, `SELECT reason,source_jail,banned_at,expires_at,unbanned_at,ban_count
 				FROM firewall_bans WHERE ip_address=? AND banned_at <= ?
 				AND COALESCE(unbanned_at,expires_at,datetime('now')) >= ?
 				ORDER BY banned_at DESC,id DESC LIMIT 1`, rankedIP.Name,
@@ -191,7 +225,7 @@ func buildLogAnalysisIPDetails(db *sql.DB, siteID int, counts map[string]int, st
 				item.RangeBanExpiresAt = historicalExpires.String
 				item.RangeBanEndedAt = ended.String
 			}
-			rows, err := db.Query(`SELECT event_type,COUNT(*),MAX(occurred_at) FROM wp_security_events
+			rows, err := db.QueryContext(ctx, `SELECT event_type,COUNT(*),MAX(occurred_at) FROM wp_security_events
 				WHERE site_id=? AND ip_address=? GROUP BY event_type ORDER BY COUNT(*) DESC,event_type ASC`, siteID, rankedIP.Name)
 			if err == nil {
 				for rows.Next() {
@@ -214,6 +248,13 @@ func buildLogAnalysisIPDetails(db *sql.DB, siteID int, counts map[string]int, st
 }
 
 func scanLogAnalysisDetailFile(path string, consume func(string) bool) error {
+	return scanLogAnalysisDetailFileContext(context.Background(), path, consume)
+}
+
+func scanLogAnalysisDetailFileContext(ctx context.Context, path string, consume func(string) bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -231,9 +272,15 @@ func scanLogAnalysisDetailFile(path string, consume func(string) bool) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !consume(scanner.Text()) {
 			break
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return ctx.Err()
 }

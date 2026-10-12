@@ -41,7 +41,7 @@ func (h *LogAnalysisHandler) CreateDiagnosticSession(c *gin.Context) {
 		return
 	}
 	if req.Kind != "" {
-		if _, err := executor.AnalyzeWebsiteLogDetails(site, job.StartAt, job.EndAt, database.GetDB(), req.Kind, req.Value, 1, 1); err != nil {
+		if err := executor.ValidateLogAnalysisDetailSelection(req.Kind, req.Value); err != nil {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "log_analysis.invalid_detail")))
 			return
 		}
@@ -201,9 +201,13 @@ func (h *LogAnalysisHandler) Details(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	detail, err := executor.AnalyzeWebsiteLogDetails(site, job.StartAt, job.EndAt, database.GetDB(), c.Query("kind"), c.Query("value"), page, pageSize)
-	if err != nil {
+	if err := executor.ValidateLogAnalysisDetailSelection(c.Query("kind"), c.Query("value")); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "log_analysis.invalid_detail")))
+		return
+	}
+	detail, err := executor.AnalyzeWebsiteLogDetailsContext(c.Request.Context(), site, job.StartAt, job.EndAt, database.GetDB(), c.Query("kind"), c.Query("value"), page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "log_analysis.load_failed")))
 		return
 	}
 	c.JSON(http.StatusOK, models.SuccessResponse(detail))

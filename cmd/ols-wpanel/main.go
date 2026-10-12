@@ -417,6 +417,8 @@ func main() {
 	select {
 	case <-quit:
 		log.Println("正在关闭面板...")
+		executor.ClosePanelOperationAdmission()
+		executor.StopAlertMonitor()
 		ctx, cancel := context.WithTimeout(context.Background(), panelHTTPShutdownTimeout)
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("HTTP 服务优雅关闭超时: %v", err)
@@ -430,6 +432,13 @@ func main() {
 			log.Printf("面板 HTTP 服务异常退出: %v", serveErr)
 		}
 	}
+	executor.ClosePanelOperationAdmission()
+	executor.StopAlertMonitor()
+	queueCtx, queueCancel := context.WithTimeout(context.Background(), panelHTTPShutdownTimeout)
+	if err := executor.GlobalQueue.Shutdown(queueCtx); err != nil {
+		log.Printf("运行中的任务未在关闭等待期内结束；外部强制终止仍可能中断恢复，请核对安全快照/操作日志: %v", err)
+	}
+	queueCancel()
 	executor.GlobalAdminer.DisableAll()
 	executor.StopAllImageOptimizationJobsForShutdown(wpCoreUpdateWorkerShutdownTimeout)
 	if coreUpdateWorker != nil {

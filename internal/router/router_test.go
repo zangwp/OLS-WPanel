@@ -224,10 +224,11 @@ func TestSettingsSystemUpdatesStayCompact(t *testing.T) {
 		[]byte(`@click="listOpen = !listOpen"`),
 		[]byte(`@click="check(true)"`),
 		[]byte(`@click="doUpdate()"`),
-		[]byte(`api('/system/updates' + (fresh ? '?fresh=1' : ''))`),
-		[]byte(`api('/system/updates/status')`),
-		[]byte(`api('/system/updates/do', { method: 'POST' })`),
-		[]byte(`this.resume(true)`),
+		// Request lifetimes and fresh reads are covered by the behavioral JS
+		// regressions; this contract keeps the endpoints and compact UI wired.
+		[]byte(`'/system/updates'`),
+		[]byte(`'/system/updates/status'`),
+		[]byte(`'/system/updates/do'`),
 		[]byte(`x-show="lastMessage && !msg"`),
 		[]byte(`setTimeout(() => this.dismissStatus(), 10000)`),
 		[]byte(`@click="dismissStatus()"`),
@@ -1714,7 +1715,7 @@ func TestWebsiteDetailCardOrderAndDatabaseNavigation(t *testing.T) {
 		{`verifySummaryCheck(key)`, `summaryCheck(key).can_verify`},
 		{`openSummarySettings(key)`, `!summaryCheck(key).can_verify && summarySettingsAvailable(key)`},
 	} {
-		buttons := regexp.MustCompile(`<button\b[^>]*@click="` + regexp.QuoteMeta(action.click) + `"[^>]*>`).FindAll(security, -1)
+		buttons := regexp.MustCompile(`<button\b[^>]*@click="`+regexp.QuoteMeta(action.click)+`"[^>]*>`).FindAll(security, -1)
 		if len(buttons) != 1 {
 			t.Fatalf("compact security summary must have exactly one %s action, got %d", action.click, len(buttons))
 		}
@@ -2148,7 +2149,7 @@ func TestFileManagerStartsWithDirectoryList(t *testing.T) {
 		[]byte(`url.searchParams.set('site_id', this.selectedSite)`),
 		[]byte(`calculateDirectorySize(siteID, path)`),
 		[]byte(`'/files/size?site_id='`),
-		[]byte(`{ timeout: 65000, suppressToast: true }`),
+		[]byte(`{ timeout: 65000, silent: true, signal: controller.signal }`),
 		[]byte(`deepLinkFailed: false`),
 		[]byte(`this.deepLinkFailed = true`),
 		[]byte(`class="badge-success text-xs">{{t .Lang "files.protected"}}`),

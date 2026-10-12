@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/config"
@@ -21,6 +22,9 @@ import (
 )
 
 type SoftwareHandler struct{}
+
+var softwareGuardSnapshot = executor.GetGuardStatus
+var softwareSetServiceState = executor.SetServiceState
 
 var runSoftwareShellCommand = func(command string) ([]byte, error) {
 	return exec.Command("bash", "-c", command).CombinedOutput()
@@ -34,14 +38,6 @@ type guardResponse struct {
 	Paused       bool   `json:"paused"`
 	Restarts     int    `json:"restarts"`
 	LastIncident string `json:"last_incident"`
-}
-
-var versionCmds = map[string]string{
-	"lshttpd":      "/usr/local/lsws/bin/openlitespeed -v 2>&1 | head -1",
-	"mariadb":      "mariadb --version 2>/dev/null | head -1",
-	"redis-server": "redis-server --version 2>/dev/null | awk '{print $3}' | cut -d= -f2",
-	"nftables":     "nft --version 2>/dev/null | awk '{print $2}' | cut -dv -f2",
-	"fail2ban":     "fail2ban-client --version 2>/dev/null | awk '{print $2}'",
 }
 
 type softwareItem struct {
@@ -76,28 +72,33 @@ func softwareLang(c *gin.Context) string {
 
 func (h *SoftwareHandler) List(c *gin.Context) {
 	lang := softwareLang(c)
-	items := []softwareItem{
-		getPHPInfo(lang),
-		getOpenLiteSpeedInfo(lang),
-		getMariaDBInfo(lang),
-		getRedisInfo(lang),
-		getSystemPackageInfo(lang, "nftables", "nft --version 2>/dev/null | awk '{print $2}' | cut -dv -f2"),
-		getSystemPackageInfo(lang, "Fail2ban", "fail2ban-client --version 2>/dev/null | awk '{print $2}'"),
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	fresh := c.Query("fresh") == "1"
+	loaders := []func() softwareItem{
+		func() softwareItem { return getPHPInfo(ctx, lang, fresh) },
+		func() softwareItem { return getOpenLiteSpeedInfo(ctx, lang, fresh) },
+		func() softwareItem { return getMariaDBInfo(ctx, lang, fresh) },
+		func() softwareItem { return getRedisInfo(ctx, lang, fresh) },
+		func() softwareItem { return getSystemPackageInfo(ctx, lang, "nftables", "nftables", fresh) },
+		func() softwareItem { return getSystemPackageInfo(ctx, lang, "Fail2ban", "fail2ban", fresh) },
 	}
-	items[0].Configs = append(items[0].Configs, softwareConfig{
-		Key:   "max_input_time",
-		Label: i18n.T(lang, "software.max_input_time_label"),
-		Hint:  i18n.T(lang, "software.max_input_time_hint"),
-	})
-	for i := range items {
-		populateConfigValues(&items[i])
+	packages := []string{"lsphp" + strings.ReplaceAll(executor.PrimaryLSPHPVersion(), ".", ""), "openlitespeed", "mariadb-server", "redis-server", "nftables", "fail2ban"}
+	items := make([]softwareItem, len(loaders))
+	var loading sync.WaitGroup
+	for i, load := range loaders {
+		loading.Add(1)
+		go func(index int, load func() softwareItem) {
+			defer loading.Done()
+			items[index] = load()
+			if index == 0 {
+				items[index].Configs = append(items[index].Configs, softwareConfig{Key: "max_input_time", Label: i18n.T(lang, "software.max_input_time_label"), Hint: i18n.T(lang, "software.max_input_time_hint")})
+			}
+			populateConfigValues(&items[index])
+			applyPackageUpdateInfo(ctx, fresh, &items[index], packages[index])
+		}(i, load)
 	}
-	applyPackageUpdateInfo(&items[0], "lsphp"+strings.ReplaceAll(executor.PrimaryLSPHPVersion(), ".", ""))
-	applyPackageUpdateInfo(&items[1], "openlitespeed")
-	applyPackageUpdateInfo(&items[2], "mariadb-server")
-	applyPackageUpdateInfo(&items[3], "redis-server")
-	applyPackageUpdateInfo(&items[4], "nftables")
-	applyPackageUpdateInfo(&items[5], "fail2ban")
+	loading.Wait()
 	c.JSON(http.StatusOK, models.SuccessResponse(items))
 }
 
@@ -129,6 +130,7 @@ func (h *SoftwareHandler) InstallPHPRuntime(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, "software.php_runtime_install_failed")))
 		return
 	}
+	softwareReadCache.invalidate()
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"runtime": runtime,
 		"message": i18n.T(lang, "software.php_runtime_installed", i18n.P{"version": runtime.Version}),
@@ -153,6 +155,7 @@ func (h *SoftwareHandler) InstallDevelopmentTool(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, "software.development_tool_install_failed")))
 		return
 	}
+	softwareReadCache.invalidate()
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.development_tool_installed")}))
 }
 
@@ -250,26 +253,28 @@ func (h *SoftwareHandler) ClearLog(c *gin.Context) {
 }
 
 func (h *SoftwareHandler) GetGuardStatus(c *gin.Context) {
-	svcs := executor.GetGuardStatus()
+	svcs := softwareGuardSnapshot()
 	result := make([]guardResponse, len(svcs))
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	fresh := c.Query("fresh") == "1"
+	var loading sync.WaitGroup
 	for i, s := range svcs {
-		version := strings.TrimSpace(runCmd(versionCmds[s.ServiceName]))
-		switch s.ServiceName {
-		case "lshttpd":
-			version = parseOpenLiteSpeedVersion(version)
-		case "mariadb":
-			version = parseMariaDBVersion(version)
-		}
 		result[i] = guardResponse{
 			Name:         s.Name,
 			Service:      s.ServiceName,
-			Version:      version,
 			Running:      s.Running,
 			Paused:       s.Paused,
 			Restarts:     s.Restarts,
 			LastIncident: s.LastIncident,
 		}
+		loading.Add(1)
+		go func(index int, service string) {
+			defer loading.Done()
+			result[index].Version = softwareServiceVersion(ctx, fresh, service)
+		}(i, s.ServiceName)
 	}
+	loading.Wait()
 	c.JSON(http.StatusOK, models.SuccessResponse(result))
 }
 
@@ -287,7 +292,7 @@ func (h *SoftwareHandler) GuardAction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "software.invalid_action")))
 		return
 	}
-	if err := executor.SetServiceState(req.Service, req.Action); err != nil {
+	if err := softwareSetServiceState(req.Service, req.Action); err != nil {
 		if errors.Is(err, executor.ErrUnknownGuardService) {
 			c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "software.unknown_software")))
 			return
@@ -296,6 +301,7 @@ func (h *SoftwareHandler) GuardAction(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, "software.operation_failed_with_error", i18n.P{"error": err.Error()})))
 		return
 	}
+	softwareReadCache.invalidate()
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.action_success", i18n.P{"service": req.Service, "action": req.Action})}))
 }
 
@@ -468,6 +474,7 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 			}
 			return
 		}
+		softwareReadCache.invalidate()
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.config_updated_reloaded", i18n.P{"service": serviceName})}))
 		return
 	}
@@ -543,6 +550,7 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 		}
 	}
 
+	softwareReadCache.invalidate()
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.config_updated_reloaded", i18n.P{"service": serviceName})}))
 }
 
@@ -619,21 +627,24 @@ func (h *SoftwareHandler) ClearOpcache(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.opcache_cleared")}))
 }
 
-func getPHPInfo(lang string) softwareItem {
-	ver, extCount := "", "0"
-	if out, err := exec.Command(executor.LSPHPBinaryPath(), "-v").Output(); err == nil {
-		fields := strings.Fields(strings.SplitN(string(out), "\n", 2)[0])
+func getPHPInfo(ctx context.Context, lang string, fresh bool) softwareItem {
+	ver, status := "", i18n.T(lang, "software.status_unavailable")
+	if out, err := softwareReadCache.read(ctx, fresh, executor.LSPHPBinaryPath(), "-v"); err == nil {
+		fields := strings.Fields(strings.SplitN(out, "\n", 2)[0])
 		if len(fields) >= 2 {
 			ver = fields[1]
 		}
 	}
-	if out, err := exec.Command(executor.LSPHPBinaryPath(), "-m").Output(); err == nil {
-		extCount = strconv.Itoa(len(strings.Fields(string(out))))
+	if ver != "" {
+		status = i18n.T(lang, "software.installed")
+		if out, err := softwareReadCache.read(ctx, fresh, executor.LSPHPBinaryPath(), "-m"); err == nil && out != "" {
+			status = i18n.T(lang, "software.php_installed_extensions", i18n.P{"count": strconv.Itoa(len(strings.Fields(out)))})
+		}
 	}
 	return softwareItem{
 		Name:          "PHP",
 		Version:       strings.TrimSpace(ver),
-		Status:        i18n.T(lang, "software.php_installed_extensions", i18n.P{"count": strings.TrimSpace(extCount)}),
+		Status:        status,
 		VersionPolicy: i18n.T(lang, "software.php_runtime_version_policy"),
 		ConfigPath:    executor.PHPRuntimeConfigPath(),
 		Configs: []softwareConfig{
@@ -648,15 +659,12 @@ func getPHPInfo(lang string) softwareItem {
 	}
 }
 
-func getOpenLiteSpeedInfo(lang string) softwareItem {
-	ver := ""
-	if out, err := exec.Command(executor.OpenLiteSpeedBinaryPath(), "-v").CombinedOutput(); err == nil {
-		ver = parseOpenLiteSpeedVersion(string(out))
-	}
+func getOpenLiteSpeedInfo(ctx context.Context, lang string, fresh bool) softwareItem {
+	ver := softwareServiceVersion(ctx, fresh, "lshttpd")
 	return softwareItem{
 		Name:          "OpenLiteSpeed",
 		Version:       strings.TrimSpace(ver),
-		Status:        i18n.T(lang, "software.installed"),
+		Status:        softwareInstalledStatus(lang, ver),
 		VersionPolicy: i18n.T(lang, "software.ols_runtime_version_policy"),
 		ConfigPath:    "",
 		Configs:       []softwareConfig{},
@@ -664,12 +672,12 @@ func getOpenLiteSpeedInfo(lang string) softwareItem {
 	}
 }
 
-func getMariaDBInfo(lang string) softwareItem {
-	ver := parseMariaDBVersion(runCmd("mariadb --version 2>/dev/null | head -1"))
+func getMariaDBInfo(ctx context.Context, lang string, fresh bool) softwareItem {
+	ver := softwareServiceVersion(ctx, fresh, "mariadb")
 	return softwareItem{
 		Name:          "MariaDB",
 		Version:       strings.TrimSpace(ver),
-		Status:        i18n.T(lang, "software.installed"),
+		Status:        softwareInstalledStatus(lang, ver),
 		VersionPolicy: i18n.T(lang, "software.mariadb_runtime_version_policy"),
 		ConfigPath:    "/etc/mysql/mariadb.conf.d/99-olswpanel.cnf",
 		Configs: []softwareConfig{
@@ -678,11 +686,17 @@ func getMariaDBInfo(lang string) softwareItem {
 	}
 }
 
-func getRedisInfo(lang string) softwareItem {
-	ver := runCmd("redis-server --version 2>/dev/null | awk '{print $3}' | cut -d= -f2")
-	status := i18n.T(lang, "software.running")
-	if runCmd("systemctl is-active redis-server 2>/dev/null") != "active" {
-		status = i18n.T(lang, "software.stopped")
+func getRedisInfo(ctx context.Context, lang string, fresh bool) softwareItem {
+	ver := softwareServiceVersion(ctx, fresh, "redis-server")
+	status := i18n.T(lang, "software.status_unavailable")
+	for _, service := range softwareGuardSnapshot() {
+		if service.ServiceName == "redis-server" && ver != "" {
+			status = i18n.T(lang, "software.stopped")
+			if service.Running {
+				status = i18n.T(lang, "software.running")
+			}
+			break
+		}
 	}
 	return softwareItem{
 		Name:          "Redis",
@@ -696,13 +710,62 @@ func getRedisInfo(lang string) softwareItem {
 	}
 }
 
-func getSystemPackageInfo(lang, name, versionCommand string) softwareItem {
+func getSystemPackageInfo(ctx context.Context, lang, name, service string, fresh bool) softwareItem {
+	version := softwareServiceVersion(ctx, fresh, service)
 	return softwareItem{
 		Name:          name,
-		Version:       strings.TrimSpace(runCmd(versionCommand)),
-		Status:        i18n.T(lang, "software.installed"),
+		Version:       version,
+		Status:        softwareInstalledStatus(lang, version),
 		VersionPolicy: i18n.T(lang, "software.system_package_version_policy"),
 	}
+}
+
+func softwareInstalledStatus(lang, version string) string {
+	if version == "" {
+		return i18n.T(lang, "software.status_unavailable")
+	}
+	return i18n.T(lang, "software.installed")
+}
+
+func softwareServiceVersion(ctx context.Context, fresh bool, service string) string {
+	var name string
+	args := []string{"--version"}
+	switch service {
+	case "lshttpd":
+		name, args = executor.OpenLiteSpeedBinaryPath(), []string{"-v"}
+	case "mariadb":
+		name = "mariadb"
+	case "redis-server":
+		name = "redis-server"
+	case "nftables":
+		name = "nft"
+	case "fail2ban":
+		name = "fail2ban-client"
+	default:
+		return ""
+	}
+	output, err := softwareReadCache.read(ctx, fresh, name, args...)
+	if err != nil || output == "" {
+		return ""
+	}
+	switch service {
+	case "lshttpd":
+		return parseOpenLiteSpeedVersion(output)
+	case "mariadb":
+		return parseMariaDBVersion(output)
+	case "redis-server":
+		for _, field := range strings.Fields(output) {
+			if version, ok := strings.CutPrefix(field, "v="); ok {
+				return version
+			}
+		}
+	default:
+		fields := strings.Fields(output)
+		if len(fields) >= 2 {
+			return strings.TrimPrefix(fields[1], "v")
+		}
+	}
+	return ""
 }
 
 var (
@@ -742,22 +805,26 @@ func parseAptCandidateVersion(output string) string {
 	return ""
 }
 
-func applyPackageUpdateInfo(item *softwareItem, packageName string) {
+func applyPackageUpdateInfo(ctx context.Context, fresh bool, item *softwareItem, packageName string) {
 	if item == nil || packageName == "" {
 		return
 	}
-	installedOut, installedErr := exec.Command("dpkg-query", "-W", "-f=${Version}", packageName).Output()
-	candidateOut, candidateErr := exec.Command("apt-cache", "policy", packageName).Output()
+	installedOut, installedErr := softwareReadCache.read(ctx, fresh, "dpkg-query", "-W", "-f=${Version}", packageName)
+	candidateOut, candidateErr := softwareReadCache.read(ctx, fresh, "apt-cache", "policy", packageName)
 	if installedErr != nil || candidateErr != nil {
 		return
 	}
-	installed := strings.TrimSpace(string(installedOut))
-	candidate := parseAptCandidateVersion(string(candidateOut))
+	installed := strings.TrimSpace(installedOut)
+	candidate := parseAptCandidateVersion(candidateOut)
 	if installed == "" || candidate == "" {
 		return
 	}
 	item.CandidateVersion = candidate
-	item.UpdateAvailable = exec.Command("dpkg", "--compare-versions", installed, "lt", candidate).Run() == nil
+	if installed == candidate {
+		return
+	}
+	_, err := softwareReadCache.read(ctx, fresh, "dpkg", "--compare-versions", installed, "lt", candidate)
+	item.UpdateAvailable = err == nil
 }
 
 func openLiteSpeedRuntimeDetails(lang, path string) []softwareDetail {
@@ -788,11 +855,6 @@ func openLiteSpeedRuntimeDetails(lang, path string) []softwareDetail {
 	}
 	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_webadmin"), Value: webAdminValue, Tone: webAdminTone})
 	return details
-}
-
-func runCmd(cmd string) string {
-	out, _ := exec.Command("bash", "-c", cmd).CombinedOutput()
-	return strings.TrimSpace(string(out))
 }
 
 func replaceIniValue(content, key, value string) string {

@@ -15,6 +15,7 @@ const listing = (...names) => ({ success: true, data: { files: names.map(name =>
 
 function setup(overrides = {}) {
     const context = {
+        AbortController,
         t: key => key, showToast() {}, confirmModal: async () => true,
         URL, URLSearchParams, FormData, Blob,
         window: { location: { href: 'https://panel.test/panel/files', search: '' }, history: { replaceState() {} } },

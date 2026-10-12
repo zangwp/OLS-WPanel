@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"github.com/zangwp/OLS-WPanel/internal/config"
 	"io"
 	"os"
 	"os/exec"
@@ -44,6 +45,9 @@ func TestSiteBackupStreamProcessHelper(t *testing.T) {
 		_, _ = io.WriteString(os.Stdout, siteBackupStreamTestSQL)
 	case "mysql":
 		input, err := io.ReadAll(os.Stdin)
+		if databaseImportTestAdmin(string(input)) {
+			os.Exit(0)
+		}
 		want := "SET FOREIGN_KEY_CHECKS=0;\n" + siteBackupStreamTestSQL + "\nSET FOREIGN_KEY_CHECKS=1;\n"
 		if err != nil || string(input) != want {
 			_, _ = fmt.Fprintln(os.Stderr, "restore input was not the original SQL")
@@ -58,6 +62,11 @@ func TestSiteBackupStreamProcessHelper(t *testing.T) {
 func useSiteBackupStreamTestCommand(t *testing.T) {
 	t.Helper()
 	t.Setenv("OLS_SITE_BACKUP_STREAM_HELPER", "1")
+	root := t.TempDir()
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{Panel: config.PanelConfig{DataDir: root, BackupDir: root}}
+	t.Setenv("OLS_IMPORT_TEST_STATE", filepath.Join(root, "identity-state"))
+	t.Cleanup(func() { config.AppConfig = oldConfig })
 	oldCommand := databaseBackupCommand
 	databaseBackupCommand = func(ctx context.Context, command string, args ...string) *exec.Cmd {
 		childArgs := append([]string{"-test.run=^TestSiteBackupStreamProcessHelper$", "--", command}, args...)

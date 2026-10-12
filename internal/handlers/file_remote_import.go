@@ -401,15 +401,40 @@ func remoteImportHTTPClient(allowInsecureTLS bool, lang ...string) *http.Client 
 }
 
 func validatingRemoteImportDialContext(ctx context.Context, network, address, lang string) (net.Conn, error) {
-	host, _, err := net.SplitHostPort(address)
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	return dialRemoteImportResolved(ctx, network, address, lang, net.DefaultResolver.LookupIPAddr, dialer.DialContext)
+}
+
+// Resolve once and connect only to the validated addresses. The transport keeps
+// the original request hostname for Host and TLS certificate verification.
+func dialRemoteImportResolved(ctx context.Context, network, address, lang string,
+	lookup func(context.Context, string) ([]net.IPAddr, error),
+	dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRemoteImportHost(ctx, host, lang); err != nil {
+	ips, err := resolveRemoteImportHost(ctx, host, lang, lookup)
+	if err != nil {
 		return nil, err
 	}
-	var dialer net.Dialer
-	return dialer.DialContext(ctx, network, address)
+	var lastErr error
+	for index, ip := range ips {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		deadline, _ := ctx.Deadline()
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(len(ips)-index))
+		conn, err := dial(attemptCtx, network, net.JoinHostPort(ip.String(), port))
+		attemptCancel()
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 func validateRemoteImportURL(raw, lang string) (*url.URL, error) {
@@ -436,30 +461,41 @@ func validateRemoteImportURL(raw, lang string) (*url.URL, error) {
 }
 
 func validateRemoteImportHost(ctx context.Context, host, lang string) error {
+	_, err := resolveRemoteImportHost(ctx, host, lang, net.DefaultResolver.LookupIPAddr)
+	return err
+}
+
+func resolveRemoteImportHost(ctx context.Context, host, lang string,
+	lookup func(context.Context, string) ([]net.IPAddr, error)) ([]net.IPAddr, error) {
 	host = strings.TrimSpace(strings.Trim(host, "[]"))
 	if host == "" {
-		return fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_invalid"))
+		return nil, fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_invalid"))
 	}
 	lowerHost := strings.ToLower(host)
 	if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") {
-		return fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_local"))
+		return nil, fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_local"))
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		if isBlockedRemoteImportIP(ip) {
-			return fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_private"))
+			return nil, fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_private"))
 		}
-		return nil
+		return []net.IPAddr{{IP: ip}}, nil
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ips, err := lookup(lookupCtx, host)
+	if err := lookupCtx.Err(); err != nil {
+		return nil, err
+	}
 	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_resolve_failed"))
+		return nil, fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_resolve_failed"))
 	}
 	for _, resolved := range ips {
 		if isBlockedRemoteImportIP(resolved.IP) {
-			return fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_private"))
+			return nil, fmt.Errorf("%s", i18n.T(lang, "files.remote_import_host_private"))
 		}
 	}
-	return nil
+	return ips, nil
 }
 
 func isBlockedRemoteImportIP(ip net.IP) bool {

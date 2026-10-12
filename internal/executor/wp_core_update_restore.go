@@ -2,7 +2,6 @@ package executor
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -20,6 +19,8 @@ const (
 	wpCoreRestoreMaxBytes   = int64(512 << 20)
 	wpCoreMySQLPath         = "/usr/bin/mysql"
 )
+
+var wpCoreRestoreCommand databaseImportCommand = exec.CommandContext
 
 func defaultWPCoreDatabaseRestorer(ctx context.Context, dbName, backupPath string) error {
 	if !isValidMySQLIdentifier(dbName) {
@@ -46,12 +47,6 @@ func restoreWPCoreDatabase(ctx context.Context, mysqlPath, dbName, password, bac
 	if err := validateRestoreBackupFile(backupPath); err != nil {
 		return errors.New("invalid update database backup")
 	}
-	listCmd := exec.CommandContext(ctx, mysqlPath, "-u", "root", "-B", "-N", "-e", "SELECT CONCAT(CASE WHEN TABLE_TYPE = 'VIEW' THEN 'DROP VIEW IF EXISTS `' ELSE 'DROP TABLE IF EXISTS `' END, REPLACE(TABLE_NAME, '`', '``'), '`;') FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '"+dbName+"' ORDER BY CASE WHEN TABLE_TYPE = 'VIEW' THEN 0 ELSE 1 END")
-	listCmd.Env = append(os.Environ(), "MYSQL_PWD="+password)
-	dropSQL, err := listCmd.Output()
-	if err != nil {
-		return errors.New("update database table listing failed")
-	}
 	backup, err := os.Open(backupPath)
 	if err != nil {
 		return errors.New("update database backup open failed")
@@ -62,31 +57,20 @@ func restoreWPCoreDatabase(ctx context.Context, mysqlPath, dbName, password, bac
 		return errors.New("update database backup gzip invalid")
 	}
 	defer gz.Close()
-	cmd := exec.CommandContext(ctx, mysqlPath, "-u", "root", dbName)
-	cmd.Env = append(os.Environ(), "MYSQL_PWD="+password)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return errors.New("update database restore pipe failed")
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return errors.New("update database restore start failed")
-	}
-	writeErr := error(nil)
-	if _, err := io.WriteString(stdin, "SET FOREIGN_KEY_CHECKS=0;\n"+string(dropSQL)+"\n"); err != nil {
-		writeErr = err
-	}
-	if writeErr == nil {
-		writeErr = filterRestoreSQLBuffered(stdin, gz)
-	}
-	if writeErr == nil {
-		_, writeErr = io.WriteString(stdin, "\nSET FOREIGN_KEY_CHECKS=1;\n")
-	}
-	closeErr := stdin.Close()
-	waitErr := cmd.Wait()
-	if writeErr != nil || closeErr != nil || waitErr != nil {
-		return errors.New("update database restore failed")
+	// Prepare and validate the restricted account before any destructive
+	// work. Uploaded/backup SQL never enters an administrative client.
+	result := importDatabaseSQL(ctx, wpCoreRestoreCommand, mysqlPath, gz, dbName, password, func(dst io.Writer, src io.Reader) error {
+		dropSQL, err := databaseImportAdmin(ctx, wpCoreRestoreCommand, mysqlPath, password, databaseRestoreDropQuery(dbName))
+		if err != nil {
+			return errors.New("update database object listing failed")
+		}
+		if _, err := databaseImportAdmin(ctx, wpCoreRestoreCommand, mysqlPath, password, "SET FOREIGN_KEY_CHECKS=0;\n"+string(dropSQL)+"\nSET FOREIGN_KEY_CHECKS=1;"); err != nil {
+			return errors.New("update database clearing failed")
+		}
+		return filterRestoreSQLBuffered(dst, src)
+	})
+	if !result.Success {
+		return errors.New(result.Message)
 	}
 	return nil
 }
