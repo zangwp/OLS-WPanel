@@ -4,6 +4,7 @@
 
 - Skips optional recommended packages during fresh installation while retaining WordPress PDF rendering, fonts and Fail2ban file monitoring dependencies explicitly.
 - Reports installation stage and total elapsed time, and identifies the interrupted stage on failure using Bash's built-in timer.
+- Groups fresh-install credentials in a compact table, with complete login URLs and a narrow-terminal fallback. Repair does not reprint passwords.
 
 ## v2.0.1 — 2026-10-12
 
