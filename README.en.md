@@ -63,13 +63,9 @@ o update          update / repair the panel
 o uninstall       remove the panel, preserving websites, databases and shared software
 ```
 
-Swap is under `o → 5. System settings → 3. Swap management`. Only the OLS WPanel marked `/swapfile` is managed; existing partitions, zram and external files are preserved. Resizing checks the full temporary-file disk requirement and verifies runtime state, restoring prior files and settings on failure. Removing the managed file retains system swappiness.
+Maintenance commands require root, and the terminal menu currently uses Chinese labels. See the [terminal maintenance guide](docs/verified-install.md#first-login-and-server-maintenance) for DNS, Swap, SSH and updates, and [operations and recovery](docs/operations-and-recovery.md) for backups, recovery and uninstall checks.
 
-DNS is under `o → 4. Network settings → 1. DNS settings and tests`. Active `systemd-resolved` configurations and ordinary `/etc/resolv.conf` files are supported. Taking over an ordinary file requires confirmation and saves its contents, permissions and immutable state; search/options are preserved and the original configuration can be restored. Every custom IP address must pass checks; ordinary files support up to 3 and resolved up to 4. DHCP, cloud-init, NetworkManager, resolvconf and unrecognized symlinks remain read-only with a specific reason.
-
-The time menu accepts installed IANA time zones; missing locale tools can be installed after confirmation. SSH port changes retain the old port until `o ssh-confirm` is executed from a new SSH connection on the new port. An independent watchdog rolls back unconfirmed changes. `o check-update` distinguishes the latest GitHub release from the short entry's actual target, and `o update` rejects downgrades. The terminal menu currently uses Chinese labels.
-
-Uninstall displays its scope and requires `Y` or `y`; Enter cancels. It exits the active menu and removes the `o` / `O` commands. Updates use the signed published installation entry. Fresh installation and reinstallation are blocked when retained site data or configuration is detected; use update / repair for an existing OLS WPanel installation.
+Keep your current SSH connection open when changing ports, then connect to the new port in another SSH window and run the returned `o ssh-confirm` command.
 
 ## Documentation
 
