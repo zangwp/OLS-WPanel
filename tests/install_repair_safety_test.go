@@ -15,7 +15,7 @@ func TestInstallRepairPreflightRunsBeforeAPT(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 
 	preflight := requiredIndex(t, script, `log_info "repair预检与备份完成"`)
-	apt := requiredIndex(t, script, `log_info "配置 APT 源..."`)
+	apt := requiredIndex(t, script, `log_install_stage "软件源与依赖预检"`)
 	if preflight >= apt {
 		t.Fatalf("repair preflight offset=%d must be before APT offset=%d", preflight, apt)
 	}
@@ -219,7 +219,7 @@ func repairKeySnapshotPath(t *testing.T, out []byte) string {
 func TestInstallFreshValidatesCronParentBeforeAPT(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 	freshCronCheck := requiredIndex(t, script, `fresh安装前cron父目录或现有cron文件身份不安全`)
-	apt := requiredIndex(t, script, `log_info "配置 APT 源..."`)
+	apt := requiredIndex(t, script, `log_install_stage "软件源与依赖预检"`)
 	if freshCronCheck >= apt {
 		t.Fatalf("fresh cron parent check offset=%d must precede APT offset=%d", freshCronCheck, apt)
 	}
@@ -293,7 +293,7 @@ func TestInstallRepairInstallsSQLiteOnlyAfterSafeConfigCheck(t *testing.T) {
 		t.Fatalf("repair safety order is invalid: config_check=%d binary_check=%d unit_check=%d cron_check=%d sqlite_install=%d backup=%d", configCheck, binaryCheck, unitCheck, cronCheck, sqliteInstall, backup)
 	}
 
-	componentInstall := requiredIndex(t, script, "apt-get install -y \\\n    iproute2 \\")
+	componentInstall := requiredIndex(t, script, "apt-get install -y --no-install-recommends \\\n    iproute2 \\")
 	componentComplete := requiredIndex(t, script, `log_info "基础组件安装完成"`)
 	if strings.Contains(script[componentInstall:componentComplete], "sqlite3") {
 		t.Fatal("fresh install must not install repair-only sqlite3 dependency")

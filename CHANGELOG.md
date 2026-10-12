@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.2 — 2026-10-12
+
+- Skips optional recommended packages during fresh installation while retaining WordPress PDF rendering, fonts and Fail2ban file monitoring dependencies explicitly.
+- Reports installation stage and total elapsed time, and identifies the interrupted stage on failure using Bash's built-in timer.
+
 ## v2.0.1 — 2026-10-12
 
 - Adds bounded, cached LSPHP extension and OPcache configuration checks, backup dependency checks and cron service status. Failed probes remain unknown; CLI probes do not claim to measure live website-worker cache statistics.

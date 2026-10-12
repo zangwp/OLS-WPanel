@@ -64,6 +64,9 @@ VALIDATED_TLS_PORT=""
 ATOMIC_STAGE_PATH=""
 INSTALL_FAILURE_STATUS=""
 INSTALL_FAILURE_LINE=""
+INSTALL_STARTED_SECONDS=$SECONDS
+INSTALL_STAGE=""
+INSTALL_STAGE_STARTED_SECONDS=$SECONDS
 UNINSTALL_MODE=false
 UNINSTALL_STAGE=""
 # The signed bootstrap validates this marker before it delegates execution.
@@ -94,6 +97,16 @@ fi
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+log_install_stage() {
+    local now=$SECONDS
+    if [[ -n "$INSTALL_STAGE" ]]; then
+        log_info "${INSTALL_STAGE}耗时: $((now - INSTALL_STAGE_STARTED_SECONDS)) 秒"
+    fi
+    INSTALL_STAGE="$1"
+    INSTALL_STAGE_STARTED_SECONDS=$now
+    [[ -z "$INSTALL_STAGE" ]] || log_info "${INSTALL_STAGE}..."
+}
 
 assert_supported_platform() {
     local os_id=""
@@ -363,6 +376,9 @@ installer_exit() {
             echo "  已完成的删除不会自动恢复；请保存输出并核对残留，不要直接重复完全卸载。"
         else
             echo -e "${RED}  安装未完成 / Installation incomplete${NC}"
+            if [[ -n "${INSTALL_STAGE:-}" ]]; then
+                echo "  中断阶段: ${INSTALL_STAGE}（已运行 $((SECONDS - INSTALL_STAGE_STARTED_SECONDS)) 秒）"
+            fi
         fi
         echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         if [[ -n "$INSTALL_FAILURE_STATUS" ]] && [[ -n "$INSTALL_FAILURE_LINE" ]]; then
@@ -1877,7 +1893,7 @@ DEBIANSOURCESEOF
 }
 
 base_packages_available() {
-    local packages=(ca-certificates wget curl gnupg lsb-release iproute2 mariadb-server redis-server)
+    local packages=(ca-certificates wget curl gpg iproute2 mariadb-server redis-server)
     local pkg=""
 
     for pkg in "${packages[@]}"; do
@@ -2546,7 +2562,7 @@ fi
 if $CHECK_MARIADB_PACKAGES_ONLY; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl systemd
+    apt-get install -y --no-install-recommends ca-certificates curl wget gpg coreutils openssl systemd
     init_install_workdir
     configure_mariadb_repository
     log_info "MariaDB ${MARIADB_SERIES} 软件包检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH}"
@@ -2560,14 +2576,16 @@ if $CHECK_OLS_PACKAGES_ONLY; then
     # while the production installer deliberately requires both before it
     # creates a private work directory. Install the command package here so
     # the package probe exercises the same fail-closed preflight.
-    apt-get install -y --no-install-recommends ca-certificates curl wget gnupg coreutils openssl systemd
+    apt-get install -y --no-install-recommends ca-certificates curl wget gpg coreutils openssl systemd
     init_install_workdir
     configure_litespeed_repository
 	configure_redis_repository
     apt-get install -y --no-install-recommends \
         openlitespeed lsphp85 lsphp85-common lsphp85-mysql lsphp85-curl \
         lsphp85-intl lsphp85-redis lsphp85-imagick \
-		redis-server redis-tools
+		redis-server redis-tools ghostscript fonts-dejavu-core python3-pyinotify
+    gs --version
+    test -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
     /usr/local/lsws/bin/openlitespeed -v
     /usr/local/lsws/lsphp85/bin/lsphp -v
     /usr/local/lsws/lsphp85/bin/php --ini
@@ -2983,6 +3001,7 @@ fi
 # ============================================================
 # 系统检测与Swap配置
 # ============================================================
+log_install_stage "系统准备"
 TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_MEM_MB=$((TOTAL_MEM_KB / 1024))
 log_info "物理内存: ${TOTAL_MEM_MB}MB"
@@ -3048,7 +3067,7 @@ fi
 # ============================================================
 # APT 源配置
 # ============================================================
-log_info "配置 APT 源..."
+log_install_stage "软件源与依赖预检"
 export DEBIAN_FRONTEND=noninteractive
 log_info "检测到平台: ${PLATFORM_ID} ${PLATFORM_VERSION} (${PLATFORM_CODENAME}) ${PLATFORM_ARCH}"
 
@@ -3057,7 +3076,7 @@ if ! $REPAIR_MODE; then
 select_platform_source
 
 # 安装基础依赖
-apt-get install -y curl wget unzip ca-certificates gnupg lsb-release
+apt-get install -y --no-install-recommends curl wget unzip ca-certificates gpg
 
 # OpenLiteSpeed 与 LSPHP 均只从 LiteSpeed 官方仓库安装；仓库公钥通过
 # HTTPS 下载并使用本发布内固定的 SHA-256 校验。
@@ -3068,9 +3087,9 @@ configure_redis_repository
 # ============================================================
 # 安装基础组件
 # ============================================================
-log_info "安装系统组件..."
+log_install_stage "下载并安装系统组件"
 
-apt-get install -y \
+apt-get install -y --no-install-recommends \
     iproute2 \
     openlitespeed \
     mariadb-server \
@@ -3078,6 +3097,7 @@ apt-get install -y \
     redis-server \
     redis-tools \
     fail2ban \
+    python3-pyinotify \
     nftables \
     rsync \
     openssh-client \
@@ -3092,6 +3112,8 @@ apt-get install -y \
     lsphp85-curl \
     jpegoptim \
     optipng \
+    ghostscript \
+    fonts-dejavu-core \
     lsphp85-intl \
     lsphp85-redis \
     lsphp85-imagick
@@ -3131,6 +3153,7 @@ fi
 # ============================================================
 # systemd 进程守护配置
 # ============================================================
+log_install_stage "配置服务和运行环境"
 log_info "配置 systemd 进程守护..."
 
 if ! $REPAIR_MODE; then
@@ -3518,6 +3541,7 @@ fi
 # ============================================================
 # 目录结构创建
 # ============================================================
+log_install_stage "准备网站程序与面板配置"
 log_info "创建目录结构..."
 
 mkdir -p "$INSTALL_DIR"/{backups,packages,logs,certs}
@@ -3715,6 +3739,7 @@ fi
 # ============================================================
 # 部署 Go 二进制
 # ============================================================
+log_install_stage "部署并验证面板"
 log_info "部署面板二进制..."
 
 prepare_panel_candidate
@@ -3837,6 +3862,7 @@ LOCAL_HOST="$LOCAL_IP"
 
 # Keep values on separate lines: URLs and generated passwords stay easy to copy
 # in narrow SSH terminals. Format credentials as data, never as printf escapes.
+log_install_stage ""
 print_install_summary() {
     local heading="" warning="" reset=""
     local rule="------------------------------------------------------------"
@@ -3849,6 +3875,7 @@ print_install_summary() {
     printf '\n%b%s%b\n' "$heading" "OLS WPanel / 安装完成" "$reset"
     printf '%s\n' "$rule"
     printf '  版本  %s\n  状态  %s\n' "$INSTALLER_RELEASE_VERSION" "$STATUS"
+    printf '  主脚本耗时  %s 秒\n' "$((SECONDS - INSTALL_STARTED_SECONDS))"
     printf '\n'
     if $REPAIR_MODE; then
         printf '%s\n' "更新 / 修复完成，登录地址与账号密码保持不变。" "输入 o 查看当前登录地址。"
