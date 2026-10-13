@@ -67,8 +67,7 @@
                     <div>
                         <label class="label">{{t .Lang "ai_diagnostics.issue_type"}}</label>
                         <select x-model="symptom" class="input-field text-sm">
-                            <option value="custom">{{t .Lang "ai_diagnostics.symptom_custom"}}</option>
-                            <template x-for="item in symptoms" :key="item.value">
+                            <template x-for="item in [...symptoms, { value: 'custom', label: t('ai_diagnostics.symptom_custom') }]" :key="item.value">
                                 <option :value="item.value" x-text="item.label"></option>
                             </template>
                         </select>
