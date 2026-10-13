@@ -11,7 +11,7 @@
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "website.detail_subtitle"}}</p>
             <div x-show="site" class="flex flex-wrap items-center gap-2 mt-2">
                 <span :class="site?.status === 'active' ? 'badge-success' : 'badge-warning'" x-text="site?.status === 'active' ? t('website.status_running') : (site?.status === 'migrated' ? t('website.status_migrated') : (site?.status === 'deleting' ? t('website.status_deleting') : t('website.status_paused')))"></span>
-                <span class="badge-info" x-text="site?.site_type === 'php' ? t('website.generic_php_site') : 'WordPress'"></span>
+                <span class="badge-info" :class="{ 'website-type-wordpress': site?.site_type === 'wordpress' }" x-text="site?.site_type === 'php' ? t('website.generic_php_site') : 'WordPress'"></span>
                 <span :class="site?.ssl_enabled ? 'badge-success' : 'badge-warning'" x-text="site?.ssl_enabled ? t('website.ssl_enabled') : t('website.ssl_not_enabled')"></span>
             </div>
         </div>

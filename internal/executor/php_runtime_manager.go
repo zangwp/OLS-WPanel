@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,7 +31,33 @@ type LSPHPRuntime struct {
 	Primary     bool   `json:"primary"`
 }
 
-var lsphpInstallMu sync.Mutex
+var (
+	lsphpInstallMu             sync.Mutex
+	lsphpRuntimeRead           = lsphpRuntimeForVersion
+	lsphpRuntimeHealthRead     = ReadLSPHPRuntimeHealth
+	lsphpRuntimeConfigEnsure   = EnsureLSPHPRuntimeConfig
+	lsphpRuntimePackageInstall = installMissingAPTPackages
+	ErrLSPHPRuntimeNotReady    = errors.New("PHP extensions are incomplete or could not be checked")
+)
+
+func lsphpRuntimeHealthReady(health LSPHPRuntimeHealth) bool {
+	if (health.State != "ok" && health.State != "warning") || len(health.Extensions) != len(lsphpHealthExtensions) {
+		return false
+	}
+	for _, extension := range health.Extensions {
+		if extension.State != "loaded" {
+			return false
+		}
+	}
+	return true
+}
+
+func requireLSPHPRuntimeHealth(ctx context.Context, runtime LSPHPRuntime) error {
+	if !lsphpRuntimeHealthReady(lsphpRuntimeHealthRead(ctx, runtime)) {
+		return fmt.Errorf("%w: LSPHP %s", ErrLSPHPRuntimeNotReady, runtime.Version)
+	}
+	return nil
+}
 
 func normalizeLSPHPVersion(version string) (string, error) {
 	version = strings.TrimSpace(version)
@@ -201,30 +226,36 @@ func InstallLSPHPRuntime(ctx context.Context, version string) (LSPHPRuntime, err
 	}
 	lsphpInstallMu.Lock()
 	defer lsphpInstallMu.Unlock()
-	if runtime, _ := lsphpRuntimeForVersion(version); runtime.Installed {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runtime, err := lsphpRuntimeRead(version)
+	if err != nil {
+		return LSPHPRuntime{}, err
+	}
+	if runtime.Installed && requireLSPHPRuntimeHealth(ctx, runtime) == nil {
 		return runtime, nil
 	}
+	wasInstalled := runtime.Installed
 	packages, err := lsphpRuntimePackages(version)
 	if err != nil {
 		return LSPHPRuntime{}, err
 	}
-	aptOptions := []string{"-o", "Acquire::Retries=3", "-o", "DPkg::Lock::Timeout=300"}
-	if out, err := exec.CommandContext(ctx, "apt-get", append(aptOptions, "update")...).CombinedOutput(); err != nil {
-		return LSPHPRuntime{}, fmt.Errorf("apt update failed: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	args := append([]string{"-y"}, aptOptions...)
-	args = append(args, "-o", "Dpkg::Options::=--force-confold", "install")
-	args = append(args, packages...)
-	cmd := exec.CommandContext(ctx, "apt-get", args...)
-	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return LSPHPRuntime{}, fmt.Errorf("LSPHP install failed: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	runtime, err := ResolveLSPHPRuntime(version, true)
-	if err != nil {
+	if err := lsphpRuntimePackageInstall(ctx, packages); err != nil {
 		return LSPHPRuntime{}, err
 	}
-	if err := EnsureLSPHPRuntimeConfig(version); err != nil {
+	runtime, err = lsphpRuntimeRead(version)
+	if err != nil || !runtime.Installed {
+		return LSPHPRuntime{}, fmt.Errorf("%w: LSPHP %s", ErrLSPHPRuntimeNotReady, version)
+	}
+	// Preserve existing ini files and tuning. Only a new runtime receives the
+	// default panel configuration; repair verifies the selected branch again.
+	if !wasInstalled {
+		if err := lsphpRuntimeConfigEnsure(version); err != nil {
+			return LSPHPRuntime{}, err
+		}
+	}
+	if err := requireLSPHPRuntimeHealth(ctx, runtime); err != nil {
 		return LSPHPRuntime{}, err
 	}
 	return runtime, nil
@@ -248,6 +279,9 @@ func UpdateSiteLSPHPVersion(site *models.Website, version string) error {
 	}
 	if runtime.Version == oldVersion {
 		return nil
+	}
+	if err := requireLSPHPRuntimeHealth(context.Background(), runtime); err != nil {
+		return err
 	}
 	if !TryAcquireSiteOpLock(site.ID, "php_runtime") {
 		return errors.New("site is busy")

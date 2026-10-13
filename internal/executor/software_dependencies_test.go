@@ -91,7 +91,7 @@ func TestBackupDependencyConfigurationErrorsAreSanitized(t *testing.T) {
 }
 
 func TestBackupDependencyPlansAreScopedAndDeduplicated(t *testing.T) {
-	report := backupDependencyHealth(context.Background(), backupDependencySettings{}, nil, backupDependencyTestLookup("tar", "gzip", "mysql", "mysqldump", "sshpass"))
+	report := backupDependencyHealth(context.Background(), backupDependencySettings{}, nil, backupDependencyTestLookup("tar", "gzip", "mysql", "mysqldump", "mariadb", "mariadb-dump", "sshpass"))
 	packages, err := backupDependencyInstallPackages(report)
 	if err != nil {
 		t.Fatal(err)
@@ -111,14 +111,56 @@ func TestBackupDependencyPlansAreScopedAndDeduplicated(t *testing.T) {
 	}
 }
 
-func TestBackupDependencyReportRequiresActualMySQLCommands(t *testing.T) {
-	report := backupDependencyHealth(context.Background(), backupDependencySettings{}, nil, backupDependencyTestLookup("mysql", "mysqldump"))
-	if !reflect.DeepEqual(report.MissingRequired, []string{"mysql", "mysqldump"}) {
-		t.Fatalf("MariaDB aliases must not hide absent commands used by backups: %+v", report)
+func TestBackupDependencyReportMatchesUsableDatabaseCommands(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		missing []string
+		ready   bool
+	}{
+		{"compatibility names", []string{"mariadb", "mariadb-dump"}, true},
+		{"native names only", []string{"mysql", "mysqldump"}, true},
+		{"all database commands missing", []string{"mysql", "mysqldump", "mariadb", "mariadb-dump"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := backupDependencyHealth(context.Background(), backupDependencySettings{}, nil, backupDependencyTestLookup(tc.missing...))
+			if report.Ready != tc.ready {
+				t.Fatalf("readiness does not match executable alternatives: %+v", report)
+			}
+			packages, err := backupDependencyInstallPackages(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.ready {
+				if len(packages) != 0 || len(report.MissingRequired) != 0 {
+					t.Fatalf("usable database commands requested unnecessary packages: %v", packages)
+				}
+			} else if !reflect.DeepEqual(report.MissingRequired, []string{"mysql", "mysqldump"}) || !reflect.DeepEqual(packages, []string{"mariadb-client-compat"}) {
+				t.Fatalf("missing database commands did not retain their stable IDs and package plan: %+v, %v", report, packages)
+			}
+		})
 	}
-	packages, err := backupDependencyInstallPackages(report)
-	if err != nil || !reflect.DeepEqual(packages, []string{"mariadb-client-compat"}) {
-		t.Fatalf("missing compatibility names require the alias package: %v, %v", packages, err)
+}
+
+func TestBackupDependencyDatabaseLookupErrorsDoNotFallBack(t *testing.T) {
+	for _, failed := range []string{"mysql", "mariadb"} {
+		calls := []string{}
+		lookup := func(command string) (string, error) {
+			calls = append(calls, command)
+			if command == failed {
+				return "", errors.New("permission denied")
+			}
+			return backupDependencyTestLookup("mysql")(command)
+		}
+		report := backupDependencyHealth(context.Background(), backupDependencySettings{}, nil, lookup)
+		if report.Ready || report.Status != "error" || report.Dependencies[2].Status != "error" {
+			t.Fatalf("lookup error hidden: %+v", report)
+		}
+		if failed == "mysql" && strings.Contains(strings.Join(calls, " "), "mariadb") {
+			t.Fatal("fallback after ambiguous primary lookup error")
+		}
+		if _, err := backupDependencyInstallPackages(report); err == nil {
+			t.Fatal("ambiguous availability reached installation")
+		}
 	}
 }
 
@@ -140,7 +182,7 @@ func TestBackupDependencyCompatibilityPlanAllowsNewNativeClientButNeverUpgradesO
 	}
 }
 
-func TestInstallBackupDependenciesRestoresCompatibilityNamesWithoutChangingClient(t *testing.T) {
+func TestInstallBackupDependenciesRestoresMissingDatabaseCommands(t *testing.T) {
 	backupDependencyInstallTestHooks(t)
 	backupDependencyLoadSettings = func(context.Context) (backupDependencySettings, error) {
 		return backupDependencySettings{}, nil
@@ -148,23 +190,23 @@ func TestInstallBackupDependenciesRestoresCompatibilityNamesWithoutChangingClien
 	aliasesInstalled := false
 	backupDependencyLookPath = func(command string) (string, error) {
 		if !aliasesInstalled {
-			return backupDependencyTestLookup("mysql", "mysqldump")(command)
+			return backupDependencyTestLookup("mysql", "mysqldump", "mariadb", "mariadb-dump")(command)
 		}
 		return backupDependencyTestLookup()(command)
 	}
 	backupDependencyReadCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
 		if command == "dpkg-query" {
-			return []byte("base-files\t1.0\tinstalled\nmariadb-server\t1:11.8.9-1\tinstalled\nmariadb-client\t1:11.8.9-1\tinstalled\n"), nil
+			return []byte("base-files\t1.0\tinstalled\nmariadb-server\t1:11.8.9-1\tinstalled\n"), nil
 		}
 		if args[len(args)-1] != "mariadb-client-compat" {
 			t.Fatalf("wrong package simulated: %v", args)
 		}
-		return backupDependencyTestSimulation([]string{"mariadb-client-compat"}), nil
+		return backupDependencyTestSimulation([]string{"mariadb-client", "mariadb-client-compat", "mariadb-client-core"}), nil
 	}
 	var calls [][]string
 	backupDependencyAPT = func(_ context.Context, args ...string) error {
 		calls = append(calls, append([]string(nil), args...))
-		if args[len(args)-1] == "mariadb-client-compat=1.2-1" {
+		if strings.Contains(strings.Join(args, " "), "mariadb-client-compat=1.2-1") {
 			aliasesInstalled = true
 		}
 		return nil
@@ -173,8 +215,25 @@ func TestInstallBackupDependenciesRestoresCompatibilityNamesWithoutChangingClien
 	if err != nil || !report.Ready || len(calls) != 2 {
 		t.Fatalf("compatibility commands were not restored: %+v, %v, calls=%v", report, err, calls)
 	}
-	if strings.Contains(strings.Join(calls[1], " "), "mariadb-client=") {
-		t.Fatal("an already installed native client was included in the install transaction")
+	if strings.Contains(strings.Join(calls[1], " "), "mariadb-server=") {
+		t.Fatal("an already installed database server was included in the install transaction")
+	}
+}
+
+func TestInstallBackupDependenciesSkipsAPTForNativeOnlyDatabaseCommands(t *testing.T) {
+	backupDependencyInstallTestHooks(t)
+	backupDependencyLookPath = backupDependencyTestLookup("mysql", "mysqldump")
+	backupDependencyAPT = func(context.Context, ...string) error {
+		t.Fatal("native commands must not trigger package installation")
+		return nil
+	}
+	backupDependencyReadCommand = func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("ready dependencies must not inspect or alter APT")
+		return nil, nil
+	}
+	report, err := InstallBackupDependencies(context.Background())
+	if err != nil || !report.Ready {
+		t.Fatalf("native commands were rejected: %+v, %v", report, err)
 	}
 }
 
@@ -295,7 +354,7 @@ func TestBackupDependencyPlanRejectsInstalledServerUpgradeAndRemovals(t *testing
 
 func TestInstallBackupDependenciesRejectsUnsafePlanBeforeInstallation(t *testing.T) {
 	backupDependencyInstallTestHooks(t)
-	backupDependencyLookPath = backupDependencyTestLookup("mysqldump")
+	backupDependencyLookPath = backupDependencyTestLookup("mysqldump", "mariadb-dump")
 	backupDependencyReadCommand = func(_ context.Context, name string, _ ...string) ([]byte, error) {
 		if name == "dpkg-query" {
 			return []byte("base-files\t1.0\tinstalled\nmariadb-server\t1:11.8.2-1\tinstalled\n"), nil

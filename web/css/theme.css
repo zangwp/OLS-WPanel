@@ -90,7 +90,9 @@ p { overflow-wrap: anywhere; }
 .panel-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 12px 32px; border-bottom: 1px solid var(--panel-border); background: var(--panel-surface); }
 .panel-context { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--panel-muted); font-size: 12px; }
 .panel-context-current { color: var(--panel-text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panel-topbar-brand { font-size: 11px; color: var(--panel-muted); white-space: nowrap; }
+.panel-topbar-version { margin-left: auto; white-space: nowrap; text-decoration: none; }
+.panel-topbar-version:hover { border-color: var(--panel-accent); }
+.panel-topbar-version:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 3px; }
 .panel-main { min-width: 0; min-height: 0; flex: 1; overflow-y: auto; padding: 30px 32px 48px; scrollbar-gutter: stable; }
 .panel-page-shell { width: 100%; max-width: 1560px; margin: 0 auto; }
 .page-title { font-size: 27px; line-height: 1.3; font-weight: 650; letter-spacing: -.035em; color: var(--panel-heading); }
@@ -142,6 +144,7 @@ textarea.input-field { line-height: 1.7; }
 .badge-danger { color: var(--panel-danger); background: var(--panel-danger-soft); border-color: var(--panel-danger-border); }
 .badge-warning { color: var(--panel-warning); background: var(--panel-warning-soft); border-color: var(--panel-warning-border); }
 .badge-info { color: var(--panel-muted); background: var(--panel-surface-muted); border-color: var(--panel-border); }
+.badge-info.website-type-wordpress { color: var(--panel-accent); background: var(--panel-accent-soft); border-color: var(--panel-accent-border); }
 .version-pill, .runtime-version { display: inline-flex; color: var(--panel-accent); background: var(--panel-accent-soft); border: 1px solid var(--panel-accent-border); border-radius: 5px; padding: 2px 7px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Tables share a readable rhythm; wide tables scroll inside their own section. */
@@ -259,6 +262,10 @@ textarea.input-field { line-height: 1.7; }
     .software-runtime-row { padding: 14px; }
     .software-extension-groups { grid-template-columns: 1fr; gap: 20px; }
 }
+@media (max-width: 600px) {
+    .software-runtime-header { grid-template-columns: minmax(0, 1fr); }
+    .software-runtime-action { grid-column: 1; justify-self: start; }
+}
 @media (min-width: 768px) {
     .access-field-label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
     .access-rule { min-height: 76px; padding: 14px 0; }
@@ -278,7 +285,6 @@ textarea.input-field { line-height: 1.7; }
 }
 @media (max-width: 767px) {
     .panel-topbar { padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); }
-    .panel-topbar-brand { display: none; }
     .panel-context { gap: 8px; }
     .panel-context-label { display: none; }
     .panel-context-separator { display: none; }

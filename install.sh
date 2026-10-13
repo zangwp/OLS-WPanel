@@ -2054,10 +2054,17 @@ validate_lsphp_wordpress_modules() {
 }
 
 validate_mariadb_backup_commands() {
-	local command=""
-	for command in mysql mysqldump; do
-		if ! command -v "$command" >/dev/null 2>&1 || ! "$command" --version >/dev/null 2>&1; then
-			log_error "MariaDB 备份命令不可用: $command，请检查 mariadb-client-compat 安装"
+	local candidates="" command="" selected=""
+	for candidates in "mysql mariadb" "mysqldump mariadb-dump"; do
+		selected=""
+		for command in $candidates; do
+			if command -v "$command" >/dev/null 2>&1; then
+				selected="$command"
+				break
+			fi
+		done
+		if [[ -z "$selected" ]] || ! "$selected" --version >/dev/null 2>&1; then
+			log_error "MariaDB 备份命令不可用: $candidates，请检查 MariaDB 客户端安装"
 		fi
 	done
 }
@@ -3170,8 +3177,9 @@ else
     log_info "repair模式保留APT源和现有软件包，不执行安装或升级"
     if ! command -v rsync >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1 || \
        ! command -v sshpass >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1 || \
-       ! command -v gzip >/dev/null 2>&1 || ! command -v mysql >/dev/null 2>&1 || \
-       ! command -v mysqldump >/dev/null 2>&1; then
+       ! command -v gzip >/dev/null 2>&1 || \
+       { ! command -v mysql >/dev/null 2>&1 && ! command -v mariadb >/dev/null 2>&1; } || \
+       { ! command -v mysqldump >/dev/null 2>&1 && ! command -v mariadb-dump >/dev/null 2>&1; }; then
         log_warn "检测到备份命令未完整安装；请在软件页面检查备份依赖，并按当前备份配置补装缺失依赖"
     fi
 fi
