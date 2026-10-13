@@ -23,7 +23,7 @@ import (
 
 const databaseBackupCommandTimeout = 6 * time.Hour
 
-var databaseBackupCommand = exec.CommandContext
+var databaseBackupCommand = newDatabaseBackupCommand
 var restoreBackupPassword = readMariaDBPassword
 var databaseBackupPassword = readMariaDBPassword
 

@@ -196,6 +196,23 @@ test('PHP version display puts the configured default first without changing its
     assert.equal(manager.phpRuntimes[2].primary, true);
 });
 
+test('PHP completion needs fresh missing-extension evidence and uses a repair confirmation', async () => {
+    const calls = [], prompts = [];
+    const { context } = setup({ confirmModal: async message => { prompts.push(message); return true; }, api: async (url, options) => { calls.push({url, options}); return {success:true,data:[]}; } });
+    const manager = context.softwareManager(), runtime = {version:'8.3',installed:true,active_sites:0};
+    manager.health = {php:[{version:'8.3',state:'warning',extensions:[{name:'curl',importance:'recommended',state:'missing'}]}]};
+    assert.equal(manager.canRepairPHPRuntime(runtime), false);
+    manager.healthFresh = true;
+    assert.equal(manager.canRepairPHPRuntime(runtime), true);
+    manager.healthError = 'offline'; assert.equal(manager.canRepairPHPRuntime(runtime), false);
+    manager.healthError = ''; manager.healthLoading = true; assert.equal(manager.canRepairPHPRuntime(runtime), false);
+    manager.healthLoading = false;
+    await manager.installPHPRuntime(runtime);
+    assert.equal(prompts[0], 'software.php_runtime_repair_confirm');
+    assert.equal(calls[0].url, '/software/php-runtimes/install');
+    assert.equal(calls[0].options.body.version, '8.3');
+});
+
 test('backup repair requires current successful evidence and stops after a failed refresh', async () => {
     const calls = [], read = deferred();
     const { context } = setup({ api: url => { calls.push(url); return read.promise; } });

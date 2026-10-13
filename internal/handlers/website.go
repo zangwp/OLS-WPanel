@@ -658,7 +658,11 @@ func (h *WebsiteHandler) SetPHPVersion(c *gin.Context) {
 	}
 	if err := executor.UpdateSiteLSPHPVersion(site, req.Version); err != nil {
 		log.Printf("切换网站 PHP 失败 site=%d version=%s: %v", id, req.Version, err)
-		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.T(lang, "website.php_runtime_switch_failed")))
+		key := "website.php_runtime_switch_failed"
+		if errors.Is(err, executor.ErrLSPHPRuntimeNotReady) {
+			key = "website.php_runtime_not_ready"
+		}
+		c.JSON(http.StatusConflict, models.ErrorResponse(i18n.T(lang, key)))
 		return
 	}
 	_, _ = database.GetDB().Exec(`INSERT INTO operation_logs(operation,target,status,message) VALUES('site_php_runtime',?,'success',?)`, site.Domain, "LSPHP "+req.Version)

@@ -35,7 +35,7 @@
             <span x-show="!healthLoading && !healthError && !!health?.checked_at" x-text="t('software.health_checked_at', { time: healthCheckedAt() })"></span>
         </p>
         <div class="software-runtime-list">
-            <template x-for="runtime in orderedPHPRuntimes()" :key="runtime.version">
+            <template x-for="runtime in orderedPHPRuntimes().filter(runtime => runtime.installed || runtime.primary || runtime.active_sites > 0)" :key="runtime.version">
                 <div class="software-runtime-row" :class="{ 'software-runtime-primary': runtime.primary }">
                     <div class="software-runtime-header">
                         <div class="software-runtime-identity">
@@ -45,6 +45,7 @@
                                 <span x-show="runtime.recommended && !runtime.primary" class="badge-success text-xs">{{t .Lang "software.recommended_default"}}</span>
                             </div>
                             <p class="text-xs text-gray-500 mt-1" x-text="t('software.php_runtime_site_count', { count: runtime.active_sites })"></p>
+                            <p x-show="runtime.installed && !runtime.primary && !runtime.active_sites" class="text-xs text-gray-500 mt-1">{{t .Lang "software.php_runtime_unused"}}</p>
                         </div>
                         <div x-show="runtime.installed" class="software-runtime-health">
                             <span x-show="!runtimeHealthKnown(runtime.version)" :class="healthBadge(runtimeHealth(runtime.version).state)" x-text="healthLabel(runtimeHealth(runtime.version).state)"></span>
@@ -54,7 +55,7 @@
                         </div>
                         <div class="software-runtime-action">
                             <span x-show="runtime.installed" class="text-xs text-gray-500">{{t .Lang "software.installed"}}</span>
-                            <button x-show="!runtime.installed" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button>
+                            <button x-show="!runtime.installed || canRepairPHPRuntime(runtime)" @click="installPHPRuntime(runtime)" :disabled="runtime._installing || healthLoading" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : runtime.installed ? t('software.php_runtime_repair') : t('software.install')"></button>
                         </div>
                     </div>
                     <details x-show="runtime.installed" class="software-extension-details">
@@ -90,6 +91,12 @@
                 </div>
             </template>
         </div>
+        <details x-show="phpRuntimes.some(runtime => !runtime.installed && !runtime.primary && !runtime.active_sites)" class="software-extension-details mt-4">
+            <summary>{{t .Lang "software.php_runtime_other_versions"}}</summary>
+            <template x-for="runtime in orderedPHPRuntimes().filter(runtime => !runtime.installed && !runtime.primary && !runtime.active_sites)" :key="runtime.version">
+                <div class="flex items-center justify-between gap-3 mt-3"><span class="font-semibold" x-text="'LSPHP ' + runtime.version"></span><button type="button" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-secondary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button></div>
+            </template>
+        </details>
         <p class="text-xs text-yellow-300 mt-4">{{t .Lang "software.php_runtime_install_notice"}}</p>
     </div>
 
@@ -454,6 +461,9 @@ function softwareManager() {
         orderedPHPRuntimes() {
             return [...this.phpRuntimes].sort((left, right) => Number(!!right.primary) - Number(!!left.primary) || Number(right.active_sites || 0) - Number(left.active_sites || 0));
         },
+        canRepairPHPRuntime(runtime) {
+            return runtime.installed && this.healthFresh && !this.healthError && !this.healthLoading && this.runtimeHealthKnown(runtime.version) && this.healthExtensions(runtime.version).some(extension => extension.state === 'missing');
+        },
         healthExtensions(version, importance = '') {
             return [...this.runtimeHealth(version).extensions].filter(extension => !importance || extension.importance === importance).sort((left, right) => {
                 const priority = extension => (extension.importance === 'required' ? 0 : 3) + (extension.state === 'missing' ? 0 : extension.state === 'unknown' ? 1 : 2);
@@ -604,14 +614,14 @@ function softwareManager() {
         },
         async installPHPRuntime(runtime) {
             if (this.disposed || runtime._installing) return;
-            if (!await confirmModal(t('software.php_runtime_install_confirm', { version: runtime.version }))) return;
+            if (!await confirmModal(t(runtime.installed ? 'software.php_runtime_repair_confirm' : 'software.php_runtime_install_confirm', { version: runtime.version }))) return;
             if (this.disposed || runtime._installing) return;
             runtime._installing = true;
             try {
                 const r = await api('/software/php-runtimes/install', { method: 'POST', body: { version: runtime.version }, timeout: 1800000 });
                 showToast(r.data?.message || t('software.php_runtime_installed', { version: runtime.version }), 'success');
                 await this.refreshAll();
-            } catch(e) { showToast(e.message, 'error'); }
+            } catch(e) { showToast(e.message, 'error'); await this.fetchHealth(true); }
             finally { runtime._installing = false; const current = this.phpRuntimes.find(item => item.version === runtime.version); if (current) current._installing = false; }
         },
         async fetchDevelopmentTools(fresh = false) {

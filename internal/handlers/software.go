@@ -130,7 +130,15 @@ func (h *SoftwareHandler) InstallPHPRuntime(c *gin.Context) {
 	runtime, err := executor.InstallLSPHPRuntime(ctx, req.Version)
 	if err != nil {
 		log.Printf("安装 LSPHP 失败 version=%s: %v", req.Version, err)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, "software.php_runtime_install_failed")))
+		key := "software.php_runtime_install_failed"
+		if errors.Is(err, executor.ErrLSPHPRuntimeNotReady) {
+			key = "software.php_runtime_not_ready"
+		}
+		if errors.Is(err, executor.ErrPackagePlanChangesInstalled) {
+			key = "software.php_runtime_package_plan_blocked"
+		}
+		softwareReadCache.invalidate()
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, key)))
 		return
 	}
 	softwareReadCache.invalidate()

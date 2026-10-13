@@ -47,8 +47,10 @@ func TestInstallerRequiresWorkingDatabaseBackupCommands(t *testing.T) {
 		ok             bool
 	}{
 		{"available", `mysql() { test "$1" = --version; }; mysqldump() { test "$1" = --version; }`, true},
-		{"dump command missing", `mysql() { return 0; }; command() { test "$*" != '-v mysqldump'; }`, false},
-		{"client fails", `mysql() { return 1; }; mysqldump() { return 0; }`, false},
+		{"native only", `mariadb() { test "$1" = --version; }; mariadb-dump() { test "$1" = --version; }; command() { case "$2" in mysql|mysqldump) return 1;; *) builtin command "$@";; esac; }`, true},
+		{"dump command missing", `mysql() { return 0; }; command() { case "$2" in mysqldump|mariadb-dump) return 1;; *) builtin command "$@";; esac; }`, false},
+		{"all commands missing", `command() { return 1; }`, false},
+		{"client fails without bypass", `mysql() { return 1; }; mariadb() { return 0; }; mysqldump() { return 0; }`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := lifecycleBash(t, "log_error() { printf '%s\\n' \"$1\" >&2; exit 61; }\n"+tc.commands+"\n"+helper+"\nvalidate_mariadb_backup_commands\n")

@@ -188,7 +188,7 @@
                         <span class="panel-context-separator" aria-hidden="true">/</span>
                         <span class="panel-context-current">{{.Title}}</span>
                     </div>
-                    <span class="panel-topbar-brand" translate="no">{{.PanelTitle}}</span>
+                    <a href="/{{.RandomSuffix}}/settings#updates" class="version-pill panel-topbar-version" aria-label="{{t .Lang "settings.panel_version"}} {{.PanelVersion}}" translate="no">{{.PanelVersion}}</a>
                     <button type="button" x-ref="menuToggle" @click="toggleSidebar()" x-cloak class="panel-menu-toggle relative z-50"
                             aria-label="{{t .Lang "nav.menu"}}" aria-controls="panel-sidebar" :aria-expanded="sidebarOpen.toString()">
                         <svg x-show="!sidebarOpen" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>

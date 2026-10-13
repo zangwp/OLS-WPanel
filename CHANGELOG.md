@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.5 — 2026-10-13
+
+- Completes missing extensions for a selected installed PHP version using simulated, version-pinned package additions. Preserves existing configuration and website versions; checks extensions before creating or switching a website.
+- Moves uninstalled PHP versions into an optional section and explains unused runtimes without installing their extensions automatically.
+- Uses native MariaDB client commands when MySQL compatibility names are absent, keeping backup checks, exports and restores consistent.
+- Uses a light blue WordPress type badge and a version link in the header. Clarifies external login-plugin restrictions and prevents unsupported passwordless-login settings.
+
 ## v2.0.4 — 2026-10-13
 
 - Simplifies website creation to WordPress only, removing the generic PHP selector and its unused form fields. Existing PHP websites remain manageable.

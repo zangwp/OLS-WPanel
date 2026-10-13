@@ -25,7 +25,7 @@ type BackupDependency struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Package     string   `json:"package"`
-	Commands    []string `json:"commands"`
+	Commands    []string `json:"commands"` // Alternative names for the same operation.
 	Status      string   `json:"status"`
 	Required    bool     `json:"required"`
 	RequiredFor []string `json:"required_for"`
@@ -79,8 +79,8 @@ func backupDependencyDefinitions() []BackupDependency {
 	return []BackupDependency{
 		{ID: "tar", Name: "tar", Package: "tar", Commands: []string{"tar"}, RequiredFor: []string{"local_files"}},
 		{ID: "gzip", Name: "gzip", Package: "gzip", Commands: []string{"gzip"}, RequiredFor: []string{"local_files"}},
-		{ID: "mysql", Name: "MySQL/MariaDB restore client", Package: "mariadb-client-compat", Commands: []string{"mysql"}, RequiredFor: []string{"local_database_restore"}},
-		{ID: "mysqldump", Name: "MySQL/MariaDB dump", Package: "mariadb-client-compat", Commands: []string{"mysqldump"}, RequiredFor: []string{"local_database"}},
+		{ID: "mysql", Name: "MySQL/MariaDB restore client", Package: "mariadb-client-compat", Commands: backupCommandCandidates("mysql"), RequiredFor: []string{"local_database_restore"}},
+		{ID: "mysqldump", Name: "MySQL/MariaDB dump", Package: "mariadb-client-compat", Commands: backupCommandCandidates("mysqldump"), RequiredFor: []string{"local_database"}},
 		{ID: "rsync", Name: "rsync", Package: "rsync", Commands: []string{"rsync"}, RequiredFor: []string{"remote_ssh"}},
 		{ID: "ssh", Name: "OpenSSH client", Package: "openssh-client", Commands: []string{"ssh"}, RequiredFor: []string{"remote_ssh"}},
 		{ID: "sshpass", Name: "sshpass", Package: "sshpass", Commands: []string{"sshpass"}, RequiredFor: []string{"remote_ssh_password"}},
@@ -131,14 +131,11 @@ func backupDependencyHealth(ctx context.Context, settings backupDependencySettin
 		if err := ctx.Err(); err != nil {
 			dependency.Status, dependency.Error = "error", "dependency detection interrupted"
 		} else {
-			for _, command := range dependency.Commands {
-				_, err := lookPath(command)
-				if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-					dependency.Status = "missing"
-				} else if err != nil {
-					dependency.Status, dependency.Error = "error", "command availability could not be checked"
-					break
-				}
+			_, err := findBackupCommand(dependency.Commands, lookPath)
+			if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+				dependency.Status = "missing"
+			} else if err != nil {
+				dependency.Status, dependency.Error = "error", "command availability could not be checked"
 			}
 		}
 		if dependency.Required && dependency.Status == "missing" {
@@ -208,40 +205,67 @@ func InstallBackupDependencies(ctx context.Context) (BackupDependencyHealth, err
 	if err != nil || len(packages) == 0 {
 		return report, err
 	}
-	if _, err := backupDependencyLookPath("apt-get"); err != nil {
-		return report, errors.New("APT is unavailable")
-	}
-	aptOptions := []string{"-o", "Acquire::Retries=2", "-o", "Acquire::http::Timeout=30", "-o", "Acquire::https::Timeout=30", "-o", "DPkg::Lock::Timeout=60"}
-	if err := backupDependencyAPT(ctx, append(append([]string{}, aptOptions...), "update")...); err != nil {
+	if err := installMissingAPTPackages(ctx, packages); err != nil {
 		return ReadBackupDependencyHealth(ctx), err
+	}
+	report = ReadBackupDependencyHealth(ctx)
+	if !report.Ready {
+		return report, errors.New("backup commands remain unavailable after installation")
+	}
+	return report, nil
+}
+
+var ErrPackagePlanChangesInstalled = errors.New("package plan would change installed software")
+
+// Shared by backup and PHP repair. Only missing packages from a caller-owned
+// allowlist may be added; existing versions are pinned throughout execution.
+func installMissingAPTPackages(ctx context.Context, packages []string) error {
+	if _, err := backupDependencyLookPath("apt-get"); err != nil {
+		return errors.New("APT is unavailable")
 	}
 	installedOutput, err := backupDependencyReadCommand(ctx, "dpkg-query", "-W", "-f=${binary:Package}\t${Version}\t${db:Status-Status}\n")
 	if err != nil {
-		return report, errors.New("installed package inventory could not be checked")
+		return errors.New("installed package inventory could not be checked")
 	}
 	installed, err := parseBackupDependencyInstalledPackages(installedOutput)
 	if err != nil {
-		return report, err
+		return err
+	}
+	missing := []string{}
+	for _, name := range packages {
+		if !backupDependencyPackageNameRE.MatchString(name) {
+			return errors.New("invalid package name")
+		}
+		if !backupDependencyPackageIsInstalled(installed, name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	aptOptions := []string{"-o", "Acquire::Retries=2", "-o", "Acquire::http::Timeout=30", "-o", "Acquire::https::Timeout=30", "-o", "DPkg::Lock::Timeout=60"}
+	if err := backupDependencyAPT(ctx, append(append([]string{}, aptOptions...), "update")...); err != nil {
+		return err
 	}
 	simulateArgs := append([]string{}, aptOptions...)
 	simulateArgs = append(simulateArgs, "--simulate", "--no-remove", "--no-upgrade", "--no-install-recommends", "install")
-	simulateArgs = append(simulateArgs, packages...)
+	simulateArgs = append(simulateArgs, missing...)
 	simulation, err := backupDependencyReadCommand(ctx, "apt-get", simulateArgs...)
 	if err != nil {
-		return report, errors.New("backup dependency package plan could not be checked")
+		return fmt.Errorf("%w: package plan could not be checked", ErrPackagePlanChangesInstalled)
 	}
-	planned, err := parseBackupDependencyPackagePlan(simulation, installed, packages)
+	planned, err := parseBackupDependencyPackagePlan(simulation, installed, missing)
 	if err != nil {
-		return report, err
+		return fmt.Errorf("%w: %v", ErrPackagePlanChangesInstalled, err)
 	}
 	prefsDir, err := os.MkdirTemp("", "ols-backup-dependencies-*")
 	if err != nil {
-		return report, err
+		return err
 	}
 	defer os.RemoveAll(prefsDir)
 	prefsPath := filepath.Join(prefsDir, "preferences")
 	if err := os.WriteFile(prefsPath, []byte(backupDependencyVersionPreferences(installed, planned)), 0600); err != nil {
-		return report, err
+		return err
 	}
 	args := append([]string{}, aptOptions...)
 	args = append(args, "-y", "--no-remove", "--no-upgrade", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold",
@@ -251,13 +275,9 @@ func InstallBackupDependencies(ctx context.Context) (BackupDependencyHealth, err
 		args = append(args, packageName+"="+planned[packageName])
 	}
 	if err := backupDependencyAPT(ctx, args...); err != nil {
-		return ReadBackupDependencyHealth(ctx), err
+		return err
 	}
-	report = ReadBackupDependencyHealth(ctx)
-	if !report.Ready {
-		return report, errors.New("backup commands remain unavailable after installation")
-	}
-	return report, nil
+	return nil
 }
 
 // RequireSSHBackupDependencies provides a cheap, explicit local preflight for

@@ -22,9 +22,9 @@
         <details id="wp-access-settings" class="wp-access-settings mt-5" :open="settingsOpen" @toggle="settingsOpen = $el.open; if (!settingsOpen) { settingsPassword = ''; settingsCode = ''; }"><summary>{{t .Lang "wp_access.settings_title"}}</summary>
             <form @submit.prevent="save()" class="pt-4">
                 <p x-show="status.manual_login_url" class="text-sm text-yellow-300 mb-3">{{t .Lang "wp_access.legacy_manual_notice"}}</p>
-                <label class="block"><span class="label">{{t .Lang "wp_access.custom_suffix"}}</span><input type="text" x-model="suffix" class="input-field" :disabled="busy || status.external_login_control" autocomplete="off" maxlength="64" placeholder="my-login"><span class="block text-xs text-gray-500 mt-2">{{t .Lang "wp_access.suffix_help"}}</span></label>
+                <label class="block"><span class="label">{{t .Lang "wp_access.custom_suffix"}}</span><input type="text" x-model="suffix" class="input-field" :disabled="busy || status.external_login_control" autocomplete="off" maxlength="64"><span class="block text-xs text-gray-500 mt-2">{{t .Lang "wp_access.suffix_help"}}</span></label>
                 <p x-show="status.external_login_control" class="text-sm text-yellow-300 mt-2">{{t .Lang "wp_access.external_control"}}</p>
-                <label class="flex items-start gap-2 mt-4 text-sm"><input type="checkbox" x-model="enableSSO" :disabled="busy || !!status.authentication_plugins?.length" class="mt-1"><span>{{t .Lang "wp_access.enable_sso"}}<span class="block text-xs text-gray-500 mt-1">{{t .Lang "wp_access.enable_help"}}</span></span></label>
+                <label class="flex items-start gap-2 mt-4 text-sm"><input type="checkbox" x-model="enableSSO" :disabled="busy || loading || (!enableSSO && !!authorizationConflict())" class="mt-1"><span>{{t .Lang "wp_access.enable_sso"}}<span class="block text-xs text-gray-500 mt-1">{{t .Lang "wp_access.enable_help"}}</span></span></label>
                 <p x-show="status.authentication_plugins?.length" class="text-sm text-yellow-300 mt-2" x-text="t('wp_access.authentication_conflict') + ': ' + (status.authentication_plugins || []).join(', ')"></p>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4"><label><span class="label">{{t .Lang "wp_access.panel_password"}}</span><input type="password" x-model="settingsPassword" required autocomplete="current-password" :disabled="busy" class="input-field"></label><label><span class="label">{{t .Lang "wp_access.panel_code"}}</span><input type="text" x-model="settingsCode" autocomplete="one-time-code" :disabled="busy" class="input-field"></label></div>
                 <p x-show="site.file_lock_enabled" class="text-sm text-yellow-300 mt-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
@@ -61,6 +61,7 @@ function wordpressPanelAccess() {
         },
         canAuthorize() { return this.status?.installed === true && this.status.sso_enabled === true && this.status.sso_available === true && !this.status.authentication_plugins?.length && !this.status.external_login_control && (this.status.administrators || []).some(admin => Number.isSafeInteger(admin.id) && admin.id > 0); },
         canSetupAuthorization() { return this.status?.installed === true && ((this.status.sso_enabled === false && this.status.reason_code === 'sso_disabled') || this.status.reason_code === 'bridge_unavailable') && !this.status.authentication_plugins?.length && !this.status.external_login_control; },
+        authorizationConflict() { return this.status?.external_login_control ? 'external_login_control' : this.status?.authentication_plugins?.length ? 'authentication_plugin' : ''; },
         reasonText() {
             if (this.canAuthorize()) return '';
             let reason = this.status?.reason_code || 'unavailable';
@@ -102,6 +103,12 @@ function wordpressPanelAccess() {
         async copyAddress() { const url = this.safeAddress(this.status?.installed ? this.status.login_url : this.status?.install_url); if (!url) return; try { await navigator.clipboard.writeText(url); showToast(t('common.copied'), 'success'); } catch (_) { this.error = t('common.operation_failed'); } },
         async save() {
             if (this.busy || this.loading || !this.settingsPassword || this.site?.file_lock_enabled) return;
+            const conflict = this.authorizationConflict();
+            if (this.enableSSO && conflict) {
+                this.error = t('wp_access.error_' + conflict);
+                this.settingsPassword = ''; this.settingsCode = '';
+                return;
+            }
             this.busy = true; this.error = '';
             try {
                 const response = await api('/websites/' + this.site.id + '/wp-panel-access', {method:'PUT',body:{manual_login_url:'',login_suffix:this.suffix.trim(),sso_enabled:this.enableSSO,current_password:this.settingsPassword,code:this.settingsCode,confirm:true},silent:true,allowAuthFailure:true,timeout:30000});

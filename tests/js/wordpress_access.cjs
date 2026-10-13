@@ -156,6 +156,60 @@ test('unavailable and conflicting login environments never issue a ticket or ope
     }
 });
 
+test('conflicting login controls allow disabling existing SSO but prevent enabling it again',()=>{
+    const disabled=html.match(/<input type="checkbox" x-model="enableSSO"[^>]*:disabled="([^"]+)"/)[1];
+    for (const change of [{external_login_control:true},{authentication_plugins:['two-factor']}]) {
+        const {component}=setup();Object.assign(component.status,change);
+        const isDisabled=()=>vm.runInNewContext('with (data) { '+disabled+' }',{data:component});
+        component.enableSSO=true;assert.equal(isDisabled(),false);
+        component.enableSSO=false;assert.equal(isDisabled(),true);
+        component.enableSSO=true;component.loading=true;assert.equal(isDisabled(),true);
+        component.loading=false;component.busy=true;assert.equal(isDisabled(),true);
+    }
+    const {component}=setup();component.enableSSO=false;
+    assert.equal(vm.runInNewContext('with (data) { '+disabled+' }',{data:component}),false);
+});
+
+test('known conflicting SSO enable requests fail locally without altering the login suffix or ordinary URL',async()=>{
+    for (const [change,code] of [[{external_login_control:true},'external_login_control'],[{authentication_plugins:['two-factor']},'authentication_plugin']]) {
+        const {component,calls}=setup();Object.assign(component.status,{login_url:'https://site.example/plugin-login/',...change});
+        component.enableSSO=true;component.suffix='saved-panel-login';component.settingsPassword='secret';component.settingsCode='123456';
+        await component.save();
+        assert.equal(calls.length,0);assert.equal(component.error,'wp_access.error_'+code);assert.equal(component.busy,false);
+        assert.equal(component.suffix,'saved-panel-login');assert.equal(component.safeAddress(component.status.login_url),'https://site.example/plugin-login/');
+        assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');
+    }
+});
+
+test('SSO can be disabled and tickets revoked while external login or authentication handling is active',async()=>{
+    for (const change of [{external_login_control:true},{authentication_plugins:['two-factor']}]) {
+        const {component,context,calls}=setup();Object.assign(component.status,change);
+        component.enableSSO=false;component.suffix='';component.settingsPassword='secret';
+        context.api=async(url,options)=>{calls.push({url,options});return readStatus({sso_enabled:false,sso_available:false,login_suffix:'',login_url:'https://site.example/plugin-login/',...change});};
+        await component.save();
+        assert.equal(calls[0].options.method,'PUT');assert.equal(calls[0].options.body.sso_enabled,false);assert.equal(calls[0].options.body.login_suffix,'');
+        assert.equal(component.error,'');assert.equal(component.enableSSO,false);assert.equal(component.safeAddress(component.status.login_url),'https://site.example/plugin-login/');
+        await component.revoke();assert.equal(calls.at(-1).options.method,'POST');assert(calls.at(-1).url.endsWith('/revoke'));
+    }
+});
+
+test('disabling SSO preserves an existing suffix and reports the backend conflict instead of migrating settings',async()=>{
+    const {component,context,calls}=setup();component.status.external_login_control=true;component.status.login_suffix='saved-panel-login';
+    component.enableSSO=false;component.suffix='saved-panel-login';component.settingsPassword='secret';
+    const conflictMessage=JSON.parse(fs.readFileSync(path.join(__dirname,'../../internal/i18n/locales/en-US.json'),'utf8')).wp_access.error_external_login_control;
+    context.t=key=>key==='wp_access.error_external_login_control'?conflictMessage:key;
+    context.api=async(url,options)=>{calls.push({url,options});throw Object.assign(new Error('conflict'),{code:'wp_access_external_login_control'});};
+    await component.save();
+    assert.equal(calls.length,1);assert.equal(calls[0].options.body.sso_enabled,false);assert.equal(calls[0].options.body.login_suffix,'saved-panel-login');
+    assert.equal(component.suffix,'saved-panel-login');assert.equal(component.status.login_suffix,'saved-panel-login');assert.equal(component.error,conflictMessage);
+});
+
+test('the suffix field displays only the actual saved value without a misleading login placeholder',()=>{
+    const suffixInput=html.match(/<input[^>]*x-model="suffix"[^>]*>/)[0];assert(!suffixInput.includes('placeholder='));
+    const {component}=setup();component.status.login_suffix='';component.resetSettings();assert.equal(component.suffix,'');
+    component.status.login_suffix='saved-panel-login';component.resetSettings();assert.equal(component.suffix,'saved-panel-login');
+});
+
 test('closing settings clears only its settings proofs and keeps the independent authorization form open',()=>{
     const {component}=setup();
     const toggle=html.match(/<details[^>]*@toggle="([^"]+)"/)[1];

@@ -195,6 +195,9 @@ func executeCreateSite(task *Task) TaskResult {
 	if err != nil {
 		return TaskResult{Success: false, Message: "所选 PHP 版本尚未安装或不受支持"}
 	}
+	if err := requireLSPHPRuntimeHealth(context.Background(), phpRuntime); err != nil {
+		return TaskResult{Success: false, Message: "所选 PHP 版本的扩展未齐或检测未完成，请到“软件管理”补齐并重新检查环境"}
+	}
 
 	dbPassword := payload.DBPassword
 	if dbPassword == "" {
