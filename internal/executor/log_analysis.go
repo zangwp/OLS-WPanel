@@ -562,7 +562,13 @@ func sanitizeLogAnalysisAIText(value string) string {
 }
 
 func sanitizeLogAnalysisAITextKeepingIPs(value string) string {
-	value = logAnalysisSecretPattern.ReplaceAllString(value, "$1$2[redacted]")
+	value = logAnalysisSecretPattern.ReplaceAllStringFunc(value, func(match string) string {
+		parts := logAnalysisSecretPattern.FindStringSubmatch(match)
+		if parts[3] == "redacted" || parts[3] == "[redacted]" {
+			return match
+		}
+		return parts[1] + parts[2] + "[redacted]"
+	})
 	value = logAnalysisWebRootPattern.ReplaceAllString(value, "/site")
 	return value
 }

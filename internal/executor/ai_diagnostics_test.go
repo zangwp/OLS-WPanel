@@ -1019,6 +1019,14 @@ func TestDiagnosticQuestionRedactsExistingSecretForms(t *testing.T) {
 			t.Fatalf("question redaction failed: %q => %q", value, got)
 		}
 	}
+	annotated := `{"contains_db_password":"redacted","token":"[redacted]"}`
+	if got := sanitizeLogAnalysisAITextKeepingIPs(annotated); got != annotated {
+		t.Fatalf("existing privacy annotation changed: %s", got)
+	}
+	first := SanitizeAIDiagnosticQuestion(`{"api_key":"private-value"} Authorization: Bearer private-value`)
+	if got := SanitizeAIDiagnosticQuestion(first); got != first {
+		t.Fatalf("redaction is not idempotent: %q => %q", first, got)
+	}
 }
 
 func TestDiagnosticQuestionBudgetHandlesLongUnicodeAndRejectsOverflow(t *testing.T) {

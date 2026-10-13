@@ -57,7 +57,7 @@
                 <div class="space-y-4">
                     <div>
                         <label class="label">{{t .Lang "ai_diagnostics.website"}}</label>
-                        <select x-model="selectedSiteID" @change="onSiteChange()" class="input-field text-sm">
+                        <select x-model="selectedSiteID" x-effect="websites.length && $nextTick(() => $el.value = selectedSiteID)" @change="onSiteChange()" class="input-field text-sm">
                             <option value="">{{t .Lang "ai_diagnostics.select_website"}}</option>
                             <template x-for="site in websites" :key="site.id">
                                 <option :value="String(site.id)" x-text="site.domain"></option>
@@ -66,7 +66,7 @@
                     </div>
                     <div>
                         <label class="label">{{t .Lang "ai_diagnostics.issue_type"}}</label>
-                        <select x-model="symptom" class="input-field text-sm">
+                        <select x-model="symptom" x-init="$nextTick(() => $el.value = symptom)" class="input-field text-sm">
                             <template x-for="item in [...symptoms, { value: 'custom', label: t('ai_diagnostics.symptom_custom') }]" :key="item.value">
                                 <option :value="item.value" x-text="item.label"></option>
                             </template>
