@@ -5,11 +5,13 @@ function firewallManager(initialTab = 'current') {
         activeTab: 'current',
         portView: 'policy',
         bans: [],
+        bansLoaded: false, bansLoading: false, bansError: '', banReadVersion: 0,
         banAnomalies: [],
         currentBanReadStatus: null,
         history: [],
         historyLoaded: false,
         historyLoading: false,
+        historyError: '', historyReadVersion: 0,
         historySearchIP: '',
         historyPage: 1,
         historyTotalPages: 1,
@@ -23,10 +25,12 @@ function firewallManager(initialTab = 'current') {
         securityReportItems: [],
         securityReportLoaded: false,
         securityReportLoading: false,
+        securityReportError: '',
         typeFilter: '',
         fileSecurityEvents: [],
         fileSecurityLoaded: false,
         fileSecurityLoading: false,
+        fileSecurityError: '',
         fileSecuritySummary: null,
         searchIP: '',
         banLevelFilter: '',
@@ -235,6 +239,7 @@ function firewallManager(initialTab = 'current') {
         },
         loadTab(tab) {
             this.activeTab = tab;
+            if (tab === 'current' && !this.bansLoaded && !this.bansLoading) this.fetchBans();
             if (tab === 'wp' && !this.securityReportLoaded && !this.securityReportLoading) {
                 this.fetchWPSecurityReport();
             }
@@ -247,6 +252,15 @@ function firewallManager(initialTab = 'current') {
             if (tab === 'ports' && !this.portsLoaded && !this.portsLoading) {
                 this.fetchPortStatus();
             }
+        },
+        eventReadError() { return { current: this.bansError, history: this.historyError, wp: this.securityReportError, files: this.fileSecurityError }[this.activeTab] || ''; },
+        eventReadLoading() { return !!{ current: this.bansLoading, history: this.historyLoading, wp: this.securityReportLoading, files: this.fileSecurityLoading }[this.activeTab]; },
+        retryEventRead() {
+            if (this.eventReadLoading()) return;
+            if (this.activeTab === 'current') return this.fetchBans();
+            if (this.activeTab === 'history') return this.fetchHistory();
+            if (this.activeTab === 'wp') return this.fetchWPSecurityReport();
+            if (this.activeTab === 'files') return this.loadFileSecurityEvents();
         },
         async fetchPortStatus({ resetDraft = false } = {}) {
             this.portsLoading = true;
@@ -354,21 +368,26 @@ function firewallManager(initialTab = 'current') {
             finally { this.portSubmitting = false; }
         },
         async fetchBans() {
+            const version = ++this.banReadVersion;
+            this.bansLoading = true; this.bansError = '';
             try {
                 let url = '/firewall/bans?page=' + this.page;
                 if (this.searchIP.trim()) url += '&search=' + encodeURIComponent(this.searchIP.trim());
                 if (this.banLevelFilter) url += '&level=' + encodeURIComponent(this.banLevelFilter);
                 if (this.banSourceFilter) url += '&source=' + encodeURIComponent(this.banSourceFilter);
                 const r = await api(url);
-                if (r.success) {
-                    this.bans = r.data?.data || r.data || [];
-                    this.banAnomalies = r.data?.anomalies || [];
-                    this.currentBanReadStatus = r.data?.read_status || null;
-                    this.total = r.data?.total || this.bans.length;
-                    this.page = r.data?.page || 1;
-                    this.totalPages = r.data?.total_pages || 1;
-                }
-            } catch(e) {}
+                if (version !== this.banReadVersion) return;
+                const entries = Array.isArray(r.data) ? r.data : r.data?.data;
+                if (!r.success || !Array.isArray(entries)) throw Error(t('followup.load_failed'));
+                this.bans = entries;
+                this.banAnomalies = r.data?.anomalies || [];
+                this.currentBanReadStatus = r.data?.read_status || null;
+                this.total = r.data?.total || this.bans.length;
+                this.page = r.data?.page || 1;
+                this.totalPages = r.data?.total_pages || 1;
+                this.bansLoaded = true;
+            } catch(e) { if (version === this.banReadVersion) this.bansError = e.message || t('followup.load_failed'); }
+            finally { if (version === this.banReadVersion) this.bansLoading = false; }
         },
         resetBanFilters() {
             this.searchIP = '';
@@ -384,22 +403,24 @@ function firewallManager(initialTab = 'current') {
             return !status.nftables || ['olswpanel', 'olswpanel-404', 'olswpanel-login', 'olswpanel-sshd', 'olswpanel-sqli'].some(jail => !fail2ban[jail]);
         },
         async fetchHistory() {
-            this.historyLoading = true;
+            const version = ++this.historyReadVersion;
+            this.historyLoading = true; this.historyError = '';
             try {
                 let url = '/firewall/bans?history=1&page=' + this.historyPage;
 				if (this.historyExpanded) url += '&expanded=1';
                 if (this.historySearchIP.trim()) url += '&search=' + encodeURIComponent(this.historySearchIP.trim());
                 const r = await api(url, { silent: true });
-                if (r.success) {
-                    this.history = r.data?.data || r.data || [];
-                    this.historyTotal = r.data?.total || this.history.length;
-                    this.historyPage = r.data?.page || 1;
-                    this.historyTotalPages = r.data?.total_pages || 1;
-					this.historyHasMore = !!r.data?.has_more;
-                    this.historyLoaded = true;
-                }
-            } catch(e) {}
-            finally { this.historyLoading = false; }
+                if (version !== this.historyReadVersion) return;
+                const entries = Array.isArray(r.data) ? r.data : r.data?.data;
+                if (!r.success || !Array.isArray(entries)) throw Error(t('followup.load_failed'));
+                this.history = entries;
+                this.historyTotal = r.data?.total || this.history.length;
+                this.historyPage = r.data?.page || 1;
+                this.historyTotalPages = r.data?.total_pages || 1;
+                this.historyHasMore = !!r.data?.has_more;
+                this.historyLoaded = true;
+            } catch(e) { if (version === this.historyReadVersion) this.historyError = e.message || t('followup.load_failed'); }
+            finally { if (version === this.historyReadVersion) this.historyLoading = false; }
         },
         resetHistorySearch() {
             this.historySearchIP = '';
@@ -427,40 +448,41 @@ function firewallManager(initialTab = 'current') {
             return pages;
         },
         async fetchWPSecurityReport() {
-            this.securityReportLoading = true;
+            if (this.securityReportLoading) return;
+            this.securityReportLoading = true; this.securityReportError = '';
             try {
                 const r = await api('/firewall/wp-security-report');
-                if (r.success) {
-                    this.securityReportItems = r.data?.items || [];
-                    this.securityReportLoaded = true;
-                }
-            } catch(e) { showToast(t('firewall.load_wp_report_failed', { error: e.message }), 'error'); }
+                if (!r.success || !Array.isArray(r.data?.items)) throw Error(t('followup.load_failed'));
+                this.securityReportItems = r.data.items;
+                this.securityReportLoaded = true;
+            } catch(e) { this.securityReportError = e.message || t('followup.load_failed'); }
             finally { this.securityReportLoading = false; }
         },
         async loadFileSecurityEvents() {
+            if (this.fileSecurityLoading) return;
+            this.fileSecurityLoading = true; this.fileSecurityError = '';
             try {
                 const r = await api('/firewall/file-security-events', { silent: true });
-                if (r.success) {
-                    this.fileSecurityEvents = r.data?.events || [];
-                    this.fileSecuritySummary = r.data?.summary || null;
-                    this.fileSecurityLoaded = true;
-                }
-            } catch(e) {
+                if (!r.success || !Array.isArray(r.data?.events)) throw Error(t('followup.load_failed'));
+                this.fileSecurityEvents = r.data.events;
+                this.fileSecuritySummary = r.data?.summary || null;
                 this.fileSecurityLoaded = true;
-            }
+            } catch(e) {
+                this.fileSecurityError = e.message || t('followup.load_failed');
+            } finally { this.fileSecurityLoading = false; }
         },
         async refreshFileSecurityEvents(clearFirst = false) {
-            if (clearFirst && !(await confirmModal(t('firewall.confirm_clear_history')))) return;
-            this.fileSecurityLoading = true;
+            if (this.fileSecurityLoading) return;
+            this.fileSecurityLoading = true; this.fileSecurityError = '';
             try {
+                if (clearFirst && !(await confirmModal(t('firewall.confirm_clear_history')))) return;
                 const url = '/firewall/file-security-events/refresh' + (clearFirst ? '?clear=1' : '');
                 const r = await api(url, { method: 'POST' });
-                if (r.success) {
-                    this.fileSecurityEvents = r.data?.events || [];
-                    this.fileSecuritySummary = r.data?.summary || null;
-                    this.fileSecurityLoaded = true;
-                }
-            } catch(e) { showToast(t('firewall.refresh_file_security_failed', { error: e.message }), 'error'); }
+                if (!r.success || !Array.isArray(r.data?.events)) throw Error(t('followup.load_failed'));
+                this.fileSecurityEvents = r.data.events;
+                this.fileSecuritySummary = r.data?.summary || null;
+                this.fileSecurityLoaded = true;
+            } catch(e) { this.fileSecurityError = e.message || t('followup.load_failed'); }
             finally { this.fileSecurityLoading = false; }
         },
         goPage(p) {

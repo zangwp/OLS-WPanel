@@ -9,7 +9,7 @@
     <p x-show="loading" role="status" class="text-sm text-gray-500 mb-3">{{t .Lang "followup.loading_config"}}</p>
     <div x-show="loadError" x-cloak role="alert" class="text-sm text-red-400 mb-4"><p x-text="loadError"></p><button @click="fetchAll()" :disabled="loading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.email_channel"}}</p><p class="text-sm mt-2" :class="settings.smtp_host && settings.admin_email ? 'text-green-400' : 'text-yellow-400'" x-text="!loaded ? t('followup.status_unknown') : settings.smtp_host && settings.admin_email ? t('alert.configured') : t('alert.not_configured')"></p></div>
+        <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.email_channel"}}</p><p class="text-sm mt-2" :class="smtpConfigured() ? 'text-green-400' : 'text-yellow-400'" x-text="!loaded ? t('followup.status_unknown') : smtpConfigured() ? t('alert.configured') : t('alert.not_configured')"></p></div>
         <div class="card py-4"><p class="text-xs text-gray-500">Webhook</p><p class="text-sm mt-2" :class="settings.webhook_url ? 'text-green-400' : 'text-yellow-400'" x-text="!loaded ? t('followup.status_unknown') : settings.webhook_url ? t('alert.configured') : t('alert.not_configured')"></p></div>
         <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.enabled_rules"}}</p><p class="text-xl text-white mt-1" x-text="loaded ? enabledRuleCount() : '—'"></p></div>
         <div class="card py-4"><p class="text-xs text-gray-500">{{t .Lang "alert.recent_events"}}</p><p class="text-xl text-white mt-1" x-text="logsLoaded ? logs.length : '—'"></p></div>
@@ -441,6 +441,9 @@ function alertManager() {
         },
         enabledRuleCount() {
             return Object.values(this.rules).filter(Boolean).length;
+        },
+        smtpConfigured() {
+            return this.loaded && ['smtp_host', 'smtp_user', 'smtp_pass', 'admin_email'].every(key => typeof this.settings[key] === 'string' && this.settings[key].trim() !== '');
         },
         filteredLogs() {
             const q = this.logFilter.toLowerCase();

@@ -11,6 +11,11 @@
 
     <p class="text-sm text-gray-400 mb-6">{{t .Lang "cron.overview_help"}}</p>
 
+    <div x-show="!!listError" x-cloak class="card mb-4 text-red-400" role="alert">
+        <span x-text="listError"></span>
+        <button @click="fetchList()" :disabled="loading" class="btn-secondary text-xs ml-3">{{t .Lang "common.retry"}}</button>
+    </div>
+
     <div class="card">
         <div class="overflow-x-auto">
             <table class="w-full cron-jobs">
@@ -35,20 +40,20 @@
                             <td class="table-cell font-mono text-xs"><span class="cron-job-text" :title="taskContent(job)" x-text="taskContent(job)"></span></td>
                             <td class="table-cell">
                                 <span :class="job.runtime_suspended ? 'badge-warning' : (job.enabled ? 'badge-success' : 'badge-warning')"
-                                      x-text="job.runtime_reason === 'migration_locked' ? t('cron.status_migration_locked') : (job.runtime_reason === 'paused' ? t('cron.status_site_paused') : (job.enabled ? t('cron.status_enabled') : t('cron.status_disabled')))"></span>
+                                      x-text="job.runtime_reason === 'migration_locked' ? t('cron.status_migration_locked') : (job.runtime_reason === 'paused' ? t('cron.status_site_paused') : (job.runtime_suspended ? t('cron.status_site_unavailable') : (job.enabled ? t('cron.status_enabled') : t('cron.status_disabled'))))"></span>
                             </td>
                             <td class="table-cell text-xs text-gray-400" :title="job.last_run_at || ''" x-text="formatRunTime(job.last_run_at)"></td>
                             <td class="table-cell cron-actions-column">
                                 <div class="cron-job-actions flex flex-wrap gap-1" :class="{ 'cron-wp-actions': job.task_type === 'wp_cron' }">
-                                    <button x-show="job.task_type !== 'wp_cron'" @click="runJob(job)" :disabled="job.running" class="btn-secondary text-xs py-1 px-2" :class="job.running ? 'opacity-50 cursor-not-allowed' : ''" x-text="job.running ? t('cron.job_running') : t('cron.run')"></button>
+                                    <button x-show="job.task_type !== 'wp_cron'" @click="runJob(job)" :disabled="loading || !!listError || job.running || (job.runtime_suspended && job.runtime_reason !== 'paused')" class="btn-secondary text-xs py-1 px-2" :class="job.running ? 'opacity-50 cursor-not-allowed' : ''" x-text="job.running ? t('cron.job_running') : t('cron.run')"></button>
                                     <a x-show="job.task_type === 'wp_cron'" :href="'/{{.RandomSuffix}}/websites/' + job.site_id + '#security-maintenance'" class="cron-site-settings text-xs text-blue-400 py-1 px-2">{{t .Lang "cron.site_settings"}}</a>
-                                    <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "cron.edit"}}</button>
-                                    <button x-show="canDeleteJob(job)" @click="deleteJob(job)" :disabled="job.running || deletingId !== null" class="btn-danger text-xs py-1 px-2">{{t .Lang "cron.delete"}}</button>
+                                    <button x-show="job.task_type !== 'wp_cron'" @click="openEdit(job)" :disabled="loading || !!listError" class="text-xs py-1 px-2 rounded" style="background-color: var(--panel-accent-soft); color: var(--panel-accent);">{{t .Lang "cron.edit"}}</button>
+                                    <button x-show="canDeleteJob(job)" @click="deleteJob(job)" :disabled="loading || !!listError || job.running || deletingId !== null" class="btn-danger text-xs py-1 px-2">{{t .Lang "cron.delete"}}</button>
                                 </div>
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="jobs.length === 0">
+                    <tr x-show="!loading && !listError && jobs.length === 0">
                         <td colspan="7" class="table-cell text-center text-gray-500 py-8">{{t .Lang "cron.no_jobs"}}</td>
                     </tr>
                 </tbody>
@@ -56,9 +61,14 @@
         </div>
     </div>
 
-    <div class="card mt-6" x-data="{ sysJobs: [] }" x-init="fetchSysCron()">
+    <div class="card mt-6" x-data="systemCronManager()" x-init="fetchSysCron()">
         <h3 class="text-lg font-semibold text-white mb-1">{{t .Lang "cron.system_jobs"}} <span class="text-xs text-gray-500 font-normal">{{t .Lang "cron.readonly"}}</span></h3>
         <p class="text-xs text-gray-500 mb-4">{{t .Lang "cron.system_jobs_help"}}</p>
+        <div x-show="!!sysError" x-cloak class="text-red-400 text-sm mb-4" role="alert">
+            <span x-text="sysError"></span>
+            <button @click="fetchSysCron()" :disabled="sysLoading" class="btn-secondary text-xs ml-3">{{t .Lang "common.retry"}}</button>
+        </div>
+        <p x-show="sysLoading" class="text-sm text-gray-400 mb-4">{{t .Lang "common.loading"}}</p>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead class="border-b border-gray-700 text-gray-400">
@@ -78,7 +88,7 @@
                             <td class="py-2 font-mono text-xs text-gray-300 truncate" style="max-width:400px" x-text="j.command"></td>
                         </tr>
                     </template>
-                    <tr x-show="sysJobs.length === 0">
+                    <tr x-show="!sysLoading && !sysError && sysJobs.length === 0">
                         <td colspan="4" class="py-4 text-center text-gray-500">{{t .Lang "cron.no_system_jobs"}}</td>
                     </tr>
                 </tbody>
@@ -196,6 +206,9 @@
 function cronManager() {
     return {
         jobs: [],
+        loading: false,
+        listError: '',
+        listEpoch: 0,
         sites: [],
         showModal: false,
         showLog: false,
@@ -258,7 +271,16 @@ function cronManager() {
             if (fromUser && this.form.task_type === 'wp_cron' && !this.form.cron_expression) this.form.cron_expression = '*/5 * * * *';
         },
         async fetchList() {
-            try { const r = await api('/cron'); if (r.success) this.jobs = r.data || []; } catch(e) {}
+            const epoch = ++this.listEpoch;
+            this.loading = true;
+            try {
+                const r = await api('/cron');
+                if (!r.success || !Array.isArray(r.data)) throw new Error(r.message || t('cron.load_failed'));
+                if (epoch !== this.listEpoch) return;
+                this.jobs = r.data;
+                this.listError = '';
+            } catch(e) { if (epoch === this.listEpoch) this.listError = e.message || t('cron.load_failed'); }
+            finally { if (epoch === this.listEpoch) this.loading = false; }
         },
         openCreate() {
             this.formVersion++;
@@ -267,6 +289,7 @@ function cronManager() {
             this.showModal = true;
         },
         openEdit(job) {
+            if (this.loading || this.listError) return;
             this.formVersion++;
             this.editingId = job.id;
             this.form = { name: job.name, cron_expression: job.cron_expression, command: job.command || '', task_type: job.task_type || 'command', backup_mode: job.backup_mode || 'incremental', keep_count: job.keep_count || 3, site_id: job.site_id || '', notify_fail: !!job.notify_fail };
@@ -306,7 +329,7 @@ function cronManager() {
             finally { this.saving = false; }
         },
         async runJob(job) {
-            if (job.task_type === 'wp_cron') return;
+            if (this.loading || this.listError || job.running || job.task_type === 'wp_cron' || (job.runtime_suspended && job.runtime_reason !== 'paused')) return;
             let confirmedPaused = false;
             if (job.runtime_reason === 'paused') {
                 if (!await confirmModal(t('cron.confirm_run_paused', { domain: job.runtime_site_domain || '' }))) return;
@@ -329,12 +352,12 @@ function cronManager() {
             return job.task_type !== 'wp_cron' || job.enabled === false;
         },
         async deleteJob(job) {
-            if (!this.canDeleteJob(job) || job.running || this.deletingId !== null) return;
+            if (this.loading || this.listError || !this.canDeleteJob(job) || job.running || this.deletingId !== null) return;
             this.deletingId = job.id;
             try {
                 const message = job.task_type === 'wp_cron' ? 'cron.confirm_delete_wp_cron' : 'cron.confirm_delete';
                 if (!await confirmModal(t(message, { name: this.displayJobName(job) }))) return;
-                if (!this.canDeleteJob(job) || job.running) return;
+                if (this.loading || this.listError || !this.canDeleteJob(job) || job.running) return;
                 const suffix = job.task_type === 'wp_cron' ? '?require_disabled=true' : '';
                 const r = await api('/cron/' + job.id + suffix, { method: 'DELETE' });
                 if (!r.success) throw new Error(r.message || t('common.request_failed'));
@@ -346,14 +369,25 @@ function cronManager() {
         }
     }
 }
-    window.fetchSysCron = async function() {
-        try {
-            const r = await api("/cron/system");
-            if (r.success) {
-                const el = document.querySelector("[x-data*=sysJobs]");
-                if (el && el._x_dataStack && el._x_dataStack[0]) el._x_dataStack[0].sysJobs = r.data || [];
-            }
-        } catch(e) {}
+function systemCronManager() {
+    return {
+        sysJobs: [],
+        sysLoading: true,
+        sysError: '',
+        sysEpoch: 0,
+        async fetchSysCron() {
+            const epoch = ++this.sysEpoch;
+            this.sysLoading = true;
+            try {
+                const r = await api('/cron/system');
+                if (!r.success || !Array.isArray(r.data)) throw new Error(r.message || t('cron.load_failed'));
+                if (epoch !== this.sysEpoch) return;
+                this.sysJobs = r.data;
+                this.sysError = '';
+            } catch(e) { if (epoch === this.sysEpoch) this.sysError = e.message || t('cron.load_failed'); }
+            finally { if (epoch === this.sysEpoch) this.sysLoading = false; }
+        }
     };
+}
 </script>
 {{end}}

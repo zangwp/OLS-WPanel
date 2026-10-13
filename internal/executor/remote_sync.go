@@ -987,6 +987,10 @@ func deleteRemoteBackupFileFromTargetContext(ctx context.Context, target remoteB
 }
 
 func ProbeS3BackupConnection(endpoint, bucket, region, accessKeyID, secretKey, pathPrefix string) error {
+	return ProbeS3BackupConnectionContext(context.Background(), endpoint, bucket, region, accessKeyID, secretKey, pathPrefix)
+}
+
+func ProbeS3BackupConnectionContext(ctx context.Context, endpoint, bucket, region, accessKeyID, secretKey, pathPrefix string) error {
 	if region == "" {
 		region = "auto"
 	}
@@ -994,7 +998,7 @@ func ProbeS3BackupConnection(endpoint, bucket, region, accessKeyID, secretKey, p
 		return err
 	}
 	key := s3ObjectKey(pathPrefix, ".ols-wpanel-s3-test.txt")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	body := []byte("OLS WPanel S3 test")
 	if err := putBytesToS3(ctx, endpoint, bucket, region, accessKeyID, secretKey, key, body); err != nil {

@@ -136,6 +136,23 @@ func TestGetBackupOverviewReturnsSitesAndPanelBackups(t *testing.T) {
 	}
 }
 
+func TestGetBackupOverviewRejectsUnreadablePanelBackupList(t *testing.T) {
+	setupBackupOverviewTestDB(t)
+	// Invalid paths reliably fail ReadDir on both Windows and Linux, unlike
+	// chmod-based fixtures under root or Windows permission semantics.
+	root := filepath.Join(t.TempDir(), "\x00")
+	oldConfig := config.AppConfig
+	config.AppConfig = &config.Config{Panel: config.PanelConfig{BackupDir: root}}
+	t.Cleanup(func() { config.AppConfig = oldConfig })
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/backups/overview", nil)
+	GetBackupOverview(ctx)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("unreadable backup directory became empty success: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestGetBackupOverviewReportsLocalFileExistence(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupBackupOverviewTestDB(t)

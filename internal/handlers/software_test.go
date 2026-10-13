@@ -61,6 +61,41 @@ func TestOpenLiteSpeedRuntimeDetails(t *testing.T) {
 	}
 }
 
+func TestOpenLiteSpeedRuntimeDetailsDoNotInventConfiguration(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.conf")
+	for _, detail := range openLiteSpeedRuntimeDetails("zh-CN", missing) {
+		if detail.Value != "尚未确认" || detail.Tone != "muted" {
+			t.Fatalf("unreadable config was presented as a known state: %+v", detail)
+		}
+	}
+	for _, tc := range []struct {
+		name, config, compression string
+	}{
+		{"master disabled", "enableGzipCompress 0\nenableDynGzipCompress 1\nenableBrCompress 4\n", "未启用"},
+		{"inline comments", "enableGzipCompress 1 # master\nenableDynGzipCompress 1 # dynamic\nenableBrCompress 4 # level\n", "已启用"},
+		{"missing directives", "# configured through an external include\n", "尚未确认"},
+		{"ambiguous directives", "enableGzipCompress 1\nenableGzipCompress 0\nenableDynGzipCompress 1\nenableBrCompress 4\n", "尚未确认"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "httpd_config.conf")
+			if err := os.WriteFile(path, []byte(tc.config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			details := openLiteSpeedRuntimeDetails("zh-CN", path)
+			for _, detail := range details[:2] {
+				if detail.Value != tc.compression {
+					t.Fatalf("compression detail = %+v, want %s", detail, tc.compression)
+				}
+			}
+			for _, detail := range details[2:] {
+				if detail.Value != "尚未确认" {
+					t.Fatalf("omitted directive was presented as a known state: %+v", detail)
+				}
+			}
+		})
+	}
+}
+
 func TestPHPConfigRequiresVHostRegeneration(t *testing.T) {
 	if !phpConfigRequiresVHostRegeneration("post_max_size") {
 		t.Fatal("post_max_size should regenerate OpenLiteSpeed vhosts")

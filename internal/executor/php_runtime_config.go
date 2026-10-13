@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -58,11 +59,19 @@ func PHPRuntimeConfigPath() string {
 	}
 	version := PrimaryLSPHPVersion()
 	suffix := strings.ReplaceAll(version, ".", "")
-	return filepath.Join("/usr/local/lsws", "lsphp"+suffix, "etc", "php", version, "litespeed", "conf.d", "99-ols-wpanel.ini")
+	return filepath.Join("/usr/local/lsws", "lsphp"+suffix, "etc", "php", version, "mods-available", "99-ols-wpanel.ini")
 }
 
 func EnsurePHPRuntimeConfigFile() (bool, error) {
 	path := PHPRuntimeConfigPath()
+	migrated := false
+	if strings.TrimSpace(phpRuntimeConfigPath) == "" {
+		var err error
+		migrated, err = migratePHPRuntimeConfig(legacyLSPHPRuntimeConfigPath(PrimaryLSPHPVersion()), path)
+		if err != nil {
+			return false, err
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return false, err
 	}
@@ -94,9 +103,66 @@ func EnsurePHPRuntimeConfigFile() (bool, error) {
 	next = ensureIniValue(next, "opcache.max_accelerated_files", maxFiles)
 
 	if next == content {
-		return false, nil
+		return migrated, nil
 	}
 	return true, os.WriteFile(path, []byte(next), 0644)
+}
+
+func legacyLSPHPRuntimeConfigPath(version string) string {
+	suffix := strings.ReplaceAll(version, ".", "")
+	return filepath.Join("/usr/local/lsws", "lsphp"+suffix, "etc", "php", version, "litespeed", "conf.d", "99-ols-wpanel.ini")
+}
+
+// Preserve the old file for rollback and never replace a configuration that
+// already exists in the vendor's actual scan directory.
+func migratePHPRuntimeConfig(legacyPath, path string) (bool, error) {
+	if _, err := os.Lstat(path); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	info, err := os.Lstat(legacyPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || info.Size() > lsphpHealthOutputLimit {
+		return false, fmt.Errorf("legacy PHP runtime configuration is not a safe regular file")
+	}
+	productionPath := strings.HasPrefix(filepath.ToSlash(legacyPath), "/usr/local/lsws/")
+	scope, _, _ := strings.Cut(filepath.ToSlash(legacyPath), "/etc/php/")
+	if productionPath && !lsphpHealthTrustedPath(legacyPath, filepath.FromSlash(scope), "file", fileOwnerIDs) {
+		return false, fmt.Errorf("legacy PHP runtime configuration is not trusted")
+	}
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return false, err
+	}
+	if productionPath && !lsphpHealthTrustedPath(filepath.Dir(path), filepath.FromSlash(scope), "directory", fileOwnerIDs) {
+		return false, fmt.Errorf("PHP runtime configuration directory is not trusted")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if os.IsExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(path)
+		if writeErr != nil {
+			return false, writeErr
+		}
+		return false, closeErr
+	}
+	return true, nil
 }
 
 // recommendedOpcacheAdaptiveDefaults 计算 opcache.memory_consumption（MB）和

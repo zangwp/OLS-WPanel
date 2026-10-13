@@ -437,7 +437,7 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 	if e = waitSSHListener(ctx, newPort); e != nil {
 		return failed(e)
 	}
-	sshMove.SSHPortChange = SSHPortChange{Token: token, OldPort: s.Port, NewPort: newPort, Deadline: started.Add(240 * time.Second), VerifyCommand: "sudo env OLS_SSH_CONNECTION=\"$SSH_CONNECTION\" /bin/sh " + shellLiteral(filepath.Join(dir, "verify.sh")) + " " + shellLiteral(token)}
+	sshMove.SSHPortChange = SSHPortChange{Token: token, OldPort: s.Port, NewPort: newPort, Deadline: started.Add(240 * time.Second), VerifyCommand: sshVerificationCommand(filepath.Join(dir, "verify.sh"), token)}
 	sshMove.dir = dir
 	sshMove.service = s.Service
 	sshMove.expectedConfig = dual
@@ -447,6 +447,11 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 	}
 	recordOperationLog("ssh_port_change", strconv.Itoa(newPort), "success", "awaiting new SSH login verification")
 	return sshMove.SSHPortChange, nil
+}
+
+func sshVerificationCommand(script, token string) string {
+	command := "env OLS_SSH_CONNECTION=\"$SSH_CONNECTION\" /bin/sh " + shellLiteral(script) + " " + shellLiteral(token)
+	return "if [ \"$(id -u)\" -eq 0 ]; then " + command + "; else sudo " + command + "; fi"
 }
 
 func ConfirmSSHPortChange(token string) error {

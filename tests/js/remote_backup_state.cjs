@@ -36,3 +36,9 @@ test('setup commands quote saved path and SSH public key and group fallback oper
 test('failed clipboard fallback never claims the command was copied',async()=>{
  const {m,toasts}=setup(async()=>ok(config()),{navigator:{clipboard:{writeText:async()=>{throw Error('denied');}}},document:{createElement:()=>({select(){},remove(){}}),body:{appendChild(){}},execCommand:()=>false}});await m.fetchRemote();await m.copyCmd();assert.equal(toasts.at(-1)[1],'error');assert.equal(toasts.some(t=>t[1]==='success'),false);
 });
+
+test('generated remote passwords use cryptographic randomness and reject biased values',()=>{
+ let calls=0;const {m}=setup(async()=>ok(config()),{crypto:{getRandomValues(bytes){calls++;bytes.fill(255);for(let i=12;i<bytes.length;i++)bytes[i]=i-12;return bytes;}}});
+ m.cfg.auth_type='password';m.genPassword();assert.equal(calls,1);assert.equal(m.cfg.password.length,20);assert.match(m.cfg.password,/^[ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789]{20}$/);
+ const previous=m.cfg.password;m.cfg.auth_type='key';m.genPassword();assert.equal(m.cfg.password,previous);assert.equal(m.helperPass.length,20);assert.equal(calls,2);
+});

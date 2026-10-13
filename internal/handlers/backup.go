@@ -66,7 +66,7 @@ func siteFileBackupPath(site *models.Website, filename string) (string, bool) {
 func (h *BackupHandler) List(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	db := database.GetDB()
-	rows, err := db.Query(`SELECT id, site_id, filename, file_size, db_name, auto, transport_status, transport_message, created_at
+	rows, err := db.QueryContext(c.Request.Context(), `SELECT id, site_id, filename, file_size, db_name, auto, transport_status, transport_message, created_at
 		FROM db_backups WHERE site_id = ? ORDER BY created_at DESC`, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))
@@ -78,12 +78,19 @@ func (h *BackupHandler) List(c *gin.Context) {
 	for rows.Next() {
 		var b models.DBBackup
 		var auto int
-		if rows.Scan(&b.ID, &b.SiteID, &b.Filename, &b.FileSize, &b.DBName, &auto,
-			&b.TransportStatus, &b.TransportMessage, &b.CreatedAt) != nil {
-			continue
+		if err := rows.Scan(&b.ID, &b.SiteID, &b.Filename, &b.FileSize, &b.DBName, &auto,
+			&b.TransportStatus, &b.TransportMessage, &b.CreatedAt); err != nil {
+			log.Printf("读取数据库备份列表失败 site=%d: %v", id, err)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取数据库备份列表失败"))
+			return
 		}
 		b.Auto = auto == 1
 		backups = append(backups, b)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("读取数据库备份列表失败 site=%d: %v", id, err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取数据库备份列表失败"))
+		return
 	}
 	if backups == nil {
 		backups = []models.DBBackup{}

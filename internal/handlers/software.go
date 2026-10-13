@@ -831,28 +831,43 @@ func applyPackageUpdateInfo(ctx context.Context, fresh bool, item *softwareItem,
 }
 
 func openLiteSpeedRuntimeDetails(lang, path string) []softwareDetail {
-	content, _ := os.ReadFile(path)
+	content, err := os.ReadFile(path)
 	text := string(content)
-	state := func(enabled bool) (string, string) {
+	setting := func(key string) (int, bool) {
+		matches := regexp.MustCompile("(?m)^[\\t ]*"+regexp.QuoteMeta(key)+"[\\t ]+([0-9]+)[\\t ]*(?:#.*)?$").FindAllStringSubmatch(text, -1)
+		if err != nil || len(matches) != 1 {
+			return 0, false
+		}
+		value, parseErr := strconv.Atoi(matches[0][1])
+		return value, parseErr == nil
+	}
+	state := func(enabled, known bool) (string, string) {
+		if !known {
+			return i18n.T(lang, "software.health_unknown"), "muted"
+		}
 		if enabled {
 			return i18n.T(lang, "software.enabled"), "success"
 		}
 		return i18n.T(lang, "software.disabled"), "muted"
 	}
-	match := func(pattern string) bool {
-		return regexp.MustCompile(pattern).MatchString(text)
-	}
 	details := make([]softwareDetail, 0, 4)
-	value, tone := state(match(`(?m)^\s*enableGzipCompress\s+1\s*$`) && match(`(?m)^\s*enableDynGzipCompress\s+1\s*$`))
+	compression, compressionKnown := setting("enableGzipCompress")
+	gzip, gzipKnown := setting("enableDynGzipCompress")
+	value, tone := state(compression == 1 && gzip == 1, compressionKnown && (compression == 0 || gzipKnown))
 	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_gzip"), Value: value, Tone: tone})
-	value, tone = state(match(`(?m)^\s*enableBrCompress\s+[1-9][0-9]*\s*$`))
+	brotli, brotliKnown := setting("enableBrCompress")
+	value, tone = state(compression == 1 && brotli > 0, compressionKnown && (compression == 0 || brotliKnown))
 	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_brotli"), Value: value, Tone: tone})
-	value, tone = state(match(`(?m)^\s*quicEnable\s+1\s*$`))
+	quic, quicKnown := setting("quicEnable")
+	value, tone = state(quic == 1, quicKnown)
 	details = append(details, softwareDetail{Label: i18n.T(lang, "software.ols_http3"), Value: value, Tone: tone})
-	webAdminDisabled := match(`(?m)^\s*disableWebAdmin\s+1\s*$`)
+	webAdmin, webAdminKnown := setting("disableWebAdmin")
 	webAdminValue := i18n.T(lang, "software.ols_webadmin_disabled")
 	webAdminTone := "info"
-	if !webAdminDisabled {
+	if !webAdminKnown {
+		webAdminValue = i18n.T(lang, "software.health_unknown")
+		webAdminTone = "muted"
+	} else if webAdmin != 1 {
 		webAdminValue = i18n.T(lang, "software.ols_webadmin_enabled")
 		webAdminTone = "warning"
 	}

@@ -7,7 +7,7 @@
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "software.page_help"}}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-            <button type="button" @click="refreshAll()" :disabled="listLoading || healthLoading" class="btn-secondary text-sm">{{t .Lang "common.refresh"}}</button>
+            <button type="button" @click="refreshAll()" :disabled="listLoading || healthLoading" class="btn-secondary text-sm" x-text="listLoading || healthLoading ? t('software.health_checking') : t('common.refresh')"></button>
             <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "software.manage_service_updates"}}</a>
             <button @click="showHelp = true" class="btn-secondary text-sm">{{t .Lang "software.wp_config_advice"}}</button>
         </div>
@@ -28,32 +28,52 @@
             </div>
             <a href="/{{.RandomSuffix}}/websites" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.assign_php_per_site"}}</a>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-            <template x-for="runtime in phpRuntimes" :key="runtime.version">
-                <div class="runtime-detail rounded border border-gray-700 p-4">
-                    <div class="flex items-start justify-between gap-3">
-                        <div>
+        <p class="software-check-status" role="status" aria-live="polite">
+            <span x-show="healthLoading">{{t .Lang "software.health_checking"}}</span>
+            <span x-show="!healthLoading && !!healthError" class="text-red-400" x-text="healthError"></span>
+            <span x-show="!healthLoading && !!healthError && !!health">{{t .Lang "software.health_previous_result"}}</span>
+            <span x-show="!healthLoading && !healthError && !!health?.checked_at" x-text="t('software.health_checked_at', { time: healthCheckedAt() })"></span>
+        </p>
+        <div class="software-runtime-list">
+            <template x-for="runtime in orderedPHPRuntimes()" :key="runtime.version">
+                <div class="software-runtime-row" :class="{ 'software-runtime-primary': runtime.primary }">
+                    <div class="software-runtime-header">
+                        <div class="software-runtime-identity">
                             <div class="flex items-center gap-2">
                                 <span class="font-semibold text-white" x-text="'LSPHP ' + runtime.version"></span>
                                 <span x-show="runtime.primary" class="badge-info text-xs">{{t .Lang "software.primary_runtime"}}</span>
                                 <span x-show="runtime.recommended && !runtime.primary" class="badge-success text-xs">{{t .Lang "software.recommended_default"}}</span>
                             </div>
-                            <p class="text-xs text-gray-500 mt-2" x-text="t('software.php_runtime_site_count', { count: runtime.active_sites })"></p>
+                            <p class="text-xs text-gray-500 mt-1" x-text="t('software.php_runtime_site_count', { count: runtime.active_sites })"></p>
                         </div>
-                        <span x-show="runtime.installed" class="badge-success text-xs">{{t .Lang "software.installed"}}</span>
-                        <button x-show="!runtime.installed" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button>
+                        <div x-show="runtime.installed" class="software-runtime-health">
+                            <span x-show="!runtimeHealthKnown(runtime.version)" :class="healthBadge(runtimeHealth(runtime.version).state)" x-text="healthLabel(runtimeHealth(runtime.version).state)"></span>
+                            <span x-show="runtimeHealthKnown(runtime.version)" :class="extensionSummaryBadge(runtime.version, 'required')" x-text="extensionSummary(runtime.version, 'required')"></span>
+                            <span x-show="runtimeHealthKnown(runtime.version)" :class="extensionSummaryBadge(runtime.version, 'recommended')" x-text="extensionSummary(runtime.version, 'recommended')"></span>
+                            <span x-show="runtimeHealth(runtime.version).reason === 'opcache_disabled'" class="badge-warning text-xs">{{t .Lang "software.opcache_disabled"}}</span>
+                        </div>
+                        <div class="software-runtime-action">
+                            <span x-show="runtime.installed" class="text-xs text-gray-500">{{t .Lang "software.installed"}}</span>
+                            <button x-show="!runtime.installed" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button>
+                        </div>
                     </div>
                     <details x-show="runtime.installed" class="software-extension-details">
                         <summary>
-                            <span>{{t .Lang "software.php_extensions"}}</span>
-                            <span :class="healthBadge(runtimeHealth(runtime.version).state)" x-text="healthLabel(runtimeHealth(runtime.version).state)"></span>
+                            <span>{{t .Lang "software.php_extension_details"}}</span>
                         </summary>
-                        <p x-show="runtimeHealth(runtime.version).state === 'unknown'" class="software-health-help" x-text="phpHealthReason(runtimeHealth(runtime.version).reason)"></p>
-                        <div class="software-extension-list" tabindex="0" role="region" aria-label="{{t .Lang "software.php_extensions"}}">
-                            <template x-for="extension in healthExtensions(runtime.version)" :key="extension.name">
-                                <div class="software-extension-item">
-                                    <span><span x-text="extension.name"></span><small x-show="extension.importance === 'required'">{{t .Lang "software.extension_required"}}</small></span>
-                                    <span :class="healthBadge(extension.state)" x-text="healthLabel(extension.state)"></span>
+                        <p x-show="!runtimeHealthKnown(runtime.version)" class="software-health-help" x-text="phpHealthReason(runtimeHealth(runtime.version).reason)"></p>
+                        <div class="software-extension-groups">
+                            <template x-for="importance in ['required', 'recommended']" :key="importance">
+                                <div class="software-extension-group">
+                                    <h4 x-text="t('software.extensions_' + importance)"></h4>
+                                    <div class="software-extension-list">
+                                        <template x-for="extension in healthExtensions(runtime.version, importance)" :key="extension.name">
+                                            <div class="software-extension-item">
+                                                <span x-text="extension.name"></span>
+                                                <span :class="healthBadge(extension.state)" x-text="healthLabel(extension.state)"></span>
+                                            </div>
+                                        </template>
+                                    </div>
                                 </div>
                             </template>
                         </div>
@@ -136,10 +156,13 @@
             <div class="software-health-block">
                 <div class="software-health-heading">
                     <h4 class="font-semibold">{{t .Lang "software.backup_dependencies"}}</h4>
-                    <span :class="healthBadge(health?.backup?.status)" x-text="healthLabel(health?.backup?.status)"></span>
+                    <span :class="healthBadge(backupCurrentState())" x-text="healthLabel(backupCurrentState())"></span>
                 </div>
+                <p class="software-health-summary" x-text="backupSummary()"></p>
                 <p class="software-health-help" x-text="backupModeHelp()"></p>
                 <p x-show="health?.backup?.configuration_status === 'error'" class="software-health-help">{{t .Lang "software.backup_configuration_unknown"}}</p>
+                <details class="software-health-details">
+                    <summary>{{t .Lang "software.backup_dependency_details"}}</summary>
                 <div class="software-dependency-list">
                     <template x-for="dependency in (health?.backup?.dependencies || [])" :key="dependency.id">
                         <div class="software-extension-item">
@@ -148,7 +171,8 @@
                         </div>
                     </template>
                 </div>
-                <div x-show="missingDependencyPackages().length && health?.backup?.configuration_status === 'ok'" class="software-dependency-repair">
+                </details>
+                <div x-show="canRepairBackupDependencies() || dependencyInstalling" class="software-dependency-repair">
                     <p class="software-health-help" x-text="t('software.backup_packages_missing', { packages: missingDependencyPackages().join(', ') })"></p>
                     <button type="button" @click="installBackupDependencies()" :disabled="dependencyInstalling || healthLoading" class="btn-secondary text-xs" x-text="dependencyInstalling ? t('software.installing') : t('software.backup_dependencies_repair')"></button>
                 </div>
@@ -157,15 +181,18 @@
             <div class="software-health-block">
                 <div class="software-health-heading">
                     <h4 class="font-semibold">{{t .Lang "software.cron_health"}}</h4>
-                    <span :class="healthBadge(health?.cron?.state)" x-text="healthLabel(health?.cron?.state)"></span>
+                    <span :class="healthBadge(cronCurrentState())" x-text="healthLabel(cronCurrentState())"></span>
                 </div>
-                <p class="software-health-help">{{t .Lang "software.cron_health_help"}}</p>
-                <dl class="software-cron-facts">
-                    <div><dt>{{t .Lang "software.cron_autostart"}}</dt><dd x-text="healthLabel(health?.cron?.enabled)"></dd></div>
-                    <div><dt>{{t .Lang "software.cron_unit"}}</dt><dd x-text="health?.cron?.unit || 'cron.service'"></dd></div>
-                </dl>
-                <p x-show="health?.cron?.state !== 'running'" class="software-health-help">{{t .Lang "software.cron_attention"}}</p>
-                <p class="software-health-help">{{t .Lang "software.cron_timer_scope"}}</p>
+                <p class="software-health-summary" x-text="cronSummary()"></p>
+                <details class="software-health-details">
+                    <summary>{{t .Lang "software.cron_details"}}</summary>
+                    <p class="software-health-help">{{t .Lang "software.cron_health_help"}}</p>
+                    <dl class="software-cron-facts">
+                        <div><dt>{{t .Lang "software.cron_autostart"}}</dt><dd x-text="healthLabel(health?.cron?.enabled)"></dd></div>
+                        <div><dt>{{t .Lang "software.cron_unit"}}</dt><dd x-text="health?.cron?.unit || 'cron.service'"></dd></div>
+                    </dl>
+                    <p class="software-health-help">{{t .Lang "software.cron_timer_scope"}}</p>
+                </details>
                 <a href="/{{.RandomSuffix}}/cron" class="text-xs text-blue-400 hover:underline">{{t .Lang "software.cron_view_tasks"}}</a>
             </div>
         </div>
@@ -390,7 +417,7 @@ function softwareManager() {
     return {
         software: [], disposed: false, listLoading: false, listError: '', listRequestID: 0, listController: null,
         logRequestID: 0, logController: null,
-        health: null, healthLoading: false, healthError: '', healthRequestID: 0, healthController: null, dependencyInstalling: false,
+        health: null, healthLoading: false, healthError: '', healthFresh: false, healthRequestID: 0, healthController: null, dependencyInstalling: false,
         runtimeRequestID: 0, runtimeController: null, toolsRequestID: 0, toolsController: null,
         closeLog() {
             this.logRequestID++;
@@ -421,13 +448,32 @@ function softwareManager() {
             await Promise.all([this.fetchList(true), this.fetchHealth(true)]);
         },
         runtimeHealth(version) {
-            return this.health?.php?.find(runtime => runtime.version === version) || { state: this.healthLoading ? 'checking' : 'unknown', extensions: [], reason: '' };
+            const runtime = (Array.isArray(this.health?.php) ? this.health.php : []).find(runtime => runtime.version === version);
+            return { state: this.healthLoading ? 'checking' : 'unknown', reason: '', ...runtime, extensions: Array.isArray(runtime?.extensions) ? runtime.extensions : [] };
         },
-        healthExtensions(version) {
-            return [...this.runtimeHealth(version).extensions].sort((left, right) => {
-                const priority = extension => extension.state === 'missing' ? 0 : extension.state === 'unknown' ? 1 : extension.importance === 'required' ? 2 : 3;
-                return priority(left) - priority(right);
+        orderedPHPRuntimes() {
+            return [...this.phpRuntimes].sort((left, right) => Number(!!right.primary) - Number(!!left.primary) || Number(right.active_sites || 0) - Number(left.active_sites || 0));
+        },
+        healthExtensions(version, importance = '') {
+            return [...this.runtimeHealth(version).extensions].filter(extension => !importance || extension.importance === importance).sort((left, right) => {
+                const priority = extension => (extension.importance === 'required' ? 0 : 3) + (extension.state === 'missing' ? 0 : extension.state === 'unknown' ? 1 : 2);
+                return priority(left) - priority(right) || left.name.localeCompare(right.name);
             });
+        },
+        runtimeHealthKnown(version) {
+            const runtime = this.runtimeHealth(version);
+            return ['ok', 'warning'].includes(runtime.state) && runtime.extensions.length > 0 && runtime.extensions.every(extension => ['loaded', 'missing'].includes(extension.state));
+        },
+        extensionSummary(version, importance) {
+            const extensions = this.healthExtensions(version, importance);
+            if (!this.runtimeHealthKnown(version) || !extensions.length) return t('software.health_unknown');
+            const missing = extensions.filter(extension => extension.state === 'missing').length;
+            return t('software.extensions_' + importance + (missing ? '_missing' : '_ready'), { count: missing || extensions.length });
+        },
+        extensionSummaryBadge(version, importance) {
+            if (!this.runtimeHealthKnown(version)) return this.healthBadge('unknown');
+            const missing = this.healthExtensions(version, importance).some(extension => extension.state === 'missing');
+            return this.healthBadge(missing ? (importance === 'required' ? 'missing' : 'optional') : 'ok');
         },
         healthLabel(state) {
             const keys = { ok: 'software.health_ready', installed: 'software.health_ready', loaded: 'software.health_loaded', warning: 'software.health_attention',
@@ -439,7 +485,9 @@ function softwareManager() {
                 ['warning', 'missing', 'stopped', 'error'].includes(state) ? 'badge-warning text-xs' : 'badge-info text-xs';
         },
         phpHealthReason(reason) {
-            return t(reason === 'configuration_unavailable' || reason === 'configuration_mismatch' ? 'software.php_configuration_unknown' : 'software.php_probe_unknown');
+            const keys = { configuration_unavailable: 'software.php_configuration_unknown', configuration_mismatch: 'software.php_configuration_unknown',
+                untrusted_runtime: 'software.php_runtime_untrusted', runtime_mismatch: 'software.php_runtime_mismatch', probe_timeout: 'software.php_probe_timeout' };
+            return t(keys[reason] || 'software.php_probe_unknown');
         },
         opcacheValue(version, key) {
             const value = this.runtimeHealth(version).opcache?.[key];
@@ -458,6 +506,28 @@ function softwareManager() {
                 dependency.required && dependency.status === 'missing' && (backup?.missing_required || []).includes(dependency.id)
             ).map(dependency => dependency.package))];
         },
+        canRepairBackupDependencies() {
+            const backup = this.health?.backup;
+            return this.healthFresh && !this.healthLoading && !this.healthError && !this.dependencyInstalling && backup?.configuration_status === 'ok' &&
+                backup.status === 'missing' && (backup.dependencies || []).filter(dependency => dependency.required).every(dependency => ['installed', 'missing'].includes(dependency.status)) && this.missingDependencyPackages().length > 0;
+        },
+        backupCurrentState() {
+            return this.healthLoading || this.dependencyInstalling ? 'checking' : !this.healthFresh || this.healthError ? 'unknown' : this.health?.backup?.status;
+        },
+        backupSummary() {
+            const state = this.backupCurrentState();
+            if (state === 'installed') return t('software.backup_required_ready');
+            if (state === 'missing') return t('software.backup_required_missing', { count: this.health?.backup?.missing_required?.length || 0 });
+            return t(state === 'checking' ? 'software.health_checking' : 'software.backup_check_unknown');
+        },
+        cronCurrentState() {
+            return this.healthLoading ? 'checking' : !this.healthFresh || this.healthError ? 'unknown' : this.health?.cron?.state;
+        },
+        cronSummary() {
+            const state = this.cronCurrentState();
+            if (state === 'running') return t(this.health?.cron?.enabled === 'enabled' ? 'software.cron_ready' : 'software.cron_autostart_attention');
+            return t(state === 'checking' ? 'software.health_checking' : state === 'stopped' ? 'software.cron_attention' : 'software.cron_check_unknown');
+        },
         healthCheckedAt() {
             const time = new Date(this.health?.checked_at);
             return Number.isNaN(time.getTime()) ? '' : time.toLocaleString(document.documentElement.lang || 'zh-CN');
@@ -468,18 +538,18 @@ function softwareManager() {
             const controller = new AbortController(), requestID = ++this.healthRequestID;
             this.healthController = controller;
             const current = () => !this.disposed && !controller.signal.aborted && requestID === this.healthRequestID;
-            this.healthLoading = true; this.healthError = '';
+            this.healthLoading = true; this.healthError = ''; this.healthFresh = false;
             try {
                 const result = await api('/software/health' + (fresh ? '?fresh=1' : ''), { silent: true, timeout: 15000, signal: controller.signal });
                 if (!result.success) throw Error(result.message || t('software.health_load_failed'));
-                if (current()) this.health = result.data;
+                if (current()) { this.health = result.data; this.healthFresh = true; }
             } catch(error) { if (current()) this.healthError = error.message; }
             finally { if (current()) { this.healthLoading = false; this.healthController = null; } }
         },
         async installBackupDependencies() {
-            if (this.disposed || this.dependencyInstalling || this.healthLoading || !this.missingDependencyPackages().length || this.health?.backup?.configuration_status !== 'ok') return;
+            if (this.disposed || !this.canRepairBackupDependencies()) return;
             if (!await confirmModal(t('software.backup_dependencies_install_confirm', { packages: this.missingDependencyPackages().join(', ') }))) return;
-            if (this.disposed || this.dependencyInstalling) return;
+            if (this.disposed || !this.canRepairBackupDependencies()) return;
             this.dependencyInstalling = true;
             try {
                 const result = await api('/software/backup-dependencies/install', { method: 'POST', body: {}, timeout: 660000 });

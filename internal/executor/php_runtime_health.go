@@ -153,7 +153,7 @@ func validateLSPHPHealthRuntime(runtime LSPHPRuntime) (string, string, string) {
 		return "", "", "untrusted_runtime"
 	}
 	iniPath := filepath.Join(root, "etc", "php", runtime.Version, "litespeed", "php.ini")
-	scanDir := filepath.Join(filepath.Dir(iniPath), "conf.d")
+	scanDir := filepath.Join(root, "etc", "php", runtime.Version, "mods-available")
 	if !lsphpHealthTrustedPath(iniPath, root, "file", fileOwnerIDs) ||
 		!lsphpHealthTrustedPath(scanDir, root, "directory", fileOwnerIDs) {
 		return "", "", "configuration_unavailable"

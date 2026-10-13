@@ -93,6 +93,9 @@
         <button @click="loadTab('history')" :class="activeTab === 'history' ? 'text-white border-blue-400' : 'text-gray-400 border-transparent hover:text-white'" class="px-3 py-2 text-sm border-b-2">{{t .Lang "firewall.ban_history"}}</button>
     </div>
 
+    <div x-show="eventReadError()" x-cloak role="alert" class="mb-4 text-sm text-red-400"><p x-text="eventReadError()"></p><button @click="retryEventRead()" :disabled="eventReadLoading()" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
+    <p x-show="['current', 'history'].includes(activeTab) && eventReadLoading()" role="status" class="mb-4 text-sm text-gray-500">{{t .Lang "common.loading"}}</p>
+
     <div class="card mb-6" x-show="activeTab === 'current'" x-cloak>
         <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "firewall.manual_ban_ip"}}</h3>
         <div class="flex items-end space-x-3">
@@ -132,25 +135,6 @@
                     <option value="suspicious_php">{{t .Lang "firewall.type_suspicious_php"}}</option>
                 </select>
                 <button @click="fetchWPSecurityReport()" :disabled="securityReportLoading" class="btn-secondary text-xs py-1.5 px-3" x-text="securityReportLoading ? t('firewall.analyzing') : t('firewall.refresh_analysis')"></button>
-            </div>
-        </div>
-        <div x-show="hasCurrentBanReadWarning()" class="mb-4 rounded border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
-            {{t .Lang "firewall.current_bans_partial_read"}}
-        </div>
-        <div x-show="banAnomalies.length > 0" class="mb-4 rounded border border-red-500/40 bg-red-500/10 p-4">
-            <h4 class="font-semibold text-red-300">{{t .Lang "firewall.ban_sync_anomalies"}}</h4>
-            <p class="mt-1 text-xs text-red-200/80">{{t .Lang "firewall.ban_sync_anomalies_help"}}</p>
-            <div class="mt-3 space-y-2">
-                <template x-for="ban in banAnomalies" :key="'anomaly-' + ban.id + '-' + ban.source_jail">
-                    <div class="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-900/50 px-3 py-2 text-sm">
-                        <div>
-                            <span class="font-mono" x-text="ban.ip_address"></span>
-                            <span class="ml-2 text-gray-400" x-text="sourceLabel(ban)"></span>
-                            <span class="ml-2" :class="ban.verification === 'missing' ? 'text-red-300' : 'text-yellow-300'" x-text="ban.verification === 'missing' ? t('firewall.ban_rule_missing') : t('firewall.ban_status_unverified')"></span>
-                        </div>
-                        <button x-show="ban.id > 0" @click="unban(ban)" class="btn-secondary firewall-unban-button text-xs py-1 px-2">{{t .Lang "firewall.unban"}}</button>
-                    </div>
-                </template>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -197,10 +181,10 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="securityReportLoaded && filteredSecurityReportItems().length === 0">
+                    <tr x-show="securityReportLoaded && !securityReportLoading && !securityReportError && filteredSecurityReportItems().length === 0">
                         <td colspan="8" class="table-cell text-center text-gray-500 py-6">{{t .Lang "firewall.no_wp_suspicious_access"}}</td>
                     </tr>
-                    <tr x-show="!securityReportLoaded">
+                    <tr x-show="securityReportLoading">
                         <td colspan="8" class="table-cell text-center text-gray-500 py-6">{{t .Lang "firewall.reading_local_logs"}}</td>
                     </tr>
                 </tbody>
@@ -255,10 +239,10 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="fileSecurityLoaded && fileSecurityEvents.length === 0">
+                    <tr x-show="fileSecurityLoaded && !fileSecurityLoading && !fileSecurityError && fileSecurityEvents.length === 0">
                         <td colspan="9" class="table-cell text-center text-gray-500 py-6">{{t .Lang "firewall.no_file_security_events"}}</td>
                     </tr>
-                    <tr x-show="!fileSecurityLoaded">
+                    <tr x-show="fileSecurityLoading">
                         <td colspan="9" class="table-cell text-center text-gray-500 py-6">{{t .Lang "firewall.refreshing_file_security_events"}}</td>
                     </tr>
                 </tbody>
@@ -292,6 +276,25 @@
                 </select>
                 <button @click="page=1;fetchBans()" class="btn-secondary text-xs py-1.5 px-3">{{t .Lang "firewall.search"}}</button>
                 <button @click="resetBanFilters()" class="btn-secondary text-xs py-1.5 px-3">{{t .Lang "firewall.reset_filters"}}</button>
+            </div>
+        </div>
+        <div x-show="hasCurrentBanReadWarning()" class="mb-4 rounded border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+            {{t .Lang "firewall.current_bans_partial_read"}}
+        </div>
+        <div x-show="banAnomalies.length > 0" class="mb-4 rounded border border-red-500/40 bg-red-500/10 p-4">
+            <h4 class="font-semibold text-red-300">{{t .Lang "firewall.ban_sync_anomalies"}}</h4>
+            <p class="mt-1 text-xs text-red-200/80">{{t .Lang "firewall.ban_sync_anomalies_help"}}</p>
+            <div class="mt-3 space-y-2">
+                <template x-for="ban in banAnomalies" :key="'anomaly-' + ban.id + '-' + ban.source_jail">
+                    <div class="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-900/50 px-3 py-2 text-sm">
+                        <div>
+                            <span class="font-mono" x-text="ban.ip_address"></span>
+                            <span class="ml-2 text-gray-400" x-text="sourceLabel(ban)"></span>
+                            <span class="ml-2" :class="ban.verification === 'missing' ? 'text-red-300' : 'text-yellow-300'" x-text="ban.verification === 'missing' ? t('firewall.ban_rule_missing') : t('firewall.ban_status_unverified')"></span>
+                        </div>
+                        <button x-show="ban.id > 0" @click="unban(ban)" class="btn-secondary firewall-unban-button text-xs py-1 px-2">{{t .Lang "firewall.unban"}}</button>
+                    </div>
+                </template>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -336,7 +339,7 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="bans.length === 0">
+                    <tr x-show="bansLoaded && !bansLoading && !bansError && !hasCurrentBanReadWarning() && bans.length === 0">
                         <td colspan="8" class="table-cell text-center text-gray-500 py-8">{{t .Lang "firewall.no_current_bans"}}</td>
                     </tr>
                 </tbody>
@@ -392,7 +395,7 @@
                             <td class="table-cell text-xs" x-text="h.ban_level >= 5 ? t('firewall.permanent') : (h.expires_at ? formatTime(h.expires_at) : '--')"></td>
                         </tr>
                     </template>
-                    <tr x-show="history.length === 0">
+                    <tr x-show="historyLoaded && !historyLoading && !historyError && history.length === 0">
                         <td colspan="6" class="table-cell text-center text-gray-500 py-4">{{t .Lang "firewall.no_history"}}</td>
                     </tr>
                 </tbody>

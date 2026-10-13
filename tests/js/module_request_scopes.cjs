@@ -5,6 +5,29 @@ function setup(file,name,api=async()=>({success:true,data:[]})){
  let next=0;const timers=new Map(),calls=[],toasts=[];const context={AbortController,URL,URLSearchParams,Date,FormData,Blob,t:k=>k,showToast:(...a)=>toasts.push(a),confirmModal:async()=>true,formatBytes:String,setTimeout:f=>{timers.set(++next,f);return next},clearTimeout:id=>timers.delete(id),setInterval:f=>{timers.set(++next,f);return next},clearInterval:id=>timers.delete(id),window:{location:{search:'',href:'http://fixture.invalid'}},document:{body:{dataset:{panelPrefix:'/fixture'}},querySelector:()=>({content:'fixture',value:''})},api:(url,options)=>{calls.push({url,options});return api(url,options)}};
  vm.createContext(context);vm.runInContext(script,context);const page=context[name]();page.$nextTick=()=>{};page.$refs={};return {page,context,timers,calls,toasts};
 }
+
+test('AI configuration read failure cannot overwrite saved settings or test defaults', async () => {
+ const {page,calls,context}=setup('ai_diagnostics.html','aiDiagnosticsPage',async()=>{throw Error('settings unavailable')});
+ await page.saveAI(); await page.testAI(); assert.equal(calls.length,0);
+ await page.openAISettings(); assert.equal(page.aiSettingsLoaded,false); assert.equal(page.aiSettingsError,'settings unavailable');
+ await page.saveAI(); await page.testAI(); assert.equal(calls.length,1);
+ for (const data of [null,{},[],{enabled:true,provider:'openai',model:'custom'}]) {
+  context.api=async()=>({success:true,data}); await page.openAISettings(); assert.equal(page.aiSettingsLoaded,false);
+ }
+ const settings={enabled:true,provider:'openai_compatible',base_url:'https://ai.example/v1',model:'custom-model',timeout_seconds:90,api_key_masked:'masked'};
+ context.api=async()=>({success:true,data:settings}); await page.openAISettings();
+ assert.equal(page.aiSettingsLoaded,true); assert.equal(page.ai.model,'custom-model'); assert.equal(page.aiSettingsError,'');
+ const writes=[]; context.api=async(url,options)=>{writes.push({url,options});return {success:true,data:settings}};
+ await page.saveAI(); assert.equal(writes.length,1); assert.equal(writes[0].options.body.model,'custom-model');
+});
+
+test('AI settings coalesce loads and discard a result after page destruction', async () => {
+ const d=deferred(); const {page,calls}=setup('ai_diagnostics.html','aiDiagnosticsPage',()=>d.promise);
+ const read=page.openAISettings(); await page.openAISettings(); await page.saveAI();
+ assert.equal(calls.length,1); assert.equal(calls[0].options.timeout,15000);
+ page.destroy(); d.resolve({success:true,data:{enabled:true,provider:'openai',base_url:'https://ai.example',model:'late',timeout_seconds:90}}); await read;
+ assert.equal(page.aiSettingsLoaded,false); assert.notEqual(page.ai.model,'late');
+});
 test('AI site change rejects old session and cross-site messages',async()=>{const d=deferred();const {page,calls}=setup('ai_diagnostics.html','aiDiagnosticsPage',u=>u.endsWith('/sessions/11')?d.promise:Promise.resolve({success:true,data:[]}));page.selectedSiteID='1';const p=page.loadSession(11);page.selectedSiteID='2';await page.onSiteChange();d.resolve({success:true,data:{site_id:1,report:{summary:'old'}}});await p;assert(calls[0].options.signal.aborted);assert.equal(page.sessionDetail,null);assert.equal(page.currentSessionID,null);assert(!calls.some(c=>c.url.includes('/websites/2/ai/sessions/11')));});
 test('AI latest session wins and late failure stays silent',async()=>{const d=deferred();const {page,toasts}=setup('ai_diagnostics.html','aiDiagnosticsPage',u=>u.endsWith('/sessions/11')?d.promise:Promise.resolve({success:true,data:u.endsWith('/sessions/22')?{report:{summary:'latest'}}:[]}));page.selectedSiteID='1';const p=page.loadSession(11);await page.loadSession(22);d.reject(Error('old'));await p;assert.equal(page.currentSessionID,22);assert.equal(page.report.summary,'latest');assert.equal(page.error,'');assert.equal(toasts.length,0);});
 test('AI switching site guards pending history and messages',async()=>{const h=deferred(),m=deferred();const {page}=setup('ai_diagnostics.html','aiDiagnosticsPage',u=>u==='/websites/1/ai/sessions'?h.promise:u.includes('/sessions/11/messages')?m.promise:Promise.resolve({success:true,data:[{id:22}]}));page.selectedSiteID='1';const hp=page.fetchSessions();page.currentSessionID=11;const mp=page.fetchMessages();page.selectedSiteID='2';await page.onSiteChange();h.resolve({success:true,data:[{id:11}]});m.resolve({success:true,data:[{content:'old'}]});await Promise.all([hp,mp]);assert.equal(page.sessions[0].id,22);assert.equal(page.messages.length,0);});

@@ -43,13 +43,13 @@
         </div>
     </nav>
 
+    <div x-show="!!accountLoadError && (activeSection === 'general' || activeSection === 'updates')" x-cloak role="alert" class="text-sm text-red-400 mb-4"><span x-text="accountLoadError"></span> <button type="button" class="underline" @click="fetchSettings()">{{t .Lang "common.retry"}}</button></div>
     <div x-show="activeSection === 'general' || activeSection === 'updates'" x-cloak class="settings-general-layout">
         <div x-show="activeSection === 'general'" class="card">
             <div class="settings-account-heading">
                 <h3 class="text-lg font-semibold text-white">{{t .Lang "settings.account_security"}}</h3>
                 <a class="text-sm text-blue-400 hover:underline" href="/{{.RandomSuffix}}/security#account">{{t .Lang "settings.security_center_link"}}</a>
             </div>
-            <div x-show="accountLoadError" x-cloak role="alert" class="text-sm text-red-400 mb-4"><span x-text="accountLoadError"></span> <button type="button" class="underline" @click="fetchSettings()">{{t .Lang "common.retry"}}</button></div>
             <div class="settings-account-grid">
                 <form class="settings-credentials" aria-labelledby="basic-auth-heading" @submit.prevent="saveBasicAuth()">
                     <h4 id="basic-auth-heading">{{t .Lang "settings.basic_auth_title"}}</h4>
@@ -86,7 +86,7 @@
         <div class="card">
             <h3 class="text-lg font-semibold text-white mb-4" x-text="activeSection === 'updates' ? t('settings.section_updates') : t('settings.server_settings')"></h3>
 
-            <div x-show="activeSection === 'general'" class="settings-server-fields">
+            <fieldset x-show="activeSection === 'general'" :disabled="!accountLoaded" class="settings-server-fields">
             <div>
             <div class="mb-4">
                 <label for="panel-title" class="label">{{t .Lang "settings.panel_title"}}</label>
@@ -130,7 +130,7 @@
                 <p x-show="!ntpService" class="mt-1 text-xs text-yellow-300">{{t .Lang "settings.time_service_missing"}}</p>
             </div>
 
-            </div>
+            </fieldset>
 
             <section x-show="activeSection === 'general'" class="settings-certificate" x-data="panelCertificateSettings()">
  <div class="settings-label-help mb-4"><h3 class="text-white font-semibold">{{t .Lang "settings.panel_domain_https"}}</h3><details class="help-tip"><summary aria-label="{{t .Lang "common.help"}}">?</summary><span role="tooltip">{{t .Lang "settings.panel_domain_help"}}</span></details></div>
@@ -158,7 +158,7 @@
 <div x-show="activeSection === 'updates'" x-cloak>
             <details class="mb-5 rounded border border-gray-700 p-4" style="background-color: var(--panel-surface-muted);">
                 <summary class="cursor-pointer text-sm text-gray-300">{{t .Lang "settings.advanced_download_settings"}}</summary>
-            <div class="mt-4">
+            <fieldset :disabled="!accountLoaded" class="mt-4">
                 <label for="github-proxy" class="label">{{t .Lang "settings.github_proxy"}}</label>
                 <p class="text-xs text-gray-500 mb-2">{{t .Lang "settings.github_proxy_help"}}</p>
                 <div class="flex space-x-2">
@@ -167,7 +167,7 @@
                     <button @click="saveServerSetting('github_proxy', githubProxy)" class="btn-primary text-sm">{{t .Lang "settings.save"}}</button>
                 </div>
                 <p x-show="proxyResult" class="text-xs mt-2" :class="proxyOk ? 'text-green-400' : 'text-red-400'" x-text="proxyResult"></p>
-            </div>
+            </fieldset>
             </details>
 
             <hr class="my-4 border-gray-700">
@@ -202,7 +202,7 @@
                 <p x-show="updateError" class="text-xs text-red-400 mt-2" x-text="updateError"></p>
             </div>
 
-            <div class="mt-4 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
+            <fieldset :disabled="!accountLoaded" class="mt-4 p-3 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <p class="text-sm text-gray-300">{{t .Lang "settings.auto_update"}}</p>
@@ -240,7 +240,7 @@
                     <p x-show="autoUpdate.lastError" class="text-red-400" x-text="autoUpdate.lastError"></p>
                     <p x-show="autoUpdate.lastSuccess">{{t .Lang "settings.last_success"}}<span x-text="autoUpdate.lastSuccess"></span> <span x-text="autoUpdate.lastSuccessVersion"></span></p>
                 </div>
-            </div>
+            </fieldset>
 
             <hr class="my-4 border-gray-700">
 
@@ -830,12 +830,14 @@ function panelSettings() {
             finally { this.ntpSyncing = false; }
         },
         async saveBasic() {
+            if (!this.accountLoaded) return;
             try {
                 await api('/settings', { method: 'PUT', body: { panel_title: this.panelTitle } });
                 showToast(t('settings.saved'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
         },
         async saveServerSetting(key, val) {
+            if (!this.accountLoaded) return;
             try {
                 const body = {};
                 body[key] = val;
@@ -844,6 +846,7 @@ function panelSettings() {
             } catch(e) { showToast(e.message, 'error'); }
         },
         async saveAutoUpdate() {
+            if (!this.accountLoaded) return;
             try {
                 await api('/settings', { method: 'PUT', body: {
                     panel_auto_update_enabled: this.autoUpdate.enabled ? 'true' : 'false',
@@ -856,6 +859,7 @@ function panelSettings() {
             } catch(e) { showToast(e.message, 'error'); }
         },
         async testProxy() {
+            if (!this.accountLoaded || this.proxyTesting) return;
             if (!this.githubProxy) {
                 showToast(t('settings.proxy_required'), 'error');
                 return;

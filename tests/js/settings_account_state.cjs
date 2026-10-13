@@ -6,8 +6,10 @@ vm.createContext(ctx); vm.runInContext(source, ctx);
 (async () => {
   const m = ctx.panelSettings();
   await m.saveBasicAuth(); await m.saveWebAccount(); assert.equal(calls.length, 0);
+  await m.saveBasic(); await m.saveServerSetting('github_proxy',''); await m.saveAutoUpdate(); await m.testProxy(); assert.equal(calls.length,0,'Unread defaults cannot overwrite title, proxy, or automatic updates, or test an unverified proxy.');
   for (const data of [undefined, {}, {username:'admin'}]) {reply = {success:true, data}; await m.fetchSettings(); assert(!m.accountLoaded); assert(m.accountLoadError);}
   reply = {success:true, data:{username:'admin',basic_auth_user:'gateway'}}; await m.fetchSettings(); assert(m.accountLoaded);
+  const beforeSettingsSave=calls.length; await m.saveAutoUpdate(); assert.equal(calls.length,beforeSettingsSave+1,'Verified settings remain editable.');
   m.pw.basicCurrent = 'current-test-password'; m.pw.basicCode = ' 123456 '; m.pw.basic = 'new-test-password';
   reply = {success:false,message:'not saved'}; await m.saveBasicAuth(); assert.equal(m.pw.basic,'new-test-password'); assert(!m.accountSaving);
   reply = {success:true}; await m.saveBasicAuth(); const request = calls.at(-1);

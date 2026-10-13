@@ -157,6 +157,116 @@ test('failed health checks preserve previous evidence with an explicit error', a
     assert.equal(manager.health.checked_at, 'last-success');
     assert.equal(manager.healthError, 'unavailable');
     assert.equal(manager.healthLoading, false);
+    assert.equal(manager.healthFresh, false);
+});
+
+test('PHP health separates required failures from recommended omissions and unknown checks', () => {
+    const { context } = setup({ t: (key, values) => values ? `${key}:${values.count}` : key });
+    const manager = context.softwareManager();
+    manager.health = { php: [{ version: '8.5', state: 'warning', extensions: [
+        { name: 'curl', importance: 'recommended', state: 'missing' },
+        { name: 'hash', importance: 'required', state: 'loaded' },
+        { name: 'mysqli', importance: 'required', state: 'missing' },
+        { name: 'json', importance: 'required', state: 'loaded' },
+    ] }] };
+    assert.equal(manager.extensionSummary('8.5', 'required'), 'software.extensions_required_missing:1');
+    assert.equal(manager.extensionSummary('8.5', 'recommended'), 'software.extensions_recommended_missing:1');
+    assert.match(manager.extensionSummaryBadge('8.5', 'required'), /badge-warning/);
+    assert.match(manager.extensionSummaryBadge('8.5', 'recommended'), /badge-info/);
+    assert.deepEqual(Array.from(manager.healthExtensions('8.5'), extension => extension.name), ['mysqli', 'hash', 'json', 'curl']);
+    manager.health.php[0].extensions.find(extension => extension.name === 'mysqli').state = 'loaded';
+    assert.equal(manager.extensionSummary('8.5', 'required'), 'software.extensions_required_ready:3');
+    manager.health.php[0].state = 'unknown';
+    assert.equal(manager.runtimeHealthKnown('8.5'), false);
+    assert.equal(manager.extensionSummary('8.5', 'required'), 'software.health_unknown');
+    assert.equal(manager.extensionSummary('8.5', 'recommended'), 'software.health_unknown');
+    assert.equal(manager.extensionSummary('8.3', 'required'), 'software.health_unknown');
+});
+
+test('PHP version display puts the configured default first without changing its assignment', () => {
+    const { context } = setup();
+    const manager = context.softwareManager();
+    manager.phpRuntimes = [
+        { version: '8.5', active_sites: 0 },
+        { version: '8.4', active_sites: 4 },
+        { version: '8.3', primary: true, active_sites: 1 },
+    ];
+    assert.deepEqual(Array.from(manager.orderedPHPRuntimes(), runtime => runtime.version), ['8.3', '8.4', '8.5']);
+    assert.deepEqual(Array.from(manager.phpRuntimes, runtime => runtime.version), ['8.5', '8.4', '8.3']);
+    assert.equal(manager.phpRuntimes[2].primary, true);
+});
+
+test('backup repair requires current successful evidence and stops after a failed refresh', async () => {
+    const calls = [], read = deferred();
+    const { context } = setup({ api: url => { calls.push(url); return read.promise; } });
+    const manager = context.softwareManager();
+    manager.health = { checked_at: 'last-success', backup: { status: 'missing', configuration_status: 'ok', missing_required: ['mysql'], dependencies: [
+        { id: 'mysql', package: 'mariadb-client-compat', status: 'missing', required: true },
+    ] } };
+    assert.equal(manager.canRepairBackupDependencies(), false);
+    manager.healthFresh = true;
+    assert.equal(manager.canRepairBackupDependencies(), true);
+    const refreshing = manager.fetchHealth(true);
+    assert.equal(manager.canRepairBackupDependencies(), false);
+    await manager.installBackupDependencies();
+    assert.equal(calls.length, 1);
+    read.reject(Error('check failed'));
+    await refreshing;
+    assert.equal(manager.health.checked_at, 'last-success');
+    assert.equal(manager.canRepairBackupDependencies(), false);
+    assert.equal(manager.backupCurrentState(), 'unknown');
+    await manager.installBackupDependencies();
+    assert.equal(calls.length, 1);
+});
+
+test('fresh unknown required tools block repair and optional tools never trigger it', () => {
+    const { context } = setup();
+    const manager = context.softwareManager();
+    manager.healthFresh = true;
+    manager.health = { backup: { status: 'missing', configuration_status: 'ok', missing_required: ['mysql'], dependencies: [
+        { id: 'mysql', package: 'mariadb-client-compat', status: 'missing', required: true },
+        { id: 'gzip', package: 'gzip', status: 'error', required: true },
+        { id: 'sshpass', package: 'sshpass', status: 'missing', required: false },
+    ] } };
+    assert.equal(manager.canRepairBackupDependencies(), false);
+    manager.health.backup.dependencies[1].status = 'installed';
+    assert.equal(manager.canRepairBackupDependencies(), true);
+    manager.health.backup.dependencies[0].status = 'installed';
+    manager.health.backup.status = 'installed';
+    assert.equal(manager.canRepairBackupDependencies(), false);
+    assert.deepEqual(Array.from(manager.missingDependencyPackages()), []);
+});
+
+test('backup repair rechecks state after confirmation instead of acting on superseded evidence', async () => {
+    const confirmation = deferred(), calls = [];
+    const { context } = setup({ confirmModal: () => confirmation.promise, api: async url => { calls.push(url); return { success: true }; } });
+    const manager = context.softwareManager();
+    manager.healthFresh = true;
+    manager.health = { backup: { status: 'missing', configuration_status: 'ok', missing_required: ['mysql'], dependencies: [
+        { id: 'mysql', package: 'mariadb-client-compat', status: 'missing', required: true },
+    ] } };
+    const operation = manager.installBackupDependencies();
+    manager.healthFresh = false;
+    confirmation.resolve(true);
+    await operation;
+    assert.equal(calls.length, 0);
+    assert.equal(manager.dependencyInstalling, false);
+});
+
+test('environment summaries distinguish backup readiness, cron startup and stale results', async () => {
+    const { context } = setup({ api: async () => ({ success: true, data: {
+        checked_at: 'latest', backup: { status: 'installed' }, cron: { state: 'running', enabled: 'enabled' },
+    } }) });
+    const manager = context.softwareManager();
+    await manager.fetchHealth(true);
+    assert.equal(manager.healthFresh, true);
+    assert.equal(manager.backupSummary(), 'software.backup_required_ready');
+    assert.equal(manager.cronSummary(), 'software.cron_ready');
+    manager.health.cron.enabled = 'disabled';
+    assert.equal(manager.cronSummary(), 'software.cron_autostart_attention');
+    manager.healthFresh = false;
+    assert.equal(manager.backupSummary(), 'software.backup_check_unknown');
+    assert.equal(manager.cronSummary(), 'software.cron_check_unknown');
 });
 
 test('dependency installation considers only currently required missing tools and refreshes on failure', async () => {
@@ -167,12 +277,13 @@ test('dependency installation considers only currently required missing tools an
         return { success: true, data: { backup: { missing_required: [], dependencies: [] } } };
     } });
     const manager = context.softwareManager();
-    manager.health = { backup: { configuration_status: 'ok', missing_required: ['mysql', 'mysqldump'], dependencies: [
-        { id: 'mysql', package: 'mariadb-client', status: 'missing', required: true },
-        { id: 'mysqldump', package: 'mariadb-client', status: 'missing', required: true },
+    manager.healthFresh = true;
+    manager.health = { backup: { status: 'missing', configuration_status: 'ok', missing_required: ['mysql', 'mysqldump'], dependencies: [
+        { id: 'mysql', package: 'mariadb-client-compat', status: 'missing', required: true },
+        { id: 'mysqldump', package: 'mariadb-client-compat', status: 'missing', required: true },
         { id: 'rsync', package: 'rsync', status: 'missing', required: false },
     ] } };
-    assert.deepEqual(Array.from(manager.missingDependencyPackages()), ['mariadb-client']);
+    assert.deepEqual(Array.from(manager.missingDependencyPackages()), ['mariadb-client-compat']);
     await manager.installBackupDependencies();
     assert.equal(calls[0].url, '/software/backup-dependencies/install');
     assert.equal(calls[0].options.method, 'POST');

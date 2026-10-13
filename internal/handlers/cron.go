@@ -204,13 +204,20 @@ func (h *CronHandler) List(c *gin.Context) {
 			&j.TaskType, &j.BackupMode, &j.KeepCount, &notifyFail,
 			&j.SiteID, &j.RunAsUser, &enabled, &running, &j.LastRunAt, &j.LastStatus,
 			&j.LastOutput, &j.CreatedAt, &j.UpdatedAt, &j.RuntimeSiteDomain, &j.RuntimeReason); err != nil {
-			continue
+			log.Printf("读取计划任务列表失败: %v", err)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取计划任务列表失败"))
+			return
 		}
 		j.Enabled = enabled == 1
 		j.NotifyFail = notifyFail == 1
 		j.Running = running == 1
-		j.RuntimeSuspended = j.RuntimeReason == "paused" || j.RuntimeReason == "migration_locked"
+		j.RuntimeSuspended = j.RuntimeReason != ""
 		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("读取计划任务列表失败: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取计划任务列表失败"))
+		return
 	}
 	if jobs == nil {
 		jobs = []models.CronJob{}

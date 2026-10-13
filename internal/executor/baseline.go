@@ -61,6 +61,9 @@ func ensureWordPressLoginAuditBaseline() {
 
 func ensurePHPBaseline() {
 	changed, err := EnsurePHPRuntimeConfigFile()
+	if err != nil {
+		log.Printf("[OLS-WPanel] PHP runtime baseline failed: %v", err)
+	}
 	if err == nil && changed {
 		// Do not start a service deliberately stopped by the administrator.
 		if exec.Command("systemctl", "is-active", "--quiet", "lshttpd").Run() != nil {

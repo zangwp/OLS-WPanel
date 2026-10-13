@@ -40,13 +40,15 @@
             <details class="card" open>
                 <summary class="cursor-pointer text-sm font-semibold text-white">{{t .Lang "log_analysis.history"}}</summary>
                 <div class="space-y-2 mt-4">
+                    <p x-show="historyLoading" role="status" class="text-xs text-gray-500">{{t .Lang "common.loading"}}</p>
+                    <div x-show="historyError" x-cloak role="alert" class="text-xs text-red-400"><p x-text="historyError"></p><button @click="loadHistory()" :disabled="historyLoading" class="btn-secondary text-xs mt-2">{{t .Lang "followup.retry_load"}}</button></div>
                     <template x-for="item in history" :key="item.id">
                         <button @click="loadJob(item.id)" class="w-full text-left p-3 rounded border border-gray-800 hover:border-blue-800" style="background-color:var(--panel-surface-muted)">
                             <div class="flex justify-between gap-2 text-xs"><span class="text-gray-300" x-text="formatTime(item.start_at) + ' — ' + formatTime(item.end_at)"></span><span class="text-gray-500" x-text="statusText(item.status)"></span></div>
                             <p class="text-xs text-gray-600 mt-1">{{t .Lang "log_analysis.local_analysis"}}</p>
                         </button>
                     </template>
-                    <p x-show="siteID && history.length === 0" class="text-xs text-gray-500 py-4 text-center">{{t .Lang "log_analysis.no_history"}}</p>
+                    <p x-show="siteID && historyLoaded && !historyLoading && !historyError && history.length === 0" class="text-xs text-gray-500 py-4 text-center">{{t .Lang "log_analysis.no_history"}}</p>
                 </div>
             </details>
         </div>
@@ -69,7 +71,7 @@
                 <div x-show="job && !running" class="space-y-6">
                     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                         <div><h3 class="text-lg font-semibold text-white" x-text="job?.domain || ''"></h3><p class="text-xs text-gray-500 mt-1" x-text="job ? formatTime(job.start_at) + ' — ' + formatTime(job.end_at) : ''"></p></div>
-                        <span class="text-xs px-2 py-1 rounded" :class="overallRiskClass()" x-text="overallRiskText()"></span>
+                        <span x-show="overallRisk() !== null" class="text-xs px-2 py-1 rounded" :class="overallRiskClass()" x-text="overallRiskText()"></span>
                     </div>
 
                     <div x-show="job?.error_message" class="p-3 rounded text-sm text-yellow-300 border border-yellow-900 bg-yellow-950/20" x-text="errorText(job?.error_message)"></div>
@@ -181,6 +183,7 @@ function logAnalysisPage() {
             this.job = null;
             this.report = null;
             this.history = [];
+            this.historyLoaded = false;
             return this.loadHistory();
         },
         closeDetails() {
@@ -196,9 +199,11 @@ function logAnalysisPage() {
             this.historyVersion++;
             if (this.historyController) this.historyController.abort();
             this.historyController = null;
+            this.historyLoading = false;
         },
         websites: [], siteID: '', range: '24h', customStart: '', customEnd: '', aiReady: false,
         running: false, job: null, report: null, history: [], pollTimer: null,
+        historyLoading: false, historyLoaded: false, historyError: '',
         detailOpen: false, detailLoading: false, detailKind: '', detailValue: '', detailTitle: '', detail: null, detailView: 'overview', detailAILoading: false,
         async init() {
             try {
@@ -260,11 +265,17 @@ function logAnalysisPage() {
             const siteID = this.siteID, version = ++this.historyVersion;
             if (this.historyController) this.historyController.abort();
             const controller = new AbortController(); this.historyController = controller;
-            if (!siteID || this.disposed) { this.history = []; return; }
+            this.historyLoading = false; this.historyError = '';
+            if (!siteID || this.disposed) { this.history = []; this.historyLoaded = false; return; }
+            const current = () => !this.disposed && !controller.signal.aborted && version === this.historyVersion && String(siteID) === String(this.siteID);
+            this.historyLoading = true;
             try {
                 const r = await api('/log-analysis?site_id=' + encodeURIComponent(siteID), { silent: true, timeout: 15000, signal: controller.signal });
-                if (!this.disposed && !controller.signal.aborted && version === this.historyVersion && String(siteID) === String(this.siteID)) this.history = r.data || [];
-            } catch (_) {}
+                if (!current()) return;
+                if (!r.success || !Array.isArray(r.data)) throw new Error(t('log_analysis.load_failed'));
+                this.history = r.data; this.historyLoaded = true;
+            } catch (e) { if (current()) this.historyError = e.message || t('log_analysis.load_failed'); }
+            finally { if (current()) { this.historyLoading = false; this.historyController = null; } }
         },
         async loadJob(id) {
             if (this.disposed) return;
@@ -323,9 +334,9 @@ function logAnalysisPage() {
         errorText(value) { return ['restart_interrupted','analysis interrupted'].includes(value) ? t('log_analysis.interrupted_by_restart') : value; },
         verificationText(value) { return value === 'verified' ? '{{t .Lang "log_analysis.verified"}}' : value === 'fake' ? '{{t .Lang "log_analysis.fake"}}' : value === 'unverified' ? '{{t .Lang "log_analysis.unverified"}}' : '{{t .Lang "log_analysis.unknown"}}'; },
         findingClass(level) { return level === 'high' ? 'border-red-900 bg-red-950/20' : level === 'medium' ? 'border-yellow-900 bg-yellow-950/20' : 'border-green-900 bg-green-950/20'; },
-        overallRisk() { if (!this.report) return 'low'; if ((this.report.findings || []).some(x => x.severity === 'high')) return 'high'; if ((this.report.findings || []).some(x => x.severity === 'medium')) return 'medium'; return 'low'; },
-        overallRiskClass() { return this.overallRisk() === 'high' ? 'bg-red-900 text-red-200' : this.overallRisk() === 'medium' ? 'bg-yellow-900 text-yellow-200' : 'bg-green-900 text-green-200'; },
-        overallRiskText() { const r = this.overallRisk(); return r === 'high' ? t('log_analysis.risk_high') : r === 'medium' ? t('log_analysis.risk_medium') : t('log_analysis.risk_low'); }
+        overallRisk() { if (this.job?.status !== 'completed' || !this.report) return null; if ((this.report.findings || []).some(x => x.severity === 'high')) return 'high'; if ((this.report.findings || []).some(x => x.severity === 'medium')) return 'medium'; return 'low'; },
+        overallRiskClass() { const r = this.overallRisk(); return r === null ? '' : r === 'high' ? 'bg-red-900 text-red-200' : r === 'medium' ? 'bg-yellow-900 text-yellow-200' : 'bg-green-900 text-green-200'; },
+        overallRiskText() { const r = this.overallRisk(); return r === null ? '' : r === 'high' ? t('log_analysis.risk_high') : r === 'medium' ? t('log_analysis.risk_medium') : t('log_analysis.risk_low'); }
     }
 }
 </script>

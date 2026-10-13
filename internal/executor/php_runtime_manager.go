@@ -155,7 +155,10 @@ func EnsureLSPHPRuntimeConfig(version string) error {
 		return err
 	}
 	suffix := strings.ReplaceAll(version, ".", "")
-	path := filepath.Join("/usr/local/lsws", "lsphp"+suffix, "etc", "php", version, "litespeed", "conf.d", "99-ols-wpanel.ini")
+	path := filepath.Join("/usr/local/lsws", "lsphp"+suffix, "etc", "php", version, "mods-available", "99-ols-wpanel.ini")
+	if _, err := migratePHPRuntimeConfig(legacyLSPHPRuntimeConfigPath(version), path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}

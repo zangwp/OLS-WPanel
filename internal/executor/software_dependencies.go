@@ -79,8 +79,8 @@ func backupDependencyDefinitions() []BackupDependency {
 	return []BackupDependency{
 		{ID: "tar", Name: "tar", Package: "tar", Commands: []string{"tar"}, RequiredFor: []string{"local_files"}},
 		{ID: "gzip", Name: "gzip", Package: "gzip", Commands: []string{"gzip"}, RequiredFor: []string{"local_files"}},
-		{ID: "mysql", Name: "MySQL/MariaDB restore client", Package: "mariadb-client", Commands: []string{"mysql"}, RequiredFor: []string{"local_database_restore"}},
-		{ID: "mysqldump", Name: "MySQL/MariaDB dump", Package: "mariadb-client", Commands: []string{"mysqldump"}, RequiredFor: []string{"local_database"}},
+		{ID: "mysql", Name: "MySQL/MariaDB restore client", Package: "mariadb-client-compat", Commands: []string{"mysql"}, RequiredFor: []string{"local_database_restore"}},
+		{ID: "mysqldump", Name: "MySQL/MariaDB dump", Package: "mariadb-client-compat", Commands: []string{"mysqldump"}, RequiredFor: []string{"local_database"}},
 		{ID: "rsync", Name: "rsync", Package: "rsync", Commands: []string{"rsync"}, RequiredFor: []string{"remote_ssh"}},
 		{ID: "ssh", Name: "OpenSSH client", Package: "openssh-client", Commands: []string{"ssh"}, RequiredFor: []string{"remote_ssh"}},
 		{ID: "sshpass", Name: "sshpass", Package: "sshpass", Commands: []string{"sshpass"}, RequiredFor: []string{"remote_ssh_password"}},
