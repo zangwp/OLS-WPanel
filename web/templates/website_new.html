@@ -4,20 +4,7 @@
     <h1 class="page-title mb-6">{{t .Lang "website.create_title"}}</h1>
     <div class="card max-w-2xl">
         <form @submit.prevent="submit">
-            <div class="mb-4">
-                <label class="label">{{t .Lang "website.site_type"}}</label>
-                <div class="flex space-x-4 mt-1">
-                    <label class="flex items-center space-x-2 cursor-pointer text-gray-300">
-                        <input type="radio" x-model="siteType" value="wordpress" class="w-4 h-4 text-blue-600 focus:ring-blue-500">
-                        <span>WordPress</span>
-                    </label>
-                    <label class="flex items-center space-x-2 cursor-pointer text-gray-300">
-                        <input type="radio" x-model="siteType" value="php" class="w-4 h-4 text-blue-600 focus:ring-blue-500">
-                        <span>{{t .Lang "website.generic_php_site"}}</span>
-                    </label>
-                </div>
-            </div>
-            <p x-show="siteType === 'wordpress'" class="text-sm text-gray-500 mb-4">{{t .Lang "website.wordpress_defaults_help"}}</p>
+            <p class="text-sm text-gray-500 mb-4">{{t .Lang "website.wordpress_defaults_help"}}</p>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.main_domain"}}</label>
                 <input type="text" x-model="domain" class="input-field" placeholder="example.com" required>
@@ -53,18 +40,9 @@
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.database_password"}}</label>
                 <div class="flex space-x-2">
-                    <input type="text" x-model="dbPassword" class="input-field flex-1" :placeholder="siteType === 'php' ? t('website.db_password_php_placeholder') : t('website.db_password_wp_placeholder')" :required="siteType === 'php'">
-                    <button type="button" @click="generatePassword()" class="btn-secondary" x-show="siteType !== 'php'">{{t .Lang "website.generate_random_password"}}</button>
+                    <input type="text" x-model="dbPassword" class="input-field flex-1" placeholder="{{t .Lang "website.db_password_wp_placeholder"}}">
+                    <button type="button" @click="generatePassword()" class="btn-secondary">{{t .Lang "website.generate_random_password"}}</button>
                 </div>
-                <p class="text-xs text-gray-500 mt-1" x-show="siteType === 'php'">{{t .Lang "website.php_password_help"}}</p>
-            </div>
-            <div class="mb-4" x-show="siteType === 'php'">
-                <label class="label">{{t .Lang "website.document_root"}}</label>
-                <select x-model="documentRootSubdir" class="input-field">
-                    <option value="">{{t .Lang "website.project_root"}}</option>
-                    <option value="public">{{t .Lang "website.public_root_option"}}</option>
-                </select>
-                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.document_root_help"}}</p>
             </div>
             <div class="mb-4">
                 <label class="label">{{t .Lang "website.expiry_optional"}}</label>
@@ -103,8 +81,6 @@ function createWebsite() {
         dbPassword: '',
         sslEnabled: false,
         expiresAt: '',
-        siteType: 'wordpress',
-        documentRootSubdir: '',
         phpVersion: '8.5',
         phpRuntimes: [],
         loading: false,
@@ -174,12 +150,9 @@ function createWebsite() {
                     db_password: this.dbPassword,
                     ssl_enabled: this.sslEnabled,
                     expires_at: this.expiresAt || null,
-                    site_type: this.siteType,
+                    site_type: 'wordpress',
                     php_version: this.phpVersion
                 };
-                if (this.siteType === 'php') {
-                    body.document_root_subdir = this.documentRootSubdir;
-                }
                 if (!await this.confirmSSLPreflight(body)) return;
                 const resp = await api('/websites', { method: 'POST', body });
                 if (resp.success) {

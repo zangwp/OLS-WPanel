@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.4 — 2026-10-13
+
+- Simplifies website creation to WordPress only, removing the generic PHP selector and its unused form fields. Existing PHP websites remain manageable.
+
 ## v2.0.3 — 2026-10-13
 
 - Displays fresh-install browser and panel credentials in two separate tables, with complete login URLs on independent lines. Repair keeps existing credentials private.
