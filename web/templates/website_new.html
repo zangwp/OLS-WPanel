@@ -123,9 +123,9 @@ function createWebsite() {
         },
         generatePassword() {
             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
-            let pw = '';
-            for (let i = 0; i < 24; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-            this.dbPassword = pw;
+            const values = new Uint32Array(24);
+            crypto.getRandomValues(values);
+            this.dbPassword = Array.from(values, value => chars[value % chars.length]).join('');
         },
         wwwAliasCandidate() {
             const value = this.domain.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/\.$/, '');
@@ -159,6 +159,7 @@ function createWebsite() {
             return await confirmModal(t('website.ssl_precheck_warning', { warnings: warnings.join('\n\n') }));
         },
         async submit() {
+            if (this.loading) return;
             this.loading = true;
             this.error = '';
             this.success = '';
@@ -186,8 +187,8 @@ function createWebsite() {
                     this.sslWarning = sslWarning || '';
                     this.createdSiteID = resp.data && resp.data.id;
                     this.success = sslWarning
-                        ? t('website.created_ssl_warning', { domain: this.domain, warning: sslWarning })
-                        : t('website.created', { domain: this.domain });
+                        ? t('website.created_ssl_warning', { domain: body.domain, warning: sslWarning })
+                        : t('website.created', { domain: body.domain });
                     this.domain = '';
                     this.aliases = '';
                     this.dbPassword = '';

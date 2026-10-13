@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.0.3 — 2026-10-13
+
+- Displays fresh-install browser and panel credentials in two separate tables, with complete login URLs on independent lines. Repair keeps existing credentials private.
+- Simplifies software management and corrects LiteSpeed PHP configuration, extension and backup-client checks. Compression settings that cannot be read remain unknown.
+- Preserves SSH backup host identities during connection tests, rejects changed keys, and bounds SSH/S3 tests by request cancellation and timeouts.
+- Reports database, backup, security-event and cron read failures accurately; unavailable websites suspend tasks. Prevents duplicate website creation and uses cryptographic password generation.
+- Protects settings from default-value overwrites after failed reads, avoids false low-risk log reports, and supports root SSH verification without sudo.
+
+Upgrade notes: no database migration or new third-party dependency is added. Existing repair installations do not automatically install missing packages; software management can repair required backup tools. Remote database backup retention remains separate from local retention.
+
 ## v2.0.2 — 2026-10-12
 
 - Skips optional recommended packages during fresh installation while retaining WordPress PDF rendering, fonts and Fail2ban file monitoring dependencies explicitly.

@@ -298,7 +298,7 @@ function remoteBackup() {
             this.testResult = '';
             this.testOK = false;
             try {
-                const r = await api('/settings/remote-backup/test', { method: 'POST' });
+                const r = await api('/settings/remote-backup/test', { method: 'POST', timeout: 60000 });
                 if (!r.success) throw new Error(r.message || t('settings.connection_failed'));
                 this.testOK = true;
                 this.testResult = r.data?.message || t('settings.connection_ok');
@@ -308,7 +308,14 @@ function remoteBackup() {
         genPassword() {
             const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
             let pw = '';
-            for (let i = 0; i < 20; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+            const random = new Uint8Array(32), limit = 256 - (256 % chars.length);
+            while (pw.length < 20) {
+                crypto.getRandomValues(random);
+                for (const value of random) {
+                    if (value < limit) pw += chars[value % chars.length];
+                    if (pw.length === 20) break;
+                }
+            }
             if (this.cfg.auth_type === 'password') {
                 this.cfg.password = pw;
             } else {

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -271,16 +270,19 @@ func TestRemoteBackup(c *gin.Context) {
 	var backupType, host, username, authType, password, sshKey, remotePath string
 	var s3Endpoint, s3Bucket, s3Region, s3AccessKeyID, s3SecretKey, s3PathPrefix string
 	var port int
-	db.QueryRow(`SELECT backup_type, host, port, username, auth_type, password, ssh_key, remote_path,
+	if err := db.QueryRowContext(c.Request.Context(), `SELECT backup_type, host, port, username, auth_type, password, ssh_key, remote_path,
 			s3_endpoint, s3_bucket, s3_region, s3_access_key_id, s3_secret_key, s3_path_prefix
 		FROM remote_backup_settings WHERE id = 1`).Scan(
 		&backupType, &host, &port, &username, &authType, &password, &sshKey, &remotePath,
-		&s3Endpoint, &s3Bucket, &s3Region, &s3AccessKeyID, &s3SecretKey, &s3PathPrefix)
+		&s3Endpoint, &s3Bucket, &s3Region, &s3AccessKeyID, &s3SecretKey, &s3PathPrefix); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取远程备份设置失败"))
+		return
+	}
 	if backupType == "" {
 		backupType = "rsync"
 	}
 	if backupType == "s3" {
-		if err := executor.ProbeS3BackupConnection(s3Endpoint, s3Bucket, s3Region, s3AccessKeyID, s3SecretKey, s3PathPrefix); err != nil {
+		if err := executor.ProbeS3BackupConnectionContext(c.Request.Context(), s3Endpoint, s3Bucket, s3Region, s3AccessKeyID, s3SecretKey, s3PathPrefix); err != nil {
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("S3 连接测试失败: "+err.Error()))
 			return
 		}
@@ -303,90 +305,11 @@ func TestRemoteBackup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("请先填写远程服务器地址"))
 		return
 	}
-	if err := executor.RequireSSHBackupDependencies(authType); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()+"；请在软件管理中补齐备份工具"))
-		return
-	}
-	if err := executor.ValidateRemoteBackupSettings(host, port, username, authType, remotePath); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
-		return
-	}
-
-	knownHostsFile := "/www/ols-wpanel/remote_backup_known_hosts"
-
-	// Collect host key fingerprint for admin verification
-	fingerprint := ""
-	keyscanOut, _ := exec.Command("ssh-keyscan", "-H", "-p", fmt.Sprintf("%d", port), host).CombinedOutput()
-	if len(keyscanOut) > 0 {
-		os.WriteFile(knownHostsFile, keyscanOut, 0644)
-		fpOut, _ := exec.Command("ssh-keygen", "-lf", knownHostsFile).CombinedOutput()
-		fingerprint = strings.TrimSpace(string(fpOut))
-	}
-
-	commonArgs := []string{
-		"-o", "UserKnownHostsFile=" + knownHostsFile,
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "ConnectTimeout=10",
-		"-p", fmt.Sprintf("%d", port),
-	}
-
-	var cmd *exec.Cmd
-	if authType == "key" {
-		keyPath := "/www/ols-wpanel/remote_backup_key"
-		if _, err := os.Stat(keyPath); err != nil {
-			c.JSON(http.StatusBadRequest, models.ErrorResponse("SSH密钥不存在，请先保存设置生成密钥"))
-			return
-		}
-		args := append([]string{"-i", keyPath}, commonArgs...)
-		args = append(args, username+"@"+host, "echo OLS_WPANEL_OK")
-		cmd = exec.Command("ssh", args...)
-	} else {
-		args := append([]string{"-e", "ssh"}, commonArgs...)
-		args = append(args, username+"@"+host, "echo OLS_WPANEL_OK")
-		cmd = exec.Command("sshpass", args...)
-		cmd.Env = append(os.Environ(), "SSHPASS="+password)
-	}
-	out, err := cmd.CombinedOutput()
+	fingerprint, err := executor.ProbeSSHBackupConnection(c.Request.Context(), models.RemoteBackupSettings{
+		Host: host, Port: port, Username: username, AuthType: authType, Password: password, RemotePath: remotePath,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(fmt.Sprintf("连接失败: %s", string(out))))
-		return
-	}
-	if !strings.Contains(string(out), "OLS_WPANEL_OK") {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse("连接异常: "+string(out)))
-		return
-	}
-
-	// 测试 rsync 到远程备份目录
-	tmpFile, err := os.CreateTemp("", "ols-wpanel-rsync-test-*")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse("创建测试文件失败"))
-		return
-	}
-	testFile := tmpFile.Name()
-	if _, err := tmpFile.Write([]byte("OLS WPanel rsync test")); err != nil {
-		tmpFile.Close()
-		os.Remove(testFile)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse("创建测试文件失败"))
-		return
-	}
-	tmpFile.Close()
-	defer os.Remove(testFile)
-
-	rsyncSSHOpts := fmt.Sprintf("-o UserKnownHostsFile=%s -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10", knownHostsFile)
-	var testCmd *exec.Cmd
-	if authType == "key" {
-		testCmd = exec.Command("rsync", "-avz", "-e",
-			fmt.Sprintf("ssh -i /www/ols-wpanel/remote_backup_key %s -p %d", rsyncSSHOpts, port),
-			testFile, username+"@"+host+":"+remotePath+"/.ols-wpanel-rsync-test.txt")
-	} else {
-		testCmd = exec.Command("sshpass", "-e", "rsync", "-avz", "-e",
-			fmt.Sprintf("ssh %s -p %d", rsyncSSHOpts, port),
-			testFile, username+"@"+host+":"+remotePath+"/.ols-wpanel-rsync-test.txt")
-		testCmd.Env = append(os.Environ(), "SSHPASS="+password)
-	}
-	testOut, testErr := testCmd.CombinedOutput()
-	if testErr != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse(fmt.Sprintf("rsync 测试失败: %s", string(testOut))))
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
 		return
 	}
 

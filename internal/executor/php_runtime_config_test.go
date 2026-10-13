@@ -21,9 +21,67 @@ func TestPHPRuntimeConfigPathFollowsConfiguredPrimaryRuntime(t *testing.T) {
 		config.AppConfig = previousConfig
 	})
 
-	want := filepath.Join("/usr/local/lsws", "lsphp84", "etc", "php", "8.4", "litespeed", "conf.d", "99-ols-wpanel.ini")
+	want := filepath.Join("/usr/local/lsws", "lsphp84", "etc", "php", "8.4", "mods-available", "99-ols-wpanel.ini")
 	if got := PHPRuntimeConfigPath(); got != want {
 		t.Fatalf("PHPRuntimeConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestPHPRuntimeConfigMigrationPreservesValuesAndRollbackCopy(t *testing.T) {
+	root := t.TempDir()
+	for _, version := range []string{"8.3", "8.4", "8.5"} {
+		branch := filepath.Join(root, "lsphp"+strings.ReplaceAll(version, ".", ""), "etc", "php", version)
+		legacy := filepath.Join(branch, "litespeed", "conf.d", "99-ols-wpanel.ini")
+		actual := filepath.Join(branch, "mods-available", "99-ols-wpanel.ini")
+		original := "; administrator configuration for " + version + "\nmemory_limit = 512M\nopcache.memory_consumption = 320\nopcache.enable = 0\n"
+		if err := os.MkdirAll(filepath.Dir(legacy), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(legacy, []byte(original), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Windows exposes writable files as 0666. A read-only source models a
+		// trusted ini on both hosts without weakening production trust checks.
+		if err := os.Chmod(legacy, 0400); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(legacy, 0644) })
+		changed, err := migratePHPRuntimeConfig(legacy, actual)
+		if err != nil || !changed {
+			t.Fatalf("migration for %s: changed=%v err=%v", version, changed, err)
+		}
+		for _, path := range []string{legacy, actual} {
+			content, err := os.ReadFile(path)
+			if err != nil || string(content) != original {
+				t.Fatalf("migration altered %s: %s, %v", path, content, err)
+			}
+		}
+		if changed, err := migratePHPRuntimeConfig(legacy, actual); err != nil || changed {
+			t.Fatalf("repeat migration for %s: changed=%v err=%v", version, changed, err)
+		}
+		updated := "memory_limit = 768M\n"
+		if err := os.WriteFile(actual, []byte(updated), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if changed, err := migratePHPRuntimeConfig(legacy, actual); err != nil || changed {
+			t.Fatalf("existing configuration for %s overwritten: %v, %v", version, changed, err)
+		}
+		content, _ := os.ReadFile(actual)
+		if string(content) != updated {
+			t.Fatalf("newer administrator configuration replaced for %s", version)
+		}
+	}
+}
+
+func TestPHPRuntimeConfigMigrationWithoutLegacyDoesNotCreateConfig(t *testing.T) {
+	root := t.TempDir()
+	actual := filepath.Join(root, "mods-available", "99-ols-wpanel.ini")
+	changed, err := migratePHPRuntimeConfig(filepath.Join(root, "missing.ini"), actual)
+	if err != nil || changed {
+		t.Fatalf("missing legacy configuration: %v, %v", changed, err)
+	}
+	if _, err := os.Stat(actual); !os.IsNotExist(err) {
+		t.Fatalf("missing legacy unexpectedly created configuration: %v", err)
 	}
 }
 

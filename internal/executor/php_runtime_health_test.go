@@ -36,7 +36,7 @@ func lsphpHealthFixture(version, iniPath, scanDir string, exclude ...string) []b
 
 func lsphpHealthFixturePaths() (string, string) {
 	ini := filepath.Join("/usr/local/lsws/lsphp85/etc/php/8.5/litespeed", "php.ini")
-	return ini, filepath.Join(filepath.Dir(ini), "conf.d")
+	return ini, filepath.Join(filepath.Dir(filepath.Dir(ini)), "mods-available")
 }
 
 func assertLSPHPHealthUnknown(t *testing.T, health LSPHPRuntimeHealth) {

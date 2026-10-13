@@ -13,6 +13,7 @@
         <div class="mb-4">
             <input type="search" x-model="search" class="input-field w-full sm:w-80 text-sm" :placeholder="t('database.search_placeholder')">
         </div>
+        <p x-show="loadError" x-cloak class="mb-4 text-sm text-red-400" role="alert" x-text="loadError"></p>
         <div class="overflow-x-auto">
             <table class="w-full">
                 <thead class="border-b border-gray-700">
@@ -46,7 +47,7 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="!loading && filteredDatabases().length === 0">
+                    <tr x-show="!loading && !loadError && filteredDatabases().length === 0">
                         <td colspan="7" class="table-cell text-center text-gray-500 py-8" x-text="search ? t('database.no_search_results') : t('database.no_databases')"></td>
                     </tr>
                     <tr x-show="loading">
@@ -63,14 +64,18 @@ function databaseManager() {
     return {
         databases: [],
         loading: false,
+        loadError: '',
         search: '',
         async loadDatabases() {
+            if (this.loading) return;
             this.loading = true;
+            this.loadError = '';
             try {
                 const r = await api('/databases');
-                if (r.success) this.databases = r.data || [];
+                if (!r.success || !Array.isArray(r.data)) throw new Error(r.message || t('common.request_failed'));
+                this.databases = r.data;
             } catch (e) {
-                showToast(e.message, 'error');
+                this.loadError = t('website.load_failed_with_error', { error: e.message });
             }
             this.loading = false;
         },

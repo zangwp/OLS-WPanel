@@ -114,6 +114,15 @@ func TestCronListReportsPausedAndMigrationRuntimeStates(t *testing.T) {
 	if paused["runtime_reason"] != "paused" || paused["runtime_suspended"] != true {
 		t.Fatalf("paused runtime state=%v", paused)
 	}
+	for _, status := range []string{"backup_maintenance", "creating", "error"} {
+		if _, err := db.Exec(`UPDATE websites SET status=? WHERE id=1`, status); err != nil {
+			t.Fatal(err)
+		}
+		state := readState()
+		if state["runtime_reason"] != status || state["runtime_suspended"] != true {
+			t.Fatalf("unavailable site was shown as runnable: %v", state)
+		}
+	}
 
 	if _, err := db.Exec(`UPDATE websites SET status='active' WHERE id=1`); err != nil {
 		t.Fatal(err)
@@ -130,6 +139,19 @@ func TestCronListReportsPausedAndMigrationRuntimeStates(t *testing.T) {
 	migrating := readState()
 	if migrating["runtime_reason"] != "migration_locked" || migrating["runtime_suspended"] != true {
 		t.Fatalf("migration runtime state=%v", migrating)
+	}
+}
+
+func TestCronListRejectsMalformedRows(t *testing.T) {
+	setupCronHandlerRuntimeTest(t)
+	if _, err := database.GetDB().Exec(`UPDATE cron_jobs SET keep_count='not-an-integer' WHERE id=41`); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	new(CronHandler).List(ctx)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("invalid task disappeared from successful list: %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 

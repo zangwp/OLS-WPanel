@@ -64,7 +64,9 @@ func GetBackupOverview(c *gin.Context) {
 		var domain, status, siteType, documentRoot, webRoot, dbName, dbUser, systemUser string
 		if err := rows.Scan(&id, &domain, &status, &siteType, &documentRoot, &webRoot, &dbName, &dbUser, &systemUser); err != nil {
 			log.Printf("备份总览: 扫描网站列表行失败: %v", err)
-			continue
+			rows.Close()
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取网站列表失败"))
+			return
 		}
 		siteIndex[id] = len(sites)
 		siteBindings[id] = &models.Website{ID: id, Domain: domain, Status: models.WebsiteStatus(status), SiteType: siteType,
@@ -97,7 +99,9 @@ func GetBackupOverview(c *gin.Context) {
 		var status, message string
 		if err := stateRows.Scan(&siteID, &status, &rebuild, &message); err != nil {
 			log.Printf("备份总览: 扫描远程维护状态失败: %v", err)
-			continue
+			stateRows.Close()
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取远程备份维护状态失败"))
+			return
 		}
 		if idx, ok := siteIndex[siteID]; ok {
 			sites[idx].RemoteStatus = status
@@ -124,7 +128,9 @@ func GetBackupOverview(c *gin.Context) {
 		if err := dbRows.Scan(&b.ID, &b.SiteID, &b.Filename, &b.FileSize, &b.DBName, &auto,
 			&b.TransportStatus, &b.TransportMessage, &b.CreatedAt); err != nil {
 			log.Printf("备份总览: 扫描数据库备份行失败: %v", err)
-			continue
+			dbRows.Close()
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取数据库备份列表失败"))
+			return
 		}
 		b.Auto = auto == 1
 		if idx, ok := siteIndex[b.SiteID]; ok {
@@ -151,7 +157,9 @@ func GetBackupOverview(c *gin.Context) {
 		if err := fileRows.Scan(&b.ID, &b.SiteID, &b.Filename, &b.FileSize, &b.Mode,
 			&b.TransportStatus, &b.TransportMessage, &b.CreatedAt); err != nil {
 			log.Printf("备份总览: 扫描文件备份行失败: %v", err)
-			continue
+			fileRows.Close()
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取文件备份列表失败"))
+			return
 		}
 		if idx, ok := siteIndex[b.SiteID]; ok {
 			b.LocalExists = fileBackupLocalExists(sites[idx].Domain, b.Filename)
@@ -181,7 +189,9 @@ func GetBackupOverview(c *gin.Context) {
 	panelBackupDir := filepath.Join(cfg.Panel.BackupDir, "panel-db")
 	panelBackups, err := database.ListDBBackups(panelBackupDir)
 	if err != nil {
-		panelBackups = []database.DBBackupInfo{}
+		log.Printf("备份总览: 读取面板数据库备份列表失败: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取面板数据库备份列表失败"))
+		return
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{

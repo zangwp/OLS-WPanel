@@ -20,7 +20,11 @@
             </div>
 
             <div x-show="aiSettingsLoading" class="py-12 text-center text-sm text-gray-400">{{t .Lang "common.loading"}}</div>
-            <div x-show="!aiSettingsLoading" class="space-y-4">
+            <div x-show="!!aiSettingsError" class="text-sm text-red-400 mb-4" role="alert">
+                <span x-text="aiSettingsError"></span>
+                <button type="button" class="underline" @click="openAISettings()" :disabled="aiSettingsLoading">{{t .Lang "common.retry"}}</button>
+            </div>
+            <fieldset x-show="!aiSettingsLoading" :disabled="!aiSettingsLoaded || aiSaving || aiTesting" class="space-y-4">
                 <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
                     <input type="checkbox" x-model="ai.enabled">
                     <span x-text="ai.enabled ? t('settings.enabled') : t('settings.disabled')"></span>
@@ -38,7 +42,7 @@
                     <button type="button" @click="saveAI()" :disabled="aiSaving || aiTesting" class="btn-primary text-sm" x-text="aiSaving ? t('settings.saving') : t('settings.save_ai_settings')"></button>
                 </div>
                 <p x-show="aiTestResult" class="text-xs" :class="aiTestOK ? 'text-green-400' : 'text-red-400'" x-text="aiTestResult"></p>
-            </div>
+            </fieldset>
         </div>
     </div>
 
@@ -305,22 +309,29 @@ function aiDiagnosticsPage() {
         waitTimer: null,
         showAISettings: false,
         aiSettingsLoading: false,
+        aiSettingsLoaded: false,
+        aiSettingsError: '',
         ai: { enabled: false, provider: 'deepseek', base_url: 'https://api.deepseek.com', model: 'deepseek-v4-pro', api_key: '', api_key_masked: '', timeout_seconds: 180 },
         aiSaving: false,
         aiTesting: false,
         aiTestResult: '',
         aiTestOK: false,
         async openAISettings() {
+            if (this.disposed || this.aiSettingsLoading || this.aiSaving || this.aiTesting) return;
             this.showAISettings = true;
             this.aiSettingsLoading = true;
+            this.aiSettingsLoaded = false;
+            this.aiSettingsError = '';
             this.aiTestResult = '';
             try {
-                const r = await api('/ai/settings', { silent: true });
-                if (r.success && r.data) {
-                    this.ai = { enabled: !!r.data.enabled, provider: r.data.provider || 'deepseek', base_url: r.data.base_url || 'https://api.deepseek.com', model: r.data.model || 'deepseek-v4-pro', api_key: '', api_key_masked: r.data.api_key_masked || '', timeout_seconds: r.data.timeout_seconds || 180 };
-                }
-            } catch (e) { showToast(e.message, 'error'); }
-            this.aiSettingsLoading = false;
+                const r = await api('/ai/settings', { silent: true, timeout: 15000 });
+                if (this.disposed) return;
+                const d = r.data;
+                if (!r.success || typeof d?.enabled !== 'boolean' || !['provider', 'base_url', 'model'].every(key => typeof d[key] === 'string' && d[key]) || !Number.isFinite(d.timeout_seconds)) throw new Error(t('ai_settings.load_failed'));
+                this.ai = { ...d, api_key: '', api_key_masked: d.api_key_masked || '' };
+                this.aiSettingsLoaded = true;
+            } catch (e) { if (!this.disposed) this.aiSettingsError = e.message || t('ai_settings.load_failed'); }
+            finally { this.aiSettingsLoading = false; }
         },
         closeAISettings() {
             if (this.aiSettingsLoading || this.aiSaving || this.aiTesting) return;
@@ -337,15 +348,18 @@ function aiDiagnosticsPage() {
         },
         aiPayload() { return { enabled: this.ai.enabled, provider: this.ai.provider, base_url: this.ai.base_url, model: this.ai.model, api_key: this.ai.api_key, timeout_seconds: parseInt(this.ai.timeout_seconds) || 180 }; },
         async saveAI() {
+            if (this.disposed || !this.aiSettingsLoaded || this.aiSettingsLoading || this.aiSaving || this.aiTesting) return;
             this.aiSaving = true;
             try {
                 const r = await api('/ai/settings', { method: 'PUT', body: this.aiPayload() });
+                if (!r.success) throw new Error(r.message || t('ai_settings.save_failed'));
                 if (r.success && r.data) { this.ai.api_key = ''; this.ai.api_key_masked = r.data.api_key_masked || this.ai.api_key_masked; }
                 showToast(t('settings.ai_settings_saved'), 'success');
             } catch (e) { showToast(e.message, 'error'); }
             this.aiSaving = false;
         },
         async testAI() {
+            if (this.disposed || !this.aiSettingsLoaded || this.aiSettingsLoading || this.aiSaving || this.aiTesting) return;
             this.aiTesting = true;
             this.aiTestResult = '';
             try {

@@ -220,17 +220,30 @@ textarea.input-field { line-height: 1.7; }
 .software-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .software-health-block { min-width: 0; }
 .software-health-block + .software-health-block { border-left: 1px solid var(--panel-border); padding-left: 24px; }
-.software-extension-details { margin-top: 14px; border-top: 1px solid var(--panel-border); padding-top: 12px; }
-.software-extension-details summary { cursor: pointer; font-size: 12px; color: var(--panel-text); }
-.software-extension-details summary .badge-success, .software-extension-details summary .badge-warning, .software-extension-details summary .badge-info { margin-left: 6px; }
-.software-extension-details summary:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 4px; border-radius: 3px; }
-.software-extension-list { margin-top: 12px; max-height: 260px; overflow-y: auto; scrollbar-gutter: stable; }
-.software-extension-list:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 3px; }
+.software-check-status { margin: -4px 0 14px; color: var(--panel-muted); font-size: 11px; line-height: 1.7; }
+.software-check-status span + span { margin-left: 8px; }
+.software-runtime-list { display: flex; flex-direction: column; gap: 10px; }
+.software-runtime-row { min-width: 0; padding: 16px 18px; border: 1px solid var(--panel-border); border-radius: 8px; }
+.software-runtime-primary { background: var(--panel-surface-muted); }
+.software-runtime-header { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(240px, 1.4fr) auto; gap: 16px; align-items: center; }
+.software-runtime-identity { min-width: 0; }
+.software-runtime-identity > div { flex-wrap: wrap; }
+.software-runtime-health { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.software-runtime-action { grid-column: 3; justify-self: end; }
+.software-extension-details { margin-top: 12px; }
+.software-extension-details summary, .software-health-details summary { cursor: pointer; font-size: 12px; color: var(--panel-muted); }
+.software-extension-details summary:focus-visible, .software-health-details summary:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 4px; border-radius: 3px; }
+.software-extension-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 16px; }
+.software-extension-group { min-width: 0; }
+.software-extension-group h4 { font-size: 12px; font-weight: 600; margin: 0; }
+.software-extension-list { margin-top: 6px; }
 .software-extension-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; padding: 7px 0; border-bottom: 1px solid var(--panel-border); }
 .software-extension-item > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .software-extension-item > span:last-child { flex-shrink: 0; }
 .software-extension-item small { display: inline-block; margin-left: 7px; color: var(--panel-muted); font-size: 11px; }
-.software-dependency-list { margin-bottom: 14px; }
+.software-health-summary { font-size: 13px; line-height: 1.7; margin: 0 0 6px; }
+.software-health-details { margin: 12px 0 16px; }
+.software-dependency-list { margin-top: 8px; }
 .software-dependency-repair { margin-bottom: 14px; }
 .software-opcache-config { margin-top: 14px; font-size: 12px; }
 .software-opcache-config dl div, .software-cron-facts div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 6px 0; font-size: 12px; }
@@ -240,6 +253,11 @@ textarea.input-field { line-height: 1.7; }
 @media (max-width: 767px) {
     .software-health-grid { grid-template-columns: 1fr; gap: 20px; }
     .software-health-block + .software-health-block { border-left: 0; border-top: 1px solid var(--panel-border); padding: 20px 0 0; }
+    .software-runtime-header { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    .software-runtime-action { grid-column: 2; }
+    .software-runtime-health { grid-column: 1 / -1; grid-row: 2; }
+    .software-runtime-row { padding: 14px; }
+    .software-extension-groups { grid-template-columns: 1fr; gap: 20px; }
 }
 @media (min-width: 768px) {
     .access-field-label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }

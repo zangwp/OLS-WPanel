@@ -96,7 +96,7 @@ func TestBackupDependencyPlansAreScopedAndDeduplicated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"tar", "gzip", "mariadb-client"}; !reflect.DeepEqual(packages, want) {
+	if want := []string{"tar", "gzip", "mariadb-client-compat"}; !reflect.DeepEqual(packages, want) {
 		t.Fatalf("packages = %v, want %v", packages, want)
 	}
 	for _, dependency := range []BackupDependency{
@@ -115,6 +115,66 @@ func TestBackupDependencyReportRequiresActualMySQLCommands(t *testing.T) {
 	report := backupDependencyHealth(context.Background(), backupDependencySettings{}, nil, backupDependencyTestLookup("mysql", "mysqldump"))
 	if !reflect.DeepEqual(report.MissingRequired, []string{"mysql", "mysqldump"}) {
 		t.Fatalf("MariaDB aliases must not hide absent commands used by backups: %+v", report)
+	}
+	packages, err := backupDependencyInstallPackages(report)
+	if err != nil || !reflect.DeepEqual(packages, []string{"mariadb-client-compat"}) {
+		t.Fatalf("missing compatibility names require the alias package: %v, %v", packages, err)
+	}
+}
+
+func TestBackupDependencyCompatibilityPlanAllowsNewNativeClientButNeverUpgradesOne(t *testing.T) {
+	requested := []string{"mariadb-client-compat"}
+	installed := map[string]string{"base-files": "1.0", "mariadb-server": "1:11.8.9-1"}
+	simulation := backupDependencyTestSimulation([]string{"mariadb-client-compat", "mariadb-client", "mariadb-client-core"})
+	planned, err := parseBackupDependencyPackagePlan(simulation, installed, requested)
+	if err != nil || len(planned) != 3 {
+		t.Fatalf("new native dependencies rejected: %v, %v", planned, err)
+	}
+	installed["mariadb-client"] = "1:11.8.9-1"
+	if _, err := parseBackupDependencyPackagePlan(simulation, installed, requested); err == nil {
+		t.Fatal("compatibility package must not permit reinstalling or upgrading the existing client")
+	}
+	planned, err = parseBackupDependencyPackagePlan(backupDependencyTestSimulation(requested), installed, requested)
+	if err != nil || len(planned) != 1 || planned["mariadb-client-compat"] == "" {
+		t.Fatalf("compatibility links without a client upgrade rejected: %v, %v", planned, err)
+	}
+}
+
+func TestInstallBackupDependenciesRestoresCompatibilityNamesWithoutChangingClient(t *testing.T) {
+	backupDependencyInstallTestHooks(t)
+	backupDependencyLoadSettings = func(context.Context) (backupDependencySettings, error) {
+		return backupDependencySettings{}, nil
+	}
+	aliasesInstalled := false
+	backupDependencyLookPath = func(command string) (string, error) {
+		if !aliasesInstalled {
+			return backupDependencyTestLookup("mysql", "mysqldump")(command)
+		}
+		return backupDependencyTestLookup()(command)
+	}
+	backupDependencyReadCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
+		if command == "dpkg-query" {
+			return []byte("base-files\t1.0\tinstalled\nmariadb-server\t1:11.8.9-1\tinstalled\nmariadb-client\t1:11.8.9-1\tinstalled\n"), nil
+		}
+		if args[len(args)-1] != "mariadb-client-compat" {
+			t.Fatalf("wrong package simulated: %v", args)
+		}
+		return backupDependencyTestSimulation([]string{"mariadb-client-compat"}), nil
+	}
+	var calls [][]string
+	backupDependencyAPT = func(_ context.Context, args ...string) error {
+		calls = append(calls, append([]string(nil), args...))
+		if args[len(args)-1] == "mariadb-client-compat=1.2-1" {
+			aliasesInstalled = true
+		}
+		return nil
+	}
+	report, err := InstallBackupDependencies(context.Background())
+	if err != nil || !report.Ready || len(calls) != 2 {
+		t.Fatalf("compatibility commands were not restored: %+v, %v, calls=%v", report, err, calls)
+	}
+	if strings.Contains(strings.Join(calls[1], " "), "mariadb-client=") {
+		t.Fatal("an already installed native client was included in the install transaction")
 	}
 }
 

@@ -60,3 +60,9 @@ test('the rule count includes existing boolean rules without serializing numeric
 test('saving an empty SMTP port displays the effective default without leaving a false dirty state',async()=>{
  const {c}=setup(async(url,opt)=>ok(opt?.method?{}:data()));const m=c.smtpConfig();await m.fetch();m.cfg.smtp_port='';await m.save();assert.equal(m.cfg.smtp_port,'587');assert.equal(m.dirty(),false);
 });
+
+test('email channel is configured only after loading all required sender and recipient fields',async()=>{
+ const {c}=setup(async url=>ok(url==='/alert/log'?[]:data()));const m=c.alertManager();m.settings=data();assert.equal(m.smtpConfigured(),false);await m.fetchAll();assert.equal(m.smtpConfigured(),true);
+ for(const key of ['smtp_host','smtp_user','smtp_pass','admin_email']){const value=m.settings[key];for(const missing of ['', ' ', undefined]){m.settings[key]=missing;assert.equal(m.smtpConfigured(),false,key);}m.settings[key]=value;}
+ assert.equal(m.smtpConfigured(),true);
+});

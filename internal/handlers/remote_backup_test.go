@@ -26,6 +26,20 @@ func TestAutomaticBackupIdentityPaths(t *testing.T) {
 	}
 }
 
+func TestRemoteBackupConnectionRejectsUnreadableSettings(t *testing.T) {
+	setupRemoteBackupTestDB(t)
+	if _, err := database.GetDB().Exec("DROP TABLE remote_backup_settings"); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/settings/remote-backup/test", nil)
+	TestRemoteBackup(ctx)
+	if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "读取远程备份设置失败") {
+		t.Fatalf("unreadable settings became a connection attempt: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestGetRemoteBackupCreatesStableIdentityAndMasksSecrets(t *testing.T) {
 	setupRemoteBackupTestDB(t)
 	if _, err := database.GetDB().Exec(`UPDATE remote_backup_settings SET backup_type='s3', password='password-secret', s3_secret_key='s3-secret' WHERE id=1`); err != nil {

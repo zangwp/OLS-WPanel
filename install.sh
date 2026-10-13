@@ -2026,12 +2026,39 @@ MARIADBSOURCEEOF
 
 validate_lsphp_wordpress_modules() {
 	local modules_file="$INSTALL_WORKDIR/lsphp85-modules.txt"
+	local info_file="$INSTALL_WORKDIR/lsphp85-lsapi-info.txt"
+	local ini_path="/usr/local/lsws/lsphp85/etc/php/8.5/litespeed/php.ini"
+	local scan_dir="/usr/local/lsws/lsphp85/etc/php/8.5/mods-available"
 	local module=""
 
 	/usr/local/lsws/lsphp85/bin/php -m > "$modules_file"
 	for module in curl dom exif fileinfo gd imagick igbinary intl mbstring mysqli openssl pdo_mysql redis SimpleXML xml xmlreader xmlwriter zip "Zend OPcache"; do
 		grep -Fxq "$module" "$modules_file" || \
 			log_error "LSPHP 8.5 缺少 WordPress 所需模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
+	done
+	# Verify LSAPI's own default scan path, rather than masking it with a CLI override.
+	if ! env -i PATH=/usr/bin:/bin /usr/local/lsws/lsphp85/bin/lsphp -c "$ini_path" -i > "$info_file" 2>&1 ||
+		! grep -Eq '^Server API => LiteSpeed($| )' "$info_file" ||
+		! grep -Eq '^PHP Version => 8\.5\.' "$info_file" ||
+		! grep -Fxq "Loaded Configuration File => $ini_path" "$info_file" ||
+		{ ! grep -Fxq "Scan this dir for additional .ini files => $scan_dir" "$info_file" &&
+		  ! grep -Fxq "Scan this dir for additional .ini files => $scan_dir/" "$info_file"; } ||
+		! grep -Fxq 'PHP License' "$info_file" ||
+		grep -Eq 'PHP (Warning|Fatal error|Parse error):|Unable to load dynamic library|Startup Failed =>' "$info_file"; then
+		log_error "LSPHP 8.5 网站运行环境检查失败，请检查 PHP 配置与扩展加载路径"
+	fi
+	for module in json hash mysqli curl dom exif fileinfo igbinary imagick intl mbstring openssl xml zip redis "Zend OPcache"; do
+		grep -Fxq "$module" "$info_file" || \
+			log_error "LSPHP 8.5 LSAPI 未加载模块: ${module}（${PLATFORM_CODENAME}/${PLATFORM_ARCH}）"
+	done
+}
+
+validate_mariadb_backup_commands() {
+	local command=""
+	for command in mysql mysqldump; do
+		if ! command -v "$command" >/dev/null 2>&1 || ! "$command" --version >/dev/null 2>&1; then
+			log_error "MariaDB 备份命令不可用: $command，请检查 mariadb-client-compat 安装"
+		fi
 	done
 }
 
@@ -2565,6 +2592,8 @@ if $CHECK_MARIADB_PACKAGES_ONLY; then
     apt-get install -y --no-install-recommends ca-certificates curl wget gpg coreutils openssl systemd
     init_install_workdir
     configure_mariadb_repository
+    apt-get install -y --no-install-recommends mariadb-client mariadb-client-compat
+    validate_mariadb_backup_commands
     log_info "MariaDB ${MARIADB_SERIES} 软件包检查通过: ${PLATFORM_ID} ${PLATFORM_VERSION} ${PLATFORM_ARCH}"
     trap - EXIT
     exit 0
@@ -3094,6 +3123,7 @@ apt-get install -y --no-install-recommends \
     openlitespeed \
     mariadb-server \
     mariadb-client \
+    mariadb-client-compat \
     redis-server \
     redis-tools \
     fail2ban \
@@ -3119,6 +3149,7 @@ apt-get install -y --no-install-recommends \
     lsphp85-imagick
 
 validate_lsphp_wordpress_modules
+validate_mariadb_backup_commands
 
 # Minimal Debian images may omit all time-sync providers. Preserve an existing
 # provider rather than installing a competing daemon or replacing its policy.
@@ -3860,16 +3891,11 @@ LOCAL_HOST="$LOCAL_IP"
 [[ "$PUBLIC_HOST" == *:* ]] && PUBLIC_HOST="[$PUBLIC_HOST]"
 [[ "$LOCAL_HOST" == *:* ]] && LOCAL_HOST="[$LOCAL_HOST]"
 
-# Keep values on separate lines: URLs and generated passwords stay easy to copy
-# in narrow SSH terminals. Format credentials as data, never as printf escapes.
+# Keep each credential separate and print values as data, never printf escapes.
 log_install_stage ""
 print_install_summary() {
     local heading="" warning="" reset=""
     local rule="------------------------------------------------------------"
-    local columns="${COLUMNS:-80}" terminal_size=""
-    if [[ -t 1 ]] && terminal_size=$(stty size < /dev/tty 2>/dev/null); then
-        columns="${terminal_size##* }"
-    fi
     if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
         heading="$BOLD"
         warning="$YELLOW"
@@ -3878,37 +3904,50 @@ print_install_summary() {
 
     printf '\n%b%s%b\n' "$heading" "OLS WPanel / 安装完成" "$reset"
     printf '%s\n' "$rule"
-    printf '  版本  %s    状态  %s\n' "$INSTALLER_RELEASE_VERSION" "$STATUS"
+    printf '  版本  %s\n  状态  %s\n' "$INSTALLER_RELEASE_VERSION" "$STATUS"
     printf '  耗时  %s 秒（主安装脚本）\n' "$((SECONDS - INSTALL_STARTED_SECONDS))"
     printf '\n'
     if $REPAIR_MODE; then
         printf '%s\n' "更新 / 修复完成，登录地址与账号密码保持不变。" "输入 o 查看当前登录地址。"
     else
-        printf '%b%s%b\n' "$heading" "登录地址" "$reset"
+        printf '%b%s%b\n' "$heading" "面板登录地址" "$reset"
         if [[ "$PUBLIC_IP" != "<未知>" ]]; then
+            if [[ "$PUBLIC_IP" == *:* ]]; then
+                printf '%s\n' '  IPv6 / 外部地址'
+            else
+                printf '%s\n' '  IPv4 / 外部地址'
+            fi
             printf '  https://%s:%s/%s/\n' "$PUBLIC_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
             if [[ "$LOCAL_IP" != "<未知>" && "$LOCAL_IP" != "$PUBLIC_IP" ]]; then
-                printf '\n%s\n  https://%s:%s/%s/\n' "网卡地址（是否可达取决于网络配置）" "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
+                if [[ "$LOCAL_IP" == *:* ]]; then
+                    printf '\n%s\n' '  IPv6 / 网卡地址'
+                else
+                    printf '\n%s\n' '  IPv4 / 网卡地址'
+                fi
+                printf '  https://%s:%s/%s/\n' "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
             fi
-        else
+        elif [[ "$LOCAL_IP" != "<未知>" ]]; then
+            printf '%s\n' '  网卡地址'
             printf '  https://%s:%s/%s/\n' "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
+        else
+            printf '%s\n' '  暂未识别到地址；输入 o 查看面板信息。'
         fi
+        printf '\n%s\n' '地址是否可达取决于 VPS 网络与防火墙设置。'
         printf '\n%s\n' "$rule"
         printf '%b%s%b\n' "$heading" "登录凭据 / 仅显示一次，请立即保存" "$reset"
-        if [[ "$columns" =~ ^[0-9]{1,4}$ ]] && ((10#$columns >= 68)); then
-            printf '%s\n' '┌────────────────────┬──────────────────┬──────────────────────────┐'
-            printf '%s\n' '│ 登录步骤           │ 用户名           │ 密码                     │'
-            printf '%s\n' '├────────────────────┼──────────────────┼──────────────────────────┤'
-            printf '│ 1. 浏览器身份验证  │ %-16s │ %-24s │\n' "$BASIC_USER" "$BASIC_PASS"
-            printf '│ 2. 面板账户登录    │ %-16s │ %-24s │\n' "$WEB_USER" "$WEB_PASS"
-            printf '%s\n' '└────────────────────┴──────────────────┴──────────────────────────┘'
-        else
-            printf '\n%b%s%b\n' "$heading" "1. 浏览器身份验证" "$reset"
-            printf '  用户名\n    %s\n  密码\n    %s\n' "$BASIC_USER" "$BASIC_PASS"
-            printf '\n%b%s%b\n' "$heading" "2. 面板账户登录" "$reset"
-            printf '  用户名\n    %s\n  密码\n    %s\n' "$WEB_USER" "$WEB_PASS"
-        fi
-        printf '\n%s\n' "打开登录地址后，先完成浏览器身份验证，再登录面板。"
+        local value_width=20 value="" table_rule=""
+        for value in "$BASIC_USER" "$BASIC_PASS" "$WEB_USER" "$WEB_PASS"; do
+            if (( ${#value} > value_width )); then value_width=${#value}; fi
+        done
+        printf -v table_rule '%*s' "$((value_width + 2))" ''
+        table_rule=${table_rule// /─}
+        printf '\n%b%s%b\n' "$heading" "1. 浏览器身份验证" "$reset"
+        printf '┌────────┬%s┐\n│ 用户名 │ %-*s │\n├────────┼%s┤\n│ 密码   │ %-*s │\n└────────┴%s┘\n' \
+            "$table_rule" "$value_width" "$BASIC_USER" "$table_rule" "$value_width" "$BASIC_PASS" "$table_rule"
+        printf '\n%b%s%b\n' "$heading" "2. 面板账户登录" "$reset"
+        printf '┌────────┬%s┐\n│ 用户名 │ %-*s │\n├────────┼%s┤\n│ 密码   │ %-*s │\n└────────┴%s┘\n' \
+            "$table_rule" "$value_width" "$WEB_USER" "$table_rule" "$value_width" "$WEB_PASS" "$table_rule"
+        printf '\n%s\n' "先完成浏览器验证，再登录面板。"
     fi
     if ! $PORT_OK && ! $REPAIR_INACTIVE_HEALTH_VERIFIED; then
         printf '\n%b%s%b\n' "$warning" "端口未监听；输入 o status 检查。" "$reset"
