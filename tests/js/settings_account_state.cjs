@@ -17,5 +17,23 @@ vm.createContext(ctx); vm.runInContext(source, ctx);
   m.username = 'changed'; m.pw.old = 'current-test-password'; m.pw.code = 'recovery-test';
   fail = true; await m.saveWebAccount(); assert(!m.accountSaving); assert(!m.accountSaved); assert.equal(m.pw.old,'current-test-password');
   fail = false; await m.saveWebAccount(); assert(m.accountSaved); assert.equal(m.pw.old,''); assert.equal(m.pw.code,'');
+  for (const kind of ['basic', 'web']) {
+    const page = ctx.panelSettings(); page.accountLoaded = true;
+    page.basicAuthUser = 'gateway-new'; page.pw.basicCurrent = 'current-test-password';
+    page.username = 'renamed-admin'; page.originalUsername = 'admin'; page.pw.old = 'current-test-password';
+    let finish, count = 0;
+    ctx.api = () => { count++; return new Promise(resolve => { finish = resolve; }); };
+    const operation = kind === 'basic' ? page.saveBasicAuth() : page.saveWebAccount();
+    assert.equal(page.accountSaving, kind, 'Only the submitted form should display saving feedback.');
+    const html = fs.readFileSync(path.resolve(__dirname, '../../web/templates/settings.html'), 'utf8');
+    const labels = [...html.matchAll(/x-text="(accountSaving[^\"]+)"/g)].map(match => match[1]);
+    const values = labels.map(label => vm.runInNewContext('with (page) { '+label+' }',{page,t:ctx.t}));
+    assert.equal(values[kind === 'basic' ? 0 : 1], 'settings.saving');
+    assert.equal(values[kind === 'basic' ? 1 : 0], 'settings.save_' + (kind === 'basic' ? 'web_account' : 'basic_auth'));
+    await (kind === 'basic' ? page.saveWebAccount() : page.saveBasicAuth());
+    assert.equal(count, 1, 'Overlapping credential changes must remain blocked.');
+    finish({success:false,message:'retry'}); await operation;
+    assert.equal(page.accountSaving, '', 'Failure must release both forms for an explicit retry.');
+  }
   console.log('PASS settings credentials: malformed load blocks saves, step-up credentials sent, failed save retains input, success clears sensitive fields');
 })().catch(error => {console.error(error); process.exit(1);});

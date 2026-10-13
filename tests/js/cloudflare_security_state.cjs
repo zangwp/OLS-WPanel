@@ -19,7 +19,7 @@ const config = (overrides = {}) => ({
     ...overrides,
 });
 function setup(respond = async () => ok(config()), language = 'zh-CN') {
-    const calls = [], messages = locale(language), t = key => lookup(messages, key);
+    const calls = [], watchers = new Map(), messages = locale(language), t = key => lookup(messages, key);
     const context = {
         AbortController, currentLocale: () => language, t,
         api: async (url, options) => { calls.push({ url, options }); return respond(url, options); },
@@ -28,14 +28,146 @@ function setup(respond = async () => ok(config()), language = 'zh-CN') {
     vm.runInContext(source, context);
     const page = context.siteCloudflareSecurity();
     page.site = { id: 2, domain: 'shop.example.com' };
+    page.$watch = (key, callback) => watchers.set(key, callback);
     const evaluate = expression => vm.runInNewContext(expression, {
         t, ...Object.fromEntries(Object.entries(page).map(([key, value]) => [key, typeof value === 'function' ? value.bind(page) : value])),
     });
     const expressions = [...html.matchAll(/\bx-text="([^"]*)"/g)].map(match => match[1]);
     const ruleText = () => evaluate(expressions.find(value => value.startsWith('cfConfig.rule_id')));
     const standbyShown = () => evaluate(html.match(/x-show="([^"]*cloudflareStatus\(\)[^"]*)"/)[1]);
-    return { page, calls, t, context, ruleText, standbyShown };
+    const execute = statement => vm.runInNewContext('with (page) { ' + statement + ' }', { page, t });
+    const change = (key, value) => {
+        const parts = key.split('.'), last = parts.pop();
+        parts.reduce((target, part) => target[part], page)[last] = value;
+        watchers.get(key)?.(value);
+    };
+    return { page, calls, t, context, ruleText, standbyShown, evaluate, execute, change };
 }
+
+const markup = html.replace(/{{[\s\S]*?}}/g, 'translated');
+const inputTag = id => markup.match(new RegExp('<input\\b[^>]*\\bid="' + id + '"[^>]*>'))[0];
+const toggleTag = id => [...markup.matchAll(/<button\b[^>]*>/g)].map(match => match[0]).find(tag => tag.includes('aria-controls="' + id + '"'));
+const attribute = (tag, name) => tag.match(new RegExp('(?:^|\\s)' + name + '="([^"]*)"'))?.[1];
+const noticeTag = markup.match(/<p\b[^>]*class="site-cloudflare-notice"[^>]*>/)[0];
+const errorTag = markup.match(/<p\b[^>]*class="site-cloudflare-error"[^>]*x-show="cfError"[^>]*>/)[0];
+
+test('Account ID and Token inputs are masked by default and account visibility never changes the submitted ID', async () => {
+    const f = setup();
+    for (const id of ['cf-account-id', 'cf-api-token']) {
+        assert.equal(attribute(inputTag(id), 'type'), 'password', 'Credentials are masked even before Alpine initializes.');
+        assert.equal(f.evaluate(attribute(inputTag(id), ':type')), 'password');
+        assert.equal(attribute(toggleTag(id), 'type'), 'button', 'Showing a value must not submit the form.');
+    }
+    await f.page.loadCloudflare();
+    assert.equal(f.page.cfForm.account_id, account);
+    assert.equal(f.evaluate(attribute(inputTag('cf-account-id'), ':disabled')), true, 'An existing rule keeps account rebinding locked.');
+    assert.equal(attribute(toggleTag('cf-account-id'), ':disabled'), undefined, 'A locked account can still be inspected.');
+    f.execute(attribute(toggleTag('cf-account-id'), '@click'));
+    assert.equal(f.evaluate(attribute(inputTag('cf-account-id'), ':type')), 'text');
+    assert.equal(f.evaluate(attribute(toggleTag('cf-account-id'), ':aria-pressed')), true);
+    assert.equal(f.evaluate(attribute(toggleTag('cf-account-id'), 'x-text')), f.t('cloudflare_security.hide_value'));
+    f.execute(attribute(toggleTag('cf-account-id'), '@click'));
+    assert.equal(f.evaluate(attribute(inputTag('cf-account-id'), ':type')), 'password');
+    await f.page.saveCloudflare();
+    assert.equal(f.calls[1].options.body.account_id, account);
+    assert.equal(Object.hasOwn(f.calls[1].options.body, 'api_token'), false);
+});
+
+test('saved Token never populates the field or becomes readable; only a newly typed value can be shown', async () => {
+    const f = setup(async () => ok(config({ api_token: 'must-never-read-server-token', token_ciphertext: 'must-never-read-ciphertext' })));
+    await f.page.loadCloudflare();
+    assert.equal(f.page.cfToken, '');
+    assert.equal(f.page.cfConfig.api_token, undefined);
+    assert.equal(f.page.cfConfig.token_ciphertext, undefined);
+    assert.equal(f.evaluate(attribute(toggleTag('cf-api-token'), 'x-show')), false);
+    assert.equal(f.evaluate(attribute(inputTag('cf-api-token'), ':placeholder')), f.t('cloudflare_security.token_keep'));
+    f.page.cfToken = 'new-local-token-only-1234567890';
+    assert.equal(f.evaluate(attribute(toggleTag('cf-api-token'), 'x-show')), true);
+    f.execute(attribute(toggleTag('cf-api-token'), '@click'));
+    assert.equal(f.evaluate(attribute(inputTag('cf-api-token'), ':type')), 'text');
+    assert.equal(f.page.cfToken, 'new-local-token-only-1234567890');
+    await f.page.saveCloudflare();
+    assert.equal(f.calls[1].options.body.api_token, 'new-local-token-only-1234567890');
+    assert.equal(f.calls[1].options.body.account_id, account);
+    assert.equal(f.page.cfToken, '');
+    assert.equal(f.evaluate(attribute(toggleTag('cf-api-token'), 'x-show')), false);
+    assert.equal(f.evaluate(attribute(inputTag('cf-api-token'), ':type')), 'password');
+    assert.equal(f.page.cfNotice, f.t('cloudflare_security.saved'));
+    assert.equal(f.page.cfNoticeType, 'success', 'Saved configuration is distinct from claiming a completed sync.');
+    await f.page.testCloudflare();
+    assert.equal(Object.hasOwn(f.calls[2].options.body, 'api_token'), false, 'Blank field asks the backend to use its saved Token.');
+});
+
+test('clearing a displayed Token resets concealment before another Token is entered', () => {
+    const f = setup();
+    f.page.detailTab = 'overview'; f.page.init();
+    f.change('cfToken', 'local-token-1234567890');
+    f.execute(attribute(toggleTag('cf-api-token'), '@click'));
+    assert.equal(f.evaluate(attribute(inputTag('cf-api-token'), ':type')), 'text');
+    f.change('cfToken', '');
+    assert.equal(f.evaluate(attribute(toggleTag('cf-api-token'), 'x-show')), false);
+    f.change('cfToken', 'replacement-token-1234567890');
+    assert.equal(f.evaluate(attribute(inputTag('cf-api-token'), ':type')), 'password');
+});
+
+test('tab changes, resets, website changes, reads and destruction conceal values without changing binding data', async () => {
+    const f = setup();
+    f.page.detailTab = 'overview'; f.page.init();
+    await f.page.loadCloudflare();
+    f.page.cfToken = 'local-unsaved-token-1234567890';
+    f.page.cfShowAccount = true; f.page.cfShowToken = true;
+    f.change('detailTab', 'overview');
+    assert.equal(f.page.cfShowAccount, false); assert.equal(f.page.cfShowToken, false);
+    assert.equal(f.page.cfForm.account_id, account);
+    assert.equal(f.page.cfToken, 'local-unsaved-token-1234567890', 'Leaving a tab conceals the unsaved draft without silently submitting it.');
+    f.change('detailTab', 'security');
+    assert.equal(f.page.cfShowAccount, false); assert.equal(f.page.cfShowToken, false);
+    f.page.cfShowAccount = true; f.page.cfShowToken = true;
+    await f.page.loadCloudflare();
+    assert.equal(f.page.cfShowAccount, false); assert.equal(f.page.cfShowToken, false);
+    f.page.cfShowAccount = true; f.page.cfShowToken = true;
+    f.page.resetCloudflare();
+    assert.equal(f.page.cfShowAccount, false); assert.equal(f.page.cfShowToken, false); assert.equal(f.page.cfToken, '');
+    await f.page.loadCloudflare();
+    f.page.cfShowAccount = true; f.page.cfShowToken = true; f.page.cfToken = 'another-draft';
+    f.page.detailTab = 'overview'; f.change('site.id', 3);
+    assert.equal(f.page.cfShowAccount, false); assert.equal(f.page.cfShowToken, false); assert.equal(f.page.cfToken, '');
+    assert.equal(f.page.cfForm.account_id, ''); assert.equal(f.page.cfLoaded, false);
+    f.page.cfShowAccount = true; f.page.cfShowToken = true; f.page.cfToken = 'discard-on-destroy';
+    f.page.destroy();
+    assert.equal(f.page.cfShowAccount, false); assert.equal(f.page.cfShowToken, false); assert.equal(f.page.cfToken, '');
+});
+
+test('sync notices distinguish success, pending and actionable warnings, and failures use the error panel', async () => {
+    const cases = [
+        [config(), 'success', 'status_ready'],
+        [config({ active_ip_count: 2 }), 'success', 'status_synced'],
+        [config({ sync_status: 'pending' }), 'info', 'status_pending'],
+        [config({ rule_id: '', cleanup_required: false }), 'warning', 'status_rule_missing'],
+        [config({ enabled: false, sync_status: 'removal_required' }), 'warning', 'status_removal_required'],
+        [config({ enabled: false, rule_id: '', cleanup_required: false, sync_status: 'disabled' }), 'success', 'rule_removed'],
+    ];
+    for (const [returned, kind, key] of cases) {
+        const f = setup(async (_url, options) => ok(options.method === 'GET' ? config() : returned));
+        await f.page.loadCloudflare();
+        assert.equal(await f.page.syncCloudflare(), true);
+        assert.equal(f.page.cfNotice, f.t('cloudflare_security.' + key));
+        assert.equal(f.evaluate(attribute(noticeTag, ':class')), 'is-' + kind);
+        assert.equal(Boolean(f.evaluate(attribute(noticeTag, 'x-show'))), true);
+        assert.equal(Boolean(f.evaluate(attribute(errorTag, 'x-show'))), false);
+    }
+    const f = setup(async (_url, options) => options.method === 'GET' ? ok(config()) : { success: false, message: 'denied' });
+    await f.page.loadCloudflare();
+    f.page.cfNotice = 'old success'; f.page.cfNoticeType = 'success';
+    assert.equal(await f.page.syncCloudflare(), false);
+    assert.equal(Boolean(f.evaluate(attribute(noticeTag, 'x-show'))), false);
+    assert.equal(f.evaluate(attribute(errorTag, 'x-show')), 'denied');
+    const css = fs.readFileSync(path.join(__dirname, '../../web/css/site-security.css'), 'utf8');
+    for (const [selector, token] of [['.site-cloudflare-notice', 'accent'], ['.site-cloudflare-notice.is-success', 'success'], ['.site-cloudflare-notice.is-warning', 'warning'], ['.site-cloudflare-error', 'danger']]) {
+        const block = css.match(new RegExp('(?:^|\\n)' + selector.replaceAll('.', '\\.') + ' \\{([^}]+)\\}'))[1];
+        assert(block.includes('color: var(--panel-' + token + ')'));
+    }
+});
 
 test('unloaded Cloudflare state does not claim a rule or zero bans', () => {
     const { page, t, ruleText, standbyShown } = setup();
@@ -192,6 +324,7 @@ test('a read-only connection test changes test information, not rule ownership o
     assert.equal(page.cloudflareActiveIPCount(), t('cloudflare_security.active_ip_count_unknown'));
     assert.equal(standbyShown(), false);
     assert.equal(page.cfNotice, t('cloudflare_security.test_success'));
+    assert.equal(page.cfNoticeType, 'success', 'A successful read-only connection test has its own green result.');
     assert.equal(page.cfTestInfo.zone_id, zone);
     assert.equal(calls[1].url, '/websites/2/cloudflare-security/test');
     assert.equal(calls[1].options.method, 'POST');

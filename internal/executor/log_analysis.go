@@ -49,7 +49,7 @@ var nativeAccessLogPeerPattern = regexp.MustCompile(`(?:^|\s)peer=(\S+) ols_secu
 var bracketTimePattern = regexp.MustCompile(`^\[([^]]+)\]`)
 var webTimePattern = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
 var logAnalysisIPv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-var logAnalysisSecretPattern = regexp.MustCompile(`(?i)(password|passwd|token|api[_-]?key|authorization|cookie)([=: ]+)([^\s&"']+)`)
+var logAnalysisSecretPattern = regexp.MustCompile(`(?i)(password|passwd|token|api[_-]?key|authorization|cookie)(["']?[=: ]+["']?)(?:(?:Bearer|Basic)\s+)?([^\s&"']+)`)
 var logAnalysisWebRootPattern = regexp.MustCompile(`/www/wwwroot/[^/\s]+`)
 
 type logAnalysisAccumulator struct {

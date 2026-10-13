@@ -67,10 +67,16 @@
                     <div>
                         <label class="label">{{t .Lang "ai_diagnostics.issue_type"}}</label>
                         <select x-model="symptom" class="input-field text-sm">
+                            <option value="custom">{{t .Lang "ai_diagnostics.symptom_custom"}}</option>
                             <template x-for="item in symptoms" :key="item.value">
                                 <option :value="item.value" x-text="item.label"></option>
                             </template>
                         </select>
+                    </div>
+                    <div>
+                        <label for="ai-question" class="label">{{t .Lang "ai_diagnostics.question_label"}}</label>
+                        <textarea id="ai-question" x-model="question" rows="4" class="input-field text-sm" aria-describedby="ai-question-help" :required="symptom === 'custom'" placeholder="{{t .Lang "ai_diagnostics.question_placeholder"}}"></textarea>
+                        <p id="ai-question-help" class="text-xs text-gray-500 mt-1">{{t .Lang "ai_diagnostics.question_help"}}</p>
                     </div>
                     <button @click="runDiagnosis()" :disabled="diagnosing || !selectedSiteID" class="btn-primary w-full text-sm" x-text="diagnosing ? t('ai_diagnostics.diagnosing', { seconds: elapsedSeconds }) : t('ai_diagnostics.start_diagnosis_button')"></button>
                     <div x-show="diagnosing" class="p-3 rounded text-xs text-gray-300" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
@@ -158,6 +164,10 @@
                 </div>
 
                 <div x-show="report || rawText" class="space-y-5">
+                    <div x-show="sessionDetail?.question" class="p-4 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
+                        <p class="text-sm font-semibold">{{t .Lang "ai_diagnostics.original_question"}}</p>
+                        <p class="text-sm text-gray-400 mt-2 whitespace-pre-wrap" x-text="sessionDetail?.question"></p>
+                    </div>
                     <div x-show="sessionDetail?.context_type" class="p-4 rounded border border-blue-900/60 bg-blue-950/20">
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <div><p class="text-sm text-blue-200">{{t .Lang "ai_diagnostics.linked_context"}}</p><p class="text-xs text-gray-400 mt-1" x-text="contextDescription()"></p></div>
@@ -285,6 +295,7 @@ function aiDiagnosticsPage() {
         },
         selectedSiteID: '',
         symptom: 'site_500',
+        question: '',
         symptoms: [
             { value: 'site_500', label: t('ai_diagnostics.symptom_site_500') },
             { value: 'wp_admin_down', label: t('ai_diagnostics.symptom_wp_admin_down') },
@@ -374,7 +385,8 @@ function aiDiagnosticsPage() {
             const params = new URLSearchParams(window.location.search);
             this.selectedSiteID = params.get('site_id') || '';
             const requestedSessionID = params.get('session_id') || '';
-            this.symptom = params.get('symptom') || 'site_500';
+            const requestedSymptom = params.get('symptom');
+            this.symptom = ['custom', 'log_analysis'].includes(requestedSymptom) || this.symptoms.some(item => item.value === requestedSymptom) ? requestedSymptom : 'site_500';
             await this.fetchWebsites();
             if (this.selectedSiteID && !this.selectedSite()) {
                 this.selectedSiteID = '';
@@ -412,11 +424,13 @@ function aiDiagnosticsPage() {
             this.toolEvents = [];
             this.messages = [];
             this.followupText = '';
+            this.question = '';
             this.diagnosisCollapsed = false;
             this.error = '';
             await this.fetchSessions();
         },
         symptomLabel(value) {
+            if (value === 'custom') return t('ai_diagnostics.symptom_custom');
             if (value === 'log_analysis') return t('ai_diagnostics.symptom_log_analysis');
             const found = this.symptoms.find(item => item.value === value);
             return found ? found.label : value;
@@ -467,6 +481,15 @@ function aiDiagnosticsPage() {
         },
         async runDiagnosis() {
             if (!this.selectedSiteID || this.diagnosing || this.disposed) return;
+            const question = this.question.trim();
+            if (this.symptom === 'custom' && !question) {
+                this.error = t('ai_diagnostics.question_required');
+                return;
+            }
+            if ([...question].length > 2000) {
+                this.error = t('ai_diagnostics.question_too_long');
+                return;
+            }
             const siteID = this.selectedSiteID, version = this.siteVersion;
             const requestID = ++this.diagnosisRequestID;
             const current = () => !this.disposed && version === this.siteVersion
@@ -486,7 +509,7 @@ function aiDiagnosticsPage() {
             try {
                 const r = await api('/websites/' + siteID + '/ai/diagnose', {
                     method: 'POST',
-                    body: { symptom: this.symptom },
+                    body: { symptom: this.symptom, ...(question ? { question } : {}) },
                     timeout: 210000
                 });
                 if (!current()) return;

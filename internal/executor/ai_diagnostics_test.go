@@ -914,6 +914,7 @@ func TestBuildAIFollowupPromptIncludesConversationAndCurrentContext(t *testing.T
 		ID:        10,
 		SiteID:    1,
 		Symptom:   models.AIDiagnosisSite500,
+		Question:  "管理员描述原问题 password=original-secret",
 		Status:    models.AISessionCompleted,
 		RiskLevel: "high",
 		Summary:   "之前发现 500",
@@ -926,7 +927,7 @@ func TestBuildAIFollowupPromptIncludesConversationAndCurrentContext(t *testing.T
 		{Role: "user", Content: "我已经开启了调试模式", CreatedAt: time.Now()},
 	}
 
-	systemPrompt, userPrompt, err := BuildAIFollowupPrompt(site, session, messages, "你再次检查")
+	systemPrompt, userPrompt, err := BuildAIFollowupPrompt(site, session, messages, "你再次检查 Authorization: Bearer followup-secret")
 	if err != nil {
 		t.Fatalf("BuildAIFollowupPrompt() error = %v", err)
 	}
@@ -944,6 +945,100 @@ func TestBuildAIFollowupPromptIncludesConversationAndCurrentContext(t *testing.T
 		if !strings.Contains(combined, want) {
 			t.Fatalf("followup prompt missing %q:\n%s", want, combined)
 		}
+	}
+	if strings.Count(userPrompt, "管理员描述原问题") != 1 || strings.Contains(userPrompt, "original-secret") || strings.Contains(userPrompt, "followup-secret") {
+		t.Fatalf("followup duplicated question or leaked secrets: %s", userPrompt)
+	}
+}
+
+func TestCustomQuestionRetainsFocusWithinPromptBudget(t *testing.T) {
+	question := "插件更新后购物车无法结账，今天上午开始"
+	ctx := aiDiagnosticContext{
+		DiagnosisType:    models.AIDiagnosisCustom,
+		DiagnosisLabel:   aiDiagnosisLabel(models.AIDiagnosisCustom),
+		Question:         question,
+		DiagnosisProfile: aiDiagnosisProfile(models.AIDiagnosisCustom),
+		PanelContext:     aiPanelContext(),
+		Logs:             map[string]aiLogSnippet{"php_error": {Source: "php-error.log", Lines: []string{strings.Repeat("large log ", 2000)}}},
+		Constraints:      map[string]interface{}{"no_write_actions": true, "no_shell": true},
+		OutputSchema:     aiOutputSchema(),
+	}
+	prompt, err := aiPromptWithinBudget(&ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prompt) > aiMaxPromptChars || strings.Count(prompt, question) != 1 {
+		t.Fatalf("question lost or budget exceeded: length=%d question count=%d", len(prompt), strings.Count(prompt, question))
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal([]byte(prompt), &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["question"] != question || value["diagnosis_profile"].(map[string]interface{})["profile"] != "custom" {
+		t.Fatalf("context=%v", value)
+	}
+	if !strings.Contains(aiSystemPrompt(), "不得改变只读限制") {
+		t.Fatal("question can override diagnostic boundary")
+	}
+}
+
+func TestBuildCustomDiagnosticQuestionUsesReadOnlySiteContext(t *testing.T) {
+	stubAIHTTPProbe(t, 200, 302)
+	setupAIPerformanceTestDB(t)
+	oldProcess, oldConfig := aiRunProcessList, config.AppConfig
+	aiRunProcessList = func(context.Context) ([]byte, error) {
+		return []byte("USER %CPU %MEM COMMAND\nwp_demo 2.0 1.0 lsphp85\n"), nil
+	}
+	config.AppConfig = &config.Config{}
+	t.Cleanup(func() { aiRunProcessList, config.AppConfig = oldProcess, oldConfig })
+	site := &models.Website{ID: 1, Domain: "demo.com", SiteType: "wordpress", SystemUser: "wp_demo", WebRoot: t.TempDir(), LogDir: t.TempDir()}
+	system, prompt, err := BuildAIDiagnosticPromptWithQuestionContext(context.Background(), site, models.AIDiagnosisCustom, "结账变慢 token=private-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal([]byte(prompt), &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["question"] != "结账变慢 token=[redacted]" || value["diagnosis_type"] != "custom" || value["performance_summary"] == nil {
+		t.Fatalf("custom context=%v", value)
+	}
+	if strings.Contains(prompt, "private-value") || strings.Count(prompt, "结账变慢") != 1 || !strings.Contains(system, "不得改变只读限制") {
+		t.Fatalf("question leaked, duplicated or lost read-only boundary: %s", prompt)
+	}
+}
+
+func TestDiagnosticQuestionRedactsExistingSecretForms(t *testing.T) {
+	for _, value := range []string{
+		`token=private-value`, `password=private-value`, `api_key=private-value`,
+		`{"api_key":"private-value"}`, `'password': 'private-value'`,
+		`Authorization: Bearer private-value`, `Authorization: Basic private-value`,
+	} {
+		got := SanitizeAIDiagnosticQuestion("后台失败 " + value)
+		if strings.Contains(got, "private-value") || !strings.Contains(got, "[redacted]") || !strings.Contains(got, "后台失败") {
+			t.Fatalf("question redaction failed: %q => %q", value, got)
+		}
+	}
+}
+
+func TestDiagnosticQuestionBudgetHandlesLongUnicodeAndRejectsOverflow(t *testing.T) {
+	for _, char := range []string{"问", "😀"} {
+		question := strings.Repeat(char, models.AIDiagnosisQuestionMaxChars)
+		ctx := aiDiagnosticContext{DiagnosisType: models.AIDiagnosisCustom, Question: question,
+			DiagnosisProfile: aiDiagnosisProfile(models.AIDiagnosisCustom), PanelContext: aiPanelContext(),
+			Logs:         map[string]aiLogSnippet{"php_error": {Lines: []string{strings.Repeat("log ", 5000)}}},
+			OutputSchema: aiOutputSchema()}
+		prompt, err := aiPromptWithinBudget(&ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(prompt) > aiMaxPromptChars || !strings.Contains(prompt, question) {
+			t.Fatalf("Unicode question was dropped or exceeded budget: %d", len(prompt))
+		}
+	}
+	ctx := aiDiagnosticContext{Question: "原问题", SiteSummary: map[string]interface{}{"unbounded_value": strings.Repeat("x", aiMaxPromptChars)}}
+	if prompt, err := aiPromptWithinBudget(&ctx); err == nil || prompt != "" {
+		t.Fatal("oversized question context was allowed to leave the collector")
 	}
 }
 
