@@ -45,6 +45,8 @@ test('repeated creation during SSL preflight sends one immutable site request', 
     resolve({success: true, data: {warnings: [], hard_warnings: []}}); await creating;
     assert.equal(calls.length, 2);
     assert.equal(calls[1].options.body.domain, 'original.example');
+    assert.equal(calls[1].options.body.site_type, 'wordpress');
+    assert.equal(calls[1].options.body.document_root_subdir, undefined);
     assert.equal(page.success, 'website.created: original.example');
     assert.equal(page.loading, false);
 });
