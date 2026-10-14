@@ -2983,6 +2983,7 @@
     "basic_auth_username_required": "请输入 Basic Auth 用户名",
     "web_username_required": "请输入 Web 登录用户名",
     "current_password_required_for_account": "修改用户名或密码前请输入当前密码",
+    "account_change_in_progress": "已有账户设置正在保存，请完成后再操作。",
     "account_saved_logout": "已保存，正在退出登录...",
     "account_saved_please_relogin": "账户设置已保存，即将退出登录",
     "confirm_delete_backup": "确认删除该数据库备份？",

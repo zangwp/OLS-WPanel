@@ -731,6 +731,7 @@ var i18nKeys = []string{
 	"settings.basic_auth_saved",
 	"settings.basic_auth_username_required",
 	"settings.current_password_required_for_account",
+	"settings.account_change_in_progress",
 	"settings.save_basic_auth",
 	"settings.save_web_account",
 	"settings.section_updates",
