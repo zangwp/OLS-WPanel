@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.8 — 2026-10-14
+
+- Shows a dotted placeholder for saved Cloudflare tokens while keeping the input empty and retaining the original token on blank saves.
+- Makes Cloudflare sync details easier to read with semantic status badges, larger values and a separate hostname row.
+- Moves Rule ID and Zone ID into a closed technical disclosure, masking them until explicitly revealed and concealing them again on close, navigation and reload.
+
 ## v2.0.7 — 2026-10-14
 
 - Limits saving and disabled feedback to the credential form being submitted. Keeps the other account button unchanged and explains attempts to save a second account change while the first is pending.

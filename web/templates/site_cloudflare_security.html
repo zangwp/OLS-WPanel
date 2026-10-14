@@ -17,7 +17,7 @@
             <label class="site-cloudflare-checkbox"><input type="checkbox" x-model="cfForm.enabled"><span>{{t .Lang "cloudflare_security.enable"}}</span></label>
             <div class="site-cloudflare-fields">
                 <div class="site-cloudflare-field"><label for="cf-account-id">Account ID</label><div class="site-cloudflare-secret"><input id="cf-account-id" type="password" :type="cfShowAccount ? 'text' : 'password'" x-model="cfForm.account_id" :disabled="cloudflareBindingLocked()" class="input-field font-mono" maxlength="32" pattern="[a-fA-F0-9]{32}" autocomplete="off" spellcheck="false" placeholder="{{t .Lang "cloudflare_security.id_placeholder"}}"><button type="button" class="btn-secondary" @click="cfShowAccount = !cfShowAccount" :aria-pressed="cfShowAccount" aria-controls="cf-account-id" :aria-label="t(cfShowAccount ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value') + ' Account ID'" x-text="t(cfShowAccount ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value')"></button></div><small>{{t .Lang "cloudflare_security.account_help"}}</small></div>
-                <div class="site-cloudflare-field site-cloudflare-token"><label for="cf-api-token">API Token <small class="site-cloudflare-token-state" x-text="cfConfig.token_configured ? t('cloudflare_security.token_saved') : t('cloudflare_security.token_missing')"></small></label><div class="site-cloudflare-secret"><input id="cf-api-token" type="password" :type="cfShowToken ? 'text' : 'password'" x-model="cfToken" class="input-field" autocomplete="new-password" spellcheck="false" :placeholder="cfConfig.token_configured ? t('cloudflare_security.token_keep') : t('cloudflare_security.token_placeholder')"><button type="button" class="btn-secondary" x-show="!!cfToken" @click="cfShowToken = !cfShowToken" :aria-pressed="cfShowToken" aria-controls="cf-api-token" :aria-label="t(cfShowToken ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value') + ' API Token'" x-text="t(cfShowToken ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value')"></button></div><small>{{t .Lang "cloudflare_security.token_help"}}</small></div>
+                <div class="site-cloudflare-field site-cloudflare-token"><label for="cf-api-token">API Token <small class="site-cloudflare-token-state" x-text="cfConfig.token_configured ? t('cloudflare_security.token_saved') : t('cloudflare_security.token_missing')"></small></label><div class="site-cloudflare-secret"><input id="cf-api-token" type="password" :type="cfShowToken ? 'text' : 'password'" x-model="cfToken" class="input-field" autocomplete="new-password" spellcheck="false" aria-describedby="cf-token-help" :placeholder="cfConfig.token_configured ? '••••••••••••' : t('cloudflare_security.token_placeholder')"><button type="button" class="btn-secondary" x-show="!!cfToken" @click="cfShowToken = !cfShowToken" :aria-pressed="cfShowToken" aria-controls="cf-api-token" :aria-label="t(cfShowToken ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value') + ' API Token'" x-text="t(cfShowToken ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value')"></button></div><small id="cf-token-help">{{t .Lang "cloudflare_security.token_help"}}</small></div>
             </div>
             <p class="site-cloudflare-muted" x-show="cloudflareBindingLocked()">{{t .Lang "cloudflare_security.rebind_help"}}</p>
             <div class="site-cloudflare-actions">
@@ -29,12 +29,13 @@
     </form>
     <div class="site-cloudflare-sync">
         <dl class="site-cloudflare-status">
-            <div><dt>{{t .Lang "cloudflare_security.detected_zone"}}</dt><dd x-text="cloudflareZoneName()"></dd></div>
-            <div><dt>{{t .Lang "cloudflare_security.status"}}</dt><dd x-text="cloudflareStatusLabel()"></dd></div>
-            <div><dt>{{t .Lang "cloudflare_security.last_sync"}}</dt><dd x-text="cloudflareSyncTime()"></dd></div>
-            <div><dt>{{t .Lang "cloudflare_security.active_ip_count"}}</dt><dd x-text="cloudflareActiveIPCount()"></dd></div>
-            <div class="site-cloudflare-coverage"><dt>Rule ID</dt><dd class="font-mono" x-text="cfConfig.rule_id || t('cloudflare_security.rule_pending')"></dd></div>
-            <div class="site-cloudflare-coverage"><dt>{{t .Lang "cloudflare_security.covered_hostnames"}}</dt><dd x-text="cfConfig.covered_hostnames?.length ? cfConfig.covered_hostnames.join(', ') : t('cloudflare_security.coverage_pending')"></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.detected_zone"}}</dt><dd class="site-cloudflare-zone" x-text="cloudflareZoneName()"></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.status"}}</dt><dd><span class="site-cloudflare-status-badge" :class="'is-' + cloudflareStatusTone()" x-text="cloudflareStatusLabel()"></span></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.last_sync"}}</dt><dd class="site-cloudflare-time" x-text="cloudflareSyncTime()"></dd></div>
+            <div><dt>{{t .Lang "cloudflare_security.active_ip_count"}}</dt><dd class="site-cloudflare-count" x-text="cloudflareActiveIPCount()"></dd></div>
+        </dl>
+        <dl class="site-cloudflare-coverage">
+            <div><dt>{{t .Lang "cloudflare_security.covered_hostnames"}}</dt><dd x-text="cfConfig.covered_hostnames?.length ? cfConfig.covered_hostnames.join(', ') : t('cloudflare_security.coverage_pending')"></dd></div>
         </dl>
         <p class="site-cloudflare-muted" x-show="cloudflareStatus() === 'ready'" x-cloak>{{t .Lang "cloudflare_security.standby_help"}}</p>
         <p class="site-cloudflare-muted" x-show="cfTestInfo">{{t .Lang "cloudflare_security.zone_test_result"}}</p>
@@ -46,9 +47,15 @@
         </div>
         <p class="site-cloudflare-muted">{{t .Lang "cloudflare_security.sync_help"}}</p>
     </div>
-    <details class="site-cloudflare-technical-info">
+    <details class="site-cloudflare-technical-info" @toggle="if (!$el.open) cfShowTechnical = false">
         <summary>{{t .Lang "cloudflare_security.technical_info"}}</summary>
-        <dl><div><dt>Zone ID</dt><dd class="font-mono" x-text="cfTestInfo?.zone_id || cfConfig.zone_id || t('cloudflare_security.zone_pending')"></dd></div></dl>
+        <div class="site-cloudflare-technical-values">
+            <dl id="cf-technical-ids">
+                <div><dt>Rule ID</dt><dd class="font-mono" x-text="cloudflareTechnicalValue('rule_id')"></dd></div>
+                <div><dt>Zone ID</dt><dd class="font-mono" x-text="cloudflareTechnicalValue('zone_id')"></dd></div>
+            </dl>
+            <button type="button" class="btn-secondary" @click="cfShowTechnical = !cfShowTechnical" :disabled="!(cfConfig.rule_id || cfTestInfo?.zone_id || cfConfig.zone_id)" :aria-pressed="cfShowTechnical" aria-controls="cf-technical-ids" :aria-label="t(cfShowTechnical ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value') + ' Rule ID / Zone ID'" x-text="t(cfShowTechnical ? 'cloudflare_security.hide_value' : 'cloudflare_security.show_value')"></button>
+        </div>
     </details>
     <details class="site-cloudflare-help">
         <summary>{{t .Lang "cloudflare_security.setup_help"}}</summary>
@@ -82,19 +89,19 @@
 function siteCloudflareSecurity() {
     return {
         cfConfig: {}, cfForm: {enabled: false, account_id: ''}, cfToken: '', cfTestInfo: null,
-        cfLoaded: false, cfBusy: '', cfError: '', cfNotice: '', cfNoticeType: 'info', cfShowAccount: false, cfShowToken: false, cfGeneration: 0, cfController: null, cfDestroyed: false,
+        cfLoaded: false, cfBusy: '', cfError: '', cfNotice: '', cfNoticeType: 'info', cfShowAccount: false, cfShowToken: false, cfShowTechnical: false, cfGeneration: 0, cfController: null, cfDestroyed: false,
         init() {
-            this.$watch('detailTab', tab => { if (tab !== 'security') { this.cfShowAccount = false; this.cfShowToken = false; } if (tab === 'security' && !this.cfLoaded && !this.cfBusy) this.loadCloudflare(); });
+            this.$watch('detailTab', tab => { if (tab !== 'security') { this.cfShowAccount = false; this.cfShowToken = false; this.cfShowTechnical = false; } if (tab === 'security' && !this.cfLoaded && !this.cfBusy) this.loadCloudflare(); });
             this.$watch('site.id', () => { this.resetCloudflare(); if (this.detailTab === 'security') this.loadCloudflare(); });
             this.$watch('cfForm.account_id', () => { this.cfTestInfo = null; });
             this.$watch('cfToken', value => { this.cfTestInfo = null; if (!value) this.cfShowToken = false; });
             if (this.detailTab === 'security') this.loadCloudflare();
         },
-        destroy() { this.cfDestroyed = true; this.cfGeneration++; this.cfController?.abort(); this.cfToken = ''; this.cfShowAccount = false; this.cfShowToken = false; },
+        destroy() { this.cfDestroyed = true; this.cfGeneration++; this.cfController?.abort(); this.cfToken = ''; this.cfShowAccount = false; this.cfShowToken = false; this.cfShowTechnical = false; },
         resetCloudflare() {
             this.cfGeneration++; this.cfController?.abort(); this.cfController = null;
             this.cfConfig = {}; this.cfForm = {enabled: false, account_id: ''}; this.cfToken = ''; this.cfTestInfo = null;
-            this.cfLoaded = false; this.cfBusy = ''; this.cfError = ''; this.cfNotice = ''; this.cfNoticeType = 'info'; this.cfShowAccount = false; this.cfShowToken = false;
+            this.cfLoaded = false; this.cfBusy = ''; this.cfError = ''; this.cfNotice = ''; this.cfNoticeType = 'info'; this.cfShowAccount = false; this.cfShowToken = false; this.cfShowTechnical = false;
         },
         cloudflareBody() {
             const body = {enabled: !!this.cfForm.enabled, account_id: this.cfForm.account_id.trim()};
@@ -119,6 +126,10 @@ function siteCloudflareSecurity() {
         cloudflareZoneName() { return this.cfTestInfo?.zone_name || this.cfConfig.zone_name || ((this.cfTestInfo?.zone_id || this.cfConfig.zone_id) ? t('cloudflare_security.zone_name_pending') : t('cloudflare_security.zone_pending')); },
         cloudflareWebsiteHostnames() { return this.cfConfig.website_hostnames?.length ? this.cfConfig.website_hostnames : (this.site?.domain ? [this.site.domain] : []); },
         cloudflareActiveIPCount() { return this.cfLoaded && this.cfConfig.active_ip_count_known ? String(this.cfConfig.active_ip_count) : t('cloudflare_security.active_ip_count_unknown'); },
+        cloudflareTechnicalValue(kind) {
+            const value = kind === 'rule_id' ? this.cfConfig.rule_id : this.cfTestInfo?.zone_id || this.cfConfig.zone_id;
+            return value ? (this.cfShowTechnical ? value : '••••••••••••') : t(kind === 'rule_id' ? 'cloudflare_security.rule_pending' : 'cloudflare_security.zone_pending');
+        },
         cloudflareStatus() {
             if (!this.cfLoaded) return 'unknown';
             if (this.cfError || this.cfConfig.last_error || this.cfConfig.coverage_error) return 'error';
@@ -132,6 +143,13 @@ function siteCloudflareSecurity() {
             const key = 'cloudflare_security.status_' + this.cloudflareStatus();
             const label = t(key);
             return label !== key ? label : t('cloudflare_security.status_unknown');
+        },
+        cloudflareStatusTone() {
+            const state = this.cloudflareStatus();
+            if (['synced', 'ready'].includes(state)) return 'success';
+            if (state === 'error') return 'error';
+            if (['rule_missing', 'removal_required'].includes(state)) return 'warning';
+            return state === 'pending' ? 'info' : 'neutral';
         },
         cloudflareSyncTime() {
             const value = this.cfConfig.last_sync_at;
@@ -148,7 +166,7 @@ function siteCloudflareSecurity() {
         async cloudflareRequest(action, method, body) {
             if (!this.site?.id || this.cfBusy || this.cfDestroyed) return false;
             const siteID = this.site.id, generation = ++this.cfGeneration, controller = new AbortController();
-            this.cfController = controller; this.cfBusy = action; this.cfError = ''; this.cfNotice = ''; this.cfNoticeType = 'info'; this.cfShowAccount = false; this.cfShowToken = false;
+            this.cfController = controller; this.cfBusy = action; this.cfError = ''; this.cfNotice = ''; this.cfNoticeType = 'info'; this.cfShowAccount = false; this.cfShowToken = false; this.cfShowTechnical = false;
             if (action === 'test') this.cfTestInfo = null;
             try {
                 const endpoint = '/websites/' + siteID + '/cloudflare-security' + (['test','sync'].includes(action) ? '/' + action : '');
