@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.7 — 2026-10-14
+
+- Limits saving and disabled feedback to the credential form being submitted. Keeps the other account button unchanged and explains attempts to save a second account change while the first is pending.
+- Reports credential-save errors once while retaining entered credentials for retry. Keeps password, MFA and concurrent-change protections unchanged.
+
 ## v2.0.6 — 2026-10-13
 
 - Adds custom questions and optional issue descriptions to AI diagnostics, retaining common issue shortcuts and the original question in follow-up sessions. Uses the existing read-only collection and redaction path without a database migration.

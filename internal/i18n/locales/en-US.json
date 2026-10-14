@@ -2983,6 +2983,7 @@
     "basic_auth_username_required": "Enter a Basic Auth username",
     "web_username_required": "Enter a web login username",
     "current_password_required_for_account": "Enter the current password before changing the username or password",
+    "account_change_in_progress": "An account change is being saved. Wait for it to finish before saving another change.",
     "account_saved_logout": "Saved. Logging out...",
     "server_settings": "Server Settings",
     "panel_title": "Panel Title",
