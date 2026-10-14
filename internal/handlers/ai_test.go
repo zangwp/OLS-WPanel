@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -57,8 +58,8 @@ func TestDiagnoseSendsPreparedPromptAndRestoresAliases(t *testing.T) {
 
 	oldBuild, oldCall := buildAIDiagnosticPrompt, callAIChat
 	t.Cleanup(func() { buildAIDiagnosticPrompt, callAIChat = oldBuild, oldCall })
-	buildAIDiagnosticPrompt = func(context.Context, *models.Website, string) (string, string, error) {
-		return "system", `198.51.100.8 token=secret /www/wwwroot/privacy.example/error.log 2001:db8::8`, nil
+	buildAIDiagnosticPrompt = func(_ context.Context, _ *models.Website, _, question string) (string, string, error) {
+		return "system", `198.51.100.8 token=secret /www/wwwroot/privacy.example/error.log 2001:db8::8 ` + question, nil
 	}
 	var sentPrompt string
 	callAIChat = func(_ context.Context, _ *models.AISettings, _, userPrompt string) (string, int64, error) {
@@ -92,6 +93,70 @@ func TestDiagnoseSendsPreparedPromptAndRestoresAliases(t *testing.T) {
 	}
 	if !strings.Contains(rawText, "198.51.100.8") || strings.Contains(rawText, "IP-01") {
 		t.Fatalf("stored response did not restore local IP alias: %s", rawText)
+	}
+
+	for _, symptom := range []string{models.AIDiagnosisSite500, models.AIDiagnosisWPAdminDown, models.AIDiagnosisSSLFailure,
+		models.AIDiagnosisDBConnection, models.AIDiagnosisCacheIssue, models.AIDiagnosisPerformance, models.AIDiagnosisCustom} {
+		t.Run(symptom, func(t *testing.T) {
+			question := ""
+			if symptom == models.AIDiagnosisCustom {
+				question = `更新后后台变慢 token=initial-secret Authorization: Bearer header-secret {"api_key":"json-secret"}`
+			}
+			request, _ := json.Marshal(models.AIDiagnoseRequest{Symptom: symptom, Question: question})
+			rec := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(rec)
+			ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(siteID)}}
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/websites/1/ai/diagnose", bytes.NewReader(request))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			(&AIHandler{}).Diagnose(ctx)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var sessionID int
+			if err := db.QueryRow(`SELECT id FROM ai_sessions ORDER BY id DESC LIMIT 1`).Scan(&sessionID); err != nil {
+				t.Fatal(err)
+			}
+			detail, err := loadAISessionDetail(int(siteID), sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if detail.Symptom != symptom {
+				t.Fatalf("symptom=%s", detail.Symptom)
+			}
+			if question == "" && detail.Question != "" {
+				t.Fatalf("old request acquired question: %s", detail.Question)
+			}
+			if question != "" {
+				for _, forbidden := range []string{"initial-secret", "header-secret", "json-secret"} {
+					if strings.Contains(sentPrompt+detail.ContextJSON+detail.Question, forbidden) {
+						t.Fatalf("secret leaked: %s", forbidden)
+					}
+				}
+				if strings.Count(sentPrompt, "更新后后台变慢") != 1 || !strings.Contains(detail.Question, "更新后后台变慢") {
+					t.Fatalf("question not retained exactly once: prompt=%s detail=%s", sentPrompt, detail.Question)
+				}
+			}
+		})
+	}
+}
+
+func TestDiagnoseRejectsMissingAndOversizedQuestionsBeforeCollecting(t *testing.T) {
+	for _, req := range []models.AIDiagnoseRequest{
+		{Symptom: models.AIDiagnosisCustom},
+		{Symptom: models.AIDiagnosisCustom, Question: " \n\t "},
+		{Symptom: models.AIDiagnosisCustom, Question: strings.Repeat("问", models.AIDiagnosisQuestionMaxChars+1)},
+		{Symptom: models.AIDiagnosisSite500, Question: strings.Repeat("q", models.AIDiagnosisQuestionMaxChars+1)},
+	} {
+		body, _ := json.Marshal(req)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Params = gin.Params{{Key: "id", Value: "1"}}
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/websites/1/ai/diagnose", bytes.NewReader(body))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		(&AIHandler{}).Diagnose(ctx)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
 	}
 }
 

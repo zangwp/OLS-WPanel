@@ -32,7 +32,8 @@
             </button>
         </div>
     </div>
-    <dl class="overview-metrics" x-data="dashboardStats()" x-init="fetchStats()">
+    <div x-data="dashboardStats()" x-init="initFetch()">
+    <dl class="overview-metrics">
         <div class="overview-metric">
             <dt>{{t .Lang "dashboard.cpu_usage"}}</dt>
             <dd class="overview-metric-value" x-text="Number.isFinite(stats.cpu_percent) ? stats.cpu_percent.toFixed(1) + '%' : '—'">—</dd>
@@ -61,8 +62,10 @@
             <dd class="overview-metric-value" x-text="Number.isFinite(stats.uptime) ? formatUptime(stats.uptime) : '—'">—</dd>
         </div>
     </dl>
+    <p x-show="error" class="text-xs text-yellow-300 mb-3" role="status" x-text="(loaded ? t('dashboard.data_stale') + ': ' : '') + error"></p>
+    </div>
 
-    <div class="card overview-section overview-chart" x-data="{ range: '24h' }">
+    <div class="card overview-section overview-chart" x-data="dashboardHistory()">
         <div class="overview-section-heading">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "dashboard.history_trend"}}</h3>
             <div class="overview-range" role="group" aria-label="{{t .Lang "dashboard.history_trend"}}">
@@ -72,6 +75,7 @@
             </div>
         </div>
         <div class="overview-chart-frame"><canvas id="metricsCanvas" class="w-full" height="280" role="img" aria-label="{{t .Lang "dashboard.history_trend"}}"></canvas></div>
+        <p id="metricsTimezone" class="text-xs text-gray-400 mt-3"></p>
         <p id="metricsSummary" class="text-xs text-gray-400 mt-3" hidden></p>
         <p id="metricsError" class="text-xs text-yellow-300 mt-3" role="status" hidden></p>
     </div>
@@ -180,14 +184,68 @@ function announcement() {
 
 function dashboardStats() {
     return {
-        stats: {},
+        stats: {}, error: '', loaded: false, loading: false, destroyed: false, paused: false,
+        timer: null, controller: null, generation: 0, pageHideHandler: null, pageShowHandler: null, visibilityHandler: null,
         async fetchStats() {
+            if (this.loading || this.destroyed || this.paused || document.hidden) return;
+            const controller = new AbortController(), generation = ++this.generation;
+            this.controller = controller; this.loading = true;
+            const current = () => !this.destroyed && !controller.signal.aborted && generation === this.generation;
             try {
-                const resp = await api('/dashboard/stats');
-                if (resp.success) this.stats = resp.data;
-            } catch (e) { console.error(e); }
+                const resp = await api('/dashboard/stats', { silent: true, timeout: 15000, signal: controller.signal });
+                if (!current()) return;
+                const fields = ['cpu_percent', 'memory_percent', 'memory_used_bytes', 'memory_total_bytes', 'swap_used_bytes', 'swap_total_bytes', 'disk_used_bytes', 'disk_total_bytes', 'load_avg_1', 'load_avg_5', 'load_avg_15', 'uptime'];
+                if (!resp?.success || !resp.data || !fields.every(key => Number.isFinite(resp.data[key]) && resp.data[key] >= 0)) throw new Error(resp?.message || t('common.request_failed'));
+                this.stats = resp.data; this.loaded = true; this.error = '';
+            } catch (e) {
+                if (current()) this.error = e.message || t('common.request_failed');
+            } finally {
+                if (generation === this.generation) { this.loading = false; this.controller = null; }
+            }
+        },
+        stopPolling() {
+            this.paused = true; this.generation++;
+            this.controller?.abort(); this.controller = null; this.loading = false;
+            if (this.timer !== null) clearInterval(this.timer);
+            this.timer = null;
+        },
+        startPolling() {
+            if (this.destroyed || this.timer !== null) return;
+            this.paused = false;
+            this.fetchStats();
+            this.timer = setInterval(() => this.fetchStats(), 30000);
+        },
+        initFetch() {
+            if (this.destroyed || this.pageHideHandler) return;
+            this.pageHideHandler = () => this.stopPolling();
+            this.pageShowHandler = () => { if (this.paused) this.startPolling(); };
+            this.visibilityHandler = () => { if (!document.hidden) this.fetchStats(); };
+            window.addEventListener('pagehide', this.pageHideHandler);
+            window.addEventListener('pageshow', this.pageShowHandler);
+            document.addEventListener('visibilitychange', this.visibilityHandler);
+            this.startPolling();
+        },
+        destroy() {
+            this.destroyed = true; this.stopPolling();
+            if (this.pageHideHandler) window.removeEventListener('pagehide', this.pageHideHandler);
+            if (this.pageShowHandler) window.removeEventListener('pageshow', this.pageShowHandler);
+            if (this.visibilityHandler) document.removeEventListener('visibilitychange', this.visibilityHandler);
+            this.pageHideHandler = null; this.pageShowHandler = null; this.visibilityHandler = null;
         }
     }
+}
+
+function dashboardTime(value, style = 'time') {
+    if (value === null || value === undefined || value === '') return '';
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    const options = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+    if (style !== 'axis') options.second = '2-digit';
+    if (style === 'date-axis' || style === 'full') { options.month = '2-digit'; options.day = '2-digit'; }
+    if (style === 'date-axis') delete options.second;
+    if (style === 'full') options.year = 'numeric';
+    if (style === 'full' || style === 'time') options.timeZoneName = 'short';
+    return new Intl.DateTimeFormat(currentLocale(), options).format(date);
 }
 
 // Chart.js — initialized outside Alpine to avoid proxy conflict
@@ -198,23 +256,14 @@ function dashboardStats() {
     let metricsTimestamps = [];
     let metricsTimes = [];
     let metricsRange = '24h';
+    let requestedRange = '24h';
+    let metricsTimer = null;
+    let metricsPaused = false;
+    let metricsDestroyed = false;
 
     function metricAxisLabel(value) {
         if (!metricsTimes.length) return chart?.data.labels[value] || '';
-        // Find the most recent sample's offset, retaining server-local time
-        // even if the selected range crosses a daylight-saving transition.
-        let low = 0, high = metricsTimes.length;
-        while (low < high) {
-            const middle = (low + high) >>> 1;
-            if (metricsTimes[middle] <= value) low = middle + 1; else high = middle;
-        }
-        const timestamp = metricsTimestamps[Math.max(0, low - 1)];
-        const zone = /([+-])(\d{2}):(\d{2})$/.exec(timestamp);
-        const offset = zone ? (Number(zone[2]) * 60 + Number(zone[3])) * (zone[1] === '-' ? -1 : 1) : 0;
-        const date = new Date(Number(value) + offset * 60000);
-        if (!Number.isFinite(date.getTime())) return '';
-        const iso = date.toISOString();
-        return metricsRange === '24h' ? iso.slice(11, 16) : iso.slice(5, 10) + ' ' + iso.slice(11, 16);
+        return dashboardTime(Number(value), metricsRange === '24h' ? 'axis' : 'date-axis');
     }
 
     function metricStatus(id, message) {
@@ -230,17 +279,20 @@ function dashboardStats() {
         metricsController = null;
     }
 
-    async function fetchMetrics(range) {
+    async function fetchMetrics(range, automatic = false) {
+        if (metricsDestroyed || metricsPaused || !chart || (automatic && (metricsController || document.hidden))) return;
+        requestedRange = range || requestedRange;
         if (metricsController) metricsController.abort();
         const controller = new AbortController();
         metricsController = controller;
         const requestID = ++metricsRequestID;
         try {
-            const resp = await api('/dashboard/metrics?range=' + (range || '24h'), { silent: true, timeout: 15000, signal: controller.signal });
-            if (requestID === metricsRequestID && !controller.signal.aborted && resp.success && chart) {
+            const resp = await api('/dashboard/metrics?range=' + requestedRange, { silent: true, timeout: 15000, signal: controller.signal });
+            if (requestID === metricsRequestID && !controller.signal.aborted && !metricsDestroyed && chart) {
+                if (!resp?.success || !resp.data) throw new Error(resp?.message || t('dashboard.history_load_failed'));
                 chart.data.labels = resp.data.labels || [];
                 metricsTimestamps = resp.data.timestamps || [];
-                metricsRange = range || '24h';
+                metricsRange = requestedRange;
                 metricsTimes = metricsTimestamps.map(timestamp => new Date(timestamp).getTime());
                 const series = [resp.data.cpu || [], resp.data.memory || [], resp.data.load || []];
                 const realTimes = metricsTimes.length > 0 && metricsTimes.length === chart.data.labels.length && metricsTimes.every(Number.isFinite) && series.every(values => values.length === metricsTimes.length);
@@ -269,6 +321,7 @@ function dashboardStats() {
     }
 
     function initChart() {
+        if (chart || metricsDestroyed) return;
         const canvas = document.getElementById('metricsCanvas');
         if (!canvas) return;
         const theme = typeof getComputedStyle === 'function' ? getComputedStyle(canvas) : null;
@@ -317,7 +370,7 @@ function dashboardStats() {
                         callbacks: {
                             title: function(items) {
                                 const timestamp = metricsTimestamps[items[0].dataIndex];
-                                const time = typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(timestamp) ? timestamp.replace('T', ' ') : items[0].label;
+                                const time = dashboardTime(timestamp, 'full') || items[0].label;
                                 return t('dashboard.tooltip_time', { time });
                             },
                             label: function(item) {
@@ -328,12 +381,48 @@ function dashboardStats() {
                 }
             }
         });
-        fetchMetrics('24h');
+        metricStatus('metricsTimezone', t('dashboard.timezone', { timezone: new Intl.DateTimeFormat().resolvedOptions().timeZone }));
+        startMetricsPolling();
+    }
+
+    function stopMetricsPolling() {
+        metricsPaused = true;
+        cancelMetricsRequest();
+        if (metricsTimer !== null) clearInterval(metricsTimer);
+        metricsTimer = null;
+    }
+
+    function startMetricsPolling() {
+        if (metricsDestroyed || !chart || metricsTimer !== null) return;
+        metricsPaused = false;
+        fetchMetrics(requestedRange, true);
+        metricsTimer = setInterval(() => fetchMetrics(requestedRange, true), 30000);
+    }
+
+    function resumeMetrics() {
+        if (metricsPaused) startMetricsPolling();
+    }
+
+    function refreshVisibleMetrics() {
+        if (!document.hidden) fetchMetrics(requestedRange, true);
+    }
+
+    function destroyMetrics() {
+        metricsDestroyed = true;
+        stopMetricsPolling();
+        window.removeEventListener('pagehide', stopMetricsPolling);
+        window.removeEventListener('pageshow', resumeMetrics);
+        document.removeEventListener('DOMContentLoaded', initChart);
+        document.removeEventListener('visibilitychange', refreshVisibleMetrics);
+        chart?.destroy(); chart = null;
     }
 
     // Expose for Alpine button clicks
     window.fetchMetrics = fetchMetrics;
-    window.addEventListener('pagehide', cancelMetricsRequest);
+    window.dashboardHistory = () => ({ range: '24h', destroy: destroyMetrics });
+    window.addEventListener('pagehide', stopMetricsPolling);
+    window.addEventListener('pageshow', resumeMetrics);
+    document.addEventListener('visibilitychange', refreshVisibleMetrics);
     // Deferred app and Chart scripts finish before DOMContentLoaded.
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initChart, { once: true });
@@ -368,8 +457,7 @@ function siteResources() {
                 this.sites = r.data;
                 this.loaded = true;
                 this.error = '';
-                const sampledAt = r.sampled_at ? new Date(r.sampled_at) : null;
-                this.since = sampledAt && Number.isFinite(sampledAt.getTime()) ? sampledAt.toLocaleTimeString(currentLocale()) : '';
+                this.since = dashboardTime(r.sampled_at);
             } catch(e) {
                 if (current()) this.error = e.message || t('dashboard.site_resources_load_failed');
             } finally {

@@ -21,7 +21,7 @@ import (
 // aiDiagnosisMu prevents concurrent diagnoses for the same site within one process.
 var aiDiagnosisMu sync.Map
 
-var buildAIDiagnosticPrompt = executor.BuildAIDiagnosticPromptContext
+var buildAIDiagnosticPrompt = executor.BuildAIDiagnosticPromptWithQuestionContext
 var callAIChat = executor.CallAIChat
 
 const (
@@ -132,6 +132,16 @@ func (h *AIHandler) Diagnose(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.log_analysis_entry_required")))
 		return
 	}
+	req.Question = strings.TrimSpace(req.Question)
+	if req.Symptom == models.AIDiagnosisCustom && req.Question == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.question_required")))
+		return
+	}
+	if len([]rune(req.Question)) > models.AIDiagnosisQuestionMaxChars {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.question_too_long")))
+		return
+	}
+	req.Question = executor.SanitizeAIDiagnosticQuestion(req.Question)
 
 	site := getWebsiteByID(id)
 	if site == nil {
@@ -180,7 +190,12 @@ func (h *AIHandler) Diagnose(c *gin.Context) {
 		return
 	}
 
-	sessionID, err := createAISession(site.ID, req.Symptom)
+	questionContext := ""
+	if req.Question != "" {
+		data, _ := json.Marshal(map[string]string{"question": req.Question})
+		questionContext = string(data)
+	}
+	sessionID, err := createAISessionWithContext(site.ID, req.Symptom, models.AIDiagnosticContextRef{}, questionContext)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.create_session_failed")))
 		return
@@ -188,7 +203,7 @@ func (h *AIHandler) Diagnose(c *gin.Context) {
 	updateAISessionStatus(sessionID, models.AISessionRunning, "")
 
 	collectCtx, collectCancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	systemPrompt, userPrompt, err := buildAIDiagnosticPrompt(collectCtx, site, req.Symptom)
+	systemPrompt, userPrompt, err := buildAIDiagnosticPrompt(collectCtx, site, req.Symptom, req.Question)
 	collectCancel()
 	if err != nil {
 		failAISession(sessionID, err.Error(), len(userPrompt), 0)
@@ -609,6 +624,14 @@ func loadAISessionDetail(siteID, sessionID int) (models.AISessionDetail, error) 
 		var report models.AIDiagnosticReport
 		if json.Unmarshal([]byte(reportJSON), &report) == nil {
 			detail.Report = &report
+		}
+	}
+	if detail.ContextType == "" && detail.ContextJSON != "" {
+		var saved struct {
+			Question string `json:"question"`
+		}
+		if json.Unmarshal([]byte(detail.ContextJSON), &saved) == nil {
+			detail.Question = executor.SanitizeAIDiagnosticQuestion(saved.Question)
 		}
 	}
 	detail.ToolEvents, _ = listAIToolEvents(sessionID, 20)

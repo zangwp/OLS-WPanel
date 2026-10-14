@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.6 — 2026-10-13
+
+- Adds custom questions and optional issue descriptions to AI diagnostics, retaining common issue shortcuts and the original question in follow-up sessions. Uses the existing read-only collection and redaction path without a database migration.
+- Refreshes dashboard server metrics and history every 30 seconds, cancels obsolete requests, and shows chart and sample times in the browser's time zone.
+- Separates credential-save button feedback and makes Cloudflare operation results easier to read. Masks the Account ID by default and allows temporary display of newly entered tokens without returning saved tokens.
+
 ## v2.0.5 — 2026-10-13
 
 - Completes missing extensions for a selected installed PHP version using simulated, version-pinned package additions. Preserves existing configuration and website versions; checks extensions before creating or switching a website.

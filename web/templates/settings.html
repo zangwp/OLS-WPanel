@@ -61,7 +61,7 @@
                         <div class="settings-field"><label for="basic-security-code">{{t .Lang "settings.mfa_code_optional"}}</label><input id="basic-security-code" type="text" x-model="pw.basicCode" class="input-field text-sm" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false" aria-describedby="basic-security-code-help"></div>
                     </div>
                     <p id="basic-security-code-help" class="text-xs text-gray-500 mb-3">{{t .Lang "settings.mfa_code_help"}}</p>
-                    <div class="settings-account-action"><button type="submit" :disabled="accountSaving || !accountLoaded" class="btn-primary" x-text="accountSaving ? t('settings.saving') : t('settings.save_basic_auth')"></button></div>
+                    <div class="settings-account-action"><button type="submit" :disabled="accountSaving || !accountLoaded" class="btn-primary" x-text="accountSaving === 'basic' ? t('settings.saving') : t('settings.save_basic_auth')"></button></div>
                 </form>
                 <form class="settings-credentials" aria-labelledby="web-login-heading" @submit.prevent="saveWebAccount()">
                     <h4 id="web-login-heading">{{t .Lang "settings.web_login_title"}}</h4>
@@ -77,7 +77,7 @@
                         <div class="settings-field"><label for="web-security-code">{{t .Lang "settings.mfa_code_optional"}}</label><input id="web-security-code" type="text" x-model="pw.code" class="input-field text-sm" autocomplete="one-time-code" maxlength="64" autocapitalize="none" spellcheck="false" aria-describedby="web-security-code-help"></div>
                     </div>
                     <p id="web-security-code-help" class="text-xs text-gray-500 mb-3">{{t .Lang "settings.mfa_code_help"}}</p>
-                    <div class="settings-account-action"><button type="submit" :disabled="accountSaving || !accountLoaded" class="btn-primary" x-text="accountSaving ? t('settings.saving') : t('settings.save_web_account')"></button></div>
+                    <div class="settings-account-action"><button type="submit" :disabled="accountSaving || !accountLoaded" class="btn-primary" x-text="accountSaving === 'web' ? t('settings.saving') : t('settings.save_web_account')"></button></div>
                 </form>
             </div>
             <p class="text-xs text-yellow-400 mt-2" x-show="accountSaved">{{t .Lang "settings.account_saved_logout"}}</p>
@@ -665,7 +665,7 @@ function panelSettings() {
         proxyTesting: false,
         proxyResult: '',
         proxyOk: false,
-        accountSaving: false,
+        accountSaving: '',
         accountLoaded: false,
         accountLoadError: '',
         accountSaved: false,
@@ -780,7 +780,7 @@ function panelSettings() {
             if (this.pw.basic && this.pw.basic.length < 8) { showToast(t('settings.basic_auth_password_min_length'), 'error'); return; }
             const body = { basic_auth_user: this.basicAuthUser.trim(), old_password: this.pw.basicCurrent, code: this.pw.basicCode.trim() };
             if (this.pw.basic) body.basic_auth_password = this.pw.basic;
-            this.accountSaving = true;
+            this.accountSaving = 'basic';
             try {
                 const r = await api('/settings', { method: 'PUT', body, allowAuthFailure: true });
                 if (!r.success) throw new Error(r.message || t('settings.save_failed'));
@@ -789,7 +789,7 @@ function panelSettings() {
                 this.pw.basicCode = '';
                 showToast(t('settings.basic_auth_saved'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
-            this.accountSaving = false;
+            this.accountSaving = '';
         },
         async saveWebAccount() {
             if (!this.accountLoaded || this.accountSaving) return;
@@ -805,7 +805,7 @@ function panelSettings() {
             }
             const body = { username, old_password: this.pw.old, code: this.pw.code.trim() };
             if (passwordChanged) body.new_password = this.pw.new1;
-            this.accountSaving = true;
+            this.accountSaving = 'web';
             try {
                 const r = await api('/settings', { method: 'PUT', body, allowAuthFailure: true });
                 if (!r.success) throw new Error(r.message || t('settings.save_failed'));
@@ -816,7 +816,7 @@ function panelSettings() {
                     try { await api('/auth/logout', { method: 'POST' }); } catch(e) {}
                     window.location.href = (document.body.dataset.panelPrefix || '') + '/login';
                 }, 1500);
-            } catch(e) { showToast(e.message, 'error'); this.accountSaving = false; }
+            } catch(e) { showToast(e.message, 'error'); this.accountSaving = ''; }
         },
         async syncNTP() {
             if (this.ntpSyncing) return;

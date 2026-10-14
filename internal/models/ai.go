@@ -3,13 +3,15 @@ package models
 import "time"
 
 const (
-	AIDiagnosisSite500      = "site_500"
-	AIDiagnosisWPAdminDown  = "wp_admin_down"
-	AIDiagnosisSSLFailure   = "ssl_failure"
-	AIDiagnosisDBConnection = "db_connection"
-	AIDiagnosisCacheIssue   = "cache_issue"
-	AIDiagnosisPerformance  = "performance"
-	AIDiagnosisLogAnalysis  = "log_analysis"
+	AIDiagnosisSite500          = "site_500"
+	AIDiagnosisWPAdminDown      = "wp_admin_down"
+	AIDiagnosisSSLFailure       = "ssl_failure"
+	AIDiagnosisDBConnection     = "db_connection"
+	AIDiagnosisCacheIssue       = "cache_issue"
+	AIDiagnosisPerformance      = "performance"
+	AIDiagnosisCustom           = "custom"
+	AIDiagnosisLogAnalysis      = "log_analysis"
+	AIDiagnosisQuestionMaxChars = 2000
 
 	AISessionPending   = "pending"
 	AISessionRunning   = "running"
@@ -39,7 +41,8 @@ type AISettingsRequest struct {
 }
 
 type AIDiagnoseRequest struct {
-	Symptom string `json:"symptom"`
+	Symptom  string `json:"symptom"`
+	Question string `json:"question,omitempty"`
 }
 
 type AIDiagnosticContextRef struct {
@@ -105,6 +108,7 @@ type AISessionDetail struct {
 	ID            int                 `json:"id"`
 	SiteID        int                 `json:"site_id"`
 	Symptom       string              `json:"symptom"`
+	Question      string              `json:"question,omitempty"`
 	Status        string              `json:"status"`
 	RiskLevel     string              `json:"risk_level"`
 	Summary       string              `json:"summary"`
@@ -145,7 +149,7 @@ type AIMessage struct {
 func IsValidAIDiagnosisSymptom(symptom string) bool {
 	switch symptom {
 	case AIDiagnosisSite500, AIDiagnosisWPAdminDown, AIDiagnosisSSLFailure,
-		AIDiagnosisDBConnection, AIDiagnosisCacheIssue, AIDiagnosisPerformance, AIDiagnosisLogAnalysis:
+		AIDiagnosisDBConnection, AIDiagnosisCacheIssue, AIDiagnosisPerformance, AIDiagnosisCustom, AIDiagnosisLogAnalysis:
 		return true
 	default:
 		return false

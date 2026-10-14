@@ -12,9 +12,11 @@
 .site-cloudflare-checkbox { display: flex; align-items: flex-start; gap: 8px; color: var(--panel-heading); font-size: 13px; line-height: 1.6; }
 .site-cloudflare-checkbox input { margin-top: 4px; flex-shrink: 0; }
 .site-cloudflare-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; margin-top: 16px; }
-.site-cloudflare-fields > label { min-width: 0; display: grid; gap: 7px; align-content: start; }
-.site-cloudflare-fields > label > span { color: var(--panel-heading); font-size: 13px; font-weight: 600; }
-.site-cloudflare-fields > label > small { color: var(--panel-muted); font-size: 12px; line-height: 1.6; }
+.site-cloudflare-field { min-width: 0; display: grid; gap: 7px; align-content: start; }
+.site-cloudflare-field > label { color: var(--panel-heading); font-size: 13px; font-weight: 600; }
+.site-cloudflare-field > small { color: var(--panel-muted); font-size: 12px; line-height: 1.6; }
+.site-cloudflare-secret { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.site-cloudflare-secret > button { flex-shrink: 0; font-size: 12px; }
 .site-cloudflare-fields .input-field { width: 100%; min-width: 0; }
 .site-cloudflare-fields .site-cloudflare-token { grid-column: 2; }
 .site-cloudflare-token-state { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--panel-muted); }
@@ -32,9 +34,11 @@
 .site-cloudflare-technical-info dl > div { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .site-cloudflare-technical-info dd { margin: 0; overflow-wrap: anywhere; }
 .site-cloudflare-technical-info > summary:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 3px; }
-.site-cloudflare-error, .site-cloudflare-notice { margin: 12px 0 0; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
-.site-cloudflare-error { color: var(--panel-danger); }
-.site-cloudflare-notice { color: var(--panel-accent); }
+.site-cloudflare-error, .site-cloudflare-notice { margin: 12px 0 0; padding: 10px 14px; border: 1px solid; border-left-width: 4px; border-radius: 6px; font-size: 13px; font-weight: 550; line-height: 1.7; overflow-wrap: anywhere; }
+.site-cloudflare-error { color: var(--panel-danger); background: var(--panel-danger-soft); border-color: var(--panel-danger-border); border-left-color: var(--panel-danger); }
+.site-cloudflare-notice { color: var(--panel-accent); background: var(--panel-accent-soft); border-color: var(--panel-accent-border); border-left-color: var(--panel-accent); }
+.site-cloudflare-notice.is-success { color: var(--panel-success); background: var(--panel-success-soft); border-color: var(--panel-success-border); border-left-color: var(--panel-success); }
+.site-cloudflare-notice.is-warning { color: var(--panel-warning); background: var(--panel-warning-soft); border-color: var(--panel-warning-border); border-left-color: var(--panel-warning); }
 .site-cloudflare-help { margin-top: 20px; border-top: 1px solid var(--panel-border); padding-top: 16px; font-size: 13px; line-height: 1.8; }
 .site-cloudflare-help > summary { width: fit-content; color: var(--panel-accent); cursor: pointer; }
 .site-cloudflare-help > div { margin-top: 12px; }
