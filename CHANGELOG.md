@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.9 — 2026-10-14
+
+- Displays the installed version in the top bar as a static badge, removing the update-page link and its hover/focus styles. Keeps update controls in panel settings.
+
 ## v2.0.8 — 2026-10-14
 
 - Shows a dotted placeholder for saved Cloudflare tokens while keeping the input empty and retaining the original token on blank saves.
