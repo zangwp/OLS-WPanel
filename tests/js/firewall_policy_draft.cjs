@@ -368,6 +368,29 @@ test('changing the draft while the apply confirmation is open prevents the outda
     assert.equal(calls.some(call => call.url.endsWith('/access/apply')),false);
 });
 
+for (const requiresConfirmation of [true, false]) {
+    for (const transport of ['error', 'response']) {
+        test('a rejected changed preview preserves the draft without rollback advice: ' + requiresConfirmation + '/' + transport, async () => {
+            const {page, context, calls, notices, timers} = setup(), before = draft(page);
+            await page.previewAccess(); page.accessPreview.requires_confirmation = requiresConfirmation;
+            context.api = async (url, options) => {
+                calls.push({url, options});
+                assert.equal(url, '/firewall/ports/access/apply');
+                assert.equal(options.suppressToast, true);
+                if (transport === 'response') return {success:false, message:'rules changed', error_code:'firewall_access_preview_changed'};
+                throw Object.assign(Error('rules changed'), {status:409, code:'firewall_access_preview_changed'});
+            };
+            await page.applyAccess();
+            assert.deepEqual(clone(page.accessRows), before); assert.equal(page.accessDirty, true);
+            assert.equal(page.accessPreview, null); assert.equal(page.accessToken, ''); assert.equal(page.accessBusy, false);
+            assert.equal(page.accessError, 'firewall.access_preview_changed'); assert.equal(timers.size, 0);
+            assert.deepEqual(notices, [['firewall.access_preview_changed', 'error']]);
+            assert.equal(calls.filter(call => call.url.endsWith('/access/apply')).length, 1);
+            assert.equal(calls.some(call => call.url.endsWith('/access/confirm')), false);
+        });
+    }
+}
+
 test('an uncertain application response retains the unsaved draft and cannot announce a successful save', async () => {
     const {page, context, calls, notices, timers} = setup(), before = draft(page); await page.startAccessSave();
     const originalAPI = context.api;

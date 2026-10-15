@@ -205,8 +205,8 @@ function firewallManager(initialTab = 'current') {
             try {
                 if (requiresConfirmation && !await confirmModal(t('firewall.access_apply_confirm'))) return;
                 if (this.accessToken || this.portSubmitting || this.accessSSHStale || this.portStatus.access_available === false || draftVersion !== this.accessDraftVersion || this.accessPreview !== preview) return;
-                const r = await api('/firewall/ports/access/apply', { method: 'POST', body: { rules: preview.rules, fingerprint: preview.fingerprint }, timeout: 30000 });
-                if (!r.success) throw Error(r.message || t('common.operation_failed'));
+                const r = await api('/firewall/ports/access/apply', { method: 'POST', body: { rules: preview.rules, fingerprint: preview.fingerprint }, timeout: 30000, suppressToast: true });
+                if (!r.success) { const failure = Error(r.message || t('common.operation_failed')); failure.code = r.error_code; throw failure; }
                 if (r.data?.saved === true && r.data.requires_confirmation === false && r.data.requires_ssh_validation !== true && !r.data.confirmation_token) {
                     this.clearAccessTimers(); this.accessPreview = null; this.accessDirty = false; this.accessError = '';
                     this.accessSSHValidation = false; this.accessChecked = false;
@@ -225,7 +225,7 @@ function firewallManager(initialTab = 'current') {
                 this.accessTimer = setTimeout(() => { this.accessExpired = true; this.accessChecked = false; this.accessRollbackReady = true; this.checkAccessRollback(); }, 95000);
                 await this.fetchPortStatus({ resetDraft: true });
                 if (!this.accessChangeID) this.accessError = t('firewall.access_status_unverified');
-            } catch(e) { this.accessError = e.message + ' ' + t(requiresConfirmation ? 'firewall.access_apply_uncertain' : 'firewall.access_save_uncertain'); showToast(this.accessError, 'error'); this.accessPreview = null; } finally { this.accessBusy = false; if (this.accessToken) this.focusAccessSaveStage(); }
+            } catch(e) { this.accessError = e.code === 'firewall_access_preview_changed' ? t('firewall.access_preview_changed') : e.message + ' ' + t(requiresConfirmation ? 'firewall.access_apply_uncertain' : 'firewall.access_save_uncertain'); showToast(this.accessError, 'error'); this.accessPreview = null; } finally { this.accessBusy = false; if (this.accessToken) this.focusAccessSaveStage(); }
         },
         async confirmAccess() {
             if (this.accessBusy || this.portSubmitting || !this.accessChecked || !this.accessToken || this.accessExpired) return;

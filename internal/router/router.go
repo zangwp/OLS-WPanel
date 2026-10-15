@@ -467,6 +467,7 @@ var i18nKeys = []string{
 	"firewall.access_apply_uncertain",
 	"firewall.access_status_unverified",
 	"firewall.access_ssh_changed",
+	"firewall.access_preview_changed",
 	"firewall.access_saved_status_unavailable",
 	"firewall.access_apply_confirm",
 	"firewall.access_verify",

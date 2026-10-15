@@ -17,6 +17,9 @@ import (
 
 const accessRollbackUnit = "ols-wpanel-access-rollback"
 
+// ErrFirewallAccessPreviewChanged rejects stale selections before any mutation.
+var ErrFirewallAccessPreviewChanged = errors.New("规则或选择已变化，请重新预览")
+
 type FirewallAccessPreview struct {
 	Rules                 []FirewallAccessRule `json:"rules"`
 	Fingerprint           string               `json:"fingerprint"`
@@ -97,7 +100,7 @@ func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (F
 		return FirewallAccessPreview{}, err
 	}
 	requiresConfirmation := !exists || !accessTableMatchesManagedPolicy(previousTable, previousRules) || !accessManagementPreserved(previousRules, rules, ssh, panel)
-	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(out, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel, RequiresConfirmation: requiresConfirmation}, nil
+	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(previousTable, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel, RequiresConfirmation: requiresConfirmation}, nil
 }
 
 func PreviewFirewallAccess(req FirewallAccessRequest, ip string) (FirewallAccessPreview, error) {
@@ -132,7 +135,7 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 		return FirewallProtectionResult{}, err
 	}
 	if req.Fingerprint == "" || req.Fingerprint != preview.Fingerprint {
-		return FirewallProtectionResult{}, errors.New("规则或选择已变化，请重新预览")
+		return FirewallProtectionResult{}, ErrFirewallAccessPreviewChanged
 	}
 	if !preview.RequiresConfirmation {
 		return saveFirewallAccessWithoutConfirmation(ctx, preview)

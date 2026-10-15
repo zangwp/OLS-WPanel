@@ -2148,6 +2148,7 @@
     "access_check_status": "Check recovery status",
     "access_status_unverified": "Recovery or confirmed saving has not been verified for this change. Editing remains locked. Keep your existing connection and try Check recovery status again.",
     "access_ssh_changed": "An SSH listening port change was detected outside the panel. The unsaved port draft is paused. Refresh and confirm to reload the existing policy; firewall access rules are not migrated automatically.",
+    "access_preview_changed": "The access policy or selected rules changed. This request was not applied. Refresh and review the current policy before saving again.",
     "access_saved_status_unavailable": "The settings were confirmed and saved, but the latest port status could not be read. Keep your existing connection and refresh to verify it.",
     "access_apply_uncertain": "Saving has not been confirmed. If the rules took temporary effect, the previous policy is restored after about 90 seconds. Check the port status before retrying.",
     "access_unavailable": "Cannot safely apply here. Check nftables status and systemd rollback support.",
