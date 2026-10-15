@@ -2148,6 +2148,7 @@
     "access_check_status": "检查恢复状态",
     "access_status_unverified": "尚未核对本次变更是否已恢复或确认保存，编辑仍保持锁定。请保持现有连接，稍后点击“检查恢复状态”。",
     "access_ssh_changed": "检测到 SSH 监听端口已在面板外更改。未保存的端口草稿已暂停，请点击刷新并确认重新读取现有策略；防火墙放行规则不会自动迁移。",
+    "access_preview_changed": "端口策略或所选规则已变化，本次未应用。请刷新核对现有策略后重新保存。",
     "access_saved_status_unavailable": "设置已确认保存，但暂时无法读取最新端口状态。请保持现有连接，稍后刷新核对。",
     "access_apply_uncertain": "尚未确认保存；如果规则已临时生效，会在约 90 秒后自动恢复。请核对端口状态后重试。",
     "access_unavailable": "当前环境不可安全应用，请检查 nftables 状态及 systemd 回退支持。",

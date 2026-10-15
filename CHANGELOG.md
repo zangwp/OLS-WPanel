@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.11 — 2026-10-15
+
+- Scopes access-policy preview fingerprints to the table being replaced, the selected rules and management endpoints. Independent bans and traffic-updated sets no longer prevent saving an unchanged access draft.
+- Identifies stale previews rejected before application, retaining the draft and showing a single accurate message without rollback advice. Keeps uncertain network failures on the existing recovery path.
+
 ## v2.0.10 — 2026-10-15
 
 - Fixes first-time SSH port migration preflight by checking dual-port creation and final replacement in a single read-only nftables transaction. Retains verified confirmation, timeout rollback and reverse migration to port 22.

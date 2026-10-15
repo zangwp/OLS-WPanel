@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"sort"
@@ -73,6 +74,10 @@ func (h *FirewallHandler) ApplyAccess(c *gin.Context) {
 	}
 	result, err := executor.ApplyFirewallAccess(req, c.ClientIP())
 	if err != nil {
+		if errors.Is(err, executor.ErrFirewallAccessPreviewChanged) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error(), "error_code": "firewall_access_preview_changed"})
+			return
+		}
 		c.JSON(400, models.ErrorResponse(err.Error()))
 		return
 	}

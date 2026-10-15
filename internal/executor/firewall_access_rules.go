@@ -117,12 +117,14 @@ func accessRulesScript(rules []FirewallAccessRule, replace bool) string {
 	return b.String()
 }
 
-func accessFingerprint(ruleset string, rules []FirewallAccessRule, sshPort, panelPort int) string {
+func accessFingerprint(previousTable string, rules []FirewallAccessRule, sshPort, panelPort int) string {
 	data, _ := json.Marshal(rules)
+	// Only this table is replaced. Traffic-updated sets and independent bans in
+	// other tables must not invalidate an otherwise unchanged access selection.
 	// A previously checked selection must not become valid after a management
 	// endpoint changes, even if it happened to include both old and new ports.
 	endpoints := fmt.Sprintf("\nssh=%d;panel=%d\n", sshPort, panelPort)
-	return fmt.Sprintf("%x", sha256.Sum256(append([]byte(ruleset+endpoints), data...)))
+	return fmt.Sprintf("%x", sha256.Sum256(append([]byte(previousTable+endpoints), data...)))
 }
 
 // accessSourceCovers proves that every address admitted by previous remains
