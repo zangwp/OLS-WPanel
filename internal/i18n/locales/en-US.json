@@ -2146,7 +2146,7 @@
     "access_verify_title": "Verify connections and finish saving",
     "access_expired": "The confirmation deadline has passed. These settings have not been saved. The previous policy is restored about 90 seconds after temporary application; check the resulting port status.",
     "access_check_status": "Check recovery status",
-    "access_status_unverified": "Recovery or confirmed saving has not been verified for this change. Editing remains locked. Keep your existing connection and try Check recovery status again.",
+    "access_status_unverified": "Recovery or confirmed saving has not been verified for this change. Editing remains locked. Keep your existing connection and try Check and restore editing again.",
     "access_ssh_changed": "An SSH listening port change was detected outside the panel. The unsaved port draft is paused. Refresh and confirm to reload the existing policy; firewall access rules are not migrated automatically.",
     "access_preview_changed": "The access policy or selected rules changed. This request was not applied. Refresh and review the current policy before saving again.",
     "access_rolled_back": "These settings were not saved. The previous access policy has been verified as restored. Review it before saving again.",
