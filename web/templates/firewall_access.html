@@ -33,7 +33,7 @@
         <div class="access-preview-list"><template x-for="(rule,index) in accessPreview?.rules || []" :key="index"><p class="text-sm text-gray-300" x-text="rule.port + '/' + rule.protocol.toUpperCase() + ' ← ' + (rule.source || t('firewall.access_everyone'))"></p></template></div>
         <details class="mt-3"><summary class="text-sm text-gray-400 cursor-pointer">{{t .Lang "firewall.access_existing"}}</summary><pre class="access-code" x-text="accessPreview?.existing_rules"></pre></details>
     </div>
-    <div x-show="accessToken && !accessRecoveryRequired" x-ref="accessSaveVerification" class="access-save-stage access-save-verification" tabindex="-1" role="region" aria-label="{{t .Lang "firewall.access_verify_title"}}">
+    <div x-show="!!accessToken && !accessRecoveryRequired" x-ref="accessSaveVerification" class="access-save-stage access-save-verification" tabindex="-1" role="region" aria-label="{{t .Lang "firewall.access_verify_title"}}">
         <h4 class="font-semibold text-white">{{t .Lang "firewall.access_verify_title"}}</h4>
         <p x-show="!accessExpired" class="text-yellow-300 text-sm mt-3" x-text="accessSSHValidation ? t('firewall.access_verify_ssh') : t('firewall.access_verify')"></p>
         <p x-show="accessExpired" class="text-yellow-300 text-sm mt-3" role="status">{{t .Lang "firewall.access_expired"}}</p>
@@ -43,8 +43,8 @@
     <div class="access-action-row access-save-actions">
         <button type="button" class="btn-primary" x-show="!accessPreview && !accessRecoveryLocked()" @click="startAccessSave()" :disabled="accessBusy || portSubmitting || portsLoading || accessRecoveryLocked() || accessSSHStale || !portStatus.access_available">{{t .Lang "firewall.access_save"}}</button>
         <button type="button" class="btn-primary" x-show="accessPreview && !accessRecoveryLocked()" @click="applyAccess()" :disabled="accessBusy || portSubmitting || portsLoading || accessRecoveryLocked() || accessSSHStale || !portStatus.access_available" x-text="accessNeedsConfirmation() ? t('firewall.access_apply') : t('firewall.access_apply_direct')"></button>
-        <button type="button" class="btn-primary" x-show="accessToken && !accessRecoveryRequired" @click="confirmAccess()" :disabled="!accessChecked || accessExpired || accessBusy || portSubmitting || accessRecoveryRequired">{{t .Lang "firewall.access_confirm"}}</button>
-        <button type="button" class="btn-secondary" x-show="accessRecoveryRequired || (accessToken && accessRollbackReady)" @click="checkAccessRollback({ recover: true })" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.access_recover_edit"}}</button>
+        <button type="button" class="btn-primary" x-show="!!accessToken && !accessRecoveryRequired" @click="confirmAccess()" :disabled="!accessChecked || accessExpired || accessBusy || portSubmitting || accessRecoveryRequired">{{t .Lang "firewall.access_confirm"}}</button>
+        <button type="button" class="btn-secondary" x-show="accessRecoveryRequired || (!!accessToken && accessRollbackReady)" @click="checkAccessRollback({ recover: true })" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.access_recover_edit"}}</button>
         <button type="button" class="btn-secondary" x-show="accessPreview && !accessRecoveryLocked()" @click="editAccessDraft()" :disabled="accessBusy || portSubmitting || accessRecoveryLocked() || accessSSHStale">{{t .Lang "firewall.access_edit"}}</button>
         <button type="button" class="btn-secondary" x-show="!accessPreview && !accessRecoveryLocked()" @click="refreshAccess()" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.refresh"}}</button>
         <p class="access-save-help" x-show="!accessRecoveryLocked()" x-text="accessPreview ? (accessNeedsConfirmation() ? t('firewall.access_apply_help') : t('firewall.access_ordinary_review')) : t('firewall.access_draft_help')"></p>

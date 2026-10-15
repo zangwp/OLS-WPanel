@@ -637,6 +637,21 @@ test('the recovery UI hides stale confirmation and offers a read-only check with
     }
 });
 
+test('verification and recovery visibility stays boolean across every token and recovery state',()=>{
+    const {page}=setup(), accessHTML=fs.readFileSync(path.join(__dirname,'../../web/templates/firewall_access.html'),'utf8');
+    const expressions=[
+        accessHTML.match(/<div x-show="([^"]+)" x-ref="accessSaveVerification"/)[1],
+        accessHTML.match(/<button[^>]*x-show="([^"]+)"[^>]*@click="confirmAccess\(\)"/)[1],
+        accessHTML.match(/<button[^>]*x-show="([^"]+)"[^>]*@click="checkAccessRollback\(/)[1],
+    ];
+    for(const token of ['','pending-token'])for(const required of [false,true])for(const ready of [false,true]){
+        page.accessToken=token;page.accessRecoveryRequired=required;page.accessRollbackReady=ready;
+        const values=expressions.map(expression=>vm.runInNewContext('with (page) { '+expression+' }',{page}));
+        assert(values.every(value=>typeof value==='boolean'),'Alpine must not see false changing to an empty string during recovery.');
+        assert.deepEqual(values,[Boolean(token)&&!required,Boolean(token)&&!required,required||(Boolean(token)&&ready)]);
+    }
+});
+
 for (const postResult of ['success','lost_response','rejected']) {
     test('manual recovery with '+postResult+' POST result only unlocks after a matching terminal GET',async()=>{
         const {page,state,context,calls}=setup(), originalAPI=context.api;
