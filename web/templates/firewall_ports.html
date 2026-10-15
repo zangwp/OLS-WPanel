@@ -1,5 +1,5 @@
 {{define "firewall_ports"}}
-<div class="access-workspace" x-data="firewallManager('ports')" @ssh-port-changed.window="fetchPortStatus()">
+<div class="access-workspace" x-data="firewallManager('ports')" @ssh-port-observed.window="invalidateAccessPreview(); portStatus.access_available = false; fetchPortStatus()" @ssh-port-changed.window="invalidateAccessPreview(); portStatus.access_available = false; fetchPortStatus({ resetDraft: true })">
     <div x-show="activeTab === 'ports'" x-cloak class="space-y-6 mb-6">
         <div class="access-overview">
             <div class="access-overview-item"><p class="text-xs text-gray-500">{{t .Lang "firewall.firewall_backend"}}</p><p class="text-lg text-white mt-1" x-text="firewallBackendLabel()"></p></div>

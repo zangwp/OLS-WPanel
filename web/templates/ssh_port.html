@@ -29,9 +29,9 @@ function sshPortManager() {
     return {
         status: {}, loaded: false, busy: false, error: '', port: '', cloudReady: false, change: null, timer: null,
         destroy() { clearTimeout(this.timer); },
-        async refresh() {
+        async refresh({ notify = true } = {}) {
             this.busy = true; this.error = '';
-            try { const r = await api('/firewall/ssh-port'); if (!r.success) throw Error(t('common.operation_failed')); this.status = r.data || {}; this.loaded = true; }
+            try { const r = await api('/firewall/ssh-port'); if (!r.success) throw Error(t('common.operation_failed')); this.status = r.data || {}; this.loaded = true; if (notify && !this.change && !this.status.pending) this.$dispatch('ssh-port-observed'); }
             catch(e) { this.status.available = false; this.error = e.message; }
             finally { this.busy = false; }
         },
@@ -45,7 +45,7 @@ function sshPortManager() {
                 const r = await api('/firewall/ssh-port', { method:'POST', body:{port:requestedPort,confirm:true}, timeout:50000 });
                 if (!r.success || !r.data?.token) throw Error(t('common.operation_failed'));
                 this.change = r.data; this.status.available = false;
-                clearTimeout(this.timer); this.timer = setTimeout(async()=>{ this.change=null; await this.refresh(); this.$dispatch('ssh-port-changed'); },310000);
+                clearTimeout(this.timer); this.timer = setTimeout(async()=>{ this.change=null; await this.refresh({ notify: false }); this.$dispatch('ssh-port-changed'); },310000);
             } catch(e) { this.error = e.message; }
             finally { this.busy = false; }
         },
@@ -56,7 +56,7 @@ function sshPortManager() {
                 const r = await api('/firewall/ssh-port/confirm', {method:'POST',body:{token:this.change.token},timeout:40000});
                 if (!r.success) throw Error(t('common.operation_failed'));
                 clearTimeout(this.timer); this.change=null; this.cloudReady=false; this.port='';
-                await this.refresh(); this.$dispatch('ssh-port-changed'); showToast(t('ssh_port.saved'),'success');
+                await this.refresh({ notify: false }); this.$dispatch('ssh-port-changed'); showToast(t('ssh_port.saved'),'success');
             } catch(e) { this.error=e.message; }
             finally { this.busy=false; }
         }

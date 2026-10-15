@@ -381,6 +381,25 @@ func listenerBindScope(address string) string {
 	return "network"
 }
 
+// Observe a unique live SSH endpoint without changing configuration-based
+// transaction guards. Multiple listeners retain the configured display port.
+func observedSSHPort(ctx context.Context, listeners []FirewallListener) int {
+	port := 0
+	for _, listener := range listeners {
+		if listener.Protocol != "tcp" || !strings.Contains(strings.ToLower(listener.Process), "sshd") {
+			continue
+		}
+		if port != 0 && port != listener.Port {
+			return detectSSHPort(ctx, listeners)
+		}
+		port = listener.Port
+	}
+	if port != 0 {
+		return port
+	}
+	return detectSSHPort(ctx, listeners)
+}
+
 func detectSSHPort(ctx context.Context, listeners []FirewallListener) int {
 	out, err := portCommand(ctx, "sshd", "-T")
 	if err == nil {
@@ -485,7 +504,7 @@ func GetFirewallPortStatus() (FirewallPortStatus, error) {
 		AccessEnabled: accessEnabled, AccessRules: accessRules, AccessAvailable: writable && accessErr == nil && systemdRunAvailable(),
 		AccessChangeID: change.ID, AccessChangeState: change.State, AccessChangeError: change.Error,
 		Backend: "nftables", Writable: writable, Warning: warning, InputPolicy: policy, RecommendedPolicy: "drop",
-		SSHPort: detectSSHPort(ctx, listeners), PanelPort: panelPort,
+		SSHPort: observedSSHPort(ctx, listeners), PanelPort: panelPort,
 		ManagedRuleCount: len(rules), AnomalyCount: anomalies,
 		ListenerCount: len(listeners), NetworkListenerCount: networkListeners, LocalListenerCount: localListeners,
 		DangerousListenerCount: dangerousListeners, CanEnableProtection: canProtect,

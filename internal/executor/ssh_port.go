@@ -50,9 +50,12 @@ func sshMoveActive(ctx context.Context) bool {
 }
 
 func inspectSSHPort(ctx context.Context) SSHPortStatus {
-	listeners := detectListeners(ctx)
+	listeners, listenerErr := readFirewallListeners(ctx, true)
 	s := SSHPortStatus{Port: detectSSHPort(ctx, listeners), Pending: sshMoveActive(ctx)}
 	fail := func(reason string) SSHPortStatus { s.Reason = reason; return s }
+	if listenerErr != nil {
+		return fail("无法完整核对 SSH 监听，暂不支持自动修改: " + listenerErr.Error())
+	}
 	if s.Pending {
 		return fail("已有 SSH 端口变更，请完成验证或等待自动恢复")
 	}
@@ -98,13 +101,16 @@ func inspectSSHPort(ctx context.Context) SSHPortStatus {
 	if e != nil || validateSSHPorts(effective, s.Port) != nil {
 		return fail("SSH 包含多个端口或固定 ListenAddress，暂不支持自动修改")
 	}
-	owned := false
+	actualPort := 0
 	for _, l := range listeners {
-		if l.Protocol == "tcp" && l.Port == s.Port && strings.Contains(l.Process, "sshd") {
-			owned = true
+		if l.Protocol == "tcp" && strings.Contains(l.Process, "sshd") {
+			if actualPort != 0 && actualPort != l.Port {
+				return fail("检测到多个 SSH 监听端口，暂不支持自动修改")
+			}
+			actualPort = l.Port
 		}
 	}
-	if !owned {
+	if actualPort != s.Port {
 		return fail("配置端口与实际 SSH 监听不一致")
 	}
 	_, _, e = sshMigrationAccessState(ctx, s.Port)
@@ -301,7 +307,12 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 			_ = os.RemoveAll(dir)
 		}
 	}()
-	for name, data := range map[string]string{"original": string(original), "dual": dual, "final": final, "dual.nft": accessRulesScript(dualRules, accessExists), "final.nft": accessRulesScript(finalRules, true)} {
+	dualAccess := accessRulesScript(dualRules, accessExists)
+	finalAccess := accessRulesScript(finalRules, true)
+	// --check never creates the live table. Validate the final replacement after
+	// staging the dual-port policy in the same read-only transaction, including
+	// when this migration creates the panel's access table for the first time.
+	for name, data := range map[string]string{"original": string(original), "dual": dual, "final": final, "dual.nft": dualAccess, "final.nft": finalAccess, "final-check.nft": dualAccess + finalAccess} {
 		if e = os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); e != nil {
 			return SSHPortChange{}, e
 		}
@@ -351,7 +362,7 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 	if e = os.WriteFile(filepath.Join(dir, "allow.nft"), []byte(allows.String()), 0600); e != nil {
 		return SSHPortChange{}, e
 	}
-	for _, name := range []string{"dual.nft", "final.nft", "allow.nft"} {
+	for _, name := range []string{"dual.nft", "final-check.nft", "allow.nft"} {
 		if out, err := portCommand(ctx, "nft", "--check", "--file", filepath.Join(dir, name)); err != nil {
 			return SSHPortChange{}, fmt.Errorf("防火墙预检失败: %s", out)
 		}

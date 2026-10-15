@@ -10,7 +10,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The Cloudflare entry serves a fixed, deployed stable Release. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
 
-GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v2.0.9`; its assets must exist on GitHub before it can be used.
+GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v2.0.10`; its assets must exist on GitHub before it can be used.
 
 ## First login and server maintenance
 
@@ -32,6 +32,8 @@ Additional terminal commands are `o ports`, `o services`, `o bbr`, `o disk`, `o 
 
 `o ssh` reuses the protected dual-port SSH transaction: first allow the new port in any cloud firewall, retain the current window, connect through the new port in another SSH window, then execute the returned `o ssh-confirm <token>` command there. The old port is removed only after connection and configuration checks. An independent systemd watchdog restores unconfirmed changes after the deadline. Unsupported SSH/socket/firewall configurations remain blocked.
 
+If SSH is changed through the provider console or another tool, refresh Access Control to observe the current listener. A changed SSH port pauses an unsaved access-policy draft until you confirm a refresh. This read does not migrate firewall allowances, Fail2ban ports or cloud security-group rules; review those separately. Changing only a cloud security-group rule does not change the VPS's SSH listener.
+
 `o check-update` shows three distinct versions: installed, latest GitHub release, and the signed short entry's target from its `X-OLS-WPanel-Release` header. The short entry can lag GitHub. `o update` prints its downloaded signed target and refuses an older version; it retains the existing signature verification chain.
 
 ## Verify before executing any remote script
@@ -45,7 +47,7 @@ workdir="$(mktemp -d /tmp/ols-wpanel-install.XXXXXXXXXX)"
 trap 'rm -rf -- "$workdir"' EXIT
 cd "$workdir"
 
-version='v2.0.9'
+version='v2.0.10'
 base="https://github.com/zangwp/OLS-WPanel/releases/download/${version}"
 wget --no-config --https-only --no-hsts \
   "$base/install.sh" \
