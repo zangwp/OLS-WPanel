@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.3 — 2026-10-15
+
+- Adjusts the shared background retention-cleanup interval from one hour to 30 minutes for monitoring history, account security history and WordPress security events. Sampling, log ingestion, notification dispatch and failure-retry cadences continue unchanged.
+- Updates cadence and database-boundary regression coverage to verify 48 periodic sweeps per day, successful-retry deadlines and continued five-minute WordPress event ingestion between cleanups.
+
+Upgrade notes: no new dependency or database migration. Retention durations remain 15 days for monitoring and 90 days for account/WordPress security history. During normal operation, expired rows may remain physically stored for about one additional 30-minute interval; failures or delayed workers can extend this. Existing real-time protection and account transaction limits are preserved.
+
 ## v2.1.2 — 2026-10-15
 
 - Shares an hourly retention-cleanup schedule across monitoring history, account security history and WordPress security events. Existing sampling, log ingestion and notification dispatch cadences continue; failed cleanup retries on the next ordinary worker tick.

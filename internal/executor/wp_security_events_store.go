@@ -380,7 +380,7 @@ func pruneWPSecurityEvents(now time.Time, retentionDays int) error {
 }
 
 // StartWPSecurityEventIngestor 启动后台增量摄取调度：每 wpSecurityIngestorInterval
-// 读取一次新增日志；启动时及每小时清理过期历史，失败在下一轮摄取时重试。
+// 读取一次新增日志；启动时及每 30 分钟清理过期历史，失败在下一轮摄取时重试。
 // StopWPSecurityEventIngestor 可关闭
 // 该调度，供 main.go 在收到 SIGINT/SIGTERM 时调用（审核优化项 3.2）。
 //

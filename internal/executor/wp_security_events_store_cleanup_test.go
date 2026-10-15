@@ -36,7 +36,7 @@ func countCleanupTestEvents(t *testing.T, ip string) int {
 	return count
 }
 
-func TestWPSecurityEventCycleKeepsFiveMinuteIngestAndHourlyPrune(t *testing.T) {
+func TestWPSecurityEventCycleKeepsFiveMinuteIngestAndHalfHourlyPrune(t *testing.T) {
 	openTestDB(t)
 	dir := t.TempDir()
 	seedWPSecurityEventSite(t, dir)
@@ -54,10 +54,10 @@ func TestWPSecurityEventCycleKeepsFiveMinuteIngestAndHourlyPrune(t *testing.T) {
 		t.Fatalf("startup ingested %d events, want 1", got)
 	}
 
-	// An expired row arriving after the startup prune remains until the hourly
+	// An expired row arriving after the startup prune remains until the half-hourly
 	// cleanup; new login evidence must still be ingested on every five-minute tick.
 	insertWPSecurityEvent(t, "203.0.113.20", SecurityEventWPLoginFailed, "/old", expired)
-	for tick := 1; tick <= 12; tick++ {
+	for tick := 1; tick <= 6; tick++ {
 		at := now.Add(time.Duration(tick) * 5 * time.Minute)
 		appendCleanupTestLogin(t, dir, at)
 		runWPSecurityEventIngestCycle(at, &cleanup)
@@ -65,7 +65,7 @@ func TestWPSecurityEventCycleKeepsFiveMinuteIngestAndHourlyPrune(t *testing.T) {
 			t.Fatalf("tick %d ingested %d events, want %d", tick, got, tick+1)
 		}
 		wantExpired := 1
-		if tick == 12 {
+		if tick == 6 {
 			wantExpired = 0
 		}
 		if got := countCleanupTestEvents(t, "203.0.113.20"); got != wantExpired {

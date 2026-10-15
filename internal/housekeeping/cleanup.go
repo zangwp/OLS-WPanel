@@ -3,9 +3,9 @@ package housekeeping
 
 import "time"
 
-const CleanupInterval = time.Hour
+const CleanupInterval = 30 * time.Minute
 
-// Cleanup limits successful retention sweeps to once per hour. Its zero value
+// Cleanup limits successful retention sweeps to once per CleanupInterval. Its zero value
 // is ready for the first sweep. Keep it local to a single serial worker: it
 // starts no goroutine and does not synchronize concurrent callers.
 type Cleanup struct {
