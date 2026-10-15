@@ -46,15 +46,22 @@ vm.createContext(ctx);vm.runInContext(source,ctx);
  p.accessCustomPort='70000';p.addAccessRow();assert.equal(p.accessRows.length,rowCount);assert.equal(p.accessError,'firewall.access_invalid_port');
  p.accessCustomPort='80';p.addAccessRow();assert.equal(p.accessRows.length,rowCount);assert.equal(p.accessError,'firewall.access_duplicate_port');
  p.accessCustomPort='8088';p.addAccessRow();assert.equal(p.accessRows.find(r=>r.port===8088).scope,'public');assert.equal(p.accessDirty,true);assert.equal(p.accessPreview,null);assert(p.accessPayload().some(r=>r.port===8088));
- let refreshes=0;p.fetchPortStatus=async()=>{refreshes++};ctx.confirmModal=async()=>false;await p.refreshAccess();assert.equal(refreshes,0);assert(p.accessRows.some(r=>r.port===8088));ctx.confirmModal=async()=>true;
+ let refreshes=0;const readStatus=p.fetchPortStatus.bind(p);p.fetchPortStatus=async(options)=>{refreshes++;return readStatus(options)};ctx.confirmModal=async()=>false;await p.refreshAccess();assert.equal(refreshes,0);assert(p.accessRows.some(r=>r.port===8088));ctx.confirmModal=async()=>true;
  ctx.api=async()=>{throw Error('preview failed')};await p.previewAccess();assert.equal(p.accessError,'preview failed');assert.equal(p.accessBusy,false);assert(p.accessRows.some(r=>r.port===8088));
- ctx.api=async(path,opts)=>{calls.push(path);return {success:true,data:path.endsWith('/preview')?{rules:opts.body.rules,fingerprint:'snapshot'}:{confirmation_token:'test',deadline:'2030-01-01'}}};
+ let sshValidation=false,sequence=0;let status={...p.portStatus,access_available:true,access_enabled:true};
+ ctx.api=async(path,opts)=>{
+  calls.push(path);
+  if(path.endsWith('/preview'))return {success:true,data:{rules:opts.body.rules,fingerprint:'snapshot',ssh_port:2222,panel_port:9443}};
+  if(path.endsWith('/apply')){status={...status,access_rules:opts.body.rules,access_change_id:(++sequence).toString(16).padStart(32,'0'),access_change_state:'pending'};return {success:true,data:{confirmation_token:'test',change_id:status.access_change_id,deadline:'2030-01-01',requires_ssh_validation:sshValidation}};}
+  if(path.endsWith('/confirm')){status.access_change_state='confirmed';return {success:true,data:{confirmed:true}};}
+  assert.equal(path,'/firewall/ports');return {success:true,data:JSON.parse(JSON.stringify(status))};
+ };
  await p.previewAccess();assert(p.accessPreview.rules.some(r=>r.port===8088));assert.equal(p.accessToken,'');
- await p.applyAccess();assert.equal(p.accessToken,'test');await p.refreshAccess();assert.equal(refreshes,1,'pending verification cannot be refreshed');p.accessChecked=true;await p.confirmAccess();assert.equal(p.accessToken,'');
+ await p.applyAccess();assert.equal(p.accessToken,'test');await p.refreshAccess();assert.equal(refreshes,1,'pending verification cannot be refreshed');const confirmStart=calls.length;await p.confirmAccess();assert.deepEqual(calls.slice(confirmStart),['/firewall/ports','/firewall/ports/access/confirm','/firewall/ports']);assert.equal(p.accessChecked,false,'ordinary confirmation requires no checkbox');assert.equal(p.accessToken,'');
  calls.length=0;
  p.portStatus.access_enabled=true;p.portStatus.access_rules=[{protocol:'tcp',port:2222,source:'2001:db8::1/128'}];p.resetAccessRows();
  assert.equal(p.accessPayload().length,1);assert.equal(p.accessPayload()[0].source,'2001:db8::1/128');
- p.accessPreview={rules:payload,fingerprint:'snapshot'};p.fetchPortStatus=async()=>{};await p.applyAccess();
+ p.accessPreview={rules:payload,fingerprint:'snapshot',ssh_port:2222,panel_port:9443};sshValidation=true;await p.applyAccess();
  assert.equal(p.accessToken,'test');assert(!calls.some(x=>x.endsWith('/confirm')),'must not auto-confirm');
  await p.confirmAccess();assert(!calls.some(x=>x.endsWith('/confirm')),'requires explicit connection verification');
  p.accessChecked=true;await p.confirmAccess();assert(calls.some(x=>x.endsWith('/confirm')));assert.equal(p.accessToken,'');

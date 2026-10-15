@@ -150,6 +150,9 @@ func TestSSHConfirmationRollsBackWhenOldPortInspectionFails(t *testing.T) {
 					restored = true
 					return "", os.WriteFile(sshConfigPath, []byte(original), 0600)
 				case "systemctl":
+					if len(args) > 0 && args[0] == "show" {
+						return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
+					}
 					if len(args) > 0 && args[0] == "stop" && !restored {
 						t.Fatal("watchdog cancelled before failed inspection was restored")
 					}
@@ -163,7 +166,7 @@ func TestSSHConfirmationRollsBackWhenOldPortInspectionFails(t *testing.T) {
 				t.Fatal("failed old-port inspection persisted a permanent policy")
 				return nil
 			}
-			if err := ConfirmSSHPortChange("inspection-token"); err == nil || !strings.Contains(err.Error(), "已恢复原 SSH 配置") {
+			if err := ConfirmSSHPortChange("inspection-token"); err == nil || !strings.Contains(err.Error(), "已执行 SSH 恢复") {
 				t.Fatalf("migration falsely confirmed: %v", err)
 			}
 			current, err := os.ReadFile(sshConfigPath)

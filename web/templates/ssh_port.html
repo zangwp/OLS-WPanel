@@ -3,8 +3,10 @@
     <summary class="text-white font-semibold cursor-pointer">{{t .Lang "ssh_port.title"}}</summary>
     <p class="text-sm text-gray-400 mt-4">{{t .Lang "ssh_port.help"}}</p>
     <div class="flex flex-wrap items-center gap-4 my-4"><span class="text-sm text-gray-300">{{t .Lang "ssh_port.current"}} <strong x-text="status.port || '—'"></strong>/TCP</span><button class="btn-secondary text-xs" @click="refresh()" :disabled="busy">{{t .Lang "firewall.refresh"}}</button></div>
-    <p x-show="error" class="text-sm text-red-300 my-3" x-text="error" role="alert"></p>
-    <div x-show="status.reason" class="ssh-port-requirement">
+    <p x-show="!!error" class="text-sm text-red-300 my-3" x-text="error" role="alert"></p>
+    <p x-show="!!notice" class="text-sm my-3" :class="noticeType === 'success' ? 'text-green-300' : 'text-yellow-300'" x-text="notice" role="status"></p>
+    <p x-show="busy && !!change" class="text-sm text-gray-400 my-3" role="status">{{t .Lang "ssh_port.pending_read"}}</p>
+    <div x-show="!!status.reason" class="ssh-port-requirement">
         <p class="text-sm text-yellow-300" x-text="status.reason"></p>
     </div>
     <div x-show="!change" class="space-y-4">
@@ -14,51 +16,103 @@
         <label class="flex items-start gap-2 text-sm text-gray-300"><input type="checkbox" x-model="cloudReady" :disabled="busy"><span>{{t .Lang "ssh_port.cloud"}}</span></label>
         <button type="button" class="btn-primary" @click="begin()" :disabled="busy || status.pending || !status.available || !cloudReady || !port || Number(port) === Number(status.port)" x-text="busy ? t('common.loading') : t('ssh_port.apply')"></button>
     </div>
-    <div x-show="change" class="space-y-4">
+    <div x-show="!!change" class="space-y-4">
         <p class="text-sm text-green-300" x-text="change ? t('ssh_port.transition') + change.old_port + ' → ' + change.new_port : ''"></p>
-        <p class="text-sm text-gray-300">{{t .Lang "ssh_port.verify_help"}}</p>
-        <code class="block text-sm text-blue-300" x-text="change ? 'ssh -p ' + change.new_port + ' USER@SERVER_IP' : ''"></code>
-        <label for="ssh-verification-command" class="label">{{t .Lang "ssh_port.command"}}</label>
-        <textarea id="ssh-verification-command" class="input-field text-xs" style="min-height:100px;overflow-wrap:anywhere" readonly :value="change?.verify_command || ''"></textarea>
-        <p class="text-sm text-yellow-300" x-text="change ? t('ssh_port.deadline') + new Date(change.deadline).toLocaleString() : ''"></p>
-        <button class="btn-primary" @click="confirm()" :disabled="busy" x-text="busy ? t('common.loading') : t('ssh_port.confirm')"></button>
+        <ol class="space-y-4" style="list-style:decimal;padding-inline-start:1.5rem">
+            <li><h4 class="font-semibold text-white">{{t .Lang "ssh_port.step_connect"}}</h4><p class="text-sm text-gray-300 mt-2">{{t .Lang "ssh_port.verify_help"}}</p></li>
+            <li>
+                <h4 class="font-semibold text-white mb-2">{{t .Lang "ssh_port.step_verify"}}</h4>
+                <label for="ssh-verification-command" class="label">{{t .Lang "ssh_port.command"}}</label>
+                <textarea id="ssh-verification-command" x-ref="sshVerificationCommand" class="input-field" style="min-height:100px;overflow-wrap:anywhere;font-size:1rem" readonly :value="change?.verify_command || ''"></textarea>
+                <button type="button" class="btn-secondary mt-2" @click="copyVerification()" :disabled="busy || !change?.verify_command">{{t .Lang "ssh_port.copy_verification"}}</button>
+            </li>
+            <li>
+                <h4 class="font-semibold text-white mb-2">{{t .Lang "ssh_port.step_confirm"}}</h4>
+                <p class="text-sm text-yellow-300 mb-3" x-text="change ? t('ssh_port.deadline') + new Date(change.deadline).toLocaleString() : ''"></p>
+                <button type="button" class="btn-primary" @click="confirm()" :disabled="busy || statusUnknown || changeExpired()" x-text="busy ? t('common.loading') : t('ssh_port.confirm')"></button>
+            </li>
+        </ol>
     </div>
 </details>
 <script>
 function sshPortManager() {
     return {
-        status: {}, loaded: false, busy: false, error: '', port: '', cloudReady: false, change: null, timer: null,
-        destroy() { clearTimeout(this.timer); },
+        status: {}, loaded: false, busy: false, error: '', notice: '', noticeType: 'info', statusUnknown: false, port: '', cloudReady: false, change: null, timer: null, expiryTimer: null,
+        destroy() { clearTimeout(this.timer); clearTimeout(this.expiryTimer); },
+        changeExpired() { const deadline = Date.parse(this.change?.deadline); return !Number.isFinite(deadline) || deadline <= Date.now(); },
+        async readStatus({ notify = true } = {}) {
+            const r = await api('/firewall/ssh-port', { silent: true });
+            const status = r.data;
+            if (!r.success || !status || !Number.isInteger(status.port) || status.port < 1 || status.port > 65535 || typeof status.pending !== 'boolean' || typeof status.available !== 'boolean') throw Error(t('ssh_port.status_unverified'));
+            this.status = status; this.loaded = true;
+            if (this.change) {
+                const sameChange = /^[a-f0-9]{32}$/.test(this.change.change_id || '') && status.change_id === this.change.change_id;
+                const expectedPort = status.change_state === 'confirmed' ? this.change.new_port : this.change.old_port;
+                if (sameChange && ['confirmed', 'rolled_back'].includes(status.change_state) && status.pending === false && status.port === expectedPort) {
+                    clearTimeout(this.timer); clearTimeout(this.expiryTimer); this.timer = null; this.expiryTimer = null; this.change = null; this.cloudReady = false; this.port = ''; this.statusUnknown = false; this.error = '';
+                    this.noticeType = status.change_state === 'confirmed' ? 'success' : 'warning';
+                    this.notice = t(status.change_state === 'confirmed' ? 'ssh_port.saved' : 'ssh_port.rolled_back');
+                    this.$dispatch('ssh-port-changed'); showToast(this.notice, this.noticeType);
+                } else {
+                    this.statusUnknown = !(sameChange && status.change_state === 'pending' && status.pending === true && !this.changeExpired());
+                    if (this.statusUnknown) this.error = t('ssh_port.status_unverified');
+                }
+            } else if (notify && !status.pending) this.$dispatch('ssh-port-observed');
+        },
         async refresh({ notify = true } = {}) {
-            this.busy = true; this.error = '';
-            try { const r = await api('/firewall/ssh-port'); if (!r.success) throw Error(t('common.operation_failed')); this.status = r.data || {}; this.loaded = true; if (notify && !this.change && !this.status.pending) this.$dispatch('ssh-port-observed'); }
-            catch(e) { this.status.available = false; this.error = e.message; }
+            if (this.busy) return;
+            this.busy = true; this.error = ''; this.notice = '';
+            try { await this.readStatus({ notify }); }
+            catch(e) { this.status.available = false; this.statusUnknown = !!this.change; this.error = this.change ? t('ssh_port.status_unverified') : e.message; }
             finally { this.busy = false; }
+        },
+        async copyVerification() {
+            const command = this.change?.verify_command;
+            if (this.busy || !command) return;
+            let copied = false;
+            try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(command); copied = true; } } catch (_) {}
+            if (!copied) {
+                const field = this.$refs?.sshVerificationCommand;
+                if (field) { field.focus(); field.select(); try { copied = document.execCommand('copy'); } catch (_) {} }
+            }
+            if (copied) showToast(t('common.copied'), 'success');
+            else { this.error = t('ssh_port.copy_failed'); showToast(this.error, 'error'); }
         },
         async begin() {
             if (this.busy || this.change || this.status.pending || !this.cloudReady || !this.status.available || !Number.isInteger(Number(this.port)) || Number(this.port)<1 || Number(this.port)>65535 || Number(this.port) === Number(this.status.port)) return;
             const requestedPort = Number(this.port);
-            this.busy = true; this.error = '';
+            this.busy = true; this.error = ''; this.notice = '';
             try {
                 if (!await confirmModal(t('ssh_port.confirm_begin'))) return;
                 if (this.change || this.status.pending || !this.cloudReady || !this.status.available || Number(this.port) !== requestedPort || requestedPort === Number(this.status.port)) return;
                 const r = await api('/firewall/ssh-port', { method:'POST', body:{port:requestedPort,confirm:true}, timeout:50000 });
                 if (!r.success || !r.data?.token) throw Error(t('common.operation_failed'));
-                this.change = r.data; this.status.available = false;
-                clearTimeout(this.timer); this.timer = setTimeout(async()=>{ this.change=null; await this.refresh({ notify: false }); this.$dispatch('ssh-port-changed'); },310000);
+                this.change = r.data; this.status.available = false; this.statusUnknown = !/^[a-f0-9]{32}$/.test(this.change.change_id || '') || this.changeExpired();
+                if (this.statusUnknown) this.error = t('ssh_port.status_unverified');
+                clearTimeout(this.expiryTimer);
+                if (!this.changeExpired()) this.expiryTimer = setTimeout(()=>{ this.statusUnknown = true; this.error = t('ssh_port.status_unverified'); }, Math.min(Date.parse(this.change.deadline) - Date.now(), 2147483647));
+                clearTimeout(this.timer); this.timer = setTimeout(async()=>{ this.statusUnknown = true; await this.refresh({ notify: false }); },310000);
             } catch(e) { this.error = e.message; }
             finally { this.busy = false; }
         },
         async confirm() {
-            if (!this.change?.token) return;
-            this.busy = true; this.error = '';
+            if (this.busy || !this.change?.token) return;
+            if (this.changeExpired()) { this.statusUnknown = true; await this.refresh({ notify: false }); return; }
+            if (this.statusUnknown) return;
+            this.busy = true; this.error = ''; this.notice = '';
+            let failure = null;
             try {
-                const r = await api('/firewall/ssh-port/confirm', {method:'POST',body:{token:this.change.token},timeout:40000});
+                const r = await api('/firewall/ssh-port/confirm', {method:'POST',body:{token:this.change.token},timeout:40000,suppressToast:true});
                 if (!r.success) throw Error(t('common.operation_failed'));
-                clearTimeout(this.timer); this.change=null; this.cloudReady=false; this.port='';
-                await this.refresh({ notify: false }); this.$dispatch('ssh-port-changed'); showToast(t('ssh_port.saved'),'success');
-            } catch(e) { this.error=e.message; }
-            finally { this.busy=false; }
+            } catch(e) { failure = e; }
+            try { await this.readStatus({ notify: false }); }
+            catch (_) { this.status.available = false; this.statusUnknown = true; }
+            if (this.change) {
+                if (!failure) this.statusUnknown = true;
+                this.error = this.statusUnknown ? (failure ? failure.message + ' ' : '') + t('ssh_port.status_unverified') : failure.message;
+                showToast(this.error, 'error');
+            }
+            this.busy=false;
         }
     };
 }
