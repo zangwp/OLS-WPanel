@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"errors"
 	"log"
 	"os"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/database"
+	"github.com/zangwp/OLS-WPanel/internal/housekeeping"
 )
 
 func Start() {
@@ -19,21 +21,30 @@ func runLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
+	var retention housekeeping.Cleanup
 	collect()
+	cleanupDue(&retention, time.Now())
 
 	for range ticker.C {
 		collect()
-		cleanup()
+		cleanupDue(&retention, time.Now())
 	}
 }
 
-func cleanup() {
+func cleanupDue(retention *housekeeping.Cleanup, now time.Time) {
+	if err := retention.Run(now, func() error { return cleanup(now) }); err != nil {
+		log.Printf("采集器历史清理失败: %v", err)
+	}
+}
+
+func cleanup(now time.Time) error {
 	db := database.GetDB()
 	if db == nil {
-		return
+		return errors.New("monitoring database unavailable")
 	}
-	cutoff := time.Now().UTC().Add(-15 * 24 * time.Hour).Format("2006-01-02 15:04:05")
-	db.Exec("DELETE FROM monitoring_metrics WHERE recorded_at < ?", cutoff)
+	cutoff := now.UTC().Add(-15 * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	_, err := db.Exec("DELETE FROM monitoring_metrics WHERE recorded_at < ?", cutoff)
+	return err
 }
 
 func collect() {

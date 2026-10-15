@@ -200,30 +200,6 @@ function cancelledAPIRequest() {
     return error;
 }
 
-const __apiGetCache = new Map();
-
-function cachedAPI(path, options = {}, ttlMs = 1000) {
-    const method = (options.method || 'GET').toUpperCase();
-    if (method !== 'GET' || options.body) {
-        return api(path, options);
-    }
-    const now = Date.now();
-    const cached = __apiGetCache.get(path);
-    if (cached && cached.expiresAt > now) {
-        return cached.promise;
-    }
-    const promise = api(path, options).finally(() => {
-        setTimeout(() => {
-            const current = __apiGetCache.get(path);
-            if (current && current.promise === promise) {
-                __apiGetCache.delete(path);
-            }
-        }, ttlMs);
-    });
-    __apiGetCache.set(path, { promise, expiresAt: now + ttlMs });
-    return promise;
-}
-
 function deferTask(fn, delay = 0) {
     const run = () => {
         try {

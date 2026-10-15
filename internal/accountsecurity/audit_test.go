@@ -13,18 +13,25 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func auditFixture(t *testing.T) (*AuditService, *sql.DB) {
+func auditDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "audit.db")+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { db.Close() })
 	db.SetMaxOpenConns(1)
 	if err := InitAuditSchema(db); err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+func auditFixture(t *testing.T) (*AuditService, *sql.DB) {
+	t.Helper()
+	db := auditDatabase(t)
 	s := NewAuditService(db)
-	t.Cleanup(func() { s.Close(); db.Close() })
+	t.Cleanup(s.Close)
 	return s, db
 }
 
@@ -282,5 +289,95 @@ func TestAuditQueuedNotificationFollowsRenamedAccountPreference(t *testing.T) {
 	waitAuditStatus(t, db, event.ID, "disabled")
 	if calls.Load() != 1 {
 		t.Fatal("queued notification ignored renamed account preference")
+	}
+}
+
+// Drive dispatch and delivery separately to test the retention boundary without
+// sleeping for worker ticks or changing a clock used by a running goroutine.
+func auditDispatchFixture(t *testing.T, now func() time.Time) *AuditService {
+	t.Helper()
+	return &AuditService{
+		db: auditDatabase(t), ctx: context.Background(), now: now,
+		queue: make(chan Event, 32), inFlight: make(map[string]bool),
+	}
+}
+
+func insertPendingAudit(t *testing.T, db *sql.DB, id string, createdAt time.Time) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO account_security_events(id,username,event,ip,user_agent,created_at,notification_status) VALUES(?,'admin','recovery_used','','',?,'pending')`, id, createdAt.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuditDispatchPendingExcludesExpiredRows(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	s := auditDispatchFixture(t, func() time.Time { return now })
+	cutoff := now.Add(-AuditRetention)
+	// More expired rows than the dispatch limit must not starve valid events.
+	for i := 0; i < cap(s.queue)+1; i++ {
+		insertPendingAudit(t, s.db, fmt.Sprintf("expired-%d", i), cutoff.Add(-time.Millisecond))
+	}
+	insertPendingAudit(t, s.db, "boundary", cutoff)
+	insertPendingAudit(t, s.db, "recent", now)
+	var sent []string
+	s.SetNotifier(func(_ context.Context, event Event) error {
+		sent = append(sent, event.ID)
+		return nil
+	})
+	if err := s.DispatchPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.queue) != 2 || len(s.inFlight) != 2 {
+		t.Fatalf("expired pending rows occupied dispatch slots: queued=%d in-flight=%d", len(s.queue), len(s.inFlight))
+	}
+	for len(s.queue) > 0 {
+		s.deliver(<-s.queue)
+	}
+	if len(sent) != 2 || sent[0] != "boundary" || sent[1] != "recent" {
+		t.Fatalf("unexpected notification delivery: %v", sent)
+	}
+	page, err := s.List(context.Background(), "admin", 1, 20)
+	if err != nil || page.Total != 2 || len(page.Events) != 2 {
+		t.Fatalf("retention visibility changed: %+v %v", page, err)
+	}
+	var retained int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM account_security_events WHERE notification_status='pending'`).Scan(&retained); err != nil || retained != 33 {
+		t.Fatalf("test must cover physically retained expired rows: count=%d err=%v", retained, err)
+	}
+}
+
+func TestAuditQueuedNotificationExpiresBeforeDelivery(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	s := auditDispatchFixture(t, func() time.Time { return now })
+	insertPendingAudit(t, s.db, "expiring", now.Add(-AuditRetention))
+	insertPendingAudit(t, s.db, "recent", now)
+	var sent []string
+	s.SetNotifier(func(_ context.Context, event Event) error {
+		sent = append(sent, event.ID)
+		return nil
+	})
+	if err := s.DispatchPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.queue) != 2 {
+		t.Fatalf("expected both valid events to be queued, got %d", len(s.queue))
+	}
+	// The first event crosses the cutoff while queued, before hourly cleanup.
+	now = now.Add(time.Millisecond)
+	for len(s.queue) > 0 {
+		s.deliver(<-s.queue)
+	}
+	if len(sent) != 1 || sent[0] != "recent" || len(s.inFlight) != 0 {
+		t.Fatalf("expired queued event was sent or left in flight: sent=%v in-flight=%v", sent, s.inFlight)
+	}
+	var status string
+	if err := s.db.QueryRow(`SELECT notification_status FROM account_security_events WHERE id='expiring'`).Scan(&status); err != nil || status != "pending" {
+		t.Fatalf("expired event should await physical cleanup without delivery: status=%q err=%v", status, err)
+	}
+	if err := s.DispatchPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.queue) != 0 || len(s.inFlight) != 0 {
+		t.Fatal("expired event was queued again")
 	}
 }

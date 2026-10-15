@@ -393,7 +393,7 @@ func RunUpdateWatchdog(cfg *config.Config, configPath, planPath string) {
 			setSecuritySetting("panel_auto_update_last_status", "success")
 			setSecuritySetting("panel_auto_update_last_success_at", time.Now().Format(time.RFC3339))
 			setSecuritySetting("panel_auto_update_last_success_version", plan.TargetVersion)
-			clearPanelUpdateCache()
+			ClearPanelUpdateAlertCache()
 			cleanupPanelUpdateBackups(plan)
 			_ = removeWatchdogReadyFile(plan)
 			_ = os.Remove(planPath)
@@ -2282,14 +2282,6 @@ func setSecuritySetting(key, value string) {
 	}
 	_, _ = db.Exec(`INSERT INTO security_settings (skey, svalue, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(skey) DO UPDATE SET svalue = excluded.svalue, updated_at = excluded.updated_at`, key, value)
-}
-
-func clearPanelUpdateCache() {
-	panelUpdateCache.mu.Lock()
-	panelUpdateCache.lastAt = time.Time{}
-	panelUpdateCache.latest = ""
-	panelUpdateCache.message = ""
-	panelUpdateCache.mu.Unlock()
 }
 
 func cleanupPanelUpdateBackups(plan rollbackPlan) {

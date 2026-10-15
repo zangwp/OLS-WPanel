@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const {test} = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../../web/js/app.js'), 'utf8');
-const apiSource = source.slice(source.indexOf('function api('), source.indexOf('const __apiGetCache'));
+const apiSource = source.slice(source.indexOf('function api('), source.indexOf('function deferTask('));
 const friendlySource = source.slice(source.indexOf('function friendlyAPIError('), source.indexOf('function formatBytes('));
 const reply = (status = 200, data = {success:true, data:{}}) => ({status, ok:status < 400, headers:{get:() => 'application/json'}, json:async () => data});
 function harness() {

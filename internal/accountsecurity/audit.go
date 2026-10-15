@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zangwp/OLS-WPanel/internal/housekeeping"
 )
 
 const AuditRetention = 90 * 24 * time.Hour
@@ -316,7 +317,9 @@ func (s *AuditService) DispatchPending(ctx context.Context) error {
 	if s.ctx.Err() != nil {
 		return s.ctx.Err()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+auditColumns+` FROM account_security_events WHERE notification_status='pending' ORDER BY created_at,id LIMIT 32`)
+	// Physical cleanup runs less often than dispatch; expired rows must neither
+	// send old notifications nor occupy the bounded pending-notification batch.
+	rows, err := s.db.QueryContext(ctx, `SELECT `+auditColumns+` FROM account_security_events WHERE notification_status='pending' AND created_at>=? ORDER BY created_at,id LIMIT 32`, s.now().Add(-AuditRetention).UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -354,13 +357,17 @@ func (s *AuditService) worker() {
 	defer close(s.done)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
+	var cleanup housekeeping.Cleanup
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
 			if s.db != nil {
-				if _, err := s.db.ExecContext(s.ctx, `DELETE FROM account_security_events WHERE created_at<?`, s.now().Add(-AuditRetention).UnixMilli()); err != nil && s.ctx.Err() == nil {
+				if err := cleanup.Run(s.now(), func() error {
+					_, err := s.db.ExecContext(s.ctx, `DELETE FROM account_security_events WHERE created_at<?`, s.now().Add(-AuditRetention).UnixMilli())
+					return err
+				}); err != nil && s.ctx.Err() == nil {
 					log.Printf("account security audit retention cleanup failed")
 				}
 			}
@@ -376,14 +383,14 @@ func (s *AuditService) worker() {
 func (s *AuditService) deliver(event Event) {
 	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 	defer cancel()
-	// A rename or retention cleanup may have happened since queueing. Reload
-	// the committed event instead of notifying using stale ownership metadata.
+	// Ownership or the retention cutoff may have changed since queueing. Reload
+	// the committed, unexpired event before choosing its notification transport.
 	var current Event
 	var timestamp int64
 	var enabled bool
 	// Read ownership and preference in one SQLite snapshot. Two independent
 	// queries could straddle RenameUserTx and treat the old name as default-on.
-	readErr := s.db.QueryRowContext(ctx, `SELECT `+auditColumns+`,COALESCE((SELECT notifications_enabled FROM account_security_preferences p WHERE p.username=account_security_events.username),1) FROM account_security_events WHERE id=? AND notification_status='pending'`, event.ID).Scan(&current.ID, &current.Username, &current.Event, &current.IP, &current.UserAgent, &timestamp, &current.Anomaly, &current.NotificationStatus, &current.TargetID, &enabled)
+	readErr := s.db.QueryRowContext(ctx, `SELECT `+auditColumns+`,COALESCE((SELECT notifications_enabled FROM account_security_preferences p WHERE p.username=account_security_events.username),1) FROM account_security_events WHERE id=? AND notification_status='pending' AND created_at>=?`, event.ID, s.now().Add(-AuditRetention).UnixMilli()).Scan(&current.ID, &current.Username, &current.Event, &current.IP, &current.UserAgent, &timestamp, &current.Anomaly, &current.NotificationStatus, &current.TargetID, &enabled)
 	current.CreatedAt = time.UnixMilli(timestamp).UTC()
 	if errors.Is(readErr, sql.ErrNoRows) {
 		s.notifyMu.Lock()
