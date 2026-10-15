@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.1.4 — 2026-10-15
+
+- Bounds log-analysis aggregation across current and rotated files, releases unused ranking storage, and avoids retaining complete log lines through small result strings. High-cardinality scans return explicitly marked partial results when the aggregation budget is reached.
+- Applies the existing local-only plugin API boundary before body parsing and maintenance checks, with a 64 KiB body limit and a 10-second read deadline. Site-key authentication and ordinary panel uploads retain their separate handling.
+- Sends database-account creation passwords through stdin instead of process arguments, and prevents failed credential SQL from being echoed in errors.
+- Registers rollback immediately after each website directory is created, so a later directory failure does not leave a new site path blocking retry. Existing directories are preserved.
+
+Upgrade notes: no new dependency, background worker or database migration. The 30-minute historical cleanup schedule and existing monitoring, notification, backup, SSH and firewall behavior are retained. Log-analysis limits affect only on-demand report coverage, with partial results identified in the report.
+
 ## v2.1.3 — 2026-10-15
 
 - Adjusts the shared background retention-cleanup interval from one hour to 30 minutes for monitoring history, account security history and WordPress security events. Sampling, log ingestion, notification dispatch and failure-retry cadences continue unchanged.

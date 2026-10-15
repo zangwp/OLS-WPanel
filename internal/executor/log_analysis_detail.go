@@ -101,9 +101,10 @@ func AnalyzeWebsiteLogDetailsContext(ctx context.Context, site *models.Website, 
 	offset := (page - 1) * pageSize
 	checker := newSearchBotIPChecker(db)
 	seenBots := map[string]struct{}{}
+	var aggregationBudget logAggregationBudget
 	var bytesScanned int64
 	for _, path := range files {
-		if bytesScanned >= logAnalysisDetailMaxBytes {
+		if result.Truncated || bytesScanned >= logAnalysisDetailMaxBytes {
 			result.Truncated = true
 			break
 		}
@@ -123,6 +124,7 @@ func AnalyzeWebsiteLogDetailsContext(ctx context.Context, site *models.Website, 
 			}
 			security := strings.HasPrefix(filepath.Base(path), "wp-security.log")
 			matched := false
+			requestKey := ""
 			switch kind {
 			case "status":
 				matched = !security && m[5] == value
@@ -132,11 +134,9 @@ func AnalyzeWebsiteLogDetailsContext(ctx context.Context, site *models.Website, 
 				name, verification := identifySearchBot(checker, m[6], m[1])
 				matched = name+":"+verification == value
 				if matched {
-					requestKey := m[2] + "|" + m[1] + "|" + m[4] + "|" + m[6]
+					requestKey = m[2] + "|" + m[1] + "|" + m[4] + "|" + m[6]
 					if _, exists := seenBots[requestKey]; exists {
 						matched = false
-					} else {
-						seenBots[requestKey] = struct{}{}
 					}
 				}
 			case "ip":
@@ -146,13 +146,34 @@ func AnalyzeWebsiteLogDetailsContext(ctx context.Context, site *models.Website, 
 			}
 			if matched {
 				normalizedPath := normalizeLogPath(m[4])
-				ips[m[1]]++
-				paths[normalizedPath]++
-				statuses[m[5]]++
-				userAgents[normalizeUserAgent(m[6])]++
-				methods[m[3]]++
-				hourly[stamp.Format("2006-01-02 15:00")]++
-				ipPathPairs[m[1]+" → "+normalizedPath]++
+				userAgent := normalizeUserAgent(m[6])
+				hour := stamp.Format("2006-01-02 15:00")
+				ipPathPair := m[1] + " → " + normalizedPath
+				keys := make([]string, 0, 8)
+				keys = appendNewLogAggregationKey(keys, ips, m[1])
+				keys = appendNewLogAggregationKey(keys, paths, normalizedPath)
+				keys = appendNewLogAggregationKey(keys, statuses, m[5])
+				keys = appendNewLogAggregationKey(keys, userAgents, userAgent)
+				keys = appendNewLogAggregationKey(keys, methods, m[3])
+				keys = appendNewLogAggregationKey(keys, hourly, hour)
+				keys = appendNewLogAggregationKey(keys, ipPathPairs, ipPathPair)
+				if requestKey != "" {
+					keys = appendNewLogAggregationKey(keys, seenBots, requestKey)
+				}
+				if !aggregationBudget.reserve(keys) {
+					result.Truncated = true
+					return false
+				}
+				if requestKey != "" {
+					retainLogAggregationKey(seenBots, requestKey)
+				}
+				incrementLogAggregation(ips, m[1])
+				incrementLogAggregation(paths, normalizedPath)
+				incrementLogAggregation(statuses, m[5])
+				incrementLogAggregation(userAgents, userAgent)
+				incrementLogAggregation(methods, m[3])
+				incrementLogAggregation(hourly, hour)
+				incrementLogAggregation(ipPathPairs, ipPathPair)
 				if result.Total >= offset && len(result.Lines) < pageSize {
 					result.Lines = append(result.Lines, sanitizeLogSample(line))
 				}
