@@ -53,27 +53,71 @@ func TestRsyncCancellationKillsSpawnedProcessGroup(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	deadline := time.Now().Add(2 * time.Second)
-	for processIsRunning(pid) && time.Now().Before(deadline) {
+	for {
+		if !processIsRunning(pid) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("rsync child process %d survived context cancellation", pid)
+		}
 		time.Sleep(20 * time.Millisecond)
-	}
-	if processIsRunning(pid) {
-		t.Fatalf("rsync child process %d survived context cancellation", pid)
 	}
 }
 
 func processIsRunning(pid int) bool {
-	err := syscall.Kill(pid, 0)
+	return processIsRunningWithProbe(
+		func() error { return syscall.Kill(pid, 0) },
+		func() ([]byte, error) { return os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat")) },
+	)
+}
+
+func processIsRunningWithProbe(probe func() error, readStat func() ([]byte, error)) bool {
+	err := probe()
 	if errors.Is(err, syscall.ESRCH) {
 		return false
 	}
-	// A killed child can remain a zombie very briefly while it is reaped. It
-	// cannot execute further work and is therefore considered terminated.
-	stat, readErr := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	stat, readErr := readStat()
+	// The process can be reaped after kill(pid, 0) succeeds but before the
+	// procfs read. Missing stat is proof of termination, not a live child.
+	if errors.Is(readErr, os.ErrNotExist) {
+		return false
+	}
+	// A zombie or dead task cannot execute more work. Parse after comm's final
+	// ')' because a process name can contain spaces and closing parentheses.
 	if readErr == nil {
-		fields := strings.Fields(string(stat))
-		if len(fields) >= 3 && fields[2] == "Z" {
-			return false
+		if close := strings.LastIndexByte(string(stat), ')'); close >= 0 {
+			fields := strings.Fields(string(stat[close+1:]))
+			if len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X") {
+				return false
+			}
 		}
 	}
-	return err == nil || errors.Is(err, syscall.EPERM)
+	// Unknown probe/read failures must not make a real survivor pass.
+	return true
+}
+
+func TestRsyncChildTerminationProbeHandlesReapingRace(t *testing.T) {
+	for _, sample := range []struct {
+		name    string
+		probe   error
+		stat    string
+		readErr error
+		running bool
+	}{
+		{"reaped_after_successful_signal_probe", nil, "", os.ErrNotExist, false},
+		{"already_reaped", syscall.ESRCH, "", nil, false},
+		{"zombie_with_spaced_name", nil, "42 (worker ) name) Z 1 2 3", nil, false},
+		{"dead_before_final_reaping", nil, "42 (sleep) X 1 2 3", nil, false},
+		{"live_sleep", nil, "42 (sleep) S 1 2 3", nil, true},
+		{"read_denied_is_not_termination", nil, "", os.ErrPermission, true},
+		{"signal_denied_is_not_termination", syscall.EPERM, "", os.ErrPermission, true},
+		{"malformed_stat_is_not_termination", nil, "invalid", nil, true},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			got := processIsRunningWithProbe(func() error { return sample.probe }, func() ([]byte, error) { return []byte(sample.stat), sample.readErr })
+			if got != sample.running {
+				t.Fatalf("running=%v want=%v", got, sample.running)
+			}
+		})
+	}
 }

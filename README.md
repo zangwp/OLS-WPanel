@@ -53,6 +53,8 @@ o ports           本机监听、进程与入站规则诊断
 o services        核心服务状态与最近日志
 o bbr             当前拥塞控制、内核支持与持久配置
 o disk            磁盘空间与 inode 检查
+o processes       CPU / 内存占用最高的进程（只读短时采样）
+o health          服务、磁盘、软件包与本机网络快速体检
 o apt-check       APT / dpkg 只读健康检查
 o history         最近 200 条终端维护记录
 o ssh             SSH 双端口过渡，超时自动恢复
@@ -66,6 +68,8 @@ o uninstall       卸载面板，保留网站、数据库与共享软件
 ```
 
 维护命令需 root 权限，终端菜单目前使用中文。DNS、Swap、SSH 与更新说明见 [终端维护指南](docs/verified-install.md#first-login-and-server-maintenance)，备份恢复与卸载检查见 [日常维护与恢复](docs/operations-and-recovery.md)。
+
+首页显示本机资源摘要，输入 `r` 刷新、`h` 运行快速体检。进程 CPU 按单核 100% 计算，多核进程可以超过 100%；体检显示已确认的状态与下一步命令，无法读取的项目标为未知。两项检查均不会自动修改配置或终止进程。
 
 变更 SSH 端口时请保留当前连接，并在新端口另开 SSH 连接执行返回的 `o ssh-confirm` 命令。
 

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import types
 import unittest
 from unittest.mock import patch
@@ -12,7 +13,7 @@ SOURCE = pathlib.Path(__file__).with_name('panel_cli.sh').read_text(encoding='ut
 CODE = SOURCE.split("<<'PYVIEW'\n", 1)[1].split('\nPYVIEW', 1)[0]
 
 
-def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None, status='failed', remaining=0, swap=None, swap_failure=False, manager=None, takeover=False, restore=False, locale_available=True, payloads=None, files_extra=None, fail_command=None):
+def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None, status='failed', remaining=0, swap=None, swap_failure=False, manager=None, takeover=False, restore=False, locale_available=True, payloads=None, files_extra=None, fail_command=None, disk_failure=False):
     presets = [
         dict(id='international', ipv4=['1.1.1.1', '1.0.0.1'], ipv6=['2606:4700:4700::1111', '2606:4700:4700::1001']),
         dict(id='mainland_china', ipv4=['223.5.5.5', '223.6.6.6'], ipv6=['2400:3200::1', '2400:3200:baba::1']),
@@ -43,7 +44,7 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         '/etc/sysctl.d/.ols-wpanel-vps-original.json': json.dumps({'net.core.somaxconn':'65535','net.ipv4.tcp_max_syn_backlog':'8192'}) if baseline else '',
     }
     files.update(files_extra or {})
-    ticks = [0]
+    ticks = [0];commands=[]
 
     def read(path, *args, **kwargs):
         key=path.as_posix()
@@ -53,6 +54,7 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         return files.get(key, '')
 
     def command(args, **kwargs):
+        commands.append(args)
         output = ''
         if fail_command and args[0]==fail_command:return types.SimpleNamespace(returncode=1,stdout='',stderr='fixture command failure')
         if '--vps-tool' in args:
@@ -71,7 +73,9 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         elif args[0]=='curl': output='ip='+('2001:db8::10' if '-6' in args else '192.0.2.10')
         elif args[:4]==('env','LC_ALL=C','apt','list'): output='Listing...\nlinux-image-amd64/stable-security 6.12.111-1 amd64 [upgradable from: 6.12.107-1]'
         elif args[0]=='timedatectl': output='Timezone=UTC\nNTP=yes\nNTPSynchronized=no'
-        elif args[0]=='systemctl': output='LoadState=loaded\nActiveState=active' if 'systemd-timesyncd.service' in args else 'LoadState=not-found'
+        elif args[0]=='systemctl': output='active' if '--value' in args else ('LoadState=loaded\nActiveState=active' if 'systemd-timesyncd.service' in args else 'LoadState=not-found')
+        elif args[0]=='hostnamectl':output='demo-vps'
+        elif '--info' in args:output='版本: v2.1.0 linux/amd64'
         return types.SimpleNamespace(returncode=0, stdout=output, stderr='')
 
     out=io.StringIO();code=0;namespace={}
@@ -85,13 +89,14 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         stack.enter_context(patch('os.path.isfile',return_value=baseline))
         stack.enter_context(patch('os.path.exists',return_value=False))
         stack.enter_context(patch('shutil.which',side_effect=lambda cmd:'/usr/bin/'+cmd if locale_available or cmd not in ['locale-gen','update-locale'] else None))
-        stack.enter_context(patch('shutil.disk_usage',return_value=types.SimpleNamespace(total=43*1024**3,used=2*1024**3,free=41*1024**3)))
+        stack.enter_context(patch('shutil.disk_usage',side_effect=OSError('fixture disk failure') if disk_failure else None,return_value=types.SimpleNamespace(total=43*1024**3,used=2*1024**3,free=41*1024**3)))
         stack.enter_context(patch('os.statvfs',return_value=types.SimpleNamespace(f_files=100000,f_ffree=90000),create=True))
         for key,val in [('node','demo-vps'),('release','6.12.107+deb13-amd64'),('machine','x86_64')]:stack.enter_context(patch('platform.'+key,return_value=val))
         stack.enter_context(patch('time.sleep'))
         stack.enter_context(contextlib.redirect_stdout(out))
         try:exec(compile(CODE,'embedded-cli','exec'),namespace)
         except SystemExit as e:code=e.code
+    namespace['_commands']=commands
     return out.getvalue(),code,namespace
 
 
@@ -255,6 +260,123 @@ class RendererTest(unittest.TestCase):
         self.assertIn('未知，建议按保守基线计算',text)
         text,_,_=render('swap',swap=dict(supported=True,active_wordpress_sites=3,workload_known=True))
         self.assertIn('3 个',text);self.assertNotIn('保守基线',text)
+
+    def test_home_and_overviews_are_compact_readonly_snapshots(self):
+        allowed_tools={'dns-status'}
+        for width in [32,40,72,100]:
+            for view in ['home','network-summary','system-summary']:
+                text,status,ns=render(view,width)
+                self.assertEqual(status,0,(view,text));self.assertIn('采样时间',text)
+                self.assertNotIn('\x1b',text)
+                for line in text.splitlines():self.assertLessEqual(ns['cells'](line),min(width,88),(view,line))
+                for command in ns['_commands']:
+                    if '--vps-tool' in command:self.assertIn(command[command.index('--vps-tool')+1],allowed_tools)
+            text,_,_=render('home',width)
+            for expected in ['demo-vps','v2.1.0','CPU 短时采样','内存','系统盘','[正常]']:
+                self.assertIn(expected,text)
+            self.assertNotIn('当前解析服务器',text)
+
+    def test_home_menu_uses_cell_aligned_columns_and_narrow_single_column(self):
+        for width in [32,40,72,88,120]:
+            text,status,ns=render('home-menu',width)
+            self.assertEqual(status,0)
+            self.assertEqual(ns['_commands'],[])
+            for number in range(1,9):self.assertEqual(text.count(str(number)+'. '),1)
+            for line in text.splitlines():self.assertLessEqual(ns['cells'](line),min(width,88))
+            if width>=68:
+                positions=[]
+                for right in ['2. 系统软件更新','4. 网络设置','6. 性能状态','8. 帮助 / 高级操作','更新与任务进度','DNS / IP / SSH','资源、进程与服务','命令、记录与卸载']:
+                    line=next(line for line in text.splitlines() if right in line)
+                    positions.append(ns['cells'](line.split(right)[0]))
+                self.assertEqual(len(set(positions)),1,positions)
+            else:
+                self.assertFalse(any('1. ' in line and '2. ' in line for line in text.splitlines()))
+
+    def test_summary_missing_resource_data_is_unknown_not_zero_or_full(self):
+        for view in ['home','system-summary']:
+            text,status,_=render(view,files_extra={'/proc/meminfo':''},disk_failure=True)
+            self.assertEqual(status,0,text)
+            self.assertIn('未知：内存数据未完整读取',text)
+            self.assertNotIn('100.0%',text)
+            if view=='home':self.assertIn('未知：空间读取失败',text)
+            else:self.assertIn('未知：Swap 数据未完整读取',text);self.assertNotIn('未配置',text)
+        text,_,_=render('home',files_extra={'/proc/meminfo':'MemTotal: 1000 kB'})
+        self.assertIn('未知：内存数据未完整读取',text);self.assertNotIn('100.0%',text)
+
+    def test_narrow_resources_keep_numeric_values_and_ascii_words_intact(self):
+        for width in [32,40]:
+            text,status,ns=render('home',width)
+            self.assertEqual(status,0)
+            self.assertIn('(30.0%)',text);self.assertIn('(4.7%)',text)
+            self.assertIn('Linux',text)
+            sample=ns['wrapped']('测试 CPU 137.8% RSS 512.0 MiB 长说明',width-4)
+            self.assertIn('137.8%','\n'.join(sample));self.assertIn('512.0','\n'.join(sample))
+            for line in text.splitlines():self.assertLessEqual(ns['cells'](line),width)
+
+    def test_all_three_login_urls_are_raw_full_lines_even_on_narrow_terminals(self):
+        suffix='long_entry_'+('ab'*25)
+        domain='panel.'+('long-domain-'*3)+'example.com'
+        cfg={'panel':{'tls_port':8443,'tls_cert_path':'/www/data/panel.crt','tls_key_path':'/www/data/panel.key','random_suffix':suffix}}
+        files={'config':json.dumps(cfg),'/www/data/panel-tls-active.json':json.dumps({'domain':domain})}
+        expected=[f'https://{domain}:8443/{suffix}',f'https://192.0.2.10:8443/{suffix}',f'https://[2001:db8::10]:8443/{suffix}']
+        for width in [32,40,72]:
+            text,status,ns=render('login-addresses',width,files_extra=files)
+            self.assertEqual(status,0)
+            self.assertEqual([line for line in text.splitlines() if line.startswith('https://')],expected)
+            for line in text.splitlines():
+                if not line.startswith('https://'):self.assertLessEqual(ns['cells'](line),width)
+
+    def test_processes_keep_unknown_separate_from_real_zero_and_explain_cpu_basis(self):
+        payload={'process-status':dict(sampled_at='2026-10-15T08:00:00Z',sample_seconds=.3,cpu_basis='one_core',cpu_count=2,incomplete=True,warnings=['部分进程已退出'],top_cpu=[dict(pid=123,name='php-worker\x1b',cpu_percent=137.8,memory_percent=None,rss_bytes=None)],top_memory=[dict(pid=456,name='redis-server',cpu_percent=None,memory_percent=0,rss_bytes=0)])}
+        for width in [32,40,72]:
+            text,status,ns=render('processes',width,payloads=payload)
+            self.assertEqual(status,0,text)
+            for expected in ['137.8%','CPU 未知','内存 0.0%','RSS 0.0 B','RSS 未知','[不完整]','不显示启动参数','单核 100%']:self.assertIn(re.sub(r'\s+','',expected),re.sub(r'\s+','',text))
+            self.assertNotIn('\x1b',text)
+            for line in text.splitlines():self.assertLessEqual(ns['cells'](line),width)
+            self.assertEqual(len(ns['_commands']),1)
+            self.assertEqual(ns['_commands'][0][2],'process-status')
+        payload['process-status']['cpu_basis']='lifetime'
+        self.assertNotEqual(render('processes',payloads=payload)[1],0)
+        self.assertNotEqual(render('processes',fail_command='panel')[1],0)
+
+    def test_health_warning_unknown_and_failure_never_claim_everything_passed(self):
+        for state in ['ok','warning','unknown']:
+            payload={'health-status':dict(checked_at='2026-10-15T08:00:00Z',status=state,checks=[dict(id='disk',name='磁盘空间',status=state,summary='fixture summary',next_step='检查备份与日志')],limitations=['不验证公网入站'])}
+            for width in [32,40,72]:
+                text,status,ns=render('health',width,payloads=payload)
+                self.assertEqual(status,0,text)
+                self.assertIn({'ok':'[正常]','warning':'[注意]','unknown':'[未知]'}[state],text)
+                self.assertIn('下一步',text);self.assertIn('不执行修复',text)
+                if state!='ok':self.assertNotIn('未发现异常',text)
+                for line in text.splitlines():self.assertLessEqual(ns['cells'](line),width)
+                self.assertEqual(ns['_commands'][0][2],'health-status')
+        for payload in [{},dict(status='ok',checks=[])]:
+            text,status,_=render('health',payloads={'health-status':payload})
+            self.assertEqual(status,1);self.assertNotIn('未发现异常',text)
+        self.assertNotEqual(render('health',fail_command='panel')[1],0)
+
+    def test_clean_results_report_human_sizes_partial_failure_and_unknown(self):
+        text,status,_=render('clean-result',preset=f'{2*1024**3}:{1024**3}:0')
+        self.assertEqual(status,0);self.assertIn('实际占用减少',text);self.assertIn('1.0 GiB',text)
+        text,_,_=render('clean-result',preset='1024:1024:0')
+        self.assertIn('可能没有可清理内容',text);self.assertNotIn('实际占用减少',text)
+        text,_,_=render('clean-result',preset='1024:2048:0')
+        self.assertIn('占用增加',text);self.assertNotIn('实际占用减少',text)
+        text,_,_=render('clean-result',preset='1024:512:23')
+        self.assertIn('[未完整完成]',text);self.assertNotIn('[命令完成]',text)
+        text,_,_=render('clean-result',preset=':512:0')
+        self.assertIn('[统计未知]',text);self.assertNotIn('实际占用减少',text)
+
+    def test_history_readable_actions_and_unknown_actions_are_preserved(self):
+        payload={'vps-history':dict(entries=[dict(at='2026-10-15',action='password',status='success'),dict(at='2026-10-15',action='future-action',status='pending')])}
+        text,status,_=render('history',payloads=payload)
+        self.assertEqual(status,0);self.assertIn('重置两层登录账号',text);self.assertIn('future-action',text)
+
+    def test_update_read_failure_is_not_reported_as_a_confirmed_result(self):
+        text,status,_=render('update-status',fail_command='panel')
+        self.assertEqual(status,1);self.assertIn('未确认执行结果',text)
+        self.assertNotIn('任务结果',text)
 
 
 if __name__=='__main__':unittest.main()

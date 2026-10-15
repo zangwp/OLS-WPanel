@@ -53,6 +53,8 @@ o ports           diagnose local listeners, processes and inbound rules
 o services        inspect core services and recent logs
 o bbr             inspect active algorithms and persistent configuration
 o disk            inspect disk space and inode usage
+o processes       read-only short-interval CPU and memory process rankings
+o health          quick service, disk, package and local network checks
 o apt-check       read-only APT / dpkg health checks
 o history         show the latest 200 terminal maintenance records
 o ssh             change SSH ports with dual-port transition and timed rollback
@@ -66,6 +68,8 @@ o uninstall       remove the panel, preserving websites, databases and shared so
 ```
 
 Maintenance commands require root, and the terminal menu currently uses Chinese labels. See the [terminal maintenance guide](docs/verified-install.md#first-login-and-server-maintenance) for DNS, Swap, SSH and updates, and [operations and recovery](docs/operations-and-recovery.md) for backups, recovery and uninstall checks.
+
+The home menu shows a local resource summary; enter `r` to refresh or `h` for a quick health check. Process CPU uses 100% per core, so multi-core processes can exceed 100%. Health checks show observed status and suggested next commands, with unavailable observations marked unknown. Neither inspection changes configuration or terminates processes.
 
 Keep your current SSH connection open when changing ports, then connect to the new port in another SSH window and run the returned `o ssh-confirm` command.
 
