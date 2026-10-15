@@ -55,6 +55,7 @@ o bbr             inspect active algorithms and persistent configuration
 o disk            inspect disk space and inode usage
 o processes       read-only short-interval CPU and memory process rankings
 o health          quick service, disk, package and local network checks
+o report          generate a copyable, redacted diagnostic summary (read-only)
 o apt-check       read-only APT / dpkg health checks
 o history         show the latest 200 terminal maintenance records
 o ssh             change SSH ports with dual-port transition and timed rollback
@@ -69,7 +70,9 @@ o uninstall       remove the panel, preserving websites, databases and shared so
 
 Maintenance commands require root, and the terminal menu currently uses Chinese labels. See the [terminal maintenance guide](docs/verified-install.md#first-login-and-server-maintenance) for DNS, Swap, SSH and updates, and [operations and recovery](docs/operations-and-recovery.md) for backups, recovery and uninstall checks.
 
-The home menu shows a local resource summary; enter `r` to refresh or `h` for a quick health check. Process CPU uses 100% per core, so multi-core processes can exceed 100%. Health checks show observed status and suggested next commands, with unavailable observations marked unknown. Neither inspection changes configuration or terminates processes.
+The home menu shows the panel version, service state, complete login URLs and navigation. Enter `r` to refresh or `h` for a quick health check; host and resource details are under option 1, System information. An unavailable version or abnormal service state points to the existing diagnostic entry. Process CPU uses 100% per core, so multi-core processes can exceed 100%. Health checks show observed status and suggested next commands, with unavailable observations marked unknown.
+
+`o report` (also under Help / advanced operations → option 7) prints a copyable plain-text summary. It includes only the version, normalized system information and fixed check statuses, excluding login URLs, hostnames, accounts, keys, configuration paths and raw logs. Incomplete observations remain unknown. Warnings, unknown results or collection failures return exit code 1; the generated report remains copyable. The command does not repair or change configuration.
 
 Keep your current SSH connection open when changing ports, then connect to the new port in another SSH window and run the returned `o ssh-confirm` command.
 

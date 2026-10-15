@@ -10,7 +10,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The Cloudflare entry serves a fixed, deployed stable Release. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
 
-GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v2.1.0`; its assets must exist on GitHub before it can be used.
+GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v2.1.1`; its assets must exist on GitHub before it can be used.
 
 ## First login and server maintenance
 
@@ -30,11 +30,13 @@ Swap maintenance should run without simultaneous edits from other administrator 
 
 Additional terminal commands are `o ports`, `o services`, `o bbr`, `o disk`, `o apt-check`, `o dependencies`, `o hostname` and `o history`. Port inspection reports local listeners and host firewall policy, not cloud-security-group or public reachability. Disk/inode and APT health checks are read-only; they do not kill package processes or remove lock files. Terminal changes are recorded independently of SQLite in a protected history under `/var/lib/ols-wpanel/vps-cli`, bounded to 200 entries. SSH confirmation tokens and credentials are excluded from that history.
 
-The home menu retains options 1–8 and adds `r` to refresh its local resource snapshot and `h` for a quick health check. Domain, IPv4 and IPv6 login addresses are printed in full on separate lines, without inserted line breaks. Narrow terminals may visually wrap them. Opening the home menu does not probe external network services.
+The home menu retains options 1–8, `r` to refresh and `h` for a quick health check. It shows the panel version and service state, with host/resource details kept under option 1 rather than repeated on the home page. Abnormal service states and unavailable version data point to option 7 → 3, or `o status`. Domain, IPv4 and IPv6 login addresses are grouped with spacing and printed in full on separate lines, without inserted line breaks. Narrow terminals may visually wrap them. Cyan headings and menu keys are omitted when stdout is not a terminal, `TERM=dumb`, or `NO_COLOR` is nonempty. Opening the home menu does not probe external network services.
 
 `o processes` lists the highest CPU and resident-memory processes from a short sampling interval. CPU is expressed as a percentage of one core, so a process using multiple cores can exceed 100%; it is not the whole-server percentage or the process lifetime average. Resident memory can include shared pages and must not be added together as unique usage. Only process names and PIDs are shown, not command lines or environment variables. Exited processes are omitted; incomplete or unavailable samples are marked. This command never terminates a process.
 
 `o health` summarizes core services, disk space/inodes, package state and local route/DNS configuration with suggested follow-up commands. Unknown observations remain unknown. The bounded check does not repair, install or restart anything, initialize the panel database, or change firewall rules. Local network configuration does not prove Internet access or public inbound reachability; use `o network` for explicit outbound probes and `o ports` for local listener details.
+
+`o report`, also available through option 8 → 7, produces a plain-text diagnostic summary between copy boundaries, without ANSI colors even on a terminal. It reuses the bounded health collector and exports only allowlisted version/system fields and fixed check statuses. It does not echo upstream check descriptions, raw errors or logs, login URLs, hostnames, accounts, keys or configuration paths. Missing or malformed observations are marked incomplete or unknown. Only a complete report with all checks OK exits 0; warnings, unknown results and failures exit 1 while retaining the copyable report. Local checks do not establish public reachability or website business health. No report file is written automatically.
 
 After a system update starts, the terminal progress view shows the recorded stage and last update time. Refresh to inspect progress or return while the background task continues. A started task is not a completed update. Cleanup reports readable before/after sizes and measurement failures separately; its existing package-cache and old-journal scope is retained.
 
@@ -55,7 +57,7 @@ workdir="$(mktemp -d /tmp/ols-wpanel-install.XXXXXXXXXX)"
 trap 'rm -rf -- "$workdir"' EXIT
 cd "$workdir"
 
-version='v2.1.0'
+version='v2.1.1'
 base="https://github.com/zangwp/OLS-WPanel/releases/download/${version}"
 wget --no-config --https-only --no-hsts \
   "$base/install.sh" \

@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.1.1 — 2026-10-15
+
+- Simplifies the terminal home page to the panel version, service state, grouped login URLs and existing navigation. Keeps host/resource details under System information and preserves menu numbers and shortcut commands.
+- Adds cyan headings and menu keys, spacing between address groups, and single-line menu entries with width-aware columns. Plain output, `NO_COLOR` and `TERM=dumb` remain supported; complete URLs are not truncated or hard-wrapped.
+- Points abnormal panel service states or unavailable version data to the existing diagnostic entry.
+- Adds `o report` and an advanced-menu entry for a copyable, plain-text diagnostic summary. Reuses bounded read-only health checks, exports only allowlisted fields and fixed statuses, and identifies unknown or incomplete observations without printing raw logs, credentials or identifying configuration.
+
+Upgrade notes: no new dependency or database migration. Existing website, backup, SSH, firewall and signed-update behavior is preserved. The report describes local observations and does not verify public reachability or website requests.
+
 ## v2.1.0 — 2026-10-15
 
 - Refreshes the terminal `o` home and maintenance pages with a local resource summary, consistent width and Chinese-label alignment, clearer action descriptions, and complete copyable login URLs. Preserves menu numbers and existing shortcut commands.
