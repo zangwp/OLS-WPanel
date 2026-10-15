@@ -49,6 +49,24 @@ test('pending/failed navigation never applies old file actions to a new director
     assert.equal(page.loadingFiles, false);
 });
 
+test('directory list failure can retry in place and only successful arrays restore the list',async()=>{
+    const calls=[];const {page,context}=setup({api:async(url,options)=>{calls.push({url,options});throw Error('offline');}});
+    await page.initSites();assert.equal(page.sitesLoadFailed,true);assert.equal(page.sitesLoading,false);
+    context.api=async()=>({success:true,data:{}});await page.initSites();assert.equal(page.sitesLoadFailed,true);
+    const request=deferred();context.api=async()=>{calls.push({url:'/websites'});return request.promise;};
+    const retry=page.initSites();await page.initSites();assert.equal(page.sitesLoading,true);assert.equal(page.sitesLoadFailed,false);
+    assert.equal(calls.length,2,'repeated retry clicks share one pending request');
+    request.resolve({success:true,data:[{id:1,domain:'example.test'}]});await retry;
+    assert.equal(page.sitesLoadFailed,false);assert.equal(page.sitesLoading,false);assert.equal(page.sites[0].domain,'example.test');
+    assert(calls.every(call=>!call.options?.method),'directory list retry only reads');
+});
+
+test('destroy cancels the initial directory read and prevents its late result from rebuilding roots',async()=>{
+    const request=deferred();let signal;const {page}=setup({api:(url,options)=>{signal=options.signal;return request.promise;}});
+    const pending=page.initSites();page.destroy();assert.equal(signal.aborted,true);
+    request.resolve({success:true,data:[{id:9}]});await pending;assert.equal(page.sites.length,0);
+});
+
 test('only the latest listing commits its site/path/rows; old failures cannot replace state', async () => {
     const first = deferred(), second = deferred();
     let count = 0;

@@ -1075,6 +1075,11 @@
     "operation_blocked": "AI development access is active for this site. Disable it from the website details page before continuing."
   },
   "software": {
+    "service_empty": "No services to display.",
+    "runtime_empty": "No PHP runtimes were detected.",
+    "previous_result": "Showing the last successful result; the current state is unverified.",
+    "service_load_failed": "Could not load service status.",
+    "runtime_load_failed": "Could not load the PHP runtime list.",
     "page_help": "Manage runtimes, service health, and performance settings. Update prompts appear only when an update is available.",
     "tab_runtime": "Runtime",
     "tab_tuning": "Performance",
@@ -1436,6 +1441,8 @@
     "finding_normal_detail": "Local rules found no high error ratio or PHP fatal errors."
   },
   "ai_diagnostics": {
+    "history_retention": "Keeps the latest 20 finished diagnoses and 40 messages per diagnosis. Diagnoses in progress are preserved.",
+    "no_websites": "No websites are available for diagnosis. Create a website first.",
     "description": "Select a website and use a common issue or describe your own question for a read-only diagnosis. Files, databases, and server configuration are not modified automatically.",
     "empty_help": "Choose a site and issue on the left, and optionally describe the problem. Results include evidence, likely causes, and suggested next steps.",
     "symptom_custom": "Custom question",
@@ -1558,6 +1565,9 @@
     "user_error_unauthorized": "Unauthorized request to the AI service"
   },
   "files": {
+    "directory_list_timeout": "Reading the directory timed out; no partial list was returned. Narrow the search and retry, or manage it through SSH.",
+    "directory_list_changed": "Directory contents or permissions changed and a complete listing could not be read. Refresh and retry.",
+    "directory_list_too_large": "This directory has too many entries to sort completely in the panel. Narrow the search or manage it through SSH.",
     "batch_compress": "Batch compress",
     "cut": "Cut",
     "copy": "Copy",
@@ -1573,7 +1583,7 @@
     "protection_status_help": "File protection is a server-level read-only policy for WordPress. Use Manage Protection beside a status to configure it.",
     "search_directories_placeholder": "Search by domain or directory path...",
     "loading_directories": "Loading website directories...",
-    "load_directories_failed": "Failed to load website directories. Refresh the page to try again.",
+    "load_directories_failed": "Could not load website directories. Try again.",
     "deep_link_failed": "The website directory from this link could not be opened. The website may have been removed, or the website list may be temporarily unavailable.",
     "website_or_directory": "Website / Directory",
     "site_type": "Type",
@@ -3331,6 +3341,8 @@
   },
   "session_username": "Session username",
   "backups": {
+    "site_bundle_help": "Includes files, database, recovery manifest and SHA-256 checksums. Exports a complete local point without enabling remote sync. Large files are verified before download; allow time and store this sensitive backup securely on another device.",
+    "download_site_bundle": "Download complete backup",
     "site_section_title": "Whole-site backup and restore",
     "site_backup_help": "Back up files and the database during one maintenance window. Restore the complete set using its shared ID. These sets are currently local only, without remote synchronization or automatic rotation. Delete old backup points manually.",
     "backup_site_now": "Back up whole site now",

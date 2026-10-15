@@ -1,8 +1,11 @@
 package executor
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"regexp"
@@ -14,6 +17,9 @@ import (
 )
 
 const oomJournalLookback = 2 * time.Minute
+const oomJournalByteLimit = 2 * 1024 * 1024
+const oomJournalLineLimit = 64 * 1024
+const oomJournalEventLimit = 512
 
 var oomKilledProcessPattern = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s+.*Out of memory: Killed process ([0-9]+) \(([^)]+)\)`)
 
@@ -41,16 +47,71 @@ func checkOOMEvents() {
 	defer cancel()
 
 	since := fmt.Sprintf("%d seconds ago", int(oomJournalLookback.Seconds()))
-	out, err := exec.CommandContext(ctx, "journalctl", "-k", "--since", since, "--no-pager", "-o", "short-unix").Output()
+	events, incomplete, err := readOOMJournalCommand(ctx, "journalctl", "-k", "--since", since, "--no-pager", "-o", "short-unix", "--reverse")
 	if err != nil {
-		log.Printf("[OOM监控] 读取内核日志失败: %v", err)
-		return
+		log.Printf("[OOM监控] 本次内核日志检查未完成，不能据此判定没有 OOM，后续周期将继续检查: %v", err)
+	} else if incomplete {
+		log.Printf("[OOM监控] 本次内核日志检查达到字节、行或事件预算，仅记录已读取事件；检查不完整，后续周期将继续检查")
 	}
-	for _, event := range parseOOMEvents(string(out)) {
+	for _, event := range events {
 		if err := recordOOMEvent(event); err != nil {
 			log.Printf("[OOM监控] 记录事件失败: %v", err)
 		}
 	}
+}
+
+// readOOMJournalCommand always waits for its child. Budget exhaustion cancels
+// it immediately; timeout/cancellation cannot leave journalctl running behind.
+func readOOMJournalCommand(ctx context.Context, name string, args ...string) ([]oomEvent, bool, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = time.Second
+	cmd.Stderr = io.Discard
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, true, err
+	}
+	if err := cmd.Start(); err != nil {
+		stdout.Close()
+		return nil, true, err
+	}
+	events, incomplete, scanErr := scanOOMJournal(stdout)
+	if incomplete || scanErr != nil {
+		cancel()
+	}
+	_ = stdout.Close()
+	waitErr := cmd.Wait()
+	if scanErr != nil {
+		return events, true, scanErr
+	}
+	if incomplete {
+		return events, true, nil
+	}
+	if waitErr != nil {
+		return events, true, waitErr
+	}
+	return events, false, nil
+}
+
+func scanOOMJournal(reader io.Reader) ([]oomEvent, bool, error) {
+	limited := &io.LimitedReader{R: reader, N: oomJournalByteLimit + 1}
+	scanner := bufio.NewScanner(limited)
+	scanner.Buffer(make([]byte, 4096), oomJournalLineLimit)
+	events := make([]oomEvent, 0)
+	for scanner.Scan() {
+		events = append(events, parseOOMEvents(scanner.Text())...)
+		if len(events) >= oomJournalEventLimit {
+			return events, true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return events, true, nil
+		}
+		return events, true, err
+	}
+	return events, limited.N == 0, nil
 }
 
 func parseOOMEvents(output string) []oomEvent {

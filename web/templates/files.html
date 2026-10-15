@@ -28,7 +28,10 @@
         </div>
 
         <div x-show="sitesLoading" class="text-center py-8 text-gray-500">{{t .Lang "files.loading_directories"}}</div>
-        <div x-show="sitesLoadFailed && !sitesLoading" class="text-center py-8 text-red-300">{{t .Lang "files.load_directories_failed"}}</div>
+        <div x-show="sitesLoadFailed && !sitesLoading" class="text-center py-8 text-red-300" role="alert">
+            <p>{{t .Lang "files.load_directories_failed"}}</p>
+            <button type="button" @click="initSites()" :disabled="sitesLoading" class="btn-secondary text-sm mt-3">{{t .Lang "common.retry"}}</button>
+        </div>
         <div x-show="deepLinkFailed && !sitesLoading" class="mb-4 rounded border border-yellow-800 bg-yellow-900/30 p-3 text-sm text-yellow-200">{{t .Lang "files.deep_link_failed"}}</div>
         <div x-show="!sitesLoading && !sitesLoadFailed" class="overflow-x-auto">
             <table class="w-full text-sm">
@@ -305,13 +308,15 @@
 function fileManager() {
     return {
         sites: [],
-        disposed: false, listController: null, directorySizeControllers: {},
+        disposed: false, listController: null, directorySizeControllers: {}, sitesController: null, sitesRequestID: 0,
         remoteImportController: null, remoteImportGeneration: 0, remoteImportLocation: null,
         uploadController: null,
         destroy() {
             this.disposed = true;
             this.loadRequestID++;
             this.remoteImportGeneration++;
+            this.sitesRequestID++;
+            this.sitesController?.abort(); this.sitesController = null;
             if (this.listController) this.listController.abort();
             Object.values(this.directorySizeControllers).forEach(controller => controller.abort());
             if (this.remoteImportController) this.remoteImportController.abort();
@@ -442,14 +447,23 @@ function fileManager() {
             return data?.message || data?.data?.message || fallback;
         },
         async initSites() {
+            if (this.disposed || this.sitesController) return;
+            const controller = new AbortController(), requestID = ++this.sitesRequestID;
+            this.sitesController = controller;
+            const current = () => !this.disposed && !controller.signal.aborted && requestID === this.sitesRequestID;
+            this.sitesLoading = true; this.sitesLoadFailed = false;
+            let loaded = false;
             try {
-                const r = await api('/websites');
-                if (r.success && r.data) this.sites = r.data;
+                const r = await api('/websites', { silent: true, signal: controller.signal });
+                if (!current()) return;
+                if (!r.success || !Array.isArray(r.data)) throw Error(t('common.request_failed'));
+                this.sites = r.data; loaded = true;
             } catch(e) {
-                this.sitesLoadFailed = true;
+                if (current()) this.sitesLoadFailed = true;
             } finally {
-                this.sitesLoading = false;
+                if (current()) { this.sitesLoading = false; this.sitesController = null; }
             }
+            if (!loaded || this.disposed) return;
             // 从 URL 参数自动选择网站（从网站管理页面跳转过来）
             const params = new URLSearchParams(window.location.search);
             const sid = params.get('site_id');

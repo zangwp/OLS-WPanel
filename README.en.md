@@ -28,7 +28,7 @@ See the [installation guide](docs/verified-install.md) for manual verification, 
 
 | Area | Capabilities |
 |---|---|
-| Websites and WordPress | WordPress / PHP provisioning, domains, PHP versions, files, databases and WordPress updates |
+| Websites and WordPress | WordPress provisioning, domains, PHP versions, files, databases and WordPress updates, plus management of existing PHP sites |
 | Certificates and caching | Website certificate issuance and renewal; official LiteSpeed Cache for page and Redis object caching |
 | Backups and recovery | Website, database and panel backups, with SFTP / S3 remote storage |
 | VPS maintenance | Web resource, host and service status; DNS, Swap and system settings through the SSH `o` menu; open ports managed in the Security center |
@@ -36,6 +36,8 @@ See the [installation guide](docs/verified-install.md) for manual verification, 
 | Protection and alerts | File protection, Fail2ban, nftables, email / Webhook notifications and log analysis |
 
 Fresh installations default to **LSPHP 8.5 and MariaDB 11.8**. LSPHP 8.4 / 8.3 can be added per site. Existing databases retain their installed series; routine updates do not automatically upgrade across database series.
+
+Use **Websites → Create Website** to choose a domain and PHP version and create a WordPress site. Existing generic PHP sites remain manageable from the website list and details.
 
 The interface combines a light workspace with dark blue navigation, English / Chinese layouts and mobile controls. The dashboard groups resource metrics, and wide website tables scroll horizontally. Account protection is under **Security settings → Account sign-in**. Two-factor authentication requires explicit enrollment; before enabling it, separately back up `account-mfa.key` as described in the [account security guide](docs/account-security.md). Ordinary panel database downloads do not contain that key.
 

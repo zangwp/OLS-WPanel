@@ -32,6 +32,7 @@ var (
 type DashboardHandler struct {
 	resourcesOnce sync.Once
 	resources     *siteResourceCache
+	metrics       metricHistoryCache
 }
 
 func (h *DashboardHandler) GetStats(c *gin.Context) {
@@ -47,7 +48,7 @@ func (h *DashboardHandler) GetMetrics(c *gin.Context) {
 		return
 	}
 
-	history, err := queryMetrics(c.Request.Context(), database.GetDB(), query.Range, time.Now().UTC())
+	history, err := h.metrics.get(c.Request.Context(), database.GetDB(), query.Range, time.Now().UTC())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "dashboard.history_load_failed")))
 		return

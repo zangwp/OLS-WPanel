@@ -50,6 +50,11 @@
         {{t .Lang "ai_diagnostics.privacy_notice"}}
     </div>
 
+    <div x-show="websitesLoaded && !websitesLoading && websites.length === 0" x-cloak class="card mb-6" role="status">
+        <p class="text-sm text-gray-300 mb-3">{{t .Lang "ai_diagnostics.no_websites"}}</p>
+        <a href="/{{.RandomSuffix}}/websites/new" class="btn-primary text-sm">{{t .Lang "website.create_title"}}</a>
+    </div>
+
     <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
         <div class="xl:col-span-4 space-y-6">
             <div class="card">
@@ -110,6 +115,7 @@
                     </div>
                 </summary>
                 <div class="mt-4">
+                    <p class="text-xs text-gray-500 mb-3">{{t .Lang "ai_diagnostics.history_retention"}}</p>
                     <div class="flex justify-end mb-3">
                         <button @click="fetchSessions()" :disabled="!selectedSiteID" class="btn-secondary text-xs">{{t .Lang "ai_diagnostics.refresh"}}</button>
                     </div>
@@ -267,7 +273,7 @@
 <script>
 function aiDiagnosticsPage() {
     return {
-        websites: [],
+        websites: [], websitesLoading: false, websitesLoaded: false,
         disposed: false, siteVersion: 0, diagnosisRequestID: 0, followupRequestID: 0,
         reads: {},
         beginRead(key) {
@@ -397,12 +403,15 @@ function aiDiagnosticsPage() {
             if (requestedSessionID && this.selectedSiteID) await this.loadSession(Number(requestedSessionID));
         },
         async fetchWebsites() {
+            if (this.disposed || this.websitesLoading) return;
+            this.websitesLoading = true; this.websitesLoaded = false; this.error = '';
             try {
                 const r = await api('/websites');
-                if (r.success) this.websites = r.data || [];
+                if (!r.success || !Array.isArray(r.data)) throw Error(t('common.request_failed'));
+                if (!this.disposed) { this.websites = r.data; this.websitesLoaded = true; }
             } catch(e) {
-                this.error = e.message;
-            }
+                if (!this.disposed) this.error = e.message;
+            } finally { if (!this.disposed) this.websitesLoading = false; }
         },
         selectedSite() {
             return this.websites.find(site => String(site.id) === String(this.selectedSiteID));

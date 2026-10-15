@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -146,6 +147,44 @@ func searchFileTree(ctx context.Context, basePath, searchPath, query string, rec
 	})
 }
 
+// Keep at most the remaining scan budget plus one entry to signal truncation.
+// Unlike os.ReadDir this does not allocate an arbitrarily large directory before
+// the search's existing scan limit can take effect.
+func readSearchDirectory(ctx context.Context, path string, remaining int) ([]os.DirEntry, error) {
+	dir, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	limit := remaining + 1
+	if limit < 1 {
+		limit = 1
+	}
+	entries := make([]os.DirEntry, 0)
+	for len(entries) < limit {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		count := fileListReadBatch
+		if count > limit-len(entries) {
+			count = limit - len(entries)
+		}
+		batch, readErr := dir.ReadDir(count)
+		entries = append(entries, batch...)
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				return nil, readErr
+			}
+			break
+		}
+		if len(batch) == 0 {
+			return nil, errFileListChanged
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, ctx.Err()
+}
+
 func searchFileTreeWithLimits(ctx context.Context, basePath, searchPath, query string, recursive bool, sortBy, sortDir string, page, perPage int, limits fileSearchLimits) (fileSearchResult, error) {
 	result := fileSearchResult{Files: []fileSearchEntry{}, Page: page, PerPage: perPage, TotalPages: 1}
 	query = strings.ToLower(query)
@@ -159,7 +198,7 @@ func searchFileTreeWithLimits(ctx context.Context, basePath, searchPath, query s
 		}
 		dir := dirs[len(dirs)-1]
 		dirs = dirs[:len(dirs)-1]
-		entries, err := os.ReadDir(dir)
+		entries, err := readSearchDirectory(ctx, dir, limits.MaxScanned-scanned)
 		if err != nil {
 			return result, err
 		}

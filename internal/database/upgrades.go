@@ -791,6 +791,7 @@ var upgrades = []Upgrade{
 	{Version: "1.0.76", Description: "将已启用 CDN 回源网络接入受管 OpenLiteSpeed 服务器可信代理 ACL"},
 	{Version: "1.0.77", Description: "网站独立 Cloudflare API 凭据与受管 WAF 规则同步状态", SQL: []string{cloudflareSecuritySchema}},
 	{Version: "1.0.78", Description: "自动识别网站 Cloudflare Zone 并记录已配置域名的 WAF 覆盖范围", Func: ensureCloudflareSecurityCoverageSchema},
+	{Version: "1.0.79", Description: "记录自动备份启用宽限期与更新产物清理完成状态", Func: ensureMaintenanceTrackingSchema},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

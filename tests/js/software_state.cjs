@@ -313,9 +313,9 @@ test('dependency installation considers only currently required missing tools an
 
 for (const kind of ['runtime', 'tool']) {
     test(`${kind}: refreshing during installation does not leave the new row busy`, async () => {
-        const installation = deferred();
+        const installation = deferred(), started = deferred();
         const { context } = setup({ api: async url => {
-            if (url.endsWith('/install')) return installation.promise;
+            if (url.endsWith('/install')) { started.resolve(); return installation.promise; }
             if (url.endsWith('/php-runtimes')) return { success: true, data: [{ version: '8.4', installed: true }] };
             if (url.endsWith('/development-tools')) return { success: true, data: [{ id: 'wp-cli', state: 'installed' }] };
             return { success: true, data: [] };
@@ -324,7 +324,7 @@ for (const kind of ['runtime', 'tool']) {
         const row = kind === 'runtime' ? { version: '8.4' } : { id: 'wp-cli', name: 'WP-CLI', state: 'missing' };
         if (kind === 'runtime') manager.phpRuntimes = [row]; else manager.developmentTools = [row];
         const operation = kind === 'runtime' ? manager.installPHPRuntime(row) : manager.installDevelopmentTool(row);
-        await Promise.resolve(); await Promise.resolve();
+        await started.promise;
         if (kind === 'runtime') await manager.fetchPHPRuntimes(); else await manager.fetchDevelopmentTools();
         const current = kind === 'runtime' ? manager.phpRuntimes[0] : manager.developmentTools[0];
         assert.equal(current._installing, true);
@@ -343,6 +343,56 @@ test('software refresh retains unsaved tuning values', async () => {
     await manager.fetchList(true);
     assert.equal(manager.software[0].configs[0]._value, '512M');
     assert.equal(manager.software[0].configs[0].value, '256M');
+});
+
+test('runtime catalog failure preserves the last list and retry clears its independent error', async () => {
+    const calls = [];
+    const {context} = setup({api:async(url, options)=>{calls.push({url,options});throw Error('catalog offline');}});
+    const manager=context.softwareManager();manager.phpRuntimes=[{version:'8.5',installed:true}];manager.runtimeLoaded=true;
+    await manager.fetchPHPRuntimes();
+    assert.equal(manager.runtimeError,'catalog offline');assert.equal(manager.runtimeLoading,false);
+    assert.equal(manager.phpRuntimes[0].version,'8.5');assert.equal(manager.healthError,'');assert.equal(manager.listError,'');
+    await manager.installPHPRuntime({version:'8.4'});assert.equal(calls.length,1,'unknown inventory must not trigger installation');
+    context.api=async()=>({success:true,data:[]});await manager.fetchPHPRuntimes();
+    assert.equal(manager.runtimeLoaded,true);assert.equal(manager.runtimeError,'');assert.equal(manager.phpRuntimes.length,0);
+});
+
+test('invalid runtime data is a retryable failure rather than an empty successful catalog', async()=>{
+    const {context}=setup({api:async()=>({success:true,data:null})});const manager=context.softwareManager();
+    await manager.fetchPHPRuntimes();assert(manager.runtimeError);assert.equal(manager.runtimeLoaded,false);
+    context.api=async()=>({success:true,data:[{version:'8.5'}]});await manager.fetchPHPRuntimes();
+    assert.equal(manager.runtimeError,'');assert.equal(manager.phpRuntimes[0].version,'8.5');
+});
+
+test('an old runtime failure cannot overwrite a fresh read and destroy aborts the catalog request',async()=>{
+    const old=deferred(),latest=deferred();let count=0;const calls=[];
+    const {context}=setup({api:(url,options)=>{calls.push(options);return ++count===1?old.promise:latest.promise;}});const manager=context.softwareManager();
+    const first=manager.fetchPHPRuntimes(),second=manager.fetchPHPRuntimes();
+    assert.equal(calls[0].signal.aborted,true);latest.resolve({success:true,data:[{version:'8.5'}]});await second;
+    old.reject(Error('old catalog failure'));await first;assert.equal(manager.runtimeError,'');assert.equal(manager.runtimeLoading,false);
+    const pending=deferred();context.api=()=>pending.promise;const read=manager.fetchPHPRuntimes();manager.destroy();
+    pending.resolve({success:true,data:[]});await read;assert.equal(manager.phpRuntimes[0].version,'8.5');
+});
+
+test('guard errors remain independent and preserve old rows until an explicit successful retry',async()=>{
+    const calls=[];const {context,timers}=setup({api:async(url,options)=>{calls.push({url,options});throw Error('service status offline');}});const guard=context.processGuard();
+    guard.services=[{service:'lsws',name:'OpenLiteSpeed',running:true}];guard.statusLoaded=true;
+    await guard.fetchStatus();assert.equal(guard.statusError,'service status offline');assert.equal(guard.services[0].running,true);assert.equal(guard.statusLoading,false);
+    await guard.action('lsws','stop');assert.equal(calls.length,1,'unverified old service status must not authorize an action');assert.equal(timers.size,1);
+    context.api=async()=>({success:true,data:[]});await guard.fetchStatus(true);
+    assert.equal(guard.statusError,'');assert.equal(guard.statusLoaded,true);assert.equal(guard.services.length,0);assert.equal(timers.size,1);guard.destroy();
+});
+
+test('old guard failure cannot clear current loading or replace the latest result',async()=>{
+    const old=deferred(),latest=deferred();let count=0;const {context}=setup({api:()=>++count===1?old.promise:latest.promise});const guard=context.processGuard();
+    const first=guard.fetchStatus(),second=guard.fetchStatus(true);old.reject(Error('late stale error'));await first;
+    assert.equal(guard.statusLoading,true);assert.equal(guard.statusError,'');latest.resolve({success:true,data:[{service:'lsws'}]});await second;
+    assert.equal(guard.statusLoaded,true);assert.equal(guard.statusLoading,false);assert.equal(guard.statusError,'');guard.destroy();
+});
+
+test('guard malformed data cannot erase its last verified services',async()=>{
+    const {context}=setup({api:async()=>({success:true,data:{}})});const guard=context.processGuard();guard.services=[{service:'lsws'}];
+    await guard.fetchStatus();assert(guard.statusError);assert.equal(guard.services[0].service,'lsws');assert.equal(guard.statusLoaded,false);guard.destroy();
 });
 
 test('OPcache unknown metrics and disabled configuration are never reported as measured zeros', () => {

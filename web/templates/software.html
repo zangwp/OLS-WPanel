@@ -13,7 +13,8 @@
         </div>
     </div>
 
-    <p x-show="listError" x-text="listError" role="status" class="text-sm text-red-400 mb-3"></p>
+    <p x-show="!!listError" x-text="listError" role="alert" class="text-sm text-red-400 mb-3"></p>
+    <p x-show="!!listError && software.length > 0" class="text-sm text-yellow-300 mb-3">{{t .Lang "software.previous_result"}}</p>
     <nav class="software-tabs mb-6" aria-label="{{t .Lang "nav.software"}}">
         <button type="button" @click="activeSection = 'runtime'" :class="{ 'active': activeSection === 'runtime' }">{{t .Lang "software.tab_runtime"}}</button>
         <button type="button" @click="activeSection = 'tuning'" :class="{ 'active': activeSection === 'tuning' }">{{t .Lang "software.tab_tuning"}}</button>
@@ -32,8 +33,15 @@
             <span x-show="healthLoading">{{t .Lang "software.health_checking"}}</span>
             <span x-show="!healthLoading && !!healthError" class="text-red-400" x-text="healthError"></span>
             <span x-show="!healthLoading && !!healthError && !!health">{{t .Lang "software.health_previous_result"}}</span>
-            <span x-show="!healthLoading && !healthError && !!health?.checked_at" x-text="t('software.health_checked_at', { time: healthCheckedAt() })"></span>
+            <span x-show="!healthLoading && !healthError && !runtimeError && !!health?.checked_at" x-text="t('software.health_checked_at', { time: healthCheckedAt() })"></span>
         </p>
+        <p x-show="runtimeLoading" class="text-sm text-gray-400 mb-3" role="status">{{t .Lang "common.loading"}}</p>
+        <div x-show="!!runtimeError" class="text-sm text-red-400 mb-3" role="alert">
+            <p>{{t .Lang "software.runtime_load_failed"}} <span x-text="runtimeError"></span></p>
+            <p x-show="phpRuntimes.length > 0" class="text-yellow-300 mt-1">{{t .Lang "software.previous_result"}}</p>
+            <button type="button" @click="fetchPHPRuntimes()" :disabled="runtimeLoading" class="btn-secondary text-xs mt-2">{{t .Lang "common.retry"}}</button>
+        </div>
+        <p x-show="runtimeLoaded && !runtimeLoading && !runtimeError && phpRuntimes.length === 0" class="text-sm text-gray-400 mb-3">{{t .Lang "software.runtime_empty"}}</p>
         <div class="software-runtime-list">
             <template x-for="runtime in orderedPHPRuntimes().filter(runtime => runtime.installed || runtime.primary || runtime.active_sites > 0)" :key="runtime.version">
                 <div class="software-runtime-row" :class="{ 'software-runtime-primary': runtime.primary }">
@@ -55,7 +63,7 @@
                         </div>
                         <div class="software-runtime-action">
                             <span x-show="runtime.installed" class="text-xs text-gray-500">{{t .Lang "software.installed"}}</span>
-                            <button x-show="!runtime.installed || canRepairPHPRuntime(runtime)" @click="installPHPRuntime(runtime)" :disabled="runtime._installing || healthLoading" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : runtime.installed ? t('software.php_runtime_repair') : t('software.install')"></button>
+                            <button x-show="!runtime.installed || canRepairPHPRuntime(runtime)" @click="installPHPRuntime(runtime)" :disabled="runtime._installing || healthLoading || runtimeLoading || !!runtimeError" class="btn-primary text-xs" x-text="runtime._installing ? t('software.installing') : runtime.installed ? t('software.php_runtime_repair') : t('software.install')"></button>
                         </div>
                     </div>
                     <details x-show="runtime.installed" class="software-extension-details">
@@ -94,20 +102,27 @@
         <details x-show="phpRuntimes.some(runtime => !runtime.installed && !runtime.primary && !runtime.active_sites)" class="software-extension-details mt-4">
             <summary>{{t .Lang "software.php_runtime_other_versions"}}</summary>
             <template x-for="runtime in orderedPHPRuntimes().filter(runtime => !runtime.installed && !runtime.primary && !runtime.active_sites)" :key="runtime.version">
-                <div class="flex items-center justify-between gap-3 mt-3"><span class="font-semibold" x-text="'LSPHP ' + runtime.version"></span><button type="button" @click="installPHPRuntime(runtime)" :disabled="runtime._installing" class="btn-secondary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button></div>
+                <div class="flex items-center justify-between gap-3 mt-3"><span class="font-semibold" x-text="'LSPHP ' + runtime.version"></span><button type="button" @click="installPHPRuntime(runtime)" :disabled="runtime._installing || runtimeLoading || !!runtimeError" class="btn-secondary text-xs" x-text="runtime._installing ? t('software.installing') : t('software.install')"></button></div>
             </template>
         </details>
         <p class="text-xs text-yellow-300 mt-4">{{t .Lang "software.php_runtime_install_notice"}}</p>
     </div>
 
     <div x-data="processGuard()" x-init="deferTask(() => fetchStatus(), 700)" class="card mb-6">
-        <div class="flex items-center justify-between mb-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "software.service_status"}}</h3>
             <div class="flex items-center gap-3">
                 <span class="text-xs text-gray-500">{{t .Lang "software.auto_check_30s"}}</span>
-                <button type="button" @click="fetchStatus(true)" class="btn-secondary text-xs">{{t .Lang "common.refresh"}}</button>
+                <button type="button" @click="fetchStatus(true)" :disabled="statusLoading" class="btn-secondary text-xs">{{t .Lang "common.refresh"}}</button>
             </div>
         </div>
+        <p x-show="statusLoading" class="text-sm text-gray-400 mb-3" role="status">{{t .Lang "common.loading"}}</p>
+        <div x-show="!!statusError" class="text-sm text-red-400 mb-3" role="alert">
+            <p>{{t .Lang "software.service_load_failed"}} <span x-text="statusError"></span></p>
+            <p x-show="services.length > 0" class="text-yellow-300 mt-1">{{t .Lang "software.previous_result"}}</p>
+            <button type="button" @click="fetchStatus(true)" :disabled="statusLoading" class="btn-secondary text-xs mt-2">{{t .Lang "common.retry"}}</button>
+        </div>
+        <p x-show="statusLoaded && !statusLoading && !statusError && services.length === 0" class="text-sm text-gray-400 mb-3">{{t .Lang "software.service_empty"}}</p>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead class="border-b border-gray-700 text-gray-400 text-xs">
@@ -136,9 +151,9 @@
                                 <span x-show="!s.running && !s.paused" class="badge-danger text-xs">{{t .Lang "software.stopped"}}</span>
                             </td>
                             <td class="py-2.5 text-right whitespace-nowrap">
-                                <button x-show="s.running && !s.paused" @click="action(s.service, 'stop')" :disabled="s._acting" class="btn-secondary text-xs py-1 px-2.5">{{t .Lang "software.stop"}}</button>
-                                <button x-show="!s.running || s.paused" @click="action(s.service, 'start')" :disabled="s._acting" class="btn-primary text-xs py-1 px-2.5">{{t .Lang "software.start"}}</button>
-                                <button @click="action(s.service, 'restart')" :disabled="s._acting" class="btn-secondary text-xs py-1 px-2.5 ml-1.5">{{t .Lang "software.restart"}}</button>
+                                <button x-show="s.running && !s.paused" @click="action(s.service, 'stop')" :disabled="s._acting || statusLoading || !!statusError" class="btn-secondary text-xs py-1 px-2.5">{{t .Lang "software.stop"}}</button>
+                                <button x-show="!s.running || s.paused" @click="action(s.service, 'start')" :disabled="s._acting || statusLoading || !!statusError" class="btn-primary text-xs py-1 px-2.5">{{t .Lang "software.start"}}</button>
+                                <button @click="action(s.service, 'restart')" :disabled="s._acting || statusLoading || !!statusError" class="btn-secondary text-xs py-1 px-2.5 ml-1.5">{{t .Lang "software.restart"}}</button>
                             </td>
                         </tr>
                     </template>
@@ -210,7 +225,8 @@
             <h3 class="text-lg font-semibold text-white">{{t .Lang "software.development_tools"}}</h3>
             <p class="text-xs text-gray-500 mt-1">{{t .Lang "software.development_tools_help"}}</p>
         </div>
-        <p x-show="toolsError" class="text-sm text-red-300 mb-3" x-text="toolsError"></p>
+        <p x-show="!!toolsError" class="text-sm text-red-300 mb-3" x-text="toolsError" role="alert"></p>
+        <p x-show="!!toolsError && developmentTools.length > 0" class="text-sm text-yellow-300 mb-3">{{t .Lang "software.previous_result"}}</p>
         <button type="button" @click="fetchDevelopmentTools()" :disabled="toolsLoading" class="btn-secondary text-xs mb-3">{{t .Lang "software.refresh_tools"}}</button>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <template x-for="tool in developmentTools" :key="tool.id">
@@ -366,7 +382,7 @@
 <script>
 function processGuard() {
     return {
-        services: [],
+        services: [], statusLoading: false, statusLoaded: false, statusError: '',
         actingServices: {},
         pollTimer: null,
         statusRequestID: 0,
@@ -382,26 +398,28 @@ function processGuard() {
             if (this.pollTimer !== null) clearTimeout(this.pollTimer);
             this.pollTimer = null;
             const requestID = ++this.statusRequestID;
+            this.statusLoading = true; this.statusError = '';
             try {
-                const r = await api('/software/guard' + (fresh ? '?fresh=1' : ''));
+                const r = await api('/software/guard' + (fresh ? '?fresh=1' : ''), { silent: true });
                 if (this.disposed || requestID !== this.statusRequestID) return;
-                if (r.success) {
-                    (r.data || []).forEach(s => s._acting = !!this.actingServices[s.service]);
-                    this.services = r.data || [];
-                }
+                if (!r.success || !Array.isArray(r.data)) throw Error(r.message || t('common.request_failed'));
+                r.data.forEach(s => s._acting = !!this.actingServices[s.service]);
+                this.services = r.data; this.statusLoaded = true;
             } catch(e) {
+                if (!this.disposed && requestID === this.statusRequestID) this.statusError = e.message || t('common.request_failed');
             } finally {
                 if (!this.disposed && requestID === this.statusRequestID) {
+                    this.statusLoading = false;
                     this.pollTimer = setTimeout(() => this.fetchStatus(), 30000);
                 }
             }
         },
         async action(service, act) {
             const s = this.services.find(s => s.service === service);
-            if (!s || this.actingServices[service] || this.disposed) return;
+            if (!s || this.actingServices[service] || this.disposed || this.statusLoading || this.statusError) return;
             if (act === 'stop' && !await confirmModal(t('software.confirm_stop_service', { service: s.name }))) return;
             if (act === 'restart' && !await confirmModal(t('software.confirm_restart_service', { service: s.name }))) return;
-            if (this.actingServices[service] || this.disposed) return;
+            if (this.actingServices[service] || this.disposed || this.statusLoading || this.statusError) return;
             this.actingServices[service] = true;
             s._acting = true;
             try {
@@ -425,7 +443,7 @@ function softwareManager() {
         software: [], disposed: false, listLoading: false, listError: '', listRequestID: 0, listController: null,
         logRequestID: 0, logController: null,
         health: null, healthLoading: false, healthError: '', healthFresh: false, healthRequestID: 0, healthController: null, dependencyInstalling: false,
-        runtimeRequestID: 0, runtimeController: null, toolsRequestID: 0, toolsController: null,
+        runtimeRequestID: 0, runtimeController: null, runtimeLoading: false, runtimeLoaded: false, runtimeError: '', toolsRequestID: 0, toolsController: null,
         closeLog() {
             this.logRequestID++;
             if (this.logController) this.logController.abort();
@@ -606,16 +624,18 @@ function softwareManager() {
             const controller = new AbortController(), requestID = ++this.runtimeRequestID;
             this.runtimeController = controller;
             const current = () => !this.disposed && !controller.signal.aborted && requestID === this.runtimeRequestID;
+            this.runtimeLoading = true; this.runtimeError = '';
             try {
                 const r = await api('/software/php-runtimes', { silent: true, signal: controller.signal });
-                if (current() && r.success) this.phpRuntimes = (r.data || []).map(runtime => ({ ...runtime, _installing: !!this.phpRuntimes.find(old => old.version === runtime.version)?._installing }));
-            } catch(e) {}
-            finally { if (current()) this.runtimeController = null; }
+                if (!r.success || !Array.isArray(r.data)) throw Error(r.message || t('common.request_failed'));
+                if (current()) { this.phpRuntimes = r.data.map(runtime => ({ ...runtime, _installing: !!this.phpRuntimes.find(old => old.version === runtime.version)?._installing })); this.runtimeLoaded = true; }
+            } catch(e) { if (current()) this.runtimeError = e.message || t('common.request_failed'); }
+            finally { if (current()) { this.runtimeController = null; this.runtimeLoading = false; } }
         },
         async installPHPRuntime(runtime) {
-            if (this.disposed || runtime._installing) return;
+            if (this.disposed || runtime._installing || this.runtimeLoading || this.runtimeError) return;
             if (!await confirmModal(t(runtime.installed ? 'software.php_runtime_repair_confirm' : 'software.php_runtime_install_confirm', { version: runtime.version }))) return;
-            if (this.disposed || runtime._installing) return;
+            if (this.disposed || runtime._installing || this.runtimeLoading || this.runtimeError) return;
             runtime._installing = true;
             try {
                 const r = await api('/software/php-runtimes/install', { method: 'POST', body: { version: runtime.version }, timeout: 1800000 });

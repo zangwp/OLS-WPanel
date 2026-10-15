@@ -77,6 +77,7 @@ type cronJobSnapshot struct {
 type backupSettingSnapshot struct {
 	SiteID, Enabled, KeepCount int
 	Exists                     bool
+	EnabledAt                  sql.NullString
 }
 
 type backupPolicySnapshot struct {
@@ -541,6 +542,9 @@ func snapshotBackupPolicy(db *sql.DB, requests []backupPolicySiteRequest) (backu
 			return snapshot, err
 		}
 		setting.Exists = err == nil
+		if err := tx.QueryRow(`SELECT enabled_at FROM backup_schedule_state WHERE site_id=?`, id).Scan(&setting.EnabledAt); err != nil && err != sql.ErrNoRows {
+			return snapshot, err
+		}
 		snapshot.Settings = append(snapshot.Settings, setting)
 		rows, err := tx.Query(`SELECT id,name,cron_expression,command,site_id,run_as_user,task_type,backup_mode,keep_count,notify_fail,enabled,running,last_run_at,last_status,last_output,created_at,updated_at
 			FROM cron_jobs WHERE site_id=? AND task_type='file_backup' ORDER BY id`, id)
@@ -610,6 +614,14 @@ func restoreBackupPolicy(db *sql.DB, requests []backupPolicySiteRequest, snapsho
 	for _, setting := range snapshot.Settings {
 		if setting.Exists {
 			if _, err := tx.Exec(`INSERT INTO backup_settings(site_id,enabled,keep_count) VALUES(?,?,?)`, setting.SiteID, setting.Enabled, setting.KeepCount); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM backup_schedule_state WHERE site_id=?`, setting.SiteID); err != nil {
+			return err
+		}
+		if setting.EnabledAt.Valid {
+			if _, err := tx.Exec(`INSERT INTO backup_schedule_state(site_id,enabled_at) VALUES(?,?)`, setting.SiteID, setting.EnabledAt.String); err != nil {
 				return err
 			}
 		}

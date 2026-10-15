@@ -1075,6 +1075,11 @@
     "operation_blocked": "当前网站已开启 AI 开发访问，请先在网站详情中关闭授权后再执行此操作"
   },
   "software": {
+    "service_empty": "暂无可显示的服务。",
+    "runtime_empty": "尚未检测到 PHP 运行时。",
+    "previous_result": "以下为上次成功读取的数据，当前状态尚未确认。",
+    "service_load_failed": "无法读取服务状态。",
+    "runtime_load_failed": "无法读取 PHP 运行时列表。",
     "page_help": "管理运行环境、服务状态与性能参数；仅在检测到可用更新时显示更新提示。",
     "tab_runtime": "运行环境",
     "tab_tuning": "性能配置",
@@ -1436,6 +1441,8 @@
     "finding_normal_detail": "本地规则没有发现高比例错误或 PHP 致命错误。"
   },
   "ai_diagnostics": {
+    "history_retention": "保留最近 20 条已结束的诊断及每条最近 40 条消息；进行中的诊断不受影响。",
+    "no_websites": "暂无可诊断的网站。请先创建网站。",
     "description": "选择网站，可使用常见问题或填写自己的问题发起只读诊断；不会自动修改文件、数据库或服务器配置。",
     "empty_help": "选择左侧网站和问题类型，可补充问题描述；结果将包含证据、可能原因和建议步骤。",
     "symptom_custom": "自定义问题",
@@ -1558,6 +1565,9 @@
     "user_error_unauthorized": "AI 服务请求未授权"
   },
   "files": {
+    "directory_list_timeout": "目录读取超时，未返回不完整列表。请使用搜索缩小范围后重试，或通过 SSH 管理。",
+    "directory_list_changed": "目录内容或权限已变化，无法读取完整列表。请刷新后重试。",
+    "directory_list_too_large": "此目录条目过多，无法在网页中完整排序。请使用搜索缩小范围，或通过 SSH 管理。",
     "current_selection": "当前页已选 {{count}} 项",
     "clipboard_label": "剪贴板: {{count}} 个项目（{{action}}）",
     "clipboard_cut": "剪切",
@@ -1587,7 +1597,7 @@
     "protection_status_help": "文件保护是 WordPress 服务器级只读保护；状态旁可直接进入安全与维护页面管理。",
     "search_directories_placeholder": "搜索域名或目录路径...",
     "loading_directories": "正在加载网站目录...",
-    "load_directories_failed": "网站目录加载失败，请刷新页面重试。",
+    "load_directories_failed": "无法加载网站目录，请重试。",
     "deep_link_failed": "无法打开链接指定的网站目录。网站可能已被删除，或网站列表暂时无法加载。",
     "website_or_directory": "网站 / 目录",
     "site_type": "类型",
@@ -3331,6 +3341,8 @@
   },
   "session_username": "会话用户名",
   "backups": {
+    "site_bundle_help": "包含文件、数据库、恢复清单和 SHA-256 校验；仅导出本地完整备份点，不会启用远程同步。下载前会核验大文件，请稍候；备份包含网站敏感数据，请保存到安全的其他设备。",
+    "download_site_bundle": "下载完整备份包",
     "site_section_title": "整站备份与恢复",
     "site_backup_help": "同一次维护期间备份网站文件和数据库，用共同编号的完整备份点恢复整站。目前仅保存在本机，不使用远程同步设置，也不自动轮换；旧备份点需手动删除。",
     "backup_site_now": "立即整站备份",

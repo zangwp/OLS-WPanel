@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -597,8 +598,17 @@ func runCronJob(jobID int, scheduled bool) TaskResult {
 // Keep the existing origin TLS policy while making HTTP failures and stalled
 // requests fail the job instead of recording a successful invocation.
 func runWordPressCronRequest(ctx context.Context, url string) (string, error) {
-	return runCronCommand(ctx, "curl", "-k", "-sS", "--fail",
-		"--connect-timeout", "10", "--max-time", "120", "-o", os.DevNull, url)
+	output, err := runCronCommand(ctx, "curl", "-k", "-sS", "--fail",
+		"--connect-timeout", "10", "--max-time", "120", "-o", os.DevNull,
+		"--write-out", "%{http_code}", url)
+	if err != nil {
+		return output, err
+	}
+	code, err := strconv.Atoi(strings.TrimSpace(output))
+	if err != nil || code < 200 || code >= 300 {
+		return "", fmt.Errorf("WordPress Cron 未确认执行：HTTP %s；重定向或异常响应不能作为成功，请检查网站入口与访问规则", strings.TrimSpace(output))
+	}
+	return "", nil
 }
 
 func appendCronGateError(jobID int, message string) {

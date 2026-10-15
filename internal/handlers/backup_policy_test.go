@@ -85,6 +85,35 @@ func TestApplyBackupPolicyCreatesIncrementalAndFullTasks(t *testing.T) {
 	}
 }
 
+func TestBackupPolicyCompensationRestoresOriginalEnabledGrace(t *testing.T) {
+	setupBackupOverviewTestDB(t)
+	insertBackupPolicySite(t, 1, "grace.example.com")
+	db := database.GetDB()
+	if _, err := db.Exec(`INSERT INTO backup_settings(site_id,enabled,keep_count) VALUES(1,1,7);
+	 UPDATE backup_schedule_state SET enabled_at='2020-01-02 03:04:05' WHERE site_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	requests := []backupPolicySiteRequest{{SiteID: 1, DBEnabled: false, DBKeepCount: 9}}
+	snapshot, err := snapshotBackupPolicy(db, requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := applyBackupPolicy(db, requests); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreBackupPolicy(db, requests, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var enabled int
+	var anchor string
+	if err := db.QueryRow(`SELECT bs.enabled,s.enabled_at FROM backup_settings bs JOIN backup_schedule_state s ON s.site_id=bs.site_id WHERE bs.site_id=1`).Scan(&enabled, &anchor); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 1 || anchor != "2020-01-02 03:04:05" {
+		t.Fatalf("compensation reset the original backup grace: enabled=%d anchor=%s", enabled, anchor)
+	}
+}
+
 func TestApplyBackupPolicySkipsOrRebuildsDuplicateMode(t *testing.T) {
 	setupBackupOverviewTestDB(t)
 	insertBackupPolicySite(t, 1, "duplicate.example.com")

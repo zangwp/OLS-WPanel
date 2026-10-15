@@ -873,6 +873,9 @@ func TestCheckBackupReportsOnlyStaleEnabledSites(t *testing.T) {
 		(5, 1, datetime('now', '-2 days')),
 		(6, 1, datetime('now', '-2 days'))`)
 	mustExec(t, db, `INSERT INTO site_migration_locks (site_id, status) VALUES (6, 'active')`)
+	if err := database.EnsureBackupScheduleSchema(db); err != nil {
+		t.Fatal(err)
+	}
 
 	firing, msg := checkBackup()
 	if !firing {
@@ -885,6 +888,34 @@ func TestCheckBackupReportsOnlyStaleEnabledSites(t *testing.T) {
 		if strings.Contains(msg, domain) {
 			t.Fatalf("message should not include %s, got %q", domain, msg)
 		}
+	}
+}
+
+func TestBackupFreshnessAlertsAfterFirstEnabledGraceWithoutAnySuccess(t *testing.T) {
+	db := openAlertTestDB(t)
+	mustExec(t, db, `CREATE TABLE websites(id INTEGER PRIMARY KEY,domain TEXT,status TEXT);
+	 CREATE TABLE backup_settings(site_id INTEGER PRIMARY KEY,enabled INTEGER);
+	 CREATE TABLE db_backups(site_id INTEGER,auto INTEGER,created_at TEXT);
+	 CREATE TABLE site_migration_locks(site_id INTEGER,status TEXT);
+	 INSERT INTO websites VALUES(1,'first.example','active');INSERT INTO backup_settings VALUES(1,1)`)
+	if err := database.EnsureBackupScheduleSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if result := checkBackupState(); result.state != alertCheckNormal {
+		t.Fatal("newly enabled backup alerted before grace", result)
+	}
+	mustExec(t, db, `UPDATE backup_schedule_state SET enabled_at=datetime('now','-2 days') WHERE site_id=1`)
+	if result := checkBackupState(); result.state != alertCheckFiring || !strings.Contains(result.message, "first.example") {
+		t.Fatal("never-successful automatic backup stayed silent", result)
+	}
+	mustExec(t, db, `UPDATE backup_settings SET enabled=0 WHERE site_id=1;UPDATE backup_settings SET enabled=1 WHERE site_id=1`)
+	if result := checkBackupState(); result.state != alertCheckNormal {
+		t.Fatal("re-enable grace was ignored", result)
+	}
+	mustExec(t, db, `UPDATE backup_schedule_state SET enabled_at=datetime('now','-2 days') WHERE site_id=1;
+	 INSERT INTO db_backups VALUES(1,1,datetime('now','-1 hour'))`)
+	if result := checkBackupState(); result.state != alertCheckNormal {
+		t.Fatal("successful backup did not clear readiness alert", result)
 	}
 }
 

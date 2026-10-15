@@ -259,7 +259,6 @@ func (h *AIHandler) Diagnose(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.save_result_failed")))
 		return
 	}
-	pruneAISessions(site.ID, aiSessionKeepLimit)
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"session_id": sessionID,
@@ -281,7 +280,7 @@ func (h *AIHandler) ListSessions(c *gin.Context) {
 	}
 	rows, err := database.GetDB().Query(`SELECT id, site_id, symptom, status, risk_level, summary, error_message,
 		context_type,context_id,focus_kind,focus_value,created_at,updated_at
-			FROM ai_sessions WHERE site_id = ? ORDER BY created_at DESC LIMIT ?`, id, aiSessionKeepLimit)
+			FROM ai_sessions WHERE site_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, id, aiSessionKeepLimit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.load_sessions_failed")))
 		return
@@ -446,7 +445,6 @@ func (h *AIHandler) SendMessage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.save_reply_failed")))
 		return
 	}
-	pruneAIMessages(sessionID, aiMessageKeepLimit)
 	allMessages, err := listAIMessages(sessionID, aiMessageKeepLimit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.load_messages_failed")))
@@ -657,6 +655,9 @@ func createAIMessage(sessionID int, role, content string, promptChars, responseC
 		return 0, err
 	}
 	id, err := res.LastInsertId()
+	if err == nil {
+		pruneAIMessages(sessionID, aiMessageKeepLimit)
+	}
 	return int(id), err
 }
 
@@ -726,23 +727,43 @@ func updateAISessionStatus(sessionID int, status, message string) {
 }
 
 func failAISession(sessionID int, message string, promptChars, responseChars int) {
-	_, _ = database.GetDB().Exec(`UPDATE ai_sessions
+	_, err := database.GetDB().Exec(`UPDATE ai_sessions
 		SET status = ?, error_message = ?, prompt_chars = ?, response_chars = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`, models.AISessionFailed, message, promptChars, responseChars, sessionID)
+	if err == nil {
+		pruneFinishedAISessionHistory(sessionID)
+	}
 }
 
 func completeAISession(sessionID int, riskLevel, summary, reportJSON, rawText string, promptChars, responseChars int) error {
 	_, err := database.GetDB().Exec(`UPDATE ai_sessions
 		SET status = ?, risk_level = ?, summary = ?, report_json = ?, raw_text = ?, prompt_chars = ?, response_chars = ?, error_message = '', updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`, models.AISessionCompleted, riskLevel, summary, reportJSON, rawText, promptChars, responseChars, sessionID)
+	if err == nil {
+		pruneFinishedAISessionHistory(sessionID)
+	}
 	return err
 }
 
+func pruneFinishedAISessionHistory(sessionID int) {
+	var siteID int
+	if database.GetDB().QueryRow(`SELECT site_id FROM ai_sessions WHERE id = ?`, sessionID).Scan(&siteID) == nil {
+		pruneAISessions(siteID, aiSessionKeepLimit)
+	}
+}
+
 func pruneAISessions(siteID, keep int) {
+	if keep < 1 {
+		return
+	}
+	// Only terminal sessions consume retention slots. Pending/running work and
+	// other websites must survive pruning, including when a provider keeps failing.
 	_, _ = database.GetDB().Exec(`DELETE FROM ai_sessions
-		WHERE site_id = ? AND id NOT IN (
-			SELECT id FROM ai_sessions WHERE site_id = ? ORDER BY created_at DESC LIMIT ?
-		)`, siteID, siteID, keep)
+		WHERE site_id = ? AND status IN (?, ?) AND id NOT IN (
+			SELECT id FROM ai_sessions WHERE site_id = ? AND status IN (?, ?)
+			ORDER BY created_at DESC, id DESC LIMIT ?
+		)`, siteID, models.AISessionCompleted, models.AISessionFailed,
+		siteID, models.AISessionCompleted, models.AISessionFailed, keep)
 }
 
 func maskAIKey(key string) string {
