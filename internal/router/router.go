@@ -482,6 +482,7 @@ var i18nKeys = []string{
 	"firewall.access_saved_status_unavailable",
 	"firewall.access_apply_confirm",
 	"firewall.access_verify",
+	"firewall.access_expired",
 	"firewall.access_deadline",
 	"firewall.access_verified",
 	"firewall.access_confirm",
