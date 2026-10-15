@@ -247,10 +247,8 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 			return SSHPortChange{}, errors.New("端口已被其他服务占用")
 		}
 	}
-	for _, unit := range []string{accessRollbackUnit + ".timer", firewallRollbackUnit + ".timer"} {
-		if _, e := portCommand(ctx, "systemctl", "is-active", "--quiet", unit); e == nil {
-			return SSHPortChange{}, errors.New("请先完成其他防火墙变更")
-		}
+	if err := checkFirewallRollbackUnits(ctx, accessRollbackUnit+".timer", accessRollbackUnit+".service", firewallRollbackUnit+".timer", firewallRollbackUnit+".service"); err != nil {
+		return SSHPortChange{}, fmt.Errorf("请先完成其他防火墙变更: %w", err)
 	}
 	if net.ParseIP(managementIP) == nil {
 		return SSHPortChange{}, errors.New("无法识别管理 IP")

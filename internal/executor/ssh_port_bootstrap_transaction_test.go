@@ -17,7 +17,13 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 	for _, sample := range []struct {
 		name                                     string
 		existing, reverse, failReload, failCheck bool
-	}{{name: "new_table"}, {name: "existing_table", existing: true}, {name: "restore_port_22", existing: true, reverse: true}, {name: "reload_failure", failReload: true}, {name: "final_preflight_failure", failCheck: true}} {
+		pendingUnit                              string
+		queued, unreadable                       bool
+	}{{name: "new_table"}, {name: "existing_table", existing: true}, {name: "restore_port_22", existing: true, reverse: true}, {name: "reload_failure", failReload: true}, {name: "final_preflight_failure", failCheck: true},
+		{name: "active access rollback service", pendingUnit: accessRollbackUnit + ".service"},
+		{name: "active legacy rollback service", pendingUnit: firewallRollbackUnit + ".service"},
+		{name: "queued legacy rollback", pendingUnit: firewallRollbackUnit + ".service", queued: true},
+		{name: "unreadable access rollback", pendingUnit: accessRollbackUnit + ".service", unreadable: true}} {
 		t.Run(sample.name, func(t *testing.T) {
 			oldConfig, oldJail, oldRun, oldDefaults := sshConfigPath, sshJailPath, sshMoveRunDirectory, sshDefaultsPath
 			oldCommand, oldAvailable, oldPersist, oldMove := portCommand, sshSystemdAvailable, persistAccessRules, sshMove
@@ -94,6 +100,18 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 				case "ufw":
 					return "inactive", nil
 				case "systemctl":
+					if strings.HasPrefix(joined, "show") && strings.Contains(joined, "--property=LoadState") {
+						if len(args) > 1 && args[1] == sample.pendingUnit {
+							if sample.unreadable {
+								return "", errors.New("fixture unit read failed")
+							}
+							if sample.queued {
+								return "LoadState=loaded\nActiveState=inactive\nResult=success\nJob=123", nil
+							}
+							return "LoadState=loaded\nActiveState=active\nResult=success\nJob=", nil
+						}
+						return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
+					}
 					if strings.HasPrefix(joined, "is-active") {
 						if strings.HasSuffix(joined, "ssh.service") || (armed && strings.HasSuffix(joined, sshMoveUnit+".timer")) {
 							return "active", nil
@@ -218,6 +236,13 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 				t.Fatalf("normal installer policy still requires a separate policy toggle: %+v", status)
 			}
 			change, err := BeginSSHPortChange(newPort, "203.0.113.5")
+			if sample.pendingUnit != "" {
+				current, readErr := os.ReadFile(sshConfigPath)
+				if err == nil || !strings.Contains(err.Error(), "请先完成其他防火墙变更") || readErr != nil || string(current) != original || armed || saved || restored || present != sample.existing || table != initial {
+					t.Fatalf("SSH migration ignored a running, queued or unreadable rollback: %+v %v", change, err)
+				}
+				return
+			}
 			if sample.failCheck {
 				current, readErr := os.ReadFile(sshConfigPath)
 				if err == nil || !strings.Contains(err.Error(), "fixture final policy failure") || readErr != nil || string(current) != original || armed || saved || restored || present {

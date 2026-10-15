@@ -10,7 +10,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // This same-boot receipt contains no authorization token. It survives a panel
@@ -129,7 +131,7 @@ func completeFirewallAccessChange(token string) {
 // than from is-active's nonzero exit code (which also covers command failures).
 func firewallAccessRollbackInactive(ctx context.Context, unit string) (bool, error) {
 	output, err := portCommand(ctx, "systemctl", "show", unit,
-		"--property=LoadState", "--property=ActiveState", "--property=Result")
+		"--property=LoadState", "--property=ActiveState", "--property=Result", "--property=Job")
 	if err != nil {
 		return false, fmt.Errorf("无法核对防火墙回退任务: %w", err)
 	}
@@ -151,6 +153,19 @@ func firewallAccessRollbackInactive(ctx context.Context, unit string) (bool, err
 		(load == "loaded" && strings.HasSuffix(unit, ".service") && properties["Result"] == "") {
 		return false, errors.New("防火墙回退任务状态不完整")
 	}
+	jobText, hasJob := properties["Job"]
+	if !hasJob {
+		return false, errors.New("防火墙回退任务排队状态不完整")
+	}
+	if jobText != "" {
+		job, err := strconv.ParseUint(jobText, 10, 64)
+		if err != nil {
+			return false, errors.New("防火墙回退任务排队状态不完整")
+		}
+		if job != 0 {
+			return false, nil
+		}
+	}
 	if active == "failed" || (properties["Result"] != "" && properties["Result"] != "success") {
 		return false, errors.New("防火墙回退任务执行失败，请通过 SSH 检查规则")
 	}
@@ -161,6 +176,25 @@ func firewallAccessRollbackInactive(ctx context.Context, unit string) (bool, err
 		return false, nil
 	}
 	return false, errors.New("无法识别防火墙回退任务状态")
+}
+
+func stopFirewallRollbackUnits(ctx context.Context, units ...string) error {
+	for _, unit := range units {
+		// An absent transient unit may make stop fail. Only the subsequent
+		// state and queued-job inspection can prove that cancellation is safe.
+		_, _ = portCommand(ctx, "systemctl", "stop", unit)
+		_, _ = portCommand(ctx, "systemctl", "reset-failed", unit)
+	}
+	for _, unit := range units {
+		inactive, err := firewallAccessRollbackInactive(ctx, unit)
+		if err != nil {
+			return err
+		}
+		if !inactive {
+			return errors.New("防火墙回退任务仍在运行或排队，未保存配置")
+		}
+	}
+	return nil
 }
 
 func readFirewallAccessRollbackTable(ctx context.Context) (bool, string, error) {
@@ -207,6 +241,108 @@ func readFirewallAccessRollbackTable(ctx context.Context) (bool, string, error) 
 	return true, current, nil
 }
 
+func firewallAccessOriginalRestored(ctx context.Context, record firewallAccessChangeRecord) error {
+	exists, current, err := readFirewallAccessRollbackTable(ctx)
+	if err != nil {
+		return fmt.Errorf("无法核对防火墙原规则是否恢复: %w", err)
+	}
+	if exists != record.PreviousExists {
+		return errors.New("防火墙原规则尚未恢复，请通过 SSH 检查后重试")
+	}
+	if exists && current != record.Previous {
+		return errors.New("无法确认防火墙原规则已完整恢复，请通过 SSH 检查后重试")
+	}
+	return nil
+}
+
+func recoverFirewallAccessRollback(ctx context.Context, changeID string) error {
+	record, err := readFirewallAccessChange()
+	if err != nil || (record.State != "pending" && record.State != "rolled_back") {
+		return errors.New("无法核对上次防火墙变更的恢复记录")
+	}
+	if changeID != "" && record.ID != changeID {
+		return errors.New("防火墙变更记录已变化，请重新读取状态")
+	}
+	if err := firewallAccessOriginalRestored(ctx, record); err != nil {
+		return err
+	}
+	// Never cancel a still-applied pending policy. Reaching here proves that
+	// its original snapshot is already back, so only stale jobs are removed.
+	if err := stopFirewallRollbackUnits(ctx, accessRollbackUnit+".timer", accessRollbackUnit+".service"); err != nil {
+		return err
+	}
+	if record.State == "rolled_back" {
+		if err := firewallAccessOriginalRestored(ctx, record); err != nil {
+			return err
+		}
+		if pendingAccess.token != "" && firewallAccessChangeID(pendingAccess.token) == record.ID {
+			pendingAccess.token = ""
+		}
+		return nil
+	}
+	status := inspectFirewallAccessChange(ctx)
+	if status.State != "rolled_back" {
+		return fmt.Errorf("防火墙恢复状态尚未确认: %s", status.Error)
+	}
+	return nil
+}
+
+// RecoverFirewallAccess cancels stale jobs only after the matching receipt's
+// original policy is observed. Status reads never perform this cancellation.
+func RecoverFirewallAccess(changeID string) error {
+	if len(changeID) != 32 {
+		return errors.New("防火墙恢复标识无效")
+	}
+	if _, err := hex.DecodeString(changeID); err != nil {
+		return errors.New("防火墙恢复标识无效")
+	}
+	portRulesMu.Lock()
+	defer portRulesMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	record, err := readFirewallAccessChange()
+	if err != nil {
+		return errors.New("无法读取防火墙恢复记录，请重新核对状态")
+	}
+	if record.ID != changeID {
+		return errors.New("防火墙变更记录已变化，请重新读取状态")
+	}
+	if record.State == "confirmed" || record.State == "rolled_back" {
+		return nil
+	}
+	return recoverFirewallAccessRollback(ctx, changeID)
+}
+
+func checkFirewallRollbackUnits(ctx context.Context, units ...string) error {
+	for _, unit := range units {
+		inactive, err := firewallAccessRollbackInactive(ctx, unit)
+		if err != nil {
+			return err
+		}
+		if !inactive {
+			return errors.New("已有防火墙回退任务，请等待其完成")
+		}
+	}
+	return nil
+}
+
+func prepareFirewallAccessChange(ctx context.Context) error {
+	accessUnits := []string{accessRollbackUnit + ".timer", accessRollbackUnit + ".service"}
+	if err := checkFirewallRollbackUnits(ctx, accessUnits...); err != nil {
+		if recoverErr := recoverFirewallAccessRollback(ctx, ""); recoverErr != nil {
+			return fmt.Errorf("防火墙回退任务尚未安全结束: %w", recoverErr)
+		}
+	}
+	if err := checkFirewallRollbackUnits(ctx, firewallRollbackUnit+".timer", firewallRollbackUnit+".service"); err != nil {
+		return err
+	}
+	status := inspectFirewallAccessChange(ctx)
+	if status.State == "pending" || status.State == "error" {
+		return fmt.Errorf("上次防火墙变更恢复状态尚未确认: %s", status.Error)
+	}
+	return nil
+}
+
 func inspectFirewallAccessChange(ctx context.Context) firewallAccessChangeStatus {
 	record, err := readFirewallAccessChange()
 	if os.IsNotExist(err) {
@@ -235,17 +371,8 @@ func inspectFirewallAccessChange(ctx context.Context) firewallAccessChangeStatus
 			return status
 		}
 	}
-	exists, current, err := readFirewallAccessRollbackTable(ctx)
-	if err != nil {
-		status.Error = "无法核对防火墙原规则是否恢复: " + err.Error()
-		return status
-	}
-	if exists != record.PreviousExists {
-		status.Error = "防火墙原规则尚未恢复，请通过 SSH 检查后重试"
-		return status
-	}
-	if exists && current != record.Previous {
-		status.Error = "无法确认防火墙原规则已完整恢复，请通过 SSH 检查后重试"
+	if err := firewallAccessOriginalRestored(ctx, record); err != nil {
+		status.Error = err.Error()
 		return status
 	}
 	record.State = "rolled_back"

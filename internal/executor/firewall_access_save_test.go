@@ -55,6 +55,9 @@ func TestAccessOrdinaryPortDeletionSavesImmediatelyAndRestoresOnFailure(t *testi
 					disabled = true
 					return "", nil
 				}
+				if name == "systemctl" && len(args) > 1 && args[0] == "show" && strings.Contains(command, "--property=LoadState") {
+					return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
+				}
 				if name == "systemctl" && len(args) > 0 && args[0] == "is-active" {
 					return "inactive", errors.New("inactive")
 				}

@@ -56,6 +56,9 @@ func TestAccessConfirmationFailureRestoresRuntimeAndBoot(t *testing.T) {
 		if name == "sshd" {
 			return "port 22", nil
 		}
+		if name == "systemctl" && len(args) > 1 && args[0] == "show" {
+			return "LoadState=loaded\nActiveState=inactive\nResult=success\nJob=", nil
+		}
 		if strings.Contains(cmd, "is-active") {
 			return "inactive", errors.New("inactive")
 		}

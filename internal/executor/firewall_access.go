@@ -125,10 +125,8 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	if active, _ := firewallProtectionPending(); active {
 		return FirewallProtectionResult{}, errors.New("已有防火墙变更等待确认")
 	}
-	for _, unit := range []string{accessRollbackUnit + ".timer", accessRollbackUnit + ".service", firewallRollbackUnit + ".timer"} {
-		if _, err := portCommand(ctx, "systemctl", "is-active", "--quiet", unit); err == nil {
-			return FirewallProtectionResult{}, errors.New("已有防火墙回退任务，请等待其完成")
-		}
+	if err := prepareFirewallAccessChange(ctx); err != nil {
+		return FirewallProtectionResult{}, err
 	}
 	preview, err := previewAccess(ctx, req, ip)
 	if err != nil {
@@ -304,14 +302,8 @@ func ConfirmFirewallAccess(token string) error {
 	}
 	// Stop the timer AND service before saving so a concurrent rollback cannot
 	// leave a restrictive configuration on disk while runtime has reverted.
-	if _, err = portCommand(ctx, "systemctl", "stop", accessRollbackUnit+".timer", accessRollbackUnit+".service"); err != nil {
-		rollbackCtx, c := context.WithTimeout(context.Background(), 10*time.Second)
-		defer c()
-		if _, restoreErr := portCommand(rollbackCtx, "nft", "--file", pendingAccess.rollback); restoreErr != nil {
-			return errors.New("无法停止回退任务且即时恢复失败，请通过 SSH 检查规则；未保存配置")
-		}
-		pendingAccess.token = ""
-		return errors.New("无法停止回退任务，已恢复原规则，未保存配置")
+	if err = stopFirewallRollbackUnits(ctx, accessRollbackUnit+".timer", accessRollbackUnit+".service"); err != nil {
+		return abortFirewallAccessChange(fmt.Errorf("无法停止回退任务: %w", err))
 	}
 	current, err = portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
 	if err == nil && current == pendingAccess.expected {
@@ -320,13 +312,7 @@ func ConfirmFirewallAccess(token string) error {
 		err = errors.New("规则已回退或变化，未保存")
 	}
 	if err != nil {
-		rollbackCtx, c := context.WithTimeout(context.Background(), 10*time.Second)
-		defer c()
-		if out, e := portCommand(rollbackCtx, "nft", "--file", pendingAccess.rollback); e != nil {
-			return fmt.Errorf("保存失败且回退失败，请通过 SSH 检查: %s (%v)", out, err)
-		}
-		pendingAccess.token = ""
-		return err
+		return abortFirewallAccessChange(err)
 	}
 	pendingAccess.token = ""
 	completeFirewallAccessChange(token)
@@ -334,4 +320,19 @@ func ConfirmFirewallAccess(token string) error {
 	committed = true
 	recordOperationLog("firewall_access_confirm", accessTable, "success", "saved; nftables enabled")
 	return nil
+}
+
+func abortFirewallAccessChange(cause error) error {
+	// A failed confirmation can never authorize a second save with its token.
+	// Keep rollback files and its receipt until recovery is actually observed.
+	pendingAccess.token = ""
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if out, err := portCommand(ctx, "nft", "--file", pendingAccess.rollback); err != nil {
+		return fmt.Errorf("%v；即时恢复失败，请通过 SSH 检查规则，未保存配置: %s", cause, out)
+	}
+	if status := inspectFirewallAccessChange(ctx); status.State == "rolled_back" {
+		return fmt.Errorf("%v；已恢复原规则，未保存配置", cause)
+	}
+	return fmt.Errorf("%v；已执行恢复，回退状态仍待核对，未保存配置", cause)
 }

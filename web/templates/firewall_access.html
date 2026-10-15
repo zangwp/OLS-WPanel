@@ -3,12 +3,12 @@
 <div class="card firewall-access-policy">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h3 class="text-lg font-semibold text-white">{{t .Lang "firewall.access_title"}}</h3>
-        <span class="text-sm" :class="accessDirty || accessToken ? 'text-yellow-400' : (portStatus.access_enabled ? 'text-green-400' : 'text-gray-400')" x-text="accessToken ? t('firewall.access_pending') : (accessDirty ? t('firewall.access_unsaved') : (portStatus.access_enabled ? t('firewall.access_active') : t('firewall.access_draft')))"></span>
+        <span class="text-sm" :class="accessDirty || accessRecoveryLocked() ? 'text-yellow-400' : (portStatus.access_enabled ? 'text-green-400' : 'text-gray-400')" x-text="accessRecoveryRequired ? t('firewall.access_recovery_pending') : (accessToken ? t('firewall.access_pending') : (accessDirty ? t('firewall.access_unsaved') : (portStatus.access_enabled ? t('firewall.access_active') : t('firewall.access_draft'))))"></span>
     </div>
     <p class="access-introduction">{{t .Lang "firewall.access_help"}}</p>
     <p class="text-xs text-gray-500 mb-4">{{t .Lang "firewall.access_direction_help"}}</p>
     <p class="access-workflow">{{t .Lang "firewall.access_steps"}}</p>
-    <fieldset :disabled="accessBusy || portSubmitting || !!accessToken || accessSSHStale || !portStatus.access_available" @change="markAccessDirty()">
+    <fieldset :disabled="accessBusy || portSubmitting || accessRecoveryLocked() || accessSSHStale || !portStatus.access_available" @change="markAccessDirty()">
         <div class="access-rules"><div class="access-rule-head text-xs text-gray-400"><span>{{t .Lang "firewall.service_preset"}}</span><span>{{t .Lang "firewall.access_scope"}}</span><span>{{t .Lang "firewall.source_scope"}}</span><span class="access-actions-heading">{{t .Lang "firewall.actions"}}</span></div>
             <template x-for="row in accessRows" :key="row.key">
                 <div class="access-rule">
@@ -26,14 +26,14 @@
     </fieldset>
     <p x-show="accessError" class="text-sm text-red-400 mt-3" role="alert" x-text="accessError"></p>
     <p x-show="!portStatus.access_available" class="text-sm text-yellow-400 mt-3">{{t .Lang "firewall.access_unavailable"}}</p>
-    <div x-show="accessPreview && !accessToken" x-ref="accessSaveReview" class="access-save-stage" tabindex="-1" role="region" aria-label="{{t .Lang "firewall.access_review"}}">
+    <div x-show="accessPreview && !accessRecoveryLocked()" x-ref="accessSaveReview" class="access-save-stage" tabindex="-1" role="region" aria-label="{{t .Lang "firewall.access_review"}}">
         <h4 class="font-semibold text-white">{{t .Lang "firewall.access_review"}}</h4>
         <p class="text-sm text-gray-300 mt-3" x-text="accessReviewHelp()"></p>
         <p class="text-sm text-yellow-400 my-3">{{t .Lang "firewall.access_conflicts"}}</p>
         <div class="access-preview-list"><template x-for="(rule,index) in accessPreview?.rules || []" :key="index"><p class="text-sm text-gray-300" x-text="rule.port + '/' + rule.protocol.toUpperCase() + ' ← ' + (rule.source || t('firewall.access_everyone'))"></p></template></div>
         <details class="mt-3"><summary class="text-sm text-gray-400 cursor-pointer">{{t .Lang "firewall.access_existing"}}</summary><pre class="access-code" x-text="accessPreview?.existing_rules"></pre></details>
     </div>
-    <div x-show="accessToken" x-ref="accessSaveVerification" class="access-save-stage access-save-verification" tabindex="-1" role="region" aria-label="{{t .Lang "firewall.access_verify_title"}}">
+    <div x-show="!!accessToken && !accessRecoveryRequired" x-ref="accessSaveVerification" class="access-save-stage access-save-verification" tabindex="-1" role="region" aria-label="{{t .Lang "firewall.access_verify_title"}}">
         <h4 class="font-semibold text-white">{{t .Lang "firewall.access_verify_title"}}</h4>
         <p x-show="!accessExpired" class="text-yellow-300 text-sm mt-3" x-text="accessSSHValidation ? t('firewall.access_verify_ssh') : t('firewall.access_verify')"></p>
         <p x-show="accessExpired" class="text-yellow-300 text-sm mt-3" role="status">{{t .Lang "firewall.access_expired"}}</p>
@@ -41,13 +41,13 @@
         <label class="flex items-start gap-2 text-sm text-gray-300 mt-3"><input type="checkbox" x-model="accessChecked" :disabled="accessBusy || accessExpired"><span x-text="accessSSHValidation ? t('firewall.access_verified_ssh') : t('firewall.access_verified')"></span></label>
     </div>
     <div class="access-action-row access-save-actions">
-        <button type="button" class="btn-primary" x-show="!accessPreview && !accessToken" @click="startAccessSave()" :disabled="accessBusy || portSubmitting || portsLoading || accessSSHStale || !portStatus.access_available">{{t .Lang "firewall.access_save"}}</button>
-        <button type="button" class="btn-primary" x-show="accessPreview && !accessToken" @click="applyAccess()" :disabled="accessBusy || portSubmitting || portsLoading || accessSSHStale || !portStatus.access_available" x-text="accessNeedsConfirmation() ? t('firewall.access_apply') : t('firewall.access_apply_direct')"></button>
-        <button type="button" class="btn-primary" x-show="accessToken" @click="confirmAccess()" :disabled="!accessChecked || accessExpired || accessBusy || portSubmitting">{{t .Lang "firewall.access_confirm"}}</button>
-        <button type="button" class="btn-secondary" x-show="accessToken && accessRollbackReady" @click="checkAccessRollback()" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.access_check_status"}}</button>
-        <button type="button" class="btn-secondary" x-show="accessPreview && !accessToken" @click="editAccessDraft()" :disabled="accessBusy || portSubmitting || accessSSHStale">{{t .Lang "firewall.access_edit"}}</button>
-        <button type="button" class="btn-secondary" x-show="!accessPreview && !accessToken" @click="refreshAccess()" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.refresh"}}</button>
-        <p class="access-save-help" x-show="!accessToken" x-text="accessPreview ? (accessNeedsConfirmation() ? t('firewall.access_apply_help') : t('firewall.access_ordinary_review')) : t('firewall.access_draft_help')"></p>
+        <button type="button" class="btn-primary" x-show="!accessPreview && !accessRecoveryLocked()" @click="startAccessSave()" :disabled="accessBusy || portSubmitting || portsLoading || accessRecoveryLocked() || accessSSHStale || !portStatus.access_available">{{t .Lang "firewall.access_save"}}</button>
+        <button type="button" class="btn-primary" x-show="accessPreview && !accessRecoveryLocked()" @click="applyAccess()" :disabled="accessBusy || portSubmitting || portsLoading || accessRecoveryLocked() || accessSSHStale || !portStatus.access_available" x-text="accessNeedsConfirmation() ? t('firewall.access_apply') : t('firewall.access_apply_direct')"></button>
+        <button type="button" class="btn-primary" x-show="!!accessToken && !accessRecoveryRequired" @click="confirmAccess()" :disabled="!accessChecked || accessExpired || accessBusy || portSubmitting || accessRecoveryRequired">{{t .Lang "firewall.access_confirm"}}</button>
+        <button type="button" class="btn-secondary" x-show="accessRecoveryRequired || (!!accessToken && accessRollbackReady)" @click="checkAccessRollback({ recover: true })" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.access_recover_edit"}}</button>
+        <button type="button" class="btn-secondary" x-show="accessPreview && !accessRecoveryLocked()" @click="editAccessDraft()" :disabled="accessBusy || portSubmitting || accessRecoveryLocked() || accessSSHStale">{{t .Lang "firewall.access_edit"}}</button>
+        <button type="button" class="btn-secondary" x-show="!accessPreview && !accessRecoveryLocked()" @click="refreshAccess()" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.refresh"}}</button>
+        <p class="access-save-help" x-show="!accessRecoveryLocked()" x-text="accessPreview ? (accessNeedsConfirmation() ? t('firewall.access_apply_help') : t('firewall.access_ordinary_review')) : t('firewall.access_draft_help')"></p>
     </div>
 </div>
 {{end}}

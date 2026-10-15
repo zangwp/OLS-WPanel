@@ -169,6 +169,17 @@ jobs:
           test "${#packages[@]}" -gt 0
           go test -trimpath "${packages[@]}"
 
+      - name: Verify real systemd rollback lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_binary="$RUNNER_TEMP/ols-firewall-systemd.test"
+          test_log="$RUNNER_TEMP/ols-firewall-systemd.log"
+          go test -trimpath -c -o "$test_binary" ./internal/executor
+          sudo env OLS_WPANEL_SYSTEMD_TEST=1 "$test_binary" -test.run '^TestFirewallRollbackSystemd$' -test.count=1 -test.v | tee "$test_log"
+          grep -Fq -- '--- PASS: TestFirewallRollbackSystemd ' "$test_log"
+          grep -Fq SYSTEMD_FIREWALL_ROLLBACK_OK "$test_log"
+
       - name: Static check
         shell: bash
         run: |
@@ -468,6 +479,17 @@ jobs:
           EOF
           "$RUNNER_TEMP/ols-wpanel-arm64" --info --config "$preflight_dir/config.json" > "$preflight_dir/info.txt"
           grep -Fq 'OLS WPanel' "$preflight_dir/info.txt"
+
+      - name: Verify real systemd rollback lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_binary="$RUNNER_TEMP/ols-firewall-systemd.test"
+          test_log="$RUNNER_TEMP/ols-firewall-systemd.log"
+          go test -trimpath -c -o "$test_binary" ./internal/executor
+          sudo env OLS_WPANEL_SYSTEMD_TEST=1 "$test_binary" -test.run '^TestFirewallRollbackSystemd$' -test.count=1 -test.v | tee "$test_log"
+          grep -Fq -- '--- PASS: TestFirewallRollbackSystemd ' "$test_log"
+          grep -Fq SYSTEMD_FIREWALL_ROLLBACK_OK "$test_log"
 
   sign:
     name: Sign release assets
