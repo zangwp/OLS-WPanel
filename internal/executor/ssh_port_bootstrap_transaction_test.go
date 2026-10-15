@@ -19,7 +19,9 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 		existing, reverse, failReload, failCheck bool
 		pendingUnit                              string
 		queued, unreadable                       bool
+		externalRestore                          bool
 	}{{name: "new_table"}, {name: "existing_table", existing: true}, {name: "restore_port_22", existing: true, reverse: true}, {name: "reload_failure", failReload: true}, {name: "final_preflight_failure", failCheck: true},
+		{name: "completed migration permits external restoration", existing: true, externalRestore: true},
 		{name: "active access rollback service", pendingUnit: accessRollbackUnit + ".service"},
 		{name: "active legacy rollback service", pendingUnit: firewallRollbackUnit + ".service"},
 		{name: "queued legacy rollback", pendingUnit: firewallRollbackUnit + ".service", queued: true},
@@ -38,6 +40,9 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 			sshMoveRunDirectory, sshDefaultsPath = dir, filepath.Join(dir, "defaults")
 			config.AppConfig = &config.Config{Panel: config.PanelConfig{Port: 8443}}
 			oldPort, newPort := 22, 2222
+			if sample.externalRestore {
+				newPort = 2111
+			}
 			if sample.reverse {
 				oldPort, newPort = newPort, oldPort
 			}
@@ -138,6 +143,9 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 					}
 					return "", nil
 				case "nft":
+					if joined == "--json --stateless list tables" {
+						return fmt.Sprintf(`{"nftables":[{"table":{"family":"inet","name":%q}}]}`, accessTable), nil
+					}
 					if joined == "--stateless list tables" {
 						if present {
 							return "table inet filter\ntable inet " + accessTable, nil
@@ -279,6 +287,24 @@ func TestSSHMigrationBootstrapsStrictPolicyAndRollsBackAbsentTable(t *testing.T)
 			jail, readErr := os.ReadFile(sshJailPath)
 			if len(finalPorts) != 1 || finalPorts[0] != newPort || readErr != nil || string(jail) != sshJailConfig(strconv.Itoa(newPort)) {
 				t.Fatalf("confirmed migration retained the old SSH listener or Fail2ban port: %v %q %v", finalPorts, jail, readErr)
+			}
+			if sample.externalRestore {
+				confirmed := GetSSHPortStatus()
+				if confirmed.ChangeID != change.ChangeID || confirmed.ChangeState != "confirmed" || confirmed.Pending || confirmed.Port != 2111 {
+					t.Fatalf("confirmed caller did not yield a proven matching receipt: %+v", confirmed)
+				}
+				if err := os.WriteFile(sshConfigPath, []byte(original), 0600); err != nil {
+					t.Fatal(err)
+				}
+				table = initial // Model an administrator restoring the original access policy too.
+				status := GetSSHPortStatus()
+				if status.ChangeState != "unknown" || status.Pending || !status.Available || status.Port != 22 {
+					t.Fatalf("completed receipt blocked an external SSH restoration: %+v", status)
+				}
+				next, err := BeginSSHPortChange(2112, "203.0.113.5")
+				if err != nil || next.OldPort != 22 || next.NewPort != 2112 || next.ChangeID == change.ChangeID {
+					t.Fatalf("could not begin a new migration after external restoration: %+v %v", next, err)
+				}
 			}
 		})
 	}

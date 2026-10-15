@@ -21,11 +21,13 @@ var sshSystemdAvailable = systemdRunAvailable
 var sshDefaultsPath = "/etc/default/ssh"
 
 type SSHPortStatus struct {
-	Port      int    `json:"port"`
-	Available bool   `json:"available"`
-	Reason    string `json:"reason"`
-	Service   string `json:"service"`
-	Pending   bool   `json:"pending"`
+	Port        int    `json:"port"`
+	Available   bool   `json:"available"`
+	Reason      string `json:"reason"`
+	Service     string `json:"service"`
+	Pending     bool   `json:"pending"`
+	ChangeID    string `json:"change_id"`
+	ChangeState string `json:"change_state"`
 }
 type SSHPortChange struct {
 	Token         string    `json:"token"`
@@ -33,11 +35,13 @@ type SSHPortChange struct {
 	NewPort       int       `json:"new_port"`
 	Deadline      time.Time `json:"deadline"`
 	VerifyCommand string    `json:"verify_command"`
+	ChangeID      string    `json:"change_id"`
 }
 
 var sshMove struct {
 	SSHPortChange
 	dir, service, expectedConfig, expectedTable string
+	changeState, confirmedTable                 string
 }
 
 func sshMoveActive(ctx context.Context) bool {
@@ -51,10 +55,14 @@ func sshMoveActive(ctx context.Context) bool {
 
 func inspectSSHPort(ctx context.Context) SSHPortStatus {
 	listeners, listenerErr := readFirewallListeners(ctx, true)
-	s := SSHPortStatus{Port: detectSSHPort(ctx, listeners), Pending: sshMoveActive(ctx)}
+	s := SSHPortStatus{Port: detectSSHPort(ctx, listeners), ChangeID: sshMove.ChangeID, ChangeState: "unknown"}
 	fail := func(reason string) SSHPortStatus { s.Reason = reason; return s }
 	if listenerErr != nil {
+		s.Pending = true
 		return fail("无法完整核对 SSH 监听，暂不支持自动修改: " + listenerErr.Error())
+	}
+	if err := observeSSHPortChange(ctx, listeners, &s); err != nil {
+		return fail(err.Error())
 	}
 	if s.Pending {
 		return fail("已有 SSH 端口变更，请完成验证或等待自动恢复")
@@ -415,14 +423,11 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 		return SSHPortChange{}, fmt.Errorf("无法安排恢复任务: %s", out)
 	}
 	keep = true
+	sshMove.SSHPortChange = SSHPortChange{Token: token, OldPort: s.Port, NewPort: newPort, Deadline: started.Add(240 * time.Second), VerifyCommand: sshVerificationCommand(filepath.Join(dir, "verify.sh"), token), ChangeID: sshPortChangeID(token)}
+	sshMove.dir, sshMove.service, sshMove.expectedConfig = dir, s.Service, dual
+	sshMove.expectedTable, sshMove.confirmedTable, sshMove.changeState = "", "", "pending"
 	failed := func(err error) (SSHPortChange, error) {
-		rctx, c := context.WithTimeout(context.Background(), 20*time.Second)
-		defer c()
-		if out, re := portCommand(rctx, "/bin/sh", filepath.Join(dir, "rollback.sh")); re != nil {
-			return SSHPortChange{}, fmt.Errorf("%v；即时恢复失败，定时恢复仍会重试: %s", err, out)
-		}
-		_, _ = portCommand(rctx, "systemctl", "stop", sshMoveUnit+".timer")
-		return SSHPortChange{}, fmt.Errorf("%w；已恢复原 SSH 配置", err)
+		return SSHPortChange{}, abortSSHPortChange(err)
 	}
 	if e = writeSSHFile(sshConfigPath, []byte(dual), info.Mode().Perm()); e != nil {
 		return failed(e)
@@ -446,10 +451,6 @@ func BeginSSHPortChange(newPort int, managementIP string) (SSHPortChange, error)
 	if e = waitSSHListener(ctx, newPort); e != nil {
 		return failed(e)
 	}
-	sshMove.SSHPortChange = SSHPortChange{Token: token, OldPort: s.Port, NewPort: newPort, Deadline: started.Add(240 * time.Second), VerifyCommand: sshVerificationCommand(filepath.Join(dir, "verify.sh"), token)}
-	sshMove.dir = dir
-	sshMove.service = s.Service
-	sshMove.expectedConfig = dual
 	sshMove.expectedTable, e = portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
 	if e != nil {
 		return failed(e)
@@ -487,17 +488,10 @@ func ConfirmSSHPortChange(token string) error {
 	if e != nil {
 		return e
 	}
-	rollback := func(cause error) error {
-		rctx, c := context.WithTimeout(context.Background(), 20*time.Second)
-		defer c()
-		out, err := portCommand(rctx, "/bin/sh", filepath.Join(sshMove.dir, "rollback.sh"))
-		if err != nil {
-			return fmt.Errorf("%v；恢复失败，请通过旧 SSH 会话检查: %s", cause, out)
-		}
-		sshMove.Token = ""
-		_, _ = portCommand(rctx, "systemctl", "stop", sshMoveUnit+".timer")
-		return fmt.Errorf("%w；已恢复原 SSH 配置", cause)
-	}
+	// A missing new-session proof above is retryable; only the mutation phase
+	// creates an observation receipt and retires its token on failure.
+	sshMove.ChangeID, sshMove.changeState = sshPortChangeID(token), "pending"
+	rollback := abortSSHPortChange
 	if e = writeSSHFile(sshConfigPath, final, 0600); e != nil {
 		return rollback(e)
 	}
@@ -526,7 +520,28 @@ func ConfirmSSHPortChange(token string) error {
 	if out, err := portCommand(ctx, "nft", "--file", filepath.Join(sshMove.dir, "final.nft")); err != nil {
 		return rollback(fmt.Errorf("端口策略更新失败: %s", out))
 	}
-	if _, e = portCommand(ctx, "systemctl", "stop", sshMoveUnit+".timer", sshMoveUnit+".service"); e != nil {
+	finalTable, e := portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
+	if e != nil || strings.TrimSpace(finalTable) == "" {
+		return rollback(errors.New("无法核对最终 SSH 端口策略，未保存配置"))
+	}
+	if e = stopFirewallRollbackUnits(ctx, sshMoveUnit+".timer", sshMoveUnit+".service"); e != nil {
+		return rollback(fmt.Errorf("取消 SSH 自动恢复任务失败: %w", e))
+	}
+	// The timer may have fired while cancellation was in progress. Re-read the
+	// files and live table after both units and their job queues are quiescent.
+	current, e = os.ReadFile(sshConfigPath)
+	if e != nil || string(current) != string(final) {
+		return rollback(errors.New("取消恢复任务后 SSH 配置已变化，未保存配置"))
+	}
+	table, e = portCommand(ctx, "nft", "--stateless", "list", "table", "inet", accessTable)
+	if e != nil || table != finalTable {
+		return rollback(errors.New("取消恢复任务后 SSH 端口策略已变化，未保存配置"))
+	}
+	listeners, e := readFirewallListeners(ctx, true)
+	if e != nil {
+		return rollback(fmt.Errorf("保存前无法核对 SSH 监听: %w", e))
+	}
+	if e = validateSSHListenerSet(listeners, sshMove.NewPort); e != nil {
 		return rollback(e)
 	}
 	if e = persistAccessRules(ctx); e != nil {
@@ -534,6 +549,7 @@ func ConfirmSSHPortChange(token string) error {
 	}
 	_ = os.Remove(filepath.Join(sshMove.dir, "pending"))
 	sshMove.Token = ""
+	sshMove.confirmedTable, sshMove.changeState = finalTable, "confirmed"
 	recordOperationLog("ssh_port_confirm", strconv.Itoa(sshMove.NewPort), "success", "old listener removed; policy saved")
 	return nil
 }

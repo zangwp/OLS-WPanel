@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.13 — 2026-10-15
+
+- Fixes SSH port confirmation treating an absent transient rollback service as a stop failure. Verifies task cancellation and final configuration before persistence while retaining the new-session verification requirement.
+- Reconciles SSH confirmation failures against the matching change, actual listener, configuration and firewall state. Retires verified terminal state, keeps uncertain outcomes protected, and explains verification in three steps with a copyable command.
+- Confirms temporary access policies on the current page after a fresh status request, without requiring another browser session. Keeps matching-change checks, management-source protection and timeout rollback.
+
 ## v2.0.12 — 2026-10-15
 
 - Verifies transient rollback timers, services and queued jobs individually before confirming access-policy saves. Reconciles obsolete tasks only after the previous policy is verified restored, and includes both timer/service units in SSH migration guards.

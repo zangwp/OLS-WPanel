@@ -91,6 +91,9 @@ func TestSSHMigrationRequiresCompleteUniqueListenerInspection(t *testing.T) {
 				case "ufw":
 					return "inactive", nil
 				case "systemctl":
+					if strings.HasPrefix(joined, "show") && strings.Contains(joined, "--property=LoadState") {
+						return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
+					}
 					if strings.HasPrefix(joined, "is-active") {
 						if strings.HasSuffix(joined, "ssh.service") {
 							return "active", nil

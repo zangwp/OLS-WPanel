@@ -65,6 +65,7 @@ function firewallManager(initialTab = 'current') {
         accessRecoveryRequired: false,
         accessChecked: false,
         accessSSHValidation: false,
+        accessEndpoints: null,
         accessDirty: false,
         accessSSHStale: false,
         accessDraftSSHPort: null,
@@ -169,7 +170,7 @@ function firewallManager(initialTab = 'current') {
         },
         clearAccessVerification() {
             this.clearAccessTimers();
-            this.accessToken = ''; this.accessChangeID = ''; this.accessChecked = false; this.accessSSHValidation = false;
+            this.accessToken = ''; this.accessChangeID = ''; this.accessChecked = false; this.accessSSHValidation = false; this.accessEndpoints = null;
             this.accessExpired = false; this.accessRollbackReady = false; this.accessRecoveryRequired = false; this.accessDeadline = '';
         },
         async readAccessRecovery() {
@@ -177,6 +178,9 @@ function firewallManager(initialTab = 'current') {
                 this.accessError = t('firewall.access_status_unverified');
                 return false;
             }
+            return this.finishAccessRecovery();
+        },
+        finishAccessRecovery() {
             // Only the matching receipt can retire this page's verification.
             const sameChange = /^[a-f0-9]{32}$/.test(this.accessChangeID) && this.portStatus.access_change_id === this.accessChangeID;
             const state = this.portStatus.access_change_state;
@@ -241,6 +245,7 @@ function firewallManager(initialTab = 'current') {
                 if (!r.data?.confirmation_token || r.data.saved === true || r.data.requires_confirmation === false) throw Error(t('common.operation_failed'));
                 this.clearAccessTimers();
                 this.accessSSHValidation = r.data.requires_ssh_validation === true;
+                this.accessEndpoints = { ssh: Number(preview.ssh_port), panel: Number(preview.panel_port) };
                 this.accessToken = r.data.confirmation_token; this.accessChangeID = typeof r.data.change_id === 'string' && /^[a-f0-9]{32}$/.test(r.data.change_id) ? r.data.change_id : ''; this.accessDeadline = r.data.deadline; this.accessChecked = false; this.accessPreview = null; this.accessRollbackReady = false;
                 const remaining = Date.parse(this.accessDeadline) - Date.now();
                 this.accessExpired = !Number.isFinite(remaining) || remaining <= 0;
@@ -251,17 +256,30 @@ function firewallManager(initialTab = 'current') {
             } catch(e) { this.accessError = e.code === 'firewall_access_preview_changed' ? t('firewall.access_preview_changed') : e.message + ' ' + t(requiresConfirmation ? 'firewall.access_apply_uncertain' : 'firewall.access_save_uncertain'); showToast(this.accessError, 'error'); this.accessPreview = null; } finally { this.accessBusy = false; if (this.accessToken) this.focusAccessSaveStage(); }
         },
         async confirmAccess() {
-            if (this.accessBusy || this.portSubmitting || this.accessRecoveryRequired || !this.accessChecked || !this.accessToken || this.accessExpired) return;
+            if (this.accessBusy || this.portSubmitting || this.accessRecoveryRequired || (this.accessSSHValidation && !this.accessChecked) || !this.accessToken || this.accessExpired) return;
             const deadline = Date.parse(this.accessDeadline);
             if (!Number.isFinite(deadline) || Date.now() >= deadline) { this.accessExpired = true; this.accessChecked = false; return; }
-            this.accessBusy = true;
+            const token = this.accessToken, changeID = this.accessChangeID, endpoints = this.accessEndpoints;
+            let observed = false, confirming = false;
+            this.accessBusy = true; this.accessError = '';
             try {
-                const r = await api('/firewall/ports/access/confirm', { method: 'POST', body: { token: this.accessToken }, timeout: 20000, suppressToast: true });
+                // This checks the current session and receipt, not a new TCP connection.
+                observed = await this.fetchPortStatus({ reportError: false });
+                if (!observed || !/^[a-f0-9]{32}$/.test(changeID) || this.accessChangeID !== changeID || this.accessToken !== token || this.accessRecoveryRequired || this.portStatus.access_change_id !== changeID) throw Error(t('firewall.access_status_unverified'));
+                if (['rolled_back', 'confirmed'].includes(this.portStatus.access_change_state)) { this.finishAccessRecovery(); return; }
+                if (this.portStatus.access_change_state !== 'pending' || this.portStatus.access_available !== true || this.portStatus.access_enabled !== true ||
+                    !endpoints || ![endpoints.ssh, endpoints.panel].every(port => Number.isInteger(port) && port > 0 && port <= 65535) ||
+                    Number(this.portStatus.ssh_port) !== endpoints.ssh || Number(this.portStatus.panel_port) !== endpoints.panel) throw Error(t('firewall.access_status_unverified'));
+                if (this.accessExpired || Date.now() >= deadline) { this.accessExpired = true; this.accessChecked = false; throw Error(t('firewall.access_expired')); }
+                if (this.portSubmitting || (this.accessSSHValidation && !this.accessChecked)) throw Error(t('firewall.access_status_unverified'));
+                confirming = true;
+                const r = await api('/firewall/ports/access/confirm', { method: 'POST', body: { token }, timeout: 20000, suppressToast: true });
                 if (!r.success) throw Error(t('common.operation_failed'));
-                this.clearAccessVerification(); const observed = await this.fetchPortStatus({ resetDraft: true }); showToast(t('firewall.access_saved'), 'success'); if (!observed) this.accessError = t('firewall.access_saved_status_unavailable');
+                this.clearAccessVerification(); const savedObserved = await this.fetchPortStatus({ resetDraft: true }); showToast(t('firewall.access_saved'), 'success'); if (!savedObserved) this.accessError = t('firewall.access_saved_status_unavailable');
             } catch(e) {
                 this.accessChecked = false; this.accessRecoveryRequired = true; this.accessRollbackReady = true; this.invalidateAccessPreview();
-                if (!await this.readAccessRecovery()) { this.accessError = e.message + ' ' + this.accessError; showToast(this.accessError, 'error'); }
+                const recovered = confirming ? await this.readAccessRecovery() : observed && this.accessToken === token && this.accessChangeID === changeID && this.finishAccessRecovery();
+                if (!recovered) { this.accessError = [...new Set([e.message, this.accessError || t('firewall.access_status_unverified')])].join(' '); showToast(this.accessError, 'error'); }
             } finally { this.accessBusy = false; }
         },
         init() {
@@ -305,8 +323,8 @@ function firewallManager(initialTab = 'current') {
             try {
                 const r = await api('/firewall/ports', { silent: true });
                 if (readVersion !== this.portsReadVersion) return false;
-                if (r.success) {
-                    this.portStatus = r.data || this.portStatus;
+                if (r.success && r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
+                    this.portStatus = r.data;
                     if (!this.accessToken && ['pending', 'error'].includes(this.portStatus.access_change_state)) {
                         this.accessRecoveryRequired = true;
                         if (!this.accessChangeID && /^[a-f0-9]{32}$/.test(this.portStatus.access_change_id)) this.accessChangeID = this.portStatus.access_change_id;

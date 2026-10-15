@@ -1,11 +1,12 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const code=fs.readFileSync('web/templates/ssh_port.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 const calls=[];let failConfirm=true;
+const id='a'.repeat(32);
 const ctx={t:x=>x,confirmModal:async()=>true,showToast:()=>{},clearTimeout:()=>{},setTimeout:()=>1,api:async(path,opts)=>{
  calls.push({path,opts});
  if(path.endsWith('/confirm')){if(failConfirm)throw Error('new SSH session not verified');return {success:true};}
- if(opts?.method==='POST')return {success:true,data:{token:'proof-token',new_port:2222,old_port:22,deadline:'2030-01-01',verify_command:'test command'}};
- return {success:true,data:{port:22,available:true}};
+ if(opts?.method==='POST')return {success:true,data:{token:'proof-token',change_id:id,new_port:2222,old_port:22,deadline:'2030-01-01',verify_command:'test command'}};
+ return {success:true,data:{port:failConfirm?22:2222,available:!failConfirm||!calls.some(x=>x.opts?.method==='POST'),pending:failConfirm&&calls.some(x=>x.opts?.method==='POST'),change_id:id,change_state:failConfirm?'pending':'confirmed'}};
 }};
 vm.createContext(ctx);vm.runInContext(code,ctx);
 (async()=>{

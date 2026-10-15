@@ -25,7 +25,7 @@ function setup() {
             if (url === '/firewall/ports' && !options.method) return {success:true, data:clone(state.status)};
             if (url === '/firewall/ports' && options.method === 'POST') return {success:true, data:{}};
             if (url === '/firewall/ports/7' && options.method === 'DELETE') return {success:true, data:{}};
-            if (url.endsWith('/access/preview')) return {success:true, data:{rules:clone(options.body.rules), fingerprint:'test-fingerprint', existing_rules:''}};
+            if (url.endsWith('/access/preview')) return {success:true, data:{rules:clone(options.body.rules), fingerprint:'test-fingerprint', existing_rules:'', ssh_port:state.status.ssh_port, panel_port:state.status.panel_port}};
             if (url.endsWith('/access/apply')) {
                 state.status.access_enabled = true; state.status.access_rules = clone(options.body.rules);
                 state.status.access_change_id = 'c'.repeat(32); state.status.access_change_state = 'pending'; state.status.access_change_error = '';
@@ -280,8 +280,9 @@ test('applying a preview synchronizes the applied policy but retains the separat
     assert.equal(page.accessToken,'pending-token'); assert.equal(page.accessChecked,false); assert.equal(page.accessExpired,false);
     assert.deepEqual([...timers.values()].map(timer => timer.delay).sort((a,b) => a-b),[70000,95000]);
     assert.equal(calls.some(call => call.url.endsWith('/access/confirm')),false);
-    await page.confirmAccess(); assert.equal(calls.some(call => call.url.endsWith('/access/confirm')),false);
-    page.accessChecked = true; await page.confirmAccess();
+    const confirming = calls.length; await page.confirmAccess();
+    assert.deepEqual(calls.slice(confirming).map(call => [call.url,call.options.method]),[['/firewall/ports',undefined],['/firewall/ports/access/confirm','POST'],['/firewall/ports',undefined]]);
+    assert.deepEqual(clone(calls[confirming+1].options.body),{token:'pending-token'});
     assert.equal(calls.filter(call => call.url.endsWith('/access/confirm')).length,1); assert.equal(page.accessToken,''); assert.equal(timers.size,0);
 });
 
@@ -294,6 +295,83 @@ test('rollback refresh restores observed rules and cannot leave an unapplied cus
     assert.equal(page.accessToken,''); assert.equal(page.accessChecked,false); assert.equal(page.portStatus.access_enabled,false);
     assert.equal(page.accessDirty,false); assert.equal(page.accessRows.some(row => row.port === 8088),false);
     assert.equal(page.accessExpired,false); assert.equal(page.accessRollbackReady,false); assert.equal(page.accessDeadline,''); assert.equal(timers.size,0);
+});
+
+for (const failure of ['401','timeout','unsuccessful','missing_status','unknown','error','different_change','missing_change','invalid_local_change','ssh_changed','panel_changed','missing_endpoints','expired_during_read']) {
+    test('current-page confirmation does not write when its status check is '+failure,async()=>{
+        const {page,context,calls,state,notices}=setup(),originalAPI=context.api;
+        draft(page);await page.startAccessSave();await page.applyAccess();
+        if(failure==='invalid_local_change')page.accessChangeID='not-a-change';
+        if(failure==='missing_endpoints')page.accessEndpoints=null;
+        const count=calls.length;
+        context.api=async(url,options)=>{
+            if(url==='/firewall/ports'){
+                if(['401','timeout'].includes(failure)){calls.push({url,options});throw Error(failure);}
+                if(failure==='unsuccessful'){calls.push({url,options});return {success:false};}
+                if(failure==='missing_status'){calls.push({url,options});return {success:true};}
+                if(['unknown','error'].includes(failure))state.status.access_change_state=failure;
+                if(failure==='different_change')state.status.access_change_id='d'.repeat(32);
+                if(failure==='missing_change')delete state.status.access_change_id;
+                if(failure==='ssh_changed')state.status.ssh_port=22;
+                if(failure==='panel_changed')state.status.panel_port=8443;
+                if(failure==='expired_during_read')state.now=Date.parse(page.accessDeadline);
+            }
+            return originalAPI(url,options);
+        };
+        await page.confirmAccess();
+        assert(calls.slice(count).length>0);assert(calls.slice(count).every(call=>!call.options.method),'An unverified current-page read must never save or invoke recovery.');
+        assert.equal(page.accessToken,'pending-token');assert.equal(page.accessRecoveryRequired,true);assert.equal(page.accessChecked,false);assert.equal(page.accessBusy,false);
+        assert.equal(notices.some(notice=>notice[1]==='success'),false);
+        if(failure==='expired_during_read')assert.equal(page.accessExpired,true);
+    });
+}
+
+for(const terminal of ['rolled_back','confirmed']){
+    test('current-page precheck consumes a matching '+terminal+' receipt without confirming again',async()=>{
+        const {page,calls,state,timers,notices}=setup();draft(page);await page.startAccessSave();await page.applyAccess();
+        state.status.access_change_state=terminal;
+        if(terminal==='rolled_back'){state.status.access_enabled=false;state.status.access_rules=[];}
+        const count=calls.length;await page.confirmAccess();
+        assert.deepEqual(calls.slice(count).map(call=>[call.url,call.options.method]),[['/firewall/ports',undefined]]);
+        assert.equal(page.accessToken,'');assert.equal(page.accessChangeID,'');assert.equal(page.accessEndpoints,null);assert.equal(timers.size,0);
+        assert.equal(page.accessRecoveryRequired,false);
+        assert.equal(notices.some(notice=>notice[1]==='success'),terminal==='confirmed');
+    });
+}
+
+test('a repeated click while the current-page precheck is pending cannot start a second read or save',async()=>{
+    const {page,context,calls,state}=setup(),originalAPI=context.api,response=deferred();draft(page);await page.startAccessSave();await page.applyAccess();
+    context.api=async(url,options)=>{if(url==='/firewall/ports'){calls.push({url,options});return response.promise;}return originalAPI(url,options);};
+    const count=calls.length,pending=page.confirmAccess();await page.confirmAccess();
+    assert.equal(calls.length,count+1);assert.equal(page.accessBusy,true);
+    response.resolve({success:true,data:clone(state.status)});await pending;
+    assert.equal(calls.filter(call=>call.url.endsWith('/access/confirm')).length,1);assert.equal(page.accessToken,'');
+});
+
+test('a changed local authorization while checking the current page cannot confirm with either token',async()=>{
+    const {page,context,calls,state}=setup(),response=deferred();draft(page);await page.startAccessSave();await page.applyAccess();
+    context.api=async(url,options)=>{calls.push({url,options});return response.promise;};
+    const count=calls.length,pending=page.confirmAccess();page.accessToken='replacement-token';
+    response.resolve({success:true,data:clone(state.status)});await pending;
+    assert(calls.slice(count).every(call=>!call.options.method));assert.equal(page.accessToken,'replacement-token');assert.equal(page.accessRecoveryRequired,true);
+});
+
+test('SSH-sensitive confirmation still requires an explicitly checked new SSH connection before checking the page',async()=>{
+    const {page,context,calls}=setup(),originalAPI=context.api;draft(page);await page.startAccessSave();
+    context.api=async(url,options)=>{const response=await originalAPI(url,options);if(url.endsWith('/access/apply'))response.data.requires_ssh_validation=true;return response;};
+    await page.applyAccess();assert.equal(page.accessSSHValidation,true);
+    const count=calls.length;await page.confirmAccess();assert.equal(calls.length,count);
+    page.accessChecked=true;await page.confirmAccess();assert.equal(calls.filter(call=>call.url.endsWith('/access/confirm')).length,1);
+});
+
+test('the manual verification checkbox is visible and required only for SSH-sensitive policies',()=>{
+    const {page}=setup(),html=fs.readFileSync(path.join(__dirname,'../../web/templates/firewall_access.html'),'utf8');
+    const label=html.match(/<label x-show="([^"]+)"[^>]*><input[^>]*x-model="accessChecked"/);assert(label);
+    const button=html.match(/<button[^>]*@click="confirmAccess\(\)"[^>]*:disabled="([^"]+)"/);assert(button);
+    const evaluate=expression=>vm.runInNewContext('with(page){'+expression+'}',{page});
+    page.accessSSHValidation=false;page.accessChecked=false;assert.equal(evaluate(label[1]),false);assert.equal(evaluate(button[1]),false);
+    page.accessSSHValidation=true;assert.equal(evaluate(label[1]),true);assert.equal(evaluate(button[1]),true);
+    page.accessChecked=true;assert.equal(evaluate(button[1]),false);
 });
 
 test('the first save action only checks the draft and focuses the review without applying or saving', async () => {
@@ -465,7 +543,7 @@ test('repeated confirmation clicks share one pending write and retain the lock u
         if (url.endsWith('/access/confirm')) { calls.push({url,options}); return response.promise; }
         return originalAPI(url,options);
     };
-    page.accessChecked = true; const pending = page.confirmAccess(); await page.confirmAccess();
+    page.accessChecked = true; const pending = page.confirmAccess(); await page.confirmAccess(); await settle();
     assert.equal(calls.filter(call => call.url.endsWith('/access/confirm')).length,1);
     assert.equal(page.accessBusy,true); assert.equal(page.accessToken,'pending-token'); assert.equal(timers.size,2);
     assert.equal(notices.some(notice => notice[1] === 'success'),false);
@@ -542,7 +620,8 @@ test('an apply response without a change identifier cannot use an unrelated succ
 
 test('a confirmed save with failed status read distinguishes saved settings from an unverified observation',async()=>{
     const {page,context,notices}=setup(),originalAPI=context.api;draft(page);await page.startAccessSave();await page.applyAccess();
-    context.api=async(url,options)=>{if(url==='/firewall/ports')throw Error('status offline');return originalAPI(url,options);};
+    let confirmed=false;
+    context.api=async(url,options)=>{if(url==='/firewall/ports'&&confirmed)throw Error('status offline');const response=await originalAPI(url,options);if(url.endsWith('/access/confirm'))confirmed=true;return response;};
     page.accessChecked=true;await page.confirmAccess();
     assert.equal(page.accessToken,'');assert.equal(page.accessChangeID,'');assert.equal(page.accessError,'firewall.access_saved_status_unavailable');
     assert.equal(notices.some(notice=>notice[0]==='firewall.access_saved'),true);
@@ -578,11 +657,14 @@ for (const observation of ['pending','error','unknown','different_change','read_
         const {page,context,calls,state,notices}=setup(), originalAPI=context.api;
         draft(page); await page.startAccessSave(); await page.applyAccess();
         page.accessDirty=true; const before=clone(page.accessRows);
+        let attempted=false;
         context.api=async(url,options)=>{
-            if(url.endsWith('/access/confirm')){calls.push({url,options});throw Error('confirmation failed');}
-            if(url==='/firewall/ports'&&observation==='read_failure'){calls.push({url,options});throw Error('status offline');}
-            if(observation==='different_change'){state.status.access_change_id='d'.repeat(32);state.status.access_change_state='rolled_back';}
-            else state.status.access_change_state=observation;
+            if(url.endsWith('/access/confirm')){calls.push({url,options});attempted=true;throw Error('confirmation failed');}
+            if(attempted){
+                if(url==='/firewall/ports'&&observation==='read_failure'){calls.push({url,options});throw Error('status offline');}
+                if(observation==='different_change'){state.status.access_change_id='d'.repeat(32);state.status.access_change_state='rolled_back';}
+                else state.status.access_change_state=observation;
+            }
             return originalAPI(url,options);
         };
         page.accessChecked=true; await page.confirmAccess();
