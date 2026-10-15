@@ -97,11 +97,125 @@ SSH 登录端口可以独立填写。安装器生成的可完整识别严格放�
 
 选择一个完整本地备份点，点击“恢复整站”即可恢复同一编号的文件和数据库。面板先保存当前两部分的安全副本；恢复失败会尝试回滚两部分。无法确认完整回滚或维护清理时，网站继续维护，并保留操作记录和安全副本，不能把解除维护当成恢复成功。页面的“核对并恢复网站访问”仅按本轮维护归属及日志解除可以证明安全的维护状态；未知或部分恢复状态须通过受控主机管理核对。
 
-整站备份存放在 `BackupDir/<domain>/site-sets/<编号>/`，恢复日志及数据库安全副本位于同域名的 `site-operations/<操作编号>/`。原文件安全副本的位置由恢复结果和日志给出。当前整站集合仅保存在本机，不参与单项数据库/文件轮转，也不使用现有远程同步设置；应分别下载并在面板以外安全保存两个组件及对应清单。清单、维护归属和安全副本不得随意编辑或清理。删除完整备份点会一起删除它的数据库和文件。
+整站备份存放在 `BackupDir/<domain>/site-sets/<编号>/`，恢复日志及数据库安全副本位于同域名的 `site-operations/<操作编号>/`。原文件安全副本的位置由恢复结果和日志给出。当前整站集合仅保存在本机，不参与单项数据库/文件轮转，也不使用现有远程同步设置。使用“下载完整备份包”导出一个 `.tar`，其中同一个编号目录包含 `files.tar.gz`、`database.sql.gz`、`manifest.json` 和 `SHA256SUMS`。下载前和传输期间会校验组件 SHA-256，大文件需要等待；中断的下载必须重做。不会在服务器另存一份同样大的导出包。
+
+导出清单保留恢复点身份、原站绑定和组件指纹，不导出临时维护归属、原始 vhost 文本、诊断消息或恢复安全副本。网站文件和数据库本身仍可能包含 `wp-config.php`、用户数据和密钥，应加密保存在其他设备。完整包不包含面板 SQLite、MFA/Cloudflare 加密密钥、证书、系统软件或 DNS。单项下载仍保留，但灾难恢复应保存完整包。删除本地完整备份点会一起删除它的数据库和文件。
+
+### 校验完整包，并放回原网站备份库
+
+以下只适用于**原网站仍在当前面板中登记，ID、域名、目录、系统用户、数据库及表前缀均与清单一致**的恢复。不创建新网站，不跨站修改清单，不直接覆盖线上文件或导入 SQL。新 VPS 丢失原面板数据、密钥或系统身份时，先恢复和核对原环境；不能满足绑定时停止，使用经过演练的迁移流程。
+
+先通过受控通道传回完整包。将 `bundle` 改为实际文件名，下面仅向新建的 root 私有目录解包，需要两个组件的额外磁盘空间。校验只证明完整性，应仅使用自己保存的包。
+
+```bash
+bundle='/root/example.com_实际编号_site-backup.tar'
+workdir=$(mktemp -d /root/ols-backup-check.XXXXXXXX)
+chmod 0700 "$workdir"
+python3 - "$bundle" "$workdir" <<'PY'
+import hashlib, json, os, pathlib, re, shutil, sys, tarfile, uuid
+work = pathlib.Path(sys.argv[2])
+names = {'files.tar.gz', 'database.sql.gz', 'manifest.json', 'SHA256SUMS'}
+with tarfile.open(sys.argv[1], 'r:') as archive:
+    members, point = {}, None
+    for member in archive:
+        parts = member.name.split('/')
+        if len(parts) != 2 or parts[1] not in names or not member.isfile() or member.sparse:
+            raise SystemExit('拒绝未知路径、链接或特殊成员')
+        candidate = str(uuid.UUID(parts[0]))
+        if candidate != parts[0] or uuid.UUID(candidate).int == 0 or (point and point != candidate):
+            raise SystemExit('编号不一致')
+        point = candidate
+        limit = 1024**2 if parts[1] in {'manifest.json', 'SHA256SUMS'} else 64 * 1024**3
+        if parts[1] in members or len(members) >= 4 or not 0 < member.size <= limit:
+            raise SystemExit('重复成员或大小无效')
+        members[parts[1]] = member
+    if set(members) != names or shutil.disk_usage(work).free < sum(m.size for m in members.values()) + 1024**3:
+        raise SystemExit('完整包缺少组件，或解包空间不足')
+    expected = {}
+    for line in archive.extractfile(members['SHA256SUMS']).read().decode('ascii').splitlines():
+        match = re.fullmatch(r'([0-9a-f]{64})  (files\.tar\.gz|database\.sql\.gz|manifest\.json)', line)
+        if not match or match[2] in expected:
+            raise SystemExit('校验清单格式错误')
+        expected[match[2]] = match[1]
+    if set(expected) != names - {'SHA256SUMS'}:
+        raise SystemExit('校验清单缺少组件')
+    destination = work / point
+    destination.mkdir(mode=0o700)
+    for name, member in members.items():
+        digest = hashlib.sha256()
+        with archive.extractfile(member) as source, (destination / name).open('xb') as target:
+            os.chmod(target.name, 0o600)
+            while data := source.read(128 * 1024):
+                target.write(data)
+                digest.update(data)
+        if name in expected and digest.hexdigest() != expected[name]:
+            raise SystemExit('SHA-256 不匹配：' + name)
+    m = json.loads((destination / 'manifest.json').read_text())
+    if m.get('id') != point or m.get('version') != 1 or m.get('state') != 'complete' or m.get('operation') != 'create' or m.get('requires_attention') or m.get('atomic') or m.get('consistency') != 'controlled_quiescence':
+        raise SystemExit('不是受支持的完整恢复点')
+    for key, name in [('files', 'files.tar.gz'), ('database', 'database.sql.gz')]:
+        if m[key].get('name') != name or m[key].get('size') != members[name].size or m[key].get('sha256') != expected[name]:
+            raise SystemExit('恢复清单与组件不一致')
+(work / 'point-id').write_text(point)
+print('校验通过：', destination)
+PY
+```
+
+只有明确输出“校验通过”才继续。下一步只读核对当前 SQLite 中的原网站绑定，并拒绝覆盖已有编号。自定义配置路径时修改最后一个参数。
+
+```bash
+python3 - "$workdir" /www/ols-wpanel/config.json <<'PY'
+import json, os, pathlib, sqlite3, sys, urllib.parse
+work = pathlib.Path(sys.argv[1])
+point = (work / 'point-id').read_text()
+m = json.loads((work / point / 'manifest.json').read_text())
+cfg = json.loads(pathlib.Path(sys.argv[2]).read_text())
+db = sqlite3.connect('file:' + urllib.parse.quote(cfg['sqlite']['path']) + '?mode=ro', uri=True)
+columns = ['domain', 'web_root', 'system_user', 'db_name', 'db_user', 'table_prefix']
+row = db.execute('SELECT ' + ','.join(columns) + ' FROM websites WHERE id=?', (m['site_id'],)).fetchone()
+db.close()
+if row != tuple(m[key] for key in columns):
+    raise SystemExit('原网站绑定不一致，停止；不能跨站修改清单绕过')
+root = pathlib.Path(cfg['panel']['backup_dir'])
+if not root.is_absolute() or '/' in m['domain'] or m['domain'] in {'.', '..'}:
+    raise SystemExit('备份根路径或域名无效')
+target = root / m['domain'] / 'site-sets' / point
+for parent in target.parents:
+    if parent.is_symlink():
+        raise SystemExit('备份祖先路径不能是链接')
+    if parent.exists():
+        info = parent.stat()
+        if not parent.is_dir() or info.st_uid != 0 or info.st_mode & 0o022:
+            raise SystemExit('备份祖先路径不是 root 安全目录')
+if os.path.lexists(target):
+    raise SystemExit('这个编号已存在，保留现有备份点，不覆盖')
+(work / 'target-path').write_text(str(target))
+print('原站绑定通过，待放回：', target)
+PY
+```
+
+只有绑定检查明确通过才复制。保留临时校验目录和现有备份，不将完整包解到网站根目录。完整清单最后复制；任何失败都停止，不恢复不完整集合。
+
+```bash
+point=$(cat "$workdir/point-id")
+target=$(cat "$workdir/target-path")
+if [ -e "$target" ] || [ -L "$target" ]; then echo '目标已存在，停止'; exit 1; fi
+install -d -o root -g root -m 0700 -- "$(dirname "$target")"
+mkdir -m 0700 -- "$target" || exit 1
+for name in files.tar.gz database.sql.gz SHA256SUMS manifest.json; do
+    install -o root -g root -m 0600 -- "$workdir/$point/$name" "$target/$name" || exit 1
+done
+```
+
+刷新面板“备份总览”，选择该编号，确认停止外部写入后点击“恢复整站”。面板仍会重新核对绑定、SHA-256 和停写条件，并保存恢复前双方安全副本。完成后核对首页、后台和关键业务，再单独处理缓存。未知/失败时先核对任务与维护现场，不重复提交，也不删除日志或安全副本。此流程不恢复面板账户、证书、DNS、Cloudflare 规则或历史数据库密码，当前 `wp-config.php` 继续保留。
 
 “单项备份与恢复”保留原有并排显示的数据库、文件备份，各自选择版本、下载、删除或恢复。旧单项备份没有共同编号；时间相近也不能证明属于同一次备份，不自动配成整站备份点。恢复数据库不会恢复文件，恢复文件不会恢复数据库，请核对核心、插件、主题与数据库版本是否兼容。可直接点击“立即全量文件备份”，无需先创建定时任务；单项文件备份仍不保证与独立数据库备份同一时间。
 
 单项数据库自动备份每天按 VPS 本地时区 04:00 启动，并逐站执行。批量创建的文件备份任务会避开 04 点并尝试分配不同 Cron 表达式，旧任务保持原时间；不同周期仍可能落在同一天同一时刻，例如每周日和每月 1 日。多个网站的文件备份、文件恢复及整站操作共用跨进程锁，依次执行，等待锁超过两小时会报错；同一定时任务尚未结束时再次触发会跳过本次。数据库自动备份使用独立执行通道，可能与文件备份同时占用 CPU 和磁盘，不能将这些机制理解为所有备份类型都统一排队，或定时生成的数据库和文件已经组成同一备份点。
+
+首次启用数据库自动备份后有 24 小时 5 分钟宽限；宽限结束仍没有成功的自动备份，也会进入备份过期告警。调整保留数量不会重置宽限，明确关闭后重新启用会开始新宽限。升级时没有成功历史的旧设置获得一次宽限，已有成功历史的过期判断保留；通知仍需启用告警并配置渠道。每日执行按本地日历日期计算，夏令时变化不会把正常 04:00 漂移到经过固定 24 小时后的 05:00；不存在或重复的时刻按时区规则选择有效相邻时刻，UTC 没有此问题。
+
+受管 WordPress Cron 只有 HTTP 2xx 才记录调用成功；301/302 等重定向不会自动跳转并当作已执行。失败时检查主域名、CDN/访问规则及 `/wp-cron.php` 响应，不能仅因浏览器能打开首页就认定计划任务正常。调用成功仍不等于所有插件后台工作已完成。
 
 数据库恢复复用数据库管理页的异步流程，覆盖前会创建当前数据库的安全备份。“数据库备份管理”仍可创建立即备份、上传 SQL 备份并恢复。执行时重新核对网站和数据库绑定，清空前再次核对归属；绑定变化、未结束的更新或迁移、临时维护及未处理的更新结果会阻止普通恢复。更新失败后的专用安全备份回滚保留独立入口。
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.14 — 2026-10-15
+
+- Rejects redirects from managed WordPress cron requests instead of recording an unexecuted job as successful. Daily backup schedules keep their local calendar time across daylight-saving transitions.
+- Tracks automatic-backup enablement so websites that have never completed a backup are reported after the initial grace period. Existing overdue-backup alerts remain available.
+- Exports a complete local whole-site backup as a streamed archive containing website files, the database, a portable recovery manifest and SHA-256 checksums. Documents verification and recovery boundaries; whole-site points remain local-only until exported.
+- Makes PHP runtime and service-read failures visible with independent retry controls, retaining clearly marked previous results. Improves form labels, empty-state navigation, directory retry, narrow-screen database lists and long domain names.
+- Bounds file-list and search reads, limits OOM journal collection, and avoids repeatedly scanning already-cleaned update artifacts. Shares dashboard history queries within each collection minute while preserving actual sampled peaks.
+- Applies AI history retention after failed as well as successful requests, preserving pending/running diagnoses. Aligns the README with WordPress-only website creation.
+
+Upgrade notes: adds three idempotent maintenance-tracking tables and backup-setting triggers (schema 1.0.79). No new dependency is required. Existing enabled sites without a successful automatic backup receive an initial grace period after upgrade. A complete backup export contains sensitive website data and should be stored securely on another device; automatic cross-VPS import is not provided.
+
 ## v2.0.13 — 2026-10-15
 
 - Fixes SSH port confirmation treating an absent transient rollback service as a stop failure. Verifies task cancellation and final configuration before persistence while retaining the new-session verification requirement.

@@ -117,7 +117,6 @@ func (h *LogAnalysisHandler) CreateDiagnosticSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "ai_diagnostics.save_result_failed")))
 		return
 	}
-	pruneAISessions(site.ID, aiSessionKeepLimit)
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"session_id": sessionID, "site_id": site.ID, "status": models.AISessionCompleted}))
 }
 

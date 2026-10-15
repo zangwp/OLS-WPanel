@@ -710,53 +710,38 @@ func (h *FileHandler) List(c *gin.Context) {
 		return
 	}
 
-	entries, err := os.ReadDir(fullPath)
+	dir, err := os.Open(fullPath)
 	if err != nil {
 		log.Printf("读取目录失败 path=%s: %v", fullPath, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取目录失败"))
 		return
 	}
-
-	var files []fileEntry
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
+	defer dir.Close()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), fileListTimeout)
+	defer cancel()
+	listing, err := readFileList(ctx, dir, fileListOptions{page: page, perPage: perPage, sortBy: sortBy, sortDir: sortDir, paged: hasPagingParams})
+	if err != nil {
+		switch {
+		case errors.Is(err, errFileListTooLarge):
+			c.JSON(http.StatusUnprocessableEntity, models.ErrorResponse(i18n.TE(c.Request, "files.directory_list_too_large")))
+		case errors.Is(err, errFileListChanged):
+			c.JSON(http.StatusConflict, models.ErrorResponse(i18n.TE(c.Request, "files.directory_list_changed")))
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			c.JSON(http.StatusServiceUnavailable, models.ErrorResponse(i18n.TE(c.Request, "files.directory_list_timeout")))
+		default:
+			log.Printf("读取目录失败 path=%s: %v", fullPath, err)
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("读取目录失败"))
 		}
-		files = append(files, fileEntry{
-			Name:    e.Name(),
-			IsDir:   e.IsDir(),
-			Size:    info.Size(),
-			Mode:    info.Mode().String(),
-			ModTime: info.ModTime().Format("2006-01-02 15:04:05"),
-		})
-	}
-	if files == nil {
-		files = []fileEntry{}
-	}
-	total := len(files)
-	sortFileEntries(files, sortBy, sortDir)
-	pageFiles := files
-	totalPages := 1
-	if hasPagingParams {
-		pageFiles, page, totalPages = paginateFileEntries(files, page, perPage)
-	} else {
-		perPage = total
-		if perPage == 0 {
-			perPage = defaultFilePageSize
-		}
-	}
-	if totalPages < 1 {
-		totalPages = 1
+		return
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"path":        relPath,
-		"files":       pageFiles,
-		"total":       total,
-		"page":        page,
-		"per_page":    perPage,
-		"total_pages": totalPages,
+		"files":       listing.files,
+		"total":       listing.total,
+		"page":        listing.page,
+		"per_page":    listing.perPage,
+		"total_pages": listing.totalPages,
 	}))
 }
 

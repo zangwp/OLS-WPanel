@@ -6,29 +6,29 @@
         <form @submit.prevent="submit">
             <p class="text-sm text-gray-500 mb-4">{{t .Lang "website.wordpress_defaults_help"}}</p>
             <div class="mb-4">
-                <label class="label">{{t .Lang "website.main_domain"}}</label>
-                <input type="text" x-model="domain" class="input-field" placeholder="example.com" required>
+                <label for="create-site-domain" class="label">{{t .Lang "website.main_domain"}}</label>
+                <input id="create-site-domain" type="text" x-model="domain" class="input-field" placeholder="example.com" required>
                 <div class="mt-2 flex flex-wrap items-center gap-2">
                     <button type="button" @click="addWWWRedirect()" :disabled="!wwwAliasCandidate()" class="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed">{{t .Lang "website.add_www_redirect"}}</button>
                     <span class="text-xs text-gray-500">{{t .Lang "website.add_www_redirect_help"}}</span>
                 </div>
             </div>
             <div class="mb-4">
-                <label class="label">{{t .Lang "website.php_runtime"}}</label>
-                <select x-model="phpVersion" class="input-field" :disabled="phpRuntimes.length === 0">
+                <label for="create-site-php" class="label">{{t .Lang "website.php_runtime"}}</label>
+                <select id="create-site-php" x-model="phpVersion" class="input-field" :disabled="phpRuntimes.length === 0" aria-describedby="create-site-php-help">
                     <template x-for="runtime in phpRuntimes" :key="runtime.version">
                         <option :value="runtime.version" x-text="'LSPHP ' + runtime.version + (runtime.recommended ? ' · ' + t('software.recommended') : '')"></option>
                     </template>
                 </select>
-                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.php_runtime_create_help"}}</p>
+                <p id="create-site-php-help" class="text-xs text-gray-500 mt-1">{{t .Lang "website.php_runtime_create_help"}}</p>
             </div>
             <div class="mb-4">
-                <label class="label">{{t .Lang "website.aliases_one_per_line"}}</label>
-                <textarea x-model="aliases" class="input-field" rows="3" placeholder="{{t .Lang "website.alias_placeholder"}}"></textarea>
+                <label for="create-site-aliases" class="label">{{t .Lang "website.aliases_one_per_line"}}</label>
+                <textarea id="create-site-aliases" x-model="aliases" class="input-field" rows="3" placeholder="{{t .Lang "website.alias_placeholder"}}"></textarea>
             </div>
             <div class="mb-4 rounded-lg border border-gray-700 bg-gray-900/30 p-3" :class="aliases.trim() ? '' : 'opacity-60'">
-                <label class="label">{{t .Lang "website.alias_handling"}}</label>
-                <select x-model="aliasRedirectMode" class="input-field" :disabled="!aliases.trim()">
+                <label for="create-site-alias-mode" class="label">{{t .Lang "website.alias_handling"}}</label>
+                <select id="create-site-alias-mode" x-model="aliasRedirectMode" class="input-field" :disabled="!aliases.trim()">
                     <option value="301">{{t .Lang "website.alias_redirect_301"}}</option>
                     <option value="302">{{t .Lang "website.alias_redirect_302"}}</option>
                     <option value="serve">{{t .Lang "website.alias_serve_same_site"}}</option>
@@ -38,16 +38,16 @@
                 <p x-show="aliases.trim()" class="text-xs font-mono text-green-300 mt-2" x-text="aliasPreview()"></p>
             </div>
             <div class="mb-4">
-                <label class="label">{{t .Lang "website.database_password"}}</label>
+                <label for="create-site-db-password" class="label">{{t .Lang "website.database_password"}}</label>
                 <div class="flex space-x-2">
-                    <input type="text" x-model="dbPassword" class="input-field flex-1" placeholder="{{t .Lang "website.db_password_wp_placeholder"}}">
+                    <input id="create-site-db-password" type="text" x-model="dbPassword" class="input-field flex-1" placeholder="{{t .Lang "website.db_password_wp_placeholder"}}">
                     <button type="button" @click="generatePassword()" class="btn-secondary">{{t .Lang "website.generate_random_password"}}</button>
                 </div>
             </div>
             <div class="mb-4">
-                <label class="label">{{t .Lang "website.expiry_optional"}}</label>
-                <input type="date" x-model="expiresAt" class="input-field">
-                <p class="text-xs text-gray-500 mt-1">{{t .Lang "website.expiry_help"}}</p>
+                <label for="create-site-expiration" class="label">{{t .Lang "website.expiry_optional"}}</label>
+                <input id="create-site-expiration" type="date" x-model="expiresAt" class="input-field" aria-describedby="create-site-expiration-help">
+                <p id="create-site-expiration-help" class="text-xs text-gray-500 mt-1">{{t .Lang "website.expiry_help"}}</p>
             </div>
             <div class="mb-6">
                 <label class="flex items-center space-x-2 cursor-pointer">

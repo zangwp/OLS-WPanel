@@ -1024,8 +1024,8 @@ func checkBackupState() alertCheckResult {
 			WHERE ml.site_id = bs.site_id AND ml.status = 'active'
 		)
 		AND EXISTS (
-			SELECT 1 FROM db_backups b
-			WHERE b.site_id = bs.site_id AND b.auto = 1
+			SELECT 1 FROM backup_schedule_state s WHERE s.site_id = bs.site_id
+			AND datetime(s.enabled_at) <= datetime('now', '-1 day', '-5 minutes')
 		)
 		AND NOT EXISTS (
 			SELECT 1 FROM db_backups b

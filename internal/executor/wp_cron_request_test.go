@@ -26,7 +26,7 @@ func requireWordPressCronCurl(t *testing.T) {
 
 func TestWordPressCronPersistsHTTPFailuresAndSuccess(t *testing.T) {
 	requireWordPressCronCurl(t)
-	for _, code := range []int{http.StatusOK, http.StatusNoContent, http.StatusForbidden, http.StatusInternalServerError} {
+	for _, code := range []int{http.StatusOK, http.StatusNoContent, http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect, http.StatusForbidden, http.StatusInternalServerError} {
 		for _, scheduled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("http_%d_scheduled_%t", code, scheduled), func(t *testing.T) {
 				db := setupCronGateTest(t)
@@ -46,7 +46,7 @@ func TestWordPressCronPersistsHTTPFailuresAndSuccess(t *testing.T) {
 				}
 
 				result := runCronJob(81, scheduled)
-				wantSuccess := code < 400
+				wantSuccess := code >= 200 && code < 300
 				if result.Success != wantSuccess || calls.Load() != 1 {
 					t.Fatalf("HTTP %d result=%+v, calls=%d", code, result, calls.Load())
 				}

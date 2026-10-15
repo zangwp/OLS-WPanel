@@ -38,6 +38,15 @@ test('custom diagnosis validates an empty or oversized question before an API ca
     assert.equal(page.diagnosing, false);
 });
 
+test('AI no-website guidance appears only after a successful empty read and failure stays distinct',async()=>{
+    const {page,context}=setup();context.api=async()=>({success:true,data:[]});
+    await page.fetchWebsites();assert.equal(page.websitesLoaded,true);assert.equal(page.websitesLoading,false);assert.equal(page.websites.length,0);
+    context.api=async()=>{throw Error('site list offline');};await page.fetchWebsites();
+    assert.equal(page.websitesLoaded,false);assert.equal(page.websitesLoading,false);assert.equal(page.error,'site list offline');
+    context.api=async()=>({success:true,data:[{id:1,domain:'example.test'}]});await page.fetchWebsites();
+    assert.equal(page.websitesLoaded,true);assert.equal(page.websites.length,1);assert.equal(page.error,'');
+});
+
 test('custom and preset diagnoses submit descriptions while all six old requests remain compatible', async () => {
     const { page, calls } = setup();
     assert.equal(page.symptoms.length, 6);

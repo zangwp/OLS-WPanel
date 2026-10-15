@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ var (
 	listSiteBackupSets           = executor.ListSiteBackups
 	validateSiteBackupRestore    = executor.ValidateSiteBackupRestore
 	siteBackupArtifact           = executor.GetSiteBackupArtifact
+	prepareSiteBackupExport      = executor.PrepareSiteBackupExport
 	deleteSiteBackupSet          = executor.DeleteSiteBackup
 	recoverSiteBackupMaintenance = executor.RecoverSiteBackupMaintenance
 	findActiveBackupOperation    = func(siteID int) (*executor.Task, bool) {
@@ -291,6 +293,26 @@ func (h *BackupHandler) DownloadSiteBackup(c *gin.Context) {
 		return
 	}
 	component := c.Query("component")
+	if component == "bundle" {
+		bundle, err := prepareSiteBackupExport(c.Request.Context(), site, id)
+		if err != nil {
+			c.JSON(http.StatusConflict, models.ErrorResponse(err.Error()))
+			return
+		}
+		defer bundle.Close()
+		c.Header("Cache-Control", "private, no-store")
+		c.Header("Content-Type", "application/x-tar")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": bundle.Filename()}))
+		c.Header("Content-Length", strconv.FormatInt(bundle.Size(), 10))
+		if err := bundle.Write(c.Request.Context(), c.Writer); err != nil {
+			// A fixed length makes a truncated stream an incomplete download;
+			// never append JSON or a success footer to a partial archive.
+			log.Printf("整站备份导出未完成 site=%d backup=%s: %v", site.ID, id, err)
+			c.Abort()
+		}
+		return
+	}
 	if component != "files" && component != "database" {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("请选择整站备份中的文件或数据库组件"))
 		return

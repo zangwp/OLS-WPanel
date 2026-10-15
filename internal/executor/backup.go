@@ -1210,10 +1210,7 @@ func StartAutoBackupScheduler() {
 	go func() {
 		for {
 			now := time.Now()
-			next := time.Date(now.Year(), now.Month(), now.Day(), 4, 0, 0, 0, now.Location())
-			if now.After(next) {
-				next = next.Add(24 * time.Hour)
-			}
+			next := nextDailyBackupTime(now, 4, 0)
 			log.Printf("自动备份调度: 下次执行时间 %s", next.Format("2006-01-02 15:04:05"))
 			time.Sleep(next.Sub(now))
 			executeAutoBackups()
@@ -1226,10 +1223,7 @@ func StartDBBackupScheduler() {
 	go func() {
 		for {
 			now := time.Now()
-			next := time.Date(now.Year(), now.Month(), now.Day(), 2, 30, 0, 0, now.Location())
-			if now.After(next) {
-				next = next.Add(24 * time.Hour)
-			}
+			next := nextDailyBackupTime(now, 2, 30)
 			time.Sleep(next.Sub(now))
 			autoBackupPanelDB()
 		}

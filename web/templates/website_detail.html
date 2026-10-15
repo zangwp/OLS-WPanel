@@ -4,7 +4,7 @@
 
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
-            <h1 class="page-title">
+            <h1 class="page-title" style="overflow-wrap:anywhere">
                 {{t .Lang "website.detail_title"}}
                 <span x-show="site" class="ml-2 text-base font-medium text-blue-300" x-text="site?.domain || ''"></span>
             </h1>
@@ -42,7 +42,7 @@
         <div class="card" :class="aiAccess.status !== 'disabled' ? 'border border-purple-500 shadow-lg shadow-purple-950/30' : ''">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "website.basic_info"}}</h3>
             <dl class="space-y-3">
-                <div><dt class="text-sm text-gray-400">{{t .Lang "website.domain"}}</dt><dd><a :href="(site.ssl_enabled ? 'https' : 'http') + '://' + site.domain" target="_blank" class="text-blue-400 hover:text-blue-300 hover:underline" x-text="site.domain"></a></dd></div>
+                <div><dt class="text-sm text-gray-400">{{t .Lang "website.domain"}}</dt><dd style="overflow-wrap:anywhere"><a :href="(site.ssl_enabled ? 'https' : 'http') + '://' + site.domain" target="_blank" class="text-blue-400 hover:text-blue-300 hover:underline" x-text="site.domain"></a></dd></div>
                 <div><dt class="text-sm text-gray-400">{{t .Lang "website.aliases"}}</dt><dd class="text-white whitespace-pre-line break-all" x-text="site.aliases || t('common.none')"></dd></div>
                 <div>
                     <dt class="text-sm text-gray-400">{{t .Lang "website.alias_handling"}}</dt>

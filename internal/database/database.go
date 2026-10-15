@@ -84,7 +84,17 @@ func RunMigrations() error {
 	if err := ensureCloudflareSecurityCoverageSchema(); err != nil {
 		return fmt.Errorf("Cloudflare website security migration failed: %w", err)
 	}
+	if err := ensureMaintenanceTrackingSchema(); err != nil {
+		return fmt.Errorf("maintenance tracking migration failed: %w", err)
+	}
 	return nil
+}
+
+func ensureMaintenanceTrackingSchema() error {
+	if err := EnsureBackupScheduleSchema(DB); err != nil {
+		return err
+	}
+	return EnsureWPUpdateCleanupSchema(DB)
 }
 
 func GetDB() *sql.DB {

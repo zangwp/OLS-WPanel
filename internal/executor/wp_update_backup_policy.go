@@ -15,6 +15,10 @@ const wpUpdateBackupReuseWindow = 6 * time.Hour
 const wpUpdateArtifactRetention = 24 * time.Hour
 const WPUpdateLogRetention = 7 * 24 * time.Hour
 
+const wpUpdateCleanupBatchSize = 100
+const wpUpdateLogCleanupBatchSize = 1000
+const wpUpdateCleanupRetryDelay = time.Hour
+
 func (s *wpUpdateStore) recentDatabaseBackup(ctx context.Context, siteID int, now time.Time) (models.WPUpdateRecentDatabaseBackup, error) {
 	var result models.WPUpdateRecentDatabaseBackup
 	var created string
@@ -87,12 +91,14 @@ func (s *wpUpdateArtifactService) cleanupExpiredArtifacts(ctx context.Context, n
 		return errors.New("update artifact cleanup unavailable")
 	}
 	cutoff := wpUpdateDBTime(now.Add(-wpUpdateArtifactRetention))
-	rows, err := s.store.db.QueryContext(ctx, `SELECT b.id,b.file_path FROM wp_update_task_backups b
+	rows, err := s.store.db.QueryContext(ctx, `SELECT b.id,b.file_path,b.task_id FROM wp_update_task_backups b
 		JOIN wp_update_tasks t ON t.id=b.task_id
 		WHERE b.protected=1 AND b.deleted_at IS NULL
 		  AND t.status IN ('success','failed')
 		  AND t.requires_attention=0 AND t.rollback_status!='failed'
 		  AND t.finished_at IS NOT NULL AND t.finished_at<=?
+		  AND NOT EXISTS (SELECT 1 FROM wp_update_artifact_cleanup c WHERE c.task_id=t.id)
+		  AND NOT EXISTS (SELECT 1 FROM wp_update_artifact_cleanup_retries r WHERE r.task_id=t.id AND r.retry_after>?)
 		  AND (b.kind!='database' OR NOT EXISTS (
 			SELECT 1 FROM wp_update_tasks r
 			WHERE r.database_backup_source_id=b.id AND (
@@ -100,49 +106,73 @@ func (s *wpUpdateArtifactService) cleanupExpiredArtifacts(ctx context.Context, n
 			  r.rollback_status='failed' OR r.finished_at IS NULL OR r.finished_at>?
 			)
 		  ))
-		ORDER BY b.id`, cutoff, cutoff)
+		ORDER BY b.id LIMIT ?`, cutoff, wpUpdateDBTime(now), cutoff, wpUpdateCleanupBatchSize)
 	if err != nil {
 		return err
 	}
 	type candidate struct {
 		id   int64
 		path string
+		task string
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.id, &item.path); err != nil {
+		if err := rows.Scan(&item.id, &item.path, &item.task); err != nil {
 			rows.Close()
 			return err
 		}
 		candidates = append(candidates, item)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
 	for _, item := range candidates {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		clean := filepath.Clean(item.path)
 		if !pathWithin(s.root, clean, false) {
+			if err := s.deferArtifactCleanup(ctx, item.task, now); err != nil {
+				return err
+			}
 			continue
 		}
 		if info, err := os.Lstat(clean); err == nil {
 			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+				if err := s.deferArtifactCleanup(ctx, item.task, now); err != nil {
+					return err
+				}
 				continue
 			}
 			if err := os.Remove(clean); err != nil {
+				if err := s.deferArtifactCleanup(ctx, item.task, now); err != nil {
+					return err
+				}
 				continue
 			}
 		} else if !os.IsNotExist(err) {
+			if err := s.deferArtifactCleanup(ctx, item.task, now); err != nil {
+				return err
+			}
 			continue
 		}
-		_, _ = s.store.db.ExecContext(ctx, `UPDATE wp_update_task_backups
+		if _, err := s.store.db.ExecContext(ctx, `UPDATE wp_update_task_backups
 			SET protected=0,deleted_at=?,cleanup_result='deleted'
 			WHERE id=? AND protected=1 AND deleted_at IS NULL`,
-			wpUpdateDBTime(now), item.id)
+			wpUpdateDBTime(now), item.id); err != nil {
+			return err
+		}
 	}
 	taskRows, err := s.store.db.QueryContext(ctx, `SELECT t.id FROM wp_update_tasks t
 		WHERE t.status IN ('success','failed') AND t.requires_attention=0
 		  AND t.rollback_status!='failed' AND t.finished_at IS NOT NULL AND t.finished_at<=?
+		  AND NOT EXISTS (SELECT 1 FROM wp_update_artifact_cleanup c WHERE c.task_id=t.id)
+		  AND NOT EXISTS (SELECT 1 FROM wp_update_artifact_cleanup_retries r WHERE r.task_id=t.id AND r.retry_after>?)
 		  AND NOT EXISTS (SELECT 1 FROM wp_update_task_backups b
 			WHERE b.task_id=t.id AND b.protected=1 AND b.deleted_at IS NULL)
 		  AND NOT EXISTS (SELECT 1 FROM wp_update_tasks r
@@ -152,7 +182,7 @@ func (s *wpUpdateArtifactService) cleanupExpiredArtifacts(ctx context.Context, n
 			  r.status NOT IN ('success','failed') OR r.requires_attention=1 OR
 			  r.rollback_status='failed' OR r.finished_at IS NULL OR r.finished_at>?
 			)
-		  )`, cutoff, cutoff)
+		  ) ORDER BY t.finished_at,t.id LIMIT ?`, cutoff, wpUpdateDBTime(now), cutoff, wpUpdateCleanupBatchSize)
 	if err != nil {
 		return err
 	}
@@ -165,26 +195,63 @@ func (s *wpUpdateArtifactService) cleanupExpiredArtifacts(ctx context.Context, n
 		}
 		taskIDs = append(taskIDs, id)
 	}
+	if err := taskRows.Err(); err != nil {
+		taskRows.Close()
+		return err
+	}
 	if err := taskRows.Close(); err != nil {
 		return err
 	}
 	for _, id := range taskIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !wpUpdateTaskIDPattern.MatchString(id) {
+			if err := s.deferArtifactCleanup(ctx, id, now); err != nil {
+				return err
+			}
 			continue
 		}
 		dir := filepath.Join(s.root, id)
 		if info, err := os.Lstat(dir); err == nil {
 			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				if err := s.deferArtifactCleanup(ctx, id, now); err != nil {
+					return err
+				}
 				continue
 			}
-			_ = os.RemoveAll(dir)
+			if err := os.RemoveAll(dir); err != nil {
+				if err := s.deferArtifactCleanup(ctx, id, now); err != nil {
+					return err
+				}
+				continue
+			}
+		} else if !os.IsNotExist(err) {
+			if err := s.deferArtifactCleanup(ctx, id, now); err != nil {
+				return err
+			}
+			continue
+		}
+		// Only a removed/already absent owned directory can become completed.
+		// Failed or unsafe paths stay eligible for a later maintenance attempt.
+		if _, err := s.store.db.ExecContext(ctx, `INSERT OR IGNORE INTO wp_update_artifact_cleanup(task_id,completed_at) VALUES(?,?)`, id, wpUpdateDBTime(now)); err != nil {
+			return err
+		}
+		if _, err := s.store.db.ExecContext(ctx, `DELETE FROM wp_update_artifact_cleanup_retries WHERE task_id=?`, id); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// cleanupExpiredUpdateLogs 严格按 7 天清理更新任务的事件日志：只要任务已结束且
-// finished_at 超过保留窗口，其 wp_update_task_events 行一律删除（不区分成功/失败/需人工介入）。
+func (s *wpUpdateArtifactService) deferArtifactCleanup(ctx context.Context, taskID string, now time.Time) error {
+	_, err := s.store.db.ExecContext(ctx, `INSERT INTO wp_update_artifact_cleanup_retries(task_id,retry_after) VALUES(?,?)
+		ON CONFLICT(task_id) DO UPDATE SET retry_after=excluded.retry_after`, taskID, wpUpdateDBTime(now.Add(wpUpdateCleanupRetryDelay)))
+	return err
+}
+
+// cleanupExpiredUpdateLogs 按 7 天窗口分批清理更新任务事件（不区分成功/失败/需人工介入）。
+// 每次最多 wpUpdateLogCleanupBatchSize 行；较大的积压由后续维护周期继续处理。
 // 与 cleanupExpiredArtifacts 不同，本方法只删事件、不删任务行，避免级联删除
 // wp_update_task_backups 行导致备份文件孤儿；任务行仍由其原有逻辑保留。
 // 仅依赖 s.store.db，不依赖 s.root，便于独立单测。
@@ -193,7 +260,8 @@ func (s *wpUpdateArtifactService) cleanupExpiredUpdateLogs(ctx context.Context, 
 		return errors.New("update log cleanup unavailable")
 	}
 	cutoff := wpUpdateDBTime(now.Add(-WPUpdateLogRetention))
-	_, err := s.store.db.ExecContext(ctx, `DELETE FROM wp_update_task_events WHERE task_id IN (
-		SELECT id FROM wp_update_tasks WHERE finished_at IS NOT NULL AND finished_at<=?)`, cutoff)
+	_, err := s.store.db.ExecContext(ctx, `DELETE FROM wp_update_task_events WHERE id IN (
+		SELECT e.id FROM wp_update_task_events e JOIN wp_update_tasks t ON t.id=e.task_id
+		WHERE t.finished_at IS NOT NULL AND t.finished_at<=? ORDER BY e.id LIMIT ?)`, cutoff, wpUpdateLogCleanupBatchSize)
 	return err
 }

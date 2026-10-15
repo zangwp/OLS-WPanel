@@ -28,7 +28,7 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 
 | 功能 | 内容 |
 |---|---|
-| 网站与 WordPress | 创建 WordPress / PHP 网站，管理域名、PHP 版本、文件、数据库及 WordPress 更新 |
+| 网站与 WordPress | 创建 WordPress 网站，管理域名、PHP 版本、文件、数据库及 WordPress 更新，兼容已有 PHP 网站 |
 | 证书与缓存 | 网站证书申请与续签；使用官方 LiteSpeed Cache 管理页面及 Redis 对象缓存 |
 | 备份与恢复 | 网站、数据库和面板备份，支持 SFTP / S3 异地保存 |
 | VPS 维护 | 网页查看资源、服务器信息与服务状态；通过 SSH `o` 菜单设置 DNS、Swap 和系统参数；开放端口在安全中心管理 |
@@ -36,6 +36,8 @@ apt-get update && apt-get install -y --no-install-recommends curl wget ca-certif
 | 防护与告警 | 文件保护、Fail2ban、nftables、邮件 / Webhook 通知和日志分析 |
 
 全新安装默认使用 **LSPHP 8.5、MariaDB 11.8**；可为网站增加 LSPHP 8.4 / 8.3。现有数据库保留当前系列，常规系统更新不会自动跨系列升级。
+
+在“网站管理 → 创建网站”填写域名和 PHP 版本，即可创建 WordPress 网站。已有的通用 PHP 网站仍可在网站列表和详情中管理。
 
 界面采用浅色工作区与深蓝导航，提供中英文布局和手机端操作；看板集中展示资源指标，网站列表提供分组状态、搜索与筛选。网站详情中的登录地址、授权访问、缓存与安全证据说明见 [WordPress 访问与缓存指南](docs/wordpress-access-and-cache.md)。账户安全入口位于“安全设置 → 账户登录”。双因素认证需要管理员主动绑定；启用前请按 [账户安全指南](docs/account-security.md) 单独备份 `account-mfa.key`，普通面板数据库下载不包含此密钥。
 

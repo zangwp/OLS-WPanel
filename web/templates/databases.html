@@ -14,7 +14,9 @@
             <input type="search" x-model="search" class="input-field w-full sm:w-80 text-sm" :placeholder="t('database.search_placeholder')">
         </div>
         <p x-show="loadError" x-cloak class="mb-4 text-sm text-red-400" role="alert" x-text="loadError"></p>
-        <div class="overflow-x-auto">
+        <p x-show="!loading && !loadError && filteredDatabases().length === 0" class="text-sm text-center text-gray-500 py-8" x-text="search ? t('database.no_search_results') : t('database.no_databases')"></p>
+        <p x-show="loading" class="text-sm text-center text-gray-500 py-8" role="status">{{t .Lang "database.loading"}}</p>
+        <div x-show="!loading && filteredDatabases().length > 0" class="overflow-x-auto">
             <table class="w-full">
                 <thead class="border-b border-gray-700">
                     <tr>
@@ -47,12 +49,6 @@
                             </td>
                         </tr>
                     </template>
-                    <tr x-show="!loading && !loadError && filteredDatabases().length === 0">
-                        <td colspan="7" class="table-cell text-center text-gray-500 py-8" x-text="search ? t('database.no_search_results') : t('database.no_databases')"></td>
-                    </tr>
-                    <tr x-show="loading">
-                        <td colspan="7" class="table-cell text-center text-gray-500 py-8">{{t .Lang "database.loading"}}</td>
-                    </tr>
                 </tbody>
             </table>
         </div>

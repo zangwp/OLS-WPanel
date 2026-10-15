@@ -194,10 +194,12 @@
                         <p x-show="selectedSiteBackup(site).state === 'complete' && !selectedSiteBackup(site).local_exists" class="text-xs text-amber-400 mb-3">{{t .Lang "backups.site_set_local_missing"}}</p>
                         <div class="site-backup-actions">
                             <button @click="startSiteOperation(site, 'site_restore')" :disabled="siteBusy(site) || !canRestoreSite(site)" class="btn-primary text-xs">{{t .Lang "backups.restore_site"}}</button>
+                            <button @click="downloadSiteBackup(site, 'bundle')" :disabled="siteBusy(site) || !siteSetAvailable(site)" class="btn-secondary text-xs">{{t .Lang "backups.download_site_bundle"}}</button>
                             <button @click="downloadSiteBackup(site, 'files')" :disabled="siteBusy(site) || !siteSetAvailable(site)" class="btn-secondary text-xs">{{t .Lang "backups.download_files"}}</button>
                             <button @click="downloadSiteBackup(site, 'database')" :disabled="siteBusy(site) || !siteSetAvailable(site)" class="btn-secondary text-xs">{{t .Lang "backups.download_database"}}</button>
                             <button @click="deleteSiteBackup(site)" :disabled="siteBusy(site) || !!site.site_backups_error" class="btn-danger text-xs site-backup-delete">{{t .Lang "backups.delete_site_backup"}}</button>
                         </div>
+                        <p class="text-xs text-gray-500 mt-2">{{t .Lang "backups.site_bundle_help"}}</p>
                     </div>
                 </template>
                 <p x-show="!site.site_backups.length && !site.site_backups_error" class="text-xs text-gray-500">{{t .Lang "backups.empty_site_help"}}</p>
@@ -539,7 +541,7 @@ function backupsOverview() {
             }
         },
         downloadSiteBackup(site, component) {
-            if (this.siteBusy(site) || !this.siteSetAvailable(site) || !['files', 'database'].includes(component)) return;
+            if (this.siteBusy(site) || !this.siteSetAvailable(site) || !['files', 'database', 'bundle'].includes(component)) return;
             const b = this.selectedSiteBackup(site);
             window.open(this.apiPrefix() + '/api/websites/' + site.site_id + '/site-backups/' + encodeURIComponent(b.id) + '/download?component=' + component);
         },

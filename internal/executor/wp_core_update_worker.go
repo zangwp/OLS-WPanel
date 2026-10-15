@@ -21,6 +21,7 @@ const (
 	wpCoreUpdateWorkerPollInterval      = time.Second
 	wpCoreUpdateWorkerHeartbeatInterval = 30 * time.Second
 	wpCoreUpdateWorkerSweepInterval     = 30 * time.Second
+	wpUpdateMaintenanceInterval         = 15 * time.Minute
 )
 
 var wpCoreUpdateWorkerSlot = make(chan struct{}, 1)
@@ -390,6 +391,7 @@ func (w *WPCoreUpdateWorker) run(ctx context.Context, done chan struct{}) {
 func (w *WPCoreUpdateWorker) sweep(ctx context.Context) {
 	ticker := time.NewTicker(w.sweepInterval)
 	defer ticker.Stop()
+	var nextMaintenance time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -398,17 +400,31 @@ func (w *WPCoreUpdateWorker) sweep(ctx context.Context) {
 			_, _ = w.store.recoverCoreExpired(context.Background(), w.now().UTC())
 			_ = w.recoverPluginTasks(context.Background(), true, "lease_expired")
 			_ = w.recoverThemeTasks(context.Background(), true, "lease_expired")
-			if cleaner, ok := w.backups.(interface {
-				cleanupExpiredArtifacts(context.Context, time.Time) error
-			}); ok {
-				_ = cleaner.cleanupExpiredArtifacts(context.Background(), w.now().UTC())
-			}
-			if logCleaner, ok := w.backups.(interface {
-				cleanupExpiredUpdateLogs(context.Context, time.Time) error
-			}); ok {
-				_ = logCleaner.cleanupExpiredUpdateLogs(context.Background(), w.now().UTC())
+			now := w.now().UTC()
+			if !now.Before(nextMaintenance) {
+				nextMaintenance = now.Add(wpUpdateMaintenanceInterval)
+				w.cleanupRetainedArtifacts(ctx, now)
 			}
 			w.tickBatchOrchestrator()
+		}
+	}
+}
+
+func (w *WPCoreUpdateWorker) cleanupRetainedArtifacts(ctx context.Context, now time.Time) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if cleaner, ok := w.backups.(interface {
+		cleanupExpiredArtifacts(context.Context, time.Time) error
+	}); ok {
+		if err := cleaner.cleanupExpiredArtifacts(ctx, now); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+			log.Printf("WordPress 更新产物维护失败: %v", err)
+		}
+	}
+	if cleaner, ok := w.backups.(interface {
+		cleanupExpiredUpdateLogs(context.Context, time.Time) error
+	}); ok {
+		if err := cleaner.cleanupExpiredUpdateLogs(ctx, now); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+			log.Printf("WordPress 更新日志维护失败: %v", err)
 		}
 	}
 }
