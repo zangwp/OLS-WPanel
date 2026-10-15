@@ -172,6 +172,24 @@ func ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbU
 	return nil
 }
 
+func createSiteDirectories(webRoot, logDir string) ([]rollbackStep, error) {
+	var rollbacks []rollbackStep
+	for _, dir := range []string{webRoot, logDir} {
+		if err := os.MkdirAll(filepath.Dir(dir), 0755); err != nil {
+			return rollbacks, err
+		}
+		// Claim only a newly created leaf. A path that appeared after resource
+		// preflight belongs to another operation and must never be rolled back.
+		if err := os.Mkdir(dir, 0755); err != nil {
+			return rollbacks, err
+		}
+		rollbacks = append(rollbacks, rollbackStep{"删除目录 " + dir, func() error {
+			return os.RemoveAll(dir)
+		}})
+	}
+	return rollbacks, nil
+}
+
 func executeCreateSite(task *Task) TaskResult {
 	payload, ok := task.Payload.(*CreateSitePayload)
 	if !ok {
@@ -262,22 +280,14 @@ func executeCreateSite(task *Task) TaskResult {
 	rollbacks = append(rollbacks, rollbackStep{"删除系统用户 " + systemUser, userRollback})
 
 	// Step 2: Create directories
-	for _, dir := range []string{webRoot, logDir} {
-		if _, err := executeCommand("mkdir", "-p", dir); err != nil {
-			rollback()
-			log.Printf("创建目录失败: %v", err)
-			return TaskResult{Success: false, Message: "创建目录失败"}
-		}
+	directoryRollbacks, err := createSiteDirectories(webRoot, logDir)
+	rollbacks = append(rollbacks, directoryRollbacks...)
+	if err != nil {
+		rollback()
+		log.Printf("创建目录失败: %v", err)
+		return TaskResult{Success: false, Message: "创建目录失败"}
 	}
 	ensureSiteLogFiles(logDir)
-	rollbacks = append(rollbacks, rollbackStep{"删除网站目录 " + webRoot, func() error {
-		os.RemoveAll(webRoot)
-		return nil
-	}})
-	rollbacks = append(rollbacks, rollbackStep{"删除日志目录 " + logDir, func() error {
-		os.RemoveAll(logDir)
-		return nil
-	}})
 	documentRoot, err := EnsureEffectiveDocumentRoot(webRoot, payload.SiteType, documentRootSubdir, systemUser)
 	if err != nil {
 		rollback()

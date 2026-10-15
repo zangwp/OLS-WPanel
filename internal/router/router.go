@@ -2462,6 +2462,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 
 	pluginGroup := r.Group(prefix)
 	pluginGroup.Use(middleware.RandomPath(suffix))
+	pluginGroup.Use(handlers.PluginRequestGuard())
 	pluginGroup.Use(handlers.WebsiteBackupMaintenanceGuard())
 	pluginGroup.GET("/api/sites/find", cacheHelper.FindByDomain)
 	pluginGroup.POST("/api/sites/companion/update", cacheHelper.UpdateCompanionPlugin)

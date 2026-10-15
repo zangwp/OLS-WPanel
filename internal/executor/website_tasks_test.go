@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,77 @@ func TestCreateSiteSystemUserReturnsRollbackAfterSuccess(t *testing.T) {
 	}
 	if got := strings.Join(commands, ","); got != "useradd,userdel" {
 		t.Fatalf("commands = %q, want useradd,userdel", got)
+	}
+}
+
+func TestCreateSiteDirectoriesCleansPartialCreationAndAllowsRetry(t *testing.T) {
+	root := t.TempDir()
+	webRoot := filepath.Join(root, "www", "new.example.com")
+	logParent := filepath.Join(root, "logs")
+	logDir := filepath.Join(logParent, "new.example.com")
+	// Model an unavailable second destination without relying on user-specific
+	// permissions: mkdir cannot traverse a regular file, even when run as root.
+	if err := os.WriteFile(logParent, []byte("existing file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rollbacks, err := createSiteDirectories(webRoot, logDir)
+	if err == nil {
+		t.Fatal("expected second directory creation to fail")
+	}
+	if failures := runRollbackSteps(rollbacks); len(failures) != 0 {
+		t.Fatalf("rollback failed: %v", failures)
+	}
+	if _, err := os.Stat(webRoot); !os.IsNotExist(err) {
+		t.Fatalf("partial web root blocks retry: %v", err)
+	}
+	if content, err := os.ReadFile(logParent); err != nil || string(content) != "existing file" {
+		t.Fatalf("existing log parent changed: %q, %v", content, err)
+	}
+	if err := os.Remove(logParent); err != nil {
+		t.Fatal(err)
+	}
+	rollbacks, err = createSiteDirectories(webRoot, logDir)
+	if err != nil {
+		t.Fatalf("retry after destination repair: %v", err)
+	}
+	for _, path := range []string{webRoot, logDir} {
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			t.Fatalf("directory missing after retry: %s, %v", path, err)
+		}
+	}
+	if failures := runRollbackSteps(rollbacks); len(failures) != 0 {
+		t.Fatalf("rollback successful setup: %v", failures)
+	}
+}
+
+func TestCreateSiteDirectoriesNeverRollsBackExistingDirectory(t *testing.T) {
+	for _, existingIndex := range []int{0, 1} {
+		t.Run(fmt.Sprintf("destination_%d", existingIndex), func(t *testing.T) {
+			root := t.TempDir()
+			paths := []string{filepath.Join(root, "www", "existing.example.com"), filepath.Join(root, "logs", "existing.example.com")}
+			if err := os.MkdirAll(paths[existingIndex], 0755); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(paths[existingIndex], "keep.txt")
+			if err := os.WriteFile(marker, []byte("keep existing content"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			rollbacks, err := createSiteDirectories(paths[0], paths[1])
+			if !os.IsExist(err) {
+				t.Fatalf("existing destination was not rejected: %v", err)
+			}
+			if failures := runRollbackSteps(rollbacks); len(failures) != 0 {
+				t.Fatalf("rollback failed: %v", failures)
+			}
+			if content, err := os.ReadFile(marker); err != nil || string(content) != "keep existing content" {
+				t.Fatalf("existing directory was changed: %q, %v", content, err)
+			}
+			if existingIndex == 1 {
+				if _, err := os.Stat(paths[0]); !os.IsNotExist(err) {
+					t.Fatalf("new first directory remained after second destination conflict: %v", err)
+				}
+			}
+		})
 	}
 }
 
