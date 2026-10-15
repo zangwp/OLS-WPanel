@@ -444,7 +444,7 @@ test('failed rollback observation retains its lock and error until an explicit s
     state.status.access_enabled = false; state.status.access_rules = []; state.status.access_change_state = 'rolled_back'; context.api = originalAPI;
     await page.checkAccessRollback();
     assert.equal(page.accessToken,''); assert.equal(page.accessExpired,false); assert.equal(page.accessRollbackReady,false); assert.equal(page.accessDeadline,'');
-    assert.equal(page.accessError,''); assert.equal(page.portStatus.access_enabled,false); assert.equal(page.accessRows.some(row => row.port === 8088),false); assert.equal(timers.size,0);
+    assert.equal(page.accessError,'firewall.access_rolled_back'); assert.equal(page.portStatus.access_enabled,false); assert.equal(page.accessRows.some(row => row.port === 8088),false); assert.equal(timers.size,0);
     assert.equal(calls.some(call => call.url.endsWith('/access/confirm')),false);
 });
 
@@ -452,7 +452,9 @@ test('a failed confirmation preserves the server message and pending token witho
     const {page, context, calls, notices, timers} = setup(); draft(page); await page.startAccessSave(); await page.applyAccess(); const originalAPI = context.api;
     context.api = async (url,options) => { if (url.endsWith('/access/confirm')) { calls.push({url,options}); throw Error('rules changed; wait for automatic recovery'); } return originalAPI(url,options); };
     page.accessChecked = true; await page.confirmAccess();
-    assert.equal(page.accessError,'rules changed; wait for automatic recovery'); assert.equal(page.accessToken,'pending-token'); assert.equal(page.accessExpired,false);
+    assert.equal(page.accessError,'rules changed; wait for automatic recovery firewall.access_status_unverified'); assert.equal(page.accessToken,'pending-token'); assert.equal(page.accessExpired,false);
+    assert.equal(page.accessChecked,false); assert.equal(page.accessRecoveryRequired,true); assert.equal(page.accessRollbackReady,true);
+    assert.equal(calls.at(-1).url,'/firewall/ports','Failed confirmation must immediately make a read-only status check.');
     assert.equal(page.accessBusy,false); assert.equal(timers.size,2); assert.equal(notices.some(notice => notice[1] === 'success'),false);
 });
 
@@ -544,4 +546,148 @@ test('a confirmed save with failed status read distinguishes saved settings from
     page.accessChecked=true;await page.confirmAccess();
     assert.equal(page.accessToken,'');assert.equal(page.accessChangeID,'');assert.equal(page.accessError,'firewall.access_saved_status_unavailable');
     assert.equal(notices.some(notice=>notice[0]==='firewall.access_saved'),true);
+});
+
+for (const terminal of ['rolled_back','confirmed']) {
+    test('failed confirmation retires verification only after the matching '+terminal+' receipt is read',async()=>{
+        const {page,context,calls,state,timers,notices}=setup(), originalAPI=context.api;
+        draft(page); await page.startAccessSave(); await page.applyAccess();
+        context.api=async(url,options)=>{
+            if(url.endsWith('/access/confirm')){
+                calls.push({url,options}); state.status.access_change_state=terminal;
+                if(terminal==='rolled_back'){state.status.access_enabled=false;state.status.access_rules=[];}
+                throw Error('confirmation response failed');
+            }
+            return originalAPI(url,options);
+        };
+        page.accessChecked=true; await page.confirmAccess();
+        assert.equal(page.accessToken,''); assert.equal(page.accessChangeID,''); assert.equal(page.accessChecked,false);
+        assert.equal(page.accessRecoveryRequired,false); assert.equal(page.accessRollbackReady,false); assert.equal(timers.size,0);
+        assert.equal(calls.filter(call=>call.url.endsWith('/access/confirm')).length,1);
+        if(terminal==='confirmed'){
+            assert.equal(page.accessError,''); assert(notices.some(notice=>notice[0]==='firewall.access_saved'&&notice[1]==='success'));
+        }else{
+            assert.equal(page.accessError,'firewall.access_rolled_back'); assert.equal(page.accessRows.some(row=>row.port===8088),false);
+            assert.equal(notices.some(notice=>notice[1]==='success'),false);
+        }
+    });
+}
+
+for (const observation of ['pending','error','unknown','different_change','read_failure']) {
+    test('failed confirmation with '+observation+' observation preserves the draft and blocks further confirmation writes',async()=>{
+        const {page,context,calls,state,notices}=setup(), originalAPI=context.api;
+        draft(page); await page.startAccessSave(); await page.applyAccess();
+        page.accessDirty=true; const before=clone(page.accessRows);
+        context.api=async(url,options)=>{
+            if(url.endsWith('/access/confirm')){calls.push({url,options});throw Error('confirmation failed');}
+            if(url==='/firewall/ports'&&observation==='read_failure'){calls.push({url,options});throw Error('status offline');}
+            if(observation==='different_change'){state.status.access_change_id='d'.repeat(32);state.status.access_change_state='rolled_back';}
+            else state.status.access_change_state=observation;
+            return originalAPI(url,options);
+        };
+        page.accessChecked=true; await page.confirmAccess();
+        assert.equal(page.accessChecked,false); assert.equal(page.accessRecoveryRequired,true); assert.equal(page.accessToken,'pending-token');
+        assert.equal(page.accessChangeID,'c'.repeat(32)); assert.equal(page.accessBusy,false); assert.deepEqual(clone(page.accessRows),before);
+        assert.equal(page.accessDirty,true); assert.equal(page.accessPreview,null);
+        assert.equal(notices.filter(notice=>notice[1]==='error').length,1,'Confirmation and its failed status check share one actionable error notice.');
+        page.accessChecked=true; await page.confirmAccess();
+        assert.equal(calls.filter(call=>call.url.endsWith('/access/confirm')).length,1,'An old checkbox cannot authorize another confirmation attempt.');
+        const count=calls.length; await page.checkAccessRollback();
+        assert(calls.length>count); assert(calls.slice(count).every(call=>!call.options.method),'Recovery retry only reads status.');
+    });
+}
+
+for (const initial of ['pending','error']) {
+    test('a page without an authorization token locks a '+initial+' receipt and recovers through read-only checks',async()=>{
+        const {page,state,calls}=setup();
+        state.status.access_change_id='e'.repeat(32); state.status.access_change_state=initial;
+        await page.fetchPortStatus();
+        assert.equal(page.accessToken,''); assert.equal(page.accessChangeID,'e'.repeat(32)); assert.equal(page.accessRecoveryRequired,true);
+        assert.equal(page.accessRecoveryLocked(),true); assert(page.accessError);
+        const count=calls.length; await page.startAccessSave(); await page.addPortRule(); await page.deletePortRule({id:7,port:12345,protocol:'tcp'});
+        assert.equal(calls.length,count,'Observed recovery state cannot authorize any port write.');
+        state.status.access_change_state='unknown'; await page.checkAccessRollback();
+        assert.equal(page.accessRecoveryRequired,true,'Unknown is not proof that the recorded change completed.');
+        state.status.access_change_state='rolled_back'; state.status.access_change_id='f'.repeat(32); await page.checkAccessRollback();
+        assert.equal(page.accessRecoveryRequired,true,'Another change cannot release this observation lock.');
+        state.status.access_change_id='e'.repeat(32); await page.checkAccessRollback();
+        assert.equal(page.accessRecoveryRequired,false); assert.equal(page.accessChangeID,''); assert.equal(page.accessError,'firewall.access_rolled_back');
+        assert(calls.every(call=>!call.options.method));
+    });
+}
+
+test('a normal initial unknown status without a receipt does not lock the access editor',async()=>{
+    const {page,state}=setup();state.status.access_change_state='unknown';state.status.access_change_id='';
+    await page.fetchPortStatus();assert.equal(page.accessRecoveryRequired,false);assert.equal(page.accessRecoveryLocked(),false);
+    page.accessCustomPort='2212';page.addAccessRow();assert(page.accessRows.some(row=>row.port===2212));
+});
+
+test('the recovery UI hides stale confirmation and offers a read-only check with or without a local token',()=>{
+    const {page}=setup(), accessHTML=fs.readFileSync(path.join(__dirname,'../../web/templates/firewall_access.html'),'utf8');
+    const evalExpression=expression=>vm.runInNewContext('with (page) { '+expression+' }',{page});
+    const check=accessHTML.match(/<button[^>]*x-show="([^"]+)"[^>]*@click="checkAccessRollback\(\{ recover: true \}\)"[^>]*>/)[0];
+    const confirm=accessHTML.match(/<button[^>]*x-show="([^"]+)"[^>]*@click="confirmAccess\(\)"[^>]*>/)[0];
+    page.accessRecoveryRequired=true;page.accessChecked=true;
+    for(const token of ['','pending-token']){
+        page.accessToken=token;
+        assert.equal(evalExpression(check.match(/x-show="([^"]+)"/)[1]),true);
+        assert.equal(!!evalExpression(confirm.match(/x-show="([^"]+)"/)[1]),false);
+        assert.equal(evalExpression(confirm.match(/:disabled="([^"]+)"/)[1]),true);
+        assert.equal(evalExpression(accessHTML.match(/<fieldset :disabled="([^"]+)"/)[1]),true);
+    }
+});
+
+for (const postResult of ['success','lost_response','rejected']) {
+    test('manual recovery with '+postResult+' POST result only unlocks after a matching terminal GET',async()=>{
+        const {page,state,context,calls}=setup(), originalAPI=context.api;
+        state.status.access_change_state='error';state.status.access_change_id='e'.repeat(32);
+        await page.fetchPortStatus(); const count=calls.length;
+        context.api=async(url,options)=>{
+            if(url.endsWith('/access/recover')){
+                calls.push({url,options});state.status.access_change_state='rolled_back';
+                if(postResult==='lost_response')throw Error('request timed out');
+                return postResult==='rejected'?{success:false,message:'recovery response unavailable'}:{success:true};
+            }
+            return originalAPI(url,options);
+        };
+        await page.checkAccessRollback({recover:true});
+        assert.deepEqual(calls.slice(count).map(call=>[call.url,call.options.method]),[['/firewall/ports/access/recover','POST'],['/firewall/ports',undefined]]);
+        const recovery=calls[count];assert.deepEqual(clone(recovery.options.body),{change_id:'e'.repeat(32)});assert.equal(recovery.options.suppressToast,true);
+        assert.equal(page.accessRecoveryRequired,false);assert.equal(page.accessChangeID,'');assert.equal(page.accessError,'firewall.access_rolled_back');
+    });
+}
+
+for (const receipt of ['pending','unknown','different_change','read_failure']) {
+    test('a successful manual recovery POST cannot unlock '+receipt+' status without matching completion',async()=>{
+        const {page,state,context,calls}=setup(), originalAPI=context.api;
+        state.status.access_change_state='pending';state.status.access_change_id='e'.repeat(32);
+        await page.fetchPortStatus(); const count=calls.length;
+        context.api=async(url,options)=>{
+            if(url.endsWith('/access/recover')){calls.push({url,options});return {success:true};}
+            if(receipt==='read_failure')throw Error('state offline');
+            state.status.access_change_state=receipt==='different_change'?'rolled_back':receipt;
+            if(receipt==='different_change')state.status.access_change_id='f'.repeat(32);
+            return originalAPI(url,options);
+        };
+        await page.checkAccessRollback({recover:true});
+        assert.equal(page.accessRecoveryRequired,true);assert.equal(page.accessChangeID,'e'.repeat(32));assert.equal(page.accessBusy,false);
+        assert.equal(calls.slice(count).filter(call=>call.options.method).length,1);
+    });
+}
+
+test('automatic rollback observation never posts a recovery mutation',async()=>{
+    const {page,state,calls,timers}=setup();draft(page);await page.startAccessSave();await page.applyAccess();
+    state.status.access_change_state='rolled_back';const count=calls.length;
+    [...timers.values()].find(timer=>timer.delay===95000).callback();await settle();
+    assert(calls.slice(count).length>0);assert(calls.slice(count).every(call=>!call.options.method));
+    assert.equal(page.accessToken,'');assert.equal(page.accessRecoveryRequired,false);
+});
+
+test('manual recovery without a valid change identifier only reads and keeps the unverified lock',async()=>{
+    const {page,calls}=setup();page.accessRecoveryRequired=true;
+    for(const id of ['','not-an-id']){
+        page.accessChangeID=id;const count=calls.length;await page.checkAccessRollback({recover:true});
+        assert.deepEqual(calls.slice(count).map(call=>[call.url,call.options.method]),[['/firewall/ports',undefined]]);
+        assert.equal(page.accessRecoveryRequired,true);assert.equal(page.accessChangeID,id);
+    }
 });

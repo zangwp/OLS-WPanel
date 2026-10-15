@@ -38,12 +38,12 @@ func TestAccessRollbackStatusRequiresObservedOldPolicyAndInactiveJobs(t *testing
 		previousExists, failSystemd, failNft  bool
 		want                                  string
 	}{
-		{name: "timer still waiting", timer: "LoadState=loaded\nActiveState=active", want: "pending"},
-		{name: "rollback still running", service: "LoadState=loaded\nActiveState=activating\nResult=success", want: "pending"},
+		{name: "timer still waiting", timer: "LoadState=loaded\nActiveState=active\nJob=0", want: "pending"},
+		{name: "rollback still running", service: "LoadState=loaded\nActiveState=activating\nResult=success\nJob=0", want: "pending"},
 		{name: "systemd command error", failSystemd: true, want: "error"},
-		{name: "incomplete timer output", timer: "ActiveState=inactive", want: "error"},
-		{name: "incomplete service output", service: "LoadState=loaded\nActiveState=inactive", want: "error"},
-		{name: "failed rollback service", service: "LoadState=loaded\nActiveState=failed\nResult=exit-code", want: "error"},
+		{name: "incomplete timer output", timer: "ActiveState=inactive\nJob=0", want: "error"},
+		{name: "incomplete service output", service: "LoadState=loaded\nActiveState=inactive\nJob=0", want: "error"},
+		{name: "failed rollback service", service: "LoadState=loaded\nActiveState=failed\nResult=exit-code\nJob=0", want: "error"},
 		{name: "nft read failure", failNft: true, want: "error"},
 		{name: "new table remains", tables: "table inet " + accessTable, current: "new policy", want: "error"},
 		{name: "old table missing", previousExists: true, want: "error"},
@@ -61,7 +61,7 @@ func TestAccessRollbackStatusRequiresObservedOldPolicyAndInactiveJobs(t *testing
 						t.Fatalf("mutation in status check: %s %v", name, args)
 					}
 					if tc.failSystemd {
-						return "LoadState=loaded\nActiveState=inactive\nResult=success", errors.New("partial permission failure")
+						return "LoadState=loaded\nActiveState=inactive\nResult=success\nJob=0", errors.New("partial permission failure")
 					}
 					if strings.HasSuffix(args[1], ".timer") && tc.timer != "" {
 						return tc.timer, nil
@@ -69,7 +69,7 @@ func TestAccessRollbackStatusRequiresObservedOldPolicyAndInactiveJobs(t *testing
 					if strings.HasSuffix(args[1], ".service") && tc.service != "" {
 						return tc.service, nil
 					}
-					return "LoadState=loaded\nActiveState=inactive\nResult=success", nil
+					return "LoadState=loaded\nActiveState=inactive\nResult=success\nJob=0", nil
 				}
 				if name == "nft" {
 					if tc.failNft {
@@ -128,7 +128,7 @@ func TestAccessRollbackReceiptSurvivesPanelRestartAndDoesNotAuthorizeConfirmatio
 	t.Cleanup(func() { portCommand = old })
 	portCommand = func(_ context.Context, name string, args ...string) (string, error) {
 		if name == "systemctl" {
-			return "LoadState=not-found\nActiveState=inactive", nil
+			return "LoadState=not-found\nActiveState=inactive\nJob=0", nil
 		}
 		if name == "nft" && strings.Join(args, " ") == "--json --stateless list tables" {
 			return `{"nftables":[{"metainfo":{"json_schema_version":1}},{"table":{"family":"inet","name":"filter","handle":1}}]}`, nil
@@ -166,7 +166,7 @@ func TestAccessRollbackStatusDoesNotClearDifferentChangeAndAllowsRetry(t *testin
 			return "", errors.New("temporary inspection failure")
 		}
 		if name == "systemctl" {
-			return "LoadState=not-found\nActiveState=inactive", nil
+			return "LoadState=not-found\nActiveState=inactive\nJob=0", nil
 		}
 		if name == "nft" {
 			return `{"nftables":[]}`, nil
@@ -194,7 +194,7 @@ func TestAccessRollbackRejectsIncompleteSuccessfulTableResponses(t *testing.T) {
 			t.Cleanup(func() { portCommand = old })
 			portCommand = func(_ context.Context, name string, args ...string) (string, error) {
 				if name == "systemctl" {
-					return "LoadState=not-found\nActiveState=inactive", nil
+					return "LoadState=not-found\nActiveState=inactive\nJob=0", nil
 				}
 				if name == "nft" && strings.Join(args, " ") == "--json --stateless list tables" {
 					return output, nil
@@ -271,6 +271,8 @@ func TestAccessApplyRecordsRecoveryBeforeWatchdogAndRefusesUnwritableReceipt(t *
 					return "table inet " + accessTable, nil
 				case "nft --stateless list ruleset":
 					return "fixture complete ruleset", nil
+				case "nft --json --stateless list tables":
+					return `{"nftables":[{"table":{"family":"inet","name":"` + accessTable + `"}}]}`, nil
 				case "nft --stateless list table inet " + accessTable:
 					if applied {
 						return "fixture new table", nil
@@ -278,6 +280,9 @@ func TestAccessApplyRecordsRecoveryBeforeWatchdogAndRefusesUnwritableReceipt(t *
 					return record.Previous, nil
 				case "systemctl reset-failed " + accessRollbackUnit + ".service":
 					return "", nil
+				}
+				if name == "systemctl" && args[0] == "show" {
+					return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
 				}
 				if name == "systemctl" && args[0] == "is-active" {
 					return "inactive", errors.New("inactive")
@@ -344,7 +349,7 @@ func TestAccessConfirmedReceiptRetainsSuccessfulSameChangeAfterRestart(t *testin
 	config.AppConfig = &config.Config{Panel: config.PanelConfig{Port: 8443}}
 	pendingAccess.expected, pendingAccess.sshPort, pendingAccess.panelPort = "new table", 22, 8443
 	pendingAccess.deadline = time.Now().Add(time.Minute)
-	stopped, saved := false, false
+	stopped, saved := map[string]bool{}, false
 	portCommand = func(_ context.Context, name string, args ...string) (string, error) {
 		command := name + " " + strings.Join(args, " ")
 		switch command {
@@ -358,8 +363,14 @@ func TestAccessConfirmedReceiptRetainsSuccessfulSameChangeAfterRestart(t *testin
 			return "enabled", nil
 		case "systemctl enable nftables":
 			return "", nil
-		case "systemctl stop " + accessRollbackUnit + ".timer " + accessRollbackUnit + ".service":
-			stopped = true
+		case "systemctl stop " + accessRollbackUnit + ".timer", "systemctl stop " + accessRollbackUnit + ".service":
+			stopped[args[1]] = true
+			return "", nil
+		}
+		if name == "systemctl" && args[0] == "show" {
+			return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
+		}
+		if name == "systemctl" && args[0] == "reset-failed" {
 			return "", nil
 		}
 		if name == "systemctl" && args[0] == "is-active" {
@@ -369,7 +380,7 @@ func TestAccessConfirmedReceiptRetainsSuccessfulSameChangeAfterRestart(t *testin
 		return "", errors.New("unexpected")
 	}
 	persistAccessRules = func(context.Context) error {
-		if !stopped {
+		if len(stopped) != 2 {
 			t.Fatal("policy persisted before stopping both rollback jobs")
 		}
 		saved = true

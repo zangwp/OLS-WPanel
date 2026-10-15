@@ -99,6 +99,21 @@ func (h *FirewallHandler) ConfirmAccess(c *gin.Context) {
 	c.JSON(200, models.SuccessResponse(gin.H{"confirmed": true}))
 }
 
+func (h *FirewallHandler) RecoverAccess(c *gin.Context) {
+	var req struct {
+		ChangeID string `json:"change_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse("恢复记录格式无效"))
+		return
+	}
+	if err := executor.RecoverFirewallAccess(req.ChangeID); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"checked": true}))
+}
+
 func (h *FirewallHandler) PortStatus(c *gin.Context) {
 	status, err := executor.GetFirewallPortStatus()
 	if err != nil {

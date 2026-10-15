@@ -468,6 +468,9 @@ var i18nKeys = []string{
 	"firewall.access_status_unverified",
 	"firewall.access_ssh_changed",
 	"firewall.access_preview_changed",
+	"firewall.access_rolled_back",
+	"firewall.access_recovery_pending",
+	"firewall.access_recover_edit",
 	"firewall.access_saved_status_unavailable",
 	"firewall.access_apply_confirm",
 	"firewall.access_verify",
@@ -2654,6 +2657,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.POST("/api/firewall/ports/access/preview", firewallHandler.PreviewAccess)
 	protected.POST("/api/firewall/ports/access/apply", firewallHandler.ApplyAccess)
 	protected.POST("/api/firewall/ports/access/confirm", firewallHandler.ConfirmAccess)
+	protected.POST("/api/firewall/ports/access/recover", firewallHandler.RecoverAccess)
 	protected.GET("/api/firewall/ssh-port", firewallHandler.SSHPortStatus)
 	protected.POST("/api/firewall/ssh-port", firewallHandler.ChangeSSHPort)
 	protected.POST("/api/firewall/ssh-port/confirm", firewallHandler.ConfirmSSHPort)

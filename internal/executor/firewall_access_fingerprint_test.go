@@ -60,11 +60,22 @@ func newAccessFingerprintFixture(t *testing.T, exists bool) *accessFingerprintSt
 			return "table inet filter\ntable inet " + accessTable, nil
 		case "nft --stateless list table inet " + accessTable:
 			return state.owned, nil
+		case "nft --json --stateless list tables":
+			if state.owned == "" {
+				return `{"nftables":[]}`, nil
+			}
+			return `{"nftables":[{"table":{"family":"inet","name":"` + accessTable + `"}}]}`, nil
 		case "nft --stateless list ruleset":
 			return state.owned + "\n" + state.external, nil
 		case "systemctl is-enabled nftables":
 			return "enabled", nil
 		case "systemctl enable nftables", "systemctl reset-failed " + accessRollbackUnit + ".service":
+			return "", nil
+		}
+		if name == "systemctl" && len(args) > 1 && args[0] == "show" && strings.Contains(command, "--property=LoadState") {
+			return "LoadState=not-found\nActiveState=inactive\nResult=success\nJob=", nil
+		}
+		if name == "systemctl" && len(args) > 1 && (args[0] == "stop" || args[0] == "reset-failed") {
 			return "", nil
 		}
 		if name == "systemctl" && len(args) > 0 && args[0] == "is-active" {

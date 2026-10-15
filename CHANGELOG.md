@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.12 — 2026-10-15
+
+- Verifies transient rollback timers, services and queued jobs individually before confirming access-policy saves. Reconciles obsolete tasks only after the previous policy is verified restored, and includes both timer/service units in SSH migration guards.
+- Recovers the matching confirmation state after failures and page reloads, keeping unknown results locked with read-only observations and an explicit guarded recovery action instead of showing an obsolete confirmation form.
+- Adds mandatory real-systemd lifecycle acceptance to native amd64/arm64 CI and release verification using isolated temporary test units.
+
 ## v2.0.11 — 2026-10-15
 
 - Scopes access-policy preview fingerprints to the table being replaced, the selected rules and management endpoints. Independent bans and traffic-updated sets no longer prevent saving an unchanged access draft.
