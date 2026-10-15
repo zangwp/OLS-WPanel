@@ -1,19 +1,27 @@
 """Execute the actual embedded formatter against deterministic Linux fixtures."""
 import contextlib
+import copy
 import io
 import json
 import os
 import pathlib
 import re
+import subprocess
+import sys
 import types
 import unittest
 from unittest.mock import patch
 
 SOURCE = pathlib.Path(__file__).with_name('panel_cli.sh').read_text(encoding='utf-8')
 CODE = SOURCE.split("<<'PYVIEW'\n", 1)[1].split('\nPYVIEW', 1)[0]
+HEALTH_CHECK_IDS=('service_panel','service_ols','service_mariadb','service_redis','service_fail2ban','service_nftables','disk_space','inodes','packages','default_route','dns_config')
 
 
-def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None, status='failed', remaining=0, swap=None, swap_failure=False, manager=None, takeover=False, restore=False, locale_available=True, payloads=None, files_extra=None, fail_command=None, disk_failure=False):
+def complete_health(status='ok'):
+    return dict(checked_at='2026-10-15T08:00:00Z',status=status,checks=[dict(id=identity,name='fixture name',status=status,summary='fixture summary',next_step='fixture next step') for identity in HEALTH_CHECK_IDS])
+
+
+def render(view, width=72, preset='international', configurable=False, custom=False, baseline=False, stage='services', detail=None, status='failed', remaining=0, swap=None, swap_failure=False, manager=None, takeover=False, restore=False, locale_available=True, payloads=None, files_extra=None, fail_command=None, disk_failure=False, tty=False, term='dumb', no_color='', command_outputs=None, platform_values=None):
     presets = [
         dict(id='international', ipv4=['1.1.1.1', '1.0.0.1'], ipv6=['2606:4700:4700::1111', '2606:4700:4700::1001']),
         dict(id='mainland_china', ipv4=['223.5.5.5', '223.6.6.6'], ipv6=['2400:3200::1', '2400:3200:baba::1']),
@@ -44,10 +52,11 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         '/etc/sysctl.d/.ols-wpanel-vps-original.json': json.dumps({'net.core.somaxconn':'65535','net.ipv4.tcp_max_syn_backlog':'8192'}) if baseline else '',
     }
     files.update(files_extra or {})
-    ticks = [0];commands=[]
+    ticks = [0];commands=[];reads=[];resource_mocks={}
 
     def read(path, *args, **kwargs):
         key=path.as_posix()
+        reads.append(key)
         if key == '/proc/stat':
             ticks[0] += 1
             return f'cpu {100 + ticks[0]} 0 0 {1000 + ticks[0]*9} 0 0 0 0'
@@ -56,6 +65,12 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
     def command(args, **kwargs):
         commands.append(args)
         output = ''
+        key=args[args.index('--vps-tool')+1] if '--vps-tool' in args else ('--info' if '--info' in args else args[0])
+        if key in (command_outputs or {}):
+            result=command_outputs[key]
+            if isinstance(result,Exception):raise result
+            if isinstance(result,str):return types.SimpleNamespace(returncode=0,stdout=result,stderr='')
+            return types.SimpleNamespace(returncode=result[0],stdout=result[1],stderr=result[2])
         if fail_command and args[0]==fail_command:return types.SimpleNamespace(returncode=1,stdout='',stderr='fixture command failure')
         if '--vps-tool' in args:
             action=args[args.index('--vps-tool')+1]
@@ -78,29 +93,57 @@ def render(view, width=72, preset='international', configurable=False, custom=Fa
         elif '--info' in args:output='版本: v2.1.0 linux/amd64'
         return types.SimpleNamespace(returncode=0, stdout=output, stderr='')
 
-    out=io.StringIO();code=0;namespace={}
+    out=io.StringIO();out.isatty=lambda:tty
+    code=0;namespace={}
     with contextlib.ExitStack() as stack:
-        stack.enter_context(patch.dict(os.environ, {'OLS_CLI_WIDTH':str(width)}))
+        stack.enter_context(patch.dict(os.environ, {'OLS_CLI_WIDTH':str(width),'TERM':term,'NO_COLOR':no_color}))
         stack.enter_context(patch('sys.argv',['formatter',view,'panel','config','' if view in ['swap','swap-actions'] else preset]))
         stack.enter_context(patch('pathlib.Path.read_text',read))
         stack.enter_context(patch('subprocess.run',command))
-        stack.enter_context(patch('os.getloadavg',return_value=(.07,.04,0),create=True))
-        stack.enter_context(patch('os.cpu_count',return_value=2))
+        if view=='report':
+            stack.enter_context(patch('subprocess.Popen',side_effect=AssertionError('report fixture must not spawn host processes')))
+            stack.enter_context(patch('pathlib.Path.write_text',side_effect=AssertionError('report must not write files')))
+            stack.enter_context(patch('pathlib.Path.write_bytes',side_effect=AssertionError('report must not write files')))
+            stack.enter_context(patch('os.system',side_effect=AssertionError('report must not execute shell commands')))
+        resource_mocks['load']=stack.enter_context(patch('os.getloadavg',return_value=(.07,.04,0),create=True))
+        resource_mocks['cpu_count']=stack.enter_context(patch('os.cpu_count',return_value=2))
         stack.enter_context(patch('os.path.isfile',return_value=baseline))
         stack.enter_context(patch('os.path.exists',return_value=False))
         stack.enter_context(patch('shutil.which',side_effect=lambda cmd:'/usr/bin/'+cmd if locale_available or cmd not in ['locale-gen','update-locale'] else None))
-        stack.enter_context(patch('shutil.disk_usage',side_effect=OSError('fixture disk failure') if disk_failure else None,return_value=types.SimpleNamespace(total=43*1024**3,used=2*1024**3,free=41*1024**3)))
+        resource_mocks['disk']=stack.enter_context(patch('shutil.disk_usage',side_effect=OSError('fixture disk failure') if disk_failure else None,return_value=types.SimpleNamespace(total=43*1024**3,used=2*1024**3,free=41*1024**3)))
         stack.enter_context(patch('os.statvfs',return_value=types.SimpleNamespace(f_files=100000,f_ffree=90000),create=True))
-        for key,val in [('node','demo-vps'),('release','6.12.107+deb13-amd64'),('machine','x86_64')]:stack.enter_context(patch('platform.'+key,return_value=val))
-        stack.enter_context(patch('time.sleep'))
+        for key,val in [('node','demo-vps'),('release','6.12.107+deb13-amd64'),('machine','x86_64')]:
+            result=(platform_values or {}).get(key,val)
+            resource_mocks[key]=stack.enter_context(patch('platform.'+key,return_value=result,side_effect=result if isinstance(result,Exception) else None))
+        resource_mocks['sample_sleep']=stack.enter_context(patch('time.sleep'))
         stack.enter_context(contextlib.redirect_stdout(out))
-        try:exec(compile(CODE,'embedded-cli','exec'),namespace)
+        try:
+            if view=='report':
+                # Exercise the actual report dispatch and sanitizer, while replacing
+                # only its bounded host-reader contract. Never launch real Popen.
+                definitions,dispatch=CODE.split('\nif view==',1)
+                exec(compile(definitions,'embedded-cli-definitions','exec'),namespace)
+                def report_command(*args,timeout=16,limit=65536):
+                    try:result=command(args,timeout=timeout)
+                    except (OSError,subprocess.TimeoutExpired):return None
+                    return result.stdout.strip() if result.returncode==0 else None
+                namespace['report_run']=report_command
+                namespace['report_os_release']=lambda:read(pathlib.Path('/etc/os-release')) or None
+                exec(compile('\nif view=='+dispatch,'embedded-cli-dispatch','exec'),namespace)
+            else:exec(compile(CODE,'embedded-cli','exec'),namespace)
         except SystemExit as e:code=e.code
     namespace['_commands']=commands
+    namespace['_reads']=reads
+    namespace['_resource_calls']={name:mock.call_count for name,mock in resource_mocks.items()}
     return out.getvalue(),code,namespace
 
 
 class RendererTest(unittest.TestCase):
+    def report(self,payload=None,files_extra=None,**kwargs):
+        files={'/etc/os-release':'ID=debian\nVERSION_ID="13"\nPRETTY_NAME="Debian GNU/Linux 13"'}
+        files.update(files_extra or {})
+        return render('report',payloads={'health-status':complete_health() if payload is None else payload},files_extra=files,**kwargs)
+
     def test_dns_separates_current_and_candidates(self):
         text,status,_=render('dns')
         self.assertEqual(status,2)
@@ -266,15 +309,25 @@ class RendererTest(unittest.TestCase):
         for width in [32,40,72,100]:
             for view in ['home','network-summary','system-summary']:
                 text,status,ns=render(view,width)
-                self.assertEqual(status,0,(view,text));self.assertIn('采样时间',text)
+                self.assertEqual(status,0,(view,text))
+                if view!='home':self.assertIn('采样时间',text)
                 self.assertNotIn('\x1b',text)
                 for line in text.splitlines():self.assertLessEqual(ns['cells'](line),min(width,88),(view,line))
                 for command in ns['_commands']:
                     if '--vps-tool' in command:self.assertIn(command[command.index('--vps-tool')+1],allowed_tools)
-            text,_,_=render('home',width)
-            for expected in ['demo-vps','v2.1.0','CPU 短时采样','内存','系统盘','[正常]']:
+            text,_,ns=render('home',width)
+            for expected in ['v2.1.0','面板版本 / 服务','[正常]']:
                 self.assertIn(expected,text)
-            self.assertNotIn('当前解析服务器',text)
+            for omitted in ['demo-vps','主机 / 系统','运行时长','CPU','内存','Swap','系统盘','采样时间','当前解析服务器']:
+                self.assertNotIn(omitted,text)
+            self.assertEqual(ns['_reads'],[])
+            self.assertFalse(any(ns['_resource_calls'].values()),ns['_resource_calls'])
+            self.assertEqual(len(ns['_commands']),2)
+            self.assertIn('--info',ns['_commands'][0]);self.assertEqual(ns['_commands'][1][0],'systemctl')
+            detail,detail_status,_=render('info',width)
+            self.assertEqual(detail_status,0)
+            for retained in ['demo-vps','发行版','处理器','CPU 短时采样','内存','Swap','系统盘','网卡 IPv4','网卡 IPv6','运行时长','采样时间']:
+                self.assertIn(retained,detail)
 
     def test_home_menu_uses_cell_aligned_columns_and_narrow_single_column(self):
         for width in [32,40,72,88,120]:
@@ -285,27 +338,30 @@ class RendererTest(unittest.TestCase):
             for line in text.splitlines():self.assertLessEqual(ns['cells'](line),min(width,88))
             if width>=68:
                 positions=[]
-                for right in ['2. 系统软件更新','4. 网络设置','6. 性能状态','8. 帮助 / 高级操作','更新与任务进度','DNS / IP / SSH','资源、进程与服务','命令、记录与卸载']:
+                for right in ['2. 系统软件更新','4. 网络设置','6. 性能状态','8. 帮助 / 高级操作']:
                     line=next(line for line in text.splitlines() if right in line)
                     positions.append(ns['cells'](line.split(right)[0]))
                 self.assertEqual(len(set(positions)),1,positions)
             else:
                 self.assertFalse(any('1. ' in line and '2. ' in line for line in text.splitlines()))
+            for description in ['资源与地址','更新与任务进度','DNS / IP / SSH','资源、进程与服务','命令、记录与卸载']:
+                self.assertNotIn(description,text)
+            self.assertEqual(sum(bool(re.match(r'^\s+[1-8]\. ',line)) for line in text.splitlines()),4 if width>=68 else 8)
 
     def test_summary_missing_resource_data_is_unknown_not_zero_or_full(self):
-        for view in ['home','system-summary']:
+        for view in ['info','system-summary']:
             text,status,_=render(view,files_extra={'/proc/meminfo':''},disk_failure=True)
             self.assertEqual(status,0,text)
             self.assertIn('未知：内存数据未完整读取',text)
             self.assertNotIn('100.0%',text)
-            if view=='home':self.assertIn('未知：空间读取失败',text)
+            if view=='info':self.assertIn('未知：空间读取失败',text)
             else:self.assertIn('未知：Swap 数据未完整读取',text);self.assertNotIn('未配置',text)
-        text,_,_=render('home',files_extra={'/proc/meminfo':'MemTotal: 1000 kB'})
+        text,_,_=render('info',files_extra={'/proc/meminfo':'MemTotal: 1000 kB'})
         self.assertIn('未知：内存数据未完整读取',text);self.assertNotIn('100.0%',text)
 
     def test_narrow_resources_keep_numeric_values_and_ascii_words_intact(self):
         for width in [32,40]:
-            text,status,ns=render('home',width)
+            text,status,ns=render('info',width)
             self.assertEqual(status,0)
             self.assertIn('(30.0%)',text);self.assertIn('(4.7%)',text)
             self.assertIn('Linux',text)
@@ -323,8 +379,42 @@ class RendererTest(unittest.TestCase):
             text,status,ns=render('login-addresses',width,files_extra=files)
             self.assertEqual(status,0)
             self.assertEqual([line for line in text.splitlines() if line.startswith('https://')],expected)
+            lines=text.splitlines()
+            for url in expected:
+                index=lines.index(url)
+                self.assertEqual(lines[index+1],'',text)
             for line in text.splitlines():
                 if not line.startswith('https://'):self.assertLessEqual(ns['cells'](line),width)
+
+    def test_terminal_color_respects_stdout_term_and_no_color_without_changing_layout(self):
+        ansi=re.compile(r'\x1b\[([0-9;]*)m')
+        for width in [32,40,67,68,88]:
+            for view in ['home','home-menu','login-addresses','swap-actions','clean-bytes']:
+                plain,status,_=render(view,width)
+                colored,color_status,_=render(view,width,tty=True,term='xterm-256color')
+                self.assertEqual(status,color_status)
+                # Sampling timestamps can cross a second between independent renders.
+                without_time=lambda s:re.sub(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}','<timestamp>',s)
+                self.assertEqual(without_time(ansi.sub('',colored)),without_time(plain),(view,width))
+                if view in ['home','home-menu','login-addresses']:
+                    self.assertIn('\x1b[',colored,(view,width))
+                else:self.assertNotIn('\x1b',colored,(view,width))
+                for codes in ansi.findall(colored):self.assertNotIn('2',codes.split(';'))
+                for tty,term,no_color in [(False,'xterm',''),(True,'dumb',''),(True,'xterm','1'),(True,'xterm','0')]:
+                    degraded,_,_=render(view,width,tty=tty,term=term,no_color=no_color)
+                    self.assertNotIn('\x1b',degraded,(view,tty,term,no_color))
+        text,_,_=render('home',tty=True,term='xterm')
+        self.assertIn('\x1b[32m',text)
+        menu,_,_=render('home-menu',tty=True,term='xterm')
+        self.assertIn('\x1b[1;36m1. \x1b[0m系统信息',menu)
+
+    def test_colored_urls_remain_unstyled_complete_copyable_lines(self):
+        files={'/www/data/panel-tls-active.json':json.dumps({'domain':'panel.example.com'})}
+        plain,_,_=render('login-addresses',40,files_extra=files)
+        colored,_,_=render('login-addresses',40,files_extra=files,tty=True,term='xterm')
+        urls=lambda text:[line for line in text.splitlines() if line.startswith('https://')]
+        self.assertEqual(urls(colored),urls(plain));self.assertEqual(len(urls(colored)),3)
+        for line in urls(colored):self.assertNotIn('\x1b',line)
 
     def test_processes_keep_unknown_separate_from_real_zero_and_explain_cpu_basis(self):
         payload={'process-status':dict(sampled_at='2026-10-15T08:00:00Z',sample_seconds=.3,cpu_basis='one_core',cpu_count=2,incomplete=True,warnings=['部分进程已退出'],top_cpu=[dict(pid=123,name='php-worker\x1b',cpu_percent=137.8,memory_percent=None,rss_bytes=None)],top_memory=[dict(pid=456,name='redis-server',cpu_percent=None,memory_percent=0,rss_bytes=0)])}
@@ -377,6 +467,145 @@ class RendererTest(unittest.TestCase):
         text,status,_=render('update-status',fail_command='panel')
         self.assertEqual(status,1);self.assertIn('未确认执行结果',text)
         self.assertNotIn('任务结果',text)
+
+    def test_report_is_plain_complete_and_uses_only_readonly_collectors(self):
+        for width in [32,40,72]:
+            text,status,ns=self.report(width=width,tty=True,term='xterm')
+            self.assertEqual(status,0,text)
+            self.assertTrue(text.startswith('BEGIN OLS WPANEL REPORT\n'),text)
+            self.assertTrue(text.rstrip().endswith('END OLS WPANEL REPORT'),text)
+            self.assertRegex(text,r'报告状态\s*[:：]?\s*ok\b')
+            self.assertRegex(text,r'完整性\s*[:：]?\s*complete\b')
+            self.assertNotIn('\x1b',text)
+            for line in text.splitlines():self.assertLessEqual(ns['cells'](line),width,line)
+            commands=ns['_commands']
+            self.assertEqual(len(commands),2,commands)
+            self.assertEqual(sum('--info' in command for command in commands),1)
+            tools=[command[command.index('--vps-tool')+1] for command in commands if '--vps-tool' in command]
+            self.assertEqual(tools,['health-status'])
+            self.assertTrue(set(ns['_reads'])<={'/etc/os-release'},ns['_reads'])
+            for name in ['cpu_count','load','disk','sample_sleep','node']:self.assertEqual(ns['_resource_calls'][name],0)
+
+    def test_report_does_not_echo_untrusted_health_fields_or_environment(self):
+        secrets=['203.0.113.73','2001:db8::cafe','customer-private.example','private_entry_21f7','sk-diag-only-secret','secretPassword879','/private/customer/wp-config.php','DIAG_ENV_SECRET=hidden_value','LEAK_ESCAPE_SENTINEL']
+        poison=' '.join(secrets)+'\x1b[31m'
+        for field in ['name','summary','next_step','id','error','detail','errors','checked_at','limitations']:
+            with self.subTest(field=field):
+                payload=complete_health()
+                if field in ['name','summary','next_step','id']:
+                    payload['checks'][0][field]=poison
+                else:payload[field]=[poison] if field in ['errors','limitations'] else poison
+                with patch.dict(os.environ,{'DIAG_ENV_SECRET':'hidden_value'}):
+                    text,_,_=self.report(payload,tty=True,term='xterm')
+                for secret in secrets:self.assertNotIn(secret,text,(field,secret,text))
+                self.assertNotIn('\x1b',text)
+                self.assertNotIn('fixture name',text);self.assertNotIn('fixture summary',text);self.assertNotIn('fixture next step',text)
+
+    def test_report_does_not_echo_malicious_version_os_kernel_or_architecture(self):
+        secret='203.0.113.73 private.example private_entry sk-diag-token password_secret /private/customer/file DIAG_ENV_SECRET=secret \x1b[31m'
+        cases=[dict(command_outputs={'--info':'版本: '+secret}),
+               dict(files_extra={'/etc/os-release':'ID='+secret+'\nVERSION_ID='+secret+'\nPRETTY_NAME='+secret}),
+               dict(platform_values={'release':secret,'machine':secret}),
+               dict(platform_values={'release':OSError(secret),'machine':OSError(secret)})]
+        for case in cases:
+            text,status,_=self.report(**case)
+            self.assertNotEqual(status,0,text)
+            self.assertNotRegex(text,r'报告状态\s*[:：]?\s*ok\b')
+            for marker in ['203.0.113.73','private.example','private_entry','sk-diag-token','password_secret','/private/customer/file','DIAG_ENV_SECRET']:
+                self.assertNotIn(marker,text)
+            self.assertNotIn('\x1b',text)
+        # A malicious unused display name must not hide otherwise valid allowlisted OS metadata.
+        text,status,_=self.report(files_extra={'/etc/os-release':'ID=debian\nVERSION_ID=13\nPRETTY_NAME='+secret})
+        self.assertEqual(status,0,text);self.assertNotIn('private.example',text)
+        text,status,_=self.report(command_outputs={'--info':'版本: v2.1.1 (构建: 2026-10-15 10:00:00)\n面板地址: https://private.example/private_entry'})
+        self.assertEqual(status,0,text);self.assertIn('v2.1.1',text)
+        self.assertNotIn('private.example',text);self.assertNotIn('private_entry',text)
+
+    def test_report_missing_duplicate_invalid_or_malformed_checks_never_claim_ok(self):
+        fixtures=[]
+        missing=complete_health();missing['checks'].pop();fixtures.append(missing)
+        duplicate=complete_health();duplicate['checks'].append(copy.deepcopy(duplicate['checks'][0]));fixtures.append(duplicate)
+        unknown_id=complete_health();unknown_id['checks'][0]['id']='future_unknown_check';fixtures.append(unknown_id)
+        bad_status=complete_health();bad_status['checks'][0]['status']='healthy';fixtures.append(bad_status)
+        bad_item=complete_health();bad_item['checks'][0]=None;fixtures.append(bad_item)
+        fixtures.extend([{},[],dict(status='ok',checks=[]),dict(status='ok',checks={})])
+        for payload in fixtures:
+            text,status,_=self.report(payload)
+            self.assertNotEqual(status,0,text)
+            self.assertNotRegex(text,r'报告状态\s*[:：]?\s*ok\b')
+            self.assertRegex(text,r'报告状态\s*[:：]?\s*(failed|unknown)\b')
+            self.assertRegex(text,r'完整性\s*[:：]?\s*partial\b')
+            self.assertRegex(text,r'\bo\s+status\b')
+
+    def test_report_warning_unknown_and_inconsistent_summary_remain_nonzero(self):
+        for state in ['warning','unknown']:
+            for aggregate in [state,'ok']:
+                payload=complete_health();payload['status']=aggregate;payload['checks'][0]['status']=state
+                text,status,_=self.report(payload)
+                self.assertNotEqual(status,0,text)
+                self.assertNotRegex(text,r'报告状态\s*[:：]?\s*ok\b')
+                self.assertRegex(text,r'\bo\s+status\b')
+
+    def test_report_read_failures_have_fixed_guidance_and_no_upstream_error_text(self):
+        secret='SECRET_failure_203.0.113.73_token'
+        for output in [(23,secret,secret),secret,OSError(secret),'['*2000+']'*2000]:
+            text,status,_=self.report(command_outputs={'health-status':output})
+            self.assertNotEqual(status,0,text);self.assertNotIn(secret,text)
+            self.assertRegex(text,r'报告状态\s*[:：]?\s*failed\b')
+            self.assertRegex(text,r'\bo\s+status\b')
+            self.assertNotIn('Traceback',text)
+
+    def test_report_os_reader_bounds_reads_and_suppresses_file_errors(self):
+        namespace={}
+        with patch('sys.argv',['formatter','report','unused-fixture-binary','unused-config','']):
+            exec(compile(CODE.split('\nif view==',1)[0],'actual-report-definitions','exec'),namespace)
+        class Source(io.BytesIO):
+            def read(self,size=-1):
+                self_read_sizes.append(size)
+                return super().read(size)
+        for content,expected in [(b'ID=debian\nVERSION_ID=13\n','ID=debian\nVERSION_ID=13\n'),(b'x'*16385,None),(b'\xff',None)]:
+            self_read_sizes=[]
+            with patch('pathlib.Path.is_file',return_value=True),patch('pathlib.Path.open',return_value=Source(content)) as opened:
+                self.assertEqual(namespace['report_os_release'](),expected)
+                opened.assert_called_once_with('rb')
+            self.assertEqual(self_read_sizes,[16385])
+        with patch('pathlib.Path.is_file',return_value=True),patch('pathlib.Path.open',side_effect=OSError('SECRET_file_path')):
+            self.assertIsNone(namespace['report_os_release']())
+
+    def test_home_guidance_only_appears_for_service_or_version_anomalies(self):
+        normal,status,_=render('home')
+        self.assertEqual(status,0)
+        for command in ['o status','o report','o log']:self.assertNotIn(command,normal)
+        secret='SECRET_home_203.0.113.73_token'
+        for outputs in [{'systemctl':'failed'},{'systemctl':'inactive'},{'systemctl':(1,'',secret)},
+                        {'--info':(1,secret,secret)},{'--info':'版本: '+secret}]:
+            text,status,_=render('home',command_outputs=outputs)
+            self.assertEqual(status,0,text);self.assertNotIn(secret,text)
+            self.assertRegex(text,r'\bo\s+status\b')
+            self.assertNotIn('Traceback',text)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'),'selectors pipe integration requires native Linux')
+    def test_report_runner_native_linux_bounds_and_reaps_only_test_children(self):
+        definitions=CODE.split('\nif view==',1)[0];namespace={}
+        with patch('sys.argv',['formatter','report','unused-fixture-binary','unused-config','']):
+            exec(compile(definitions,'actual-report-definitions','exec'),namespace)
+        actual_popen=subprocess.Popen;children=[]
+        def spawn(*args,**kwargs):
+            self.assertEqual(args[0][0],sys.executable)
+            self.assertEqual(kwargs.get('stderr'),subprocess.DEVNULL)
+            self.assertFalse(kwargs.get('shell',False))
+            child=actual_popen(*args,**kwargs);children.append(child);return child
+        out,err=io.StringIO(),io.StringIO()
+        with patch('subprocess.Popen',spawn),contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
+            run=namespace['report_run']
+            self.assertEqual(run(sys.executable,'-c','print("fixture-report-ok")',timeout=2),'fixture-report-ok\n')
+            self.assertIsNone(run(sys.executable,'-c','import sys; sys.stderr.write("SECRET_TEST_STDERR"); sys.exit(7)',timeout=2))
+            self.assertIsNone(run(sys.executable,'-c','import sys; sys.stdout.write("x"*70000); sys.stdout.flush()',timeout=2))
+            self.assertIsNone(run(sys.executable,'-c','import time; time.sleep(30)',timeout=.1))
+        self.assertEqual(out.getvalue(),'');self.assertEqual(err.getvalue(),'')
+        self.assertEqual(len(children),4)
+        self.assertTrue(all(child.poll() is not None and child.stdout.closed for child in children))
+        print('NATIVE_REPORT_RUNNER_OK')
 
 
 if __name__=='__main__':unittest.main()

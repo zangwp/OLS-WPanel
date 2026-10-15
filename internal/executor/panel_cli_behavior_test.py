@@ -23,13 +23,26 @@ def quote(value):
     return "'" + str(value).replace("'", "'\\''") + "'"
 
 
-def presentation_source(width, views=None):
+def actual_color_source():
+    return 'color() {'+SOURCE.split('color() {',1)[1].split('\naudit_cli() {',1)[0]+'\n'
+
+
+STDOUT_TTY_FIXTURE='''
+[() {
+    if builtin test "$#" -eq 3 && builtin test "$1" = -t && builtin test "$2" = 1; then return 0; fi
+    builtin [ "$@"
+}
+'''
+
+
+def presentation_source(width, views=None, tty=False):
     """Use actual layout functions; only the Python interpreter and read payloads are fixtures."""
     helpers='text_block() {'+SOURCE.split('text_block() {',1)[1].split('\nrule() {',1)[0]
     helpers+='\nrule() {'+SOURCE.split('rule() {',1)[1].split('\npage() {',1)[0]
     helpers+='\npage() {'+SOURCE.split('page() {',1)[1].split('\npause_page() {',1)[0]
     helpers+='\npython3() { '+quote(pathlib.Path(sys.executable).as_posix())+' "$@"; }\n'
     helpers+='tput() { echo '+str(width)+'; }\nblue() { printf "%s\\n" "$*"; }\n'
+    if tty:helpers+=actual_color_source()+STDOUT_TTY_FIXTURE
     if views is not None:
         helpers+='read_view() { case "$1" in\n'
         for view,output in views.items():helpers+=quote(view)+') printf "%s" '+quote(output)+';;\n'
@@ -39,7 +52,7 @@ def presentation_source(width, views=None):
 
 @unittest.skipUnless(BASH, 'native Bash unavailable')
 class BashBehaviorTest(unittest.TestCase):
-    def fixture(self, body, dispatch=None, definitions=DEFINITIONS):
+    def fixture(self, body, dispatch=None, definitions=DEFINITIONS, env_extra=None):
         with tempfile.TemporaryDirectory() as directory:
             script = pathlib.Path(directory) / 'synthetic.sh'
             mocks = '''
@@ -61,6 +74,7 @@ pick() { [ "$index" -lt "${#choices[@]}" ] || return 1; choice="${choices[$index
 '''
             script.write_text(definitions + mocks + body + ('\ncase "${1:-}" in' + DISPATCH if dispatch else ''), encoding='utf-8', newline='\n')
             env = dict(os.environ, PATH='', TERM='dumb', NO_COLOR='1', BASH_ENV='')
+            env.update(env_extra or {})
             return subprocess.run([BASH, '--noprofile', '--norc', str(script), *([dispatch] if dispatch else [])], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15, env=env)
 
     def test_restart_and_info_do_not_hide_command_failure(self):
@@ -108,6 +122,10 @@ pick() { [ "$index" -lt "${#choices[@]}" ] || return 1; choice="${choices[$index
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(result.stdout.count('VIEW:home-menu'),3)
         self.assertIn('VIEW:health',result.stdout)
+        self.assertNotIn('VIEW:info',result.stdout)
+        result=self.fixture('read_view() { echo VIEW:$1; }\nchoices=(1 0)\nvps_menu\n')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.count('VIEW:info'),1)
         result=self.fixture('read_view() { echo VIEW:$1; }\nchoices=(5 0 6 0 0)\nperformance_menu\n')
         self.assertIn('VIEW:processes',result.stdout);self.assertIn('VIEW:health',result.stdout)
         self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
@@ -128,8 +146,29 @@ pick() { [ "$index" -lt "${#choices[@]}" ] || return 1; choice="${choices[$index
 
     def test_help_keeps_existing_commands_and_adds_only_readonly_shortcuts(self):
         result=self.fixture('',dispatch='help')
-        for command in ['o processes','o health','o ssh-confirm','o update','o system-update-status','o password','o unban','o swap','o advanced']:
+        for command in ['o processes','o health','o report','o ssh-confirm','o update','o system-update-status','o password','o unban','o swap','o advanced']:
             self.assertIn(command,result.stdout)
+
+    def test_report_shortcut_and_advanced_entry_remain_plain_and_readonly(self):
+        body=STDOUT_TTY_FIXTURE+actual_color_source()+'python3() { :; }\nread_view() { echo REPORT_BODY:$1; return 23; }\n'
+        result=self.fixture(body,dispatch='report',env_extra={'TERM':'xterm','NO_COLOR':''})
+        self.assertEqual(result.returncode,23,result.stderr)
+        self.assertEqual(result.stdout,'REPORT_BODY:report\n')
+        self.assertNotIn('\x1b',result.stdout)
+        self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
+        result=self.fixture('python3() { :; }\nread_view() { echo VIEW:$1; }\nchoices=(7 0)\nadvanced_menu\n')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.count('VIEW:report'),1)
+        for entry in ['1. 快捷命令帮助','2. 普通卸载','3. 完全卸载','4. 终端维护记录','5. 维护工具依赖','6. APT / dpkg 健康检查','7. 生成脱敏诊断摘要']:
+            self.assertIn(entry,result.stdout)
+        self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
+        missing=self.fixture(STDOUT_TTY_FIXTURE+actual_color_source(),dispatch='report',env_extra={'TERM':'xterm','NO_COLOR':''})
+        self.assertEqual(missing.returncode,1,missing.stderr)
+        self.assertIn('报告状态: failed',missing.stdout);self.assertIn('o status',missing.stdout)
+        self.assertNotIn('\x1b',missing.stdout)
+        for line in missing.stdout.splitlines():
+            cells=sum(0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in 'WF' else 1) for c in line)
+            self.assertLessEqual(cells,32,line)
 
     def test_actual_menu_layout_fits_narrow_and_wide_columns(self):
         from panel_cli_render_test import render
@@ -145,6 +184,20 @@ pick() { [ "$index" -lt "${#choices[@]}" ] || return 1; choice="${choices[$index
                     if line.startswith(('https://','http://')):continue
                     cells=sum(0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in 'WF' else 1) for c in line)
                     self.assertLessEqual(cells,width,(menu,width,line))
+
+    def test_actual_shell_color_requires_tty_and_obeys_no_color_and_dumb(self):
+        body=actual_color_source()+'blue 标题\ngreen 正常\nred 失败\ndim 正文\n'
+        # The subprocess stdout is a real pipe: TERM alone must not force escapes.
+        result=self.fixture(body,env_extra={'TERM':'xterm-256color','NO_COLOR':''})
+        self.assertEqual(result.returncode,0,result.stderr);self.assertNotIn('\x1b',result.stdout)
+        # Only the stdout TTY predicate is simulated; actual color functions and env gates execute in Bash.
+        result=self.fixture(STDOUT_TTY_FIXTURE+body,env_extra={'TERM':'xterm','NO_COLOR':''})
+        self.assertEqual(result.returncode,0,result.stderr)
+        for sequence in ['\x1b[1;36m标题','\x1b[32m正常','\x1b[31m失败']:self.assertIn(sequence,result.stdout)
+        self.assertNotIn('\x1b[2m',result.stdout)
+        for term,no_color in [('dumb',''),('xterm','1'),('xterm','0')]:
+            result=self.fixture(STDOUT_TTY_FIXTURE+body,env_extra={'TERM':term,'NO_COLOR':no_color})
+            self.assertEqual(result.returncode,0,result.stderr);self.assertNotIn('\x1b',result.stdout)
 
     def test_readonly_new_menus_never_execute_mutations(self):
         for body in ['choices=(4 5 0)\nnetwork_menu\n', 'choices=(3 4 0 0)\nperformance_menu\n', 'choices=(4 5 6 0)\nadvanced_menu\n', 'choices=(1 0)\nssh_page\n']:

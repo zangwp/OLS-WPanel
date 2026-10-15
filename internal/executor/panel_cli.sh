@@ -17,7 +17,7 @@ color() {
 }
 red() { color 31 "$*"; }
 green() { color 32 "$*"; }
-blue() { color '1;34' "$*"; }
+blue() { color '1;36' "$*"; }
 dim() { printf '%s\n' "$*"; }
 audit_cli() {
     local outcome=success
@@ -219,7 +219,7 @@ read_view() {
     columns=$(tput cols 2>/dev/null) || columns=72
     export OLS_CLI_WIDTH="${columns:-72}"
     python3 - "$1" "$BIN" "$CFG" "${2:-}" <<'PYVIEW'
-import datetime, ipaddress, json, os, pathlib, platform, re, shutil, subprocess, sys, time, unicodedata
+import datetime, ipaddress, json, os, pathlib, platform, re, selectors, shutil, subprocess, sys, time, unicodedata
 view, binary, cfg, value = sys.argv[1:]
 def run(*args, timeout=8):
     try:
@@ -230,8 +230,146 @@ def text(path):
     try:return pathlib.Path(path).read_text(errors='replace').strip()
     except OSError:return ''
 def safe(value):return ''.join(c for c in str(value) if c.isprintable() or c=='\n')
+
+HOME_RECOVERY='下一步：进入 7.面板管理 → 3.运行诊断，或执行 o status。'
+
+def panel_version(info):
+    if not isinstance(info,str) or len(info)>16384:return None
+    lines=[line for line in info.splitlines() if line.startswith('版本:')]
+    if len(lines)!=1:return None
+    number=r'(?:0|[1-9][0-9]{0,5})'
+    build=r'[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:?[0-9]{2})?'
+    match=re.fullmatch(r'版本:[ \t]+(v?'+number+r'\.'+number+r'\.'+number+r')(?:[ \t]+(?:linux/(?:amd64|arm64)|\(构建: '+build+r'\)))?',lines[0])
+    return 'v'+match[1].lstrip('v') if match else None
+
+def report_run(*args,timeout=16,limit=65536):
+    # Read stdout as it arrives, with a byte cap; never capture arbitrary stderr.
+    # Only the fixed --info and read-only health-status callers use this helper.
+    process=None
+    try:
+        process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+            env={'PATH':'/usr/bin:/bin:/usr/sbin:/sbin','LANG':'C','LC_ALL':'C','TERM':'dumb','NO_COLOR':'1'})
+        deadline=time.monotonic()+timeout;data=bytearray()
+        with selectors.DefaultSelector() as ready:
+            ready.register(process.stdout,selectors.EVENT_READ)
+            while True:
+                remaining=deadline-time.monotonic()
+                if remaining<=0:return None
+                for event,_ in ready.select(remaining):
+                    chunk=os.read(event.fileobj.fileno(),min(8192,limit+1-len(data)))
+                    if not chunk:
+                        status=process.wait(timeout=max(.01,deadline-time.monotonic()))
+                        return data.decode('utf-8') if status==0 else None
+                    data.extend(chunk)
+                    if len(data)>limit:return None
+    except (OSError,ValueError,UnicodeError,subprocess.SubprocessError):return None
+    finally:
+        if process is not None:
+            try:
+                if process.poll() is None:process.kill()
+                process.wait(timeout=1)
+            except (OSError,subprocess.SubprocessError):pass
+            if process.stdout is not None:process.stdout.close()
+
+def report_os_release():
+    try:
+        path=pathlib.Path('/etc/os-release')
+        if not path.is_file():return None
+        with path.open('rb') as source:data=source.read(16385)
+        return data.decode('utf-8') if len(data)<=16384 else None
+    except (OSError,UnicodeError):return None
+
+def report_system(raw):
+    if not isinstance(raw,str) or len(raw)>16384:return None
+    values={}
+    for line in raw.splitlines():
+        key,separator,value=line.partition('=')
+        if separator and key in ['ID','VERSION_ID']:
+            if key in values:return None
+            if len(value)>1 and value[0]==value[-1] and value[0] in ['"',"'"]:value=value[1:-1]
+            values[key]=value
+    if values.get('ID') not in ['debian','ubuntu'] or not re.fullmatch(r'(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,3})?',values.get('VERSION_ID','')):return None
+    return values['ID']+' '+values['VERSION_ID']
+
+def report_kernel(raw):
+    if not isinstance(raw,str) or len(raw)>160:return None
+    match=re.fullmatch(r'((?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3}))(?:[-+][A-Za-z0-9_.+~-]{1,128})?',raw)
+    return match[1] if match else None
+
+REPORT_CHECKS=[
+    ('service_panel','面板服务','o services'),('service_ols','OpenLiteSpeed','o services'),
+    ('service_mariadb','MariaDB','o services'),('service_redis','Redis','o services'),
+    ('service_fail2ban','Fail2ban','o services'),('service_nftables','nftables','o services'),
+    ('disk_space','磁盘空间','o disk'),('inodes','磁盘 inode','o disk'),
+    ('packages','软件包状态','o apt-check'),('default_route','默认路由','o network'),
+    ('dns_config','DNS 配置','o dns')]
+
+def redacted_report():
+    # Build output from approved scalars only. Free-form health names, summaries,
+    # next steps, timestamps and errors are deliberately never echoed.
+    version=panel_version(report_run(binary,'--info','--config',cfg,timeout=6))
+    system=report_system(report_os_release())
+    try:kernel=report_kernel(platform.release())
+    except (OSError,ValueError,TypeError):kernel=None
+    try:
+        machine=platform.machine()
+        architecture={'x86_64':'amd64','amd64':'amd64','aarch64':'arm64','arm64':'arm64'}.get(machine) if isinstance(machine,str) else None
+    except (OSError,ValueError,TypeError):architecture=None
+    metadata_complete=all([version,system,kernel,architecture])
+    allowed={item[0] for item in REPORT_CHECKS};states={key:'unknown' for key in allowed}
+    shape=False;upstream='unknown'
+    try:
+        raw=report_run(binary,'--vps-tool','health-status','--config',cfg,timeout=16)
+        data=json.loads(raw) if isinstance(raw,str) and len(raw)<=65536 else None
+        if isinstance(data,dict):
+            checks=data.get('checks');upstream=data.get('status')
+            shape=upstream in ['ok','warning','unknown'] and isinstance(checks,list) and len(checks)==len(allowed)
+            seen=set();duplicates=set()
+            for check in checks[:64] if isinstance(checks,list) else []:
+                if not isinstance(check,dict):shape=False;continue
+                key=check.get('id');state=check.get('status')
+                if not isinstance(key,str) or key not in allowed:shape=False;continue
+                if key in seen:duplicates.add(key);shape=False
+                seen.add(key)
+                if state not in ['ok','warning','unknown']:shape=False;state='unknown'
+                states[key]=state
+            for key in duplicates:states[key]='unknown'
+            if seen!=allowed:shape=False
+    except (ValueError,TypeError,KeyError,RecursionError):shape=False
+    partial=not shape or not metadata_complete or upstream=='unknown' or 'unknown' in states.values()
+    if not shape:status='failed'
+    elif upstream=='warning' or 'warning' in states.values():status='warning'
+    elif partial:status='unknown'
+    else:status='ok'
+    def line(value):
+        # No styled()/row()/note(): reports stay plain even on an ANSI TTY.
+        for part in wrapped(value,WIDTH):print(part)
+    print('BEGIN OLS WPANEL REPORT')
+    line('报告版本: 1')
+    line('面板版本: '+(version or 'unknown'))
+    line('系统: '+(system or 'unknown'))
+    line('内核: '+(kernel or 'unknown'))
+    line('架构: '+(architecture or 'unknown'))
+    line('报告状态: '+status)
+    line('完整性: '+('partial' if partial else 'complete'))
+    print('')
+    for key,name,next_step in REPORT_CHECKS:
+        line(name+': '+states[key])
+        if states[key]!='ok':line('后续检查: '+next_step)
+    print('')
+    line('范围: 本机只读白名单摘要；不代表网站业务或公网入站可用。')
+    line('不包含账号、域名、IP、路径、密钥、日志或上游自由文本。')
+    if status!='ok':line(HOME_RECOVERY)
+    print('END OLS WPANEL REPORT')
+    return 0 if status=='ok' else 1
+
 try: WIDTH=max(32,min(88,int(os.environ.get('OLS_CLI_WIDTH','72'))))
 except ValueError: WIDTH=72
+COLOR=sys.stdout.isatty() and os.environ.get('TERM','dumb')!='dumb' and not os.environ.get('NO_COLOR','')
+STYLES={'accent':'1;36','label':'36','ok':'32','warning':'33','error':'31'}
+
+def styled(s,role=None):
+    return '\033['+STYLES[role]+'m'+s+'\033[0m' if COLOR and role in STYLES else s
 def cells(s):return sum(0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in 'WF' else 1) for c in s)
 def wrapped(s,width):
     lines=[];line=''
@@ -248,16 +386,20 @@ def wrapped(s,width):
                 line+=c
     if line or not lines:lines.append(line)
     return lines
-def note(s):
-    for line in wrapped(s,WIDTH-4):print('  '+line)
-def section(title):print('\n  '+title+'\n  '+ '─'*min(WIDTH-4,52)+'\n')
-def row(label,value):
+def note(s,role=None):
+    for line in wrapped(s,WIDTH-4):print('  '+styled(line,role))
+def section(title):print('\n  '+styled(title,'accent')+'\n  '+styled('─'*min(WIDTH-4,52),'label')+'\n')
+def row(label,value,role=None):
     label=safe(label).replace('\n',' ')
     value=value if value is not None and value!='' else '未检测到'
     col=16 if WIDTH>=52 else 12
     if WIDTH<52 or cells(label)>col:note(label);prefix='    '
     else:prefix='  '+label+' '*(col-cells(label))+'  '
-    for i,line in enumerate(wrapped(str(value),max(12,WIDTH-cells(prefix)-2))):print((prefix if i==0 else ' '*cells(prefix))+line)
+    for i,line in enumerate(wrapped(str(value),max(12,WIDTH-cells(prefix)-2))):print((prefix if i==0 else ' '*cells(prefix))+styled(line,role))
+
+def menu_item(title):
+    key,separator,name=title.partition('. ')
+    return styled(key+separator,'accent')+name
 def dns_rows(values):
     for family in [4,6]:
         selected=[]
@@ -327,13 +469,6 @@ def cpu_usage():
     a=ticks();time.sleep(.15);b=ticks()
     return f'{100*(1-(b[1]-a[1])/(b[0]-a[0])):.1f}%' if a and b and b[0]>a[0] else None
 def sampled():row('采样时间',datetime.datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %z'))
-def uptime():
-    try:
-        seconds=int(float(text('/proc/uptime').split()[0]));return f'{seconds//86400} 天 {seconds%86400//3600} 小时 {seconds%3600//60} 分钟'
-    except (ValueError,IndexError):return None
-def distribution():
-    match=re.search(r'(?m)^PRETTY_NAME=[\"\']?([^\"\'\n]+)',text('/etc/os-release'))
-    return match.group(1) if match else None
 def percent(value):
     return f'{value:.1f}%' if isinstance(value,(int,float)) and not isinstance(value,bool) and value>=0 and value<float('inf') else '未知'
 def process_rows(items):
@@ -346,31 +481,28 @@ def process_rows(items):
         note('CPU '+percent(item.get('cpu_percent'))+' · 内存 '+percent(item.get('memory_percent'))+' · RSS '+rss)
 
 if view=='home':
-    row('主机 / 系统',platform.node()+' · '+str(distribution() or '发行版未知'))
-    row('运行时长',uptime())
     info=run(binary,'--info','--config',cfg) or ''
-    version=re.search(r'(?m)^版本:\s+(\S+)',info)
+    version=panel_version(info)
     state=run('systemctl','show','ols-wpanel','--property=ActiveState','--value')
-    row('面板版本 / 服务',(version.group(1) if version else '版本未读取到')+' · '+{'active':'[正常] 运行中','inactive':'[未运行]','failed':'[异常] 启动失败','activating':'正在启动','deactivating':'正在停止'}.get(state,'[未知] 请用 o status 检查'))
-    row('CPU 短时采样',str(cpu_usage() or '未知')+' · '+str(os.cpu_count() or '?')+' 核')
-    memory_rows(include_swap=False);disk_row();sampled()
+    role='ok' if state=='active' and version else ('error' if state=='failed' else 'warning')
+    row('面板版本 / 服务',(version or '版本未读取到')+' · '+{'active':'[正常] 运行中','inactive':'[未运行]','failed':'[异常] 启动失败','activating':'正在启动','deactivating':'正在停止'}.get(state,'[未知] 服务状态未确认'),role)
+    if state!='active' or not version:note(HOME_RECOVERY,'warning')
+elif view=='report':
+    sys.exit(redacted_report())
 elif view=='home-menu':
-    items=[('1. 系统信息','资源与地址'),('2. 系统软件更新','更新与任务进度'),('3. 系统清理','缓存与过期日志'),('4. 网络设置','DNS / IP / SSH'),('5. 系统设置','时间 / 语言 / Swap'),('6. 性能状态','资源、进程与服务'),('7. 面板管理','版本、账号与排障'),('8. 帮助 / 高级操作','命令、记录与卸载')]
+    items=['1. 系统信息','2. 系统软件更新','3. 系统清理','4. 网络设置','5. 系统设置','6. 性能状态','7. 面板管理','8. 帮助 / 高级操作']
     for offset in range(0,8,2):
-        if offset in [0,6]:print('');note('VPS 维护' if offset==0 else '面板与帮助')
+        if offset in [0,6]:print('');note('VPS 维护' if offset==0 else '面板与帮助','accent')
         print('')
         if WIDTH>=68:
             col=(WIDTH-6)//2
-            for position in [0,1]:
-                left,right=items[offset][position],items[offset+1][position]
-                left_lines,right_lines=wrapped(left,col),wrapped(right,col)
-                for index in range(max(len(left_lines),len(right_lines))):
-                    a=left_lines[index] if index<len(left_lines) else ''
-                    b=right_lines[index] if index<len(right_lines) else ''
-                    print('  '+a+' '*(col-cells(a)+2)+b)
+            left,right=items[offset:offset+2]
+            print('  '+menu_item(left)+' '*(col-cells(left)+2)+menu_item(right))
         else:
-            for title,description in items[offset:offset+2]:note(title);note('  '+description)
-    print('');note('r. 刷新首页   h. 快速体检');note('0. 退出')
+            for index,title in enumerate(items[offset:offset+2]):
+                if index:print('')
+                print('  '+menu_item(title))
+    print('');print('  '+menu_item('r. 刷新首页')+'   '+menu_item('h. 快速体检'));print('  '+menu_item('0. 退出'))
 elif view=='login-addresses':
     try:
         p=json.loads(text(cfg))['panel']
@@ -383,7 +515,8 @@ elif view=='login-addresses':
                 state=json.loads(text(str(pathlib.Path(p['tls_cert_path']).parent/'panel-tls-active.json')))
                 if re.fullmatch(r'[A-Za-z0-9.-]+',state.get('domain','')):domain=state['domain']
             except (ValueError,TypeError):pass
-        if domain:note('域名登录地址');print(f'{scheme}://{domain}:{port}/{suffix}')
+        print('');note('面板登录地址 · 整行复制','accent');print('')
+        if domain:note('域名登录地址','label');print(f'{scheme}://{domain}:{port}/{suffix}');print('')
         count=0
         for family in [4,6]:
             for address in interfaces(family):
@@ -391,7 +524,7 @@ elif view=='login-addresses':
                 except ValueError:continue
                 if ip.is_loopback or ip.is_link_local:continue
                 host='['+address+']' if family==6 else address
-                note(f'网卡 IPv{family} 登录地址');print(f'{scheme}://{host}:{port}/{suffix}');count+=1
+                note(f'网卡 IPv{family} 登录地址','label');print(f'{scheme}://{host}:{port}/{suffix}');print('');count+=1
         if not count and not domain:note('未读取到网卡地址；使用服务器公网地址与端口 '+str(port)+' 访问。')
         note('网卡地址可能需 NAT 映射或放行入站；出站检测：o network。')
     except (ValueError,TypeError,KeyError):note('登录地址读取失败，请运行 o info / o status 检查。');sys.exit(1)
@@ -787,6 +920,14 @@ elif view=='clean-result':
         if status=='0':note('[命令完成] 缓存清理与过期归档日志清理已执行；容量以实际统计为准。')
     except ValueError:note('[统计未知] 无法读取清理结果。');sys.exit(1)
 PYVIEW
+}
+diagnostic_report() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' 'BEGIN OLS WPANEL REPORT' '报告版本: 1' '报告状态: failed' '完整性: partial' \
+            '下一步：进入 7.面板管理' '→ 3.运行诊断，或执行 o status。' 'END OLS WPANEL REPORT'
+        return 1
+    fi
+    read_view report
 }
 vps_info() { read_view info; }
 need_root() { [ "${EUID:-$(id -u)}" -eq 0 ] || { red "需要 root 权限"; return 1; }; }
@@ -1297,6 +1438,7 @@ panel_help() {
     text_block "o history        终端维护操作记录"
     text_block "o processes      高占用进程（只读短时采样）"
     text_block "o health         快速体检（只读，不自动修复）"
+    text_block "o report         生成脱敏诊断摘要（纯文本，只读）"
     text_block "o ssh            SSH 双端口过渡与超时恢复"
     text_block "o ssh-confirm <令牌>  在新端口 SSH 连接中确认"
     dim "项目: https://github.com/zangwp/OLS-WPanel"
@@ -1323,21 +1465,20 @@ advanced_menu() {
     local choice=""
     while true; do
         page "帮助与高级操作" "卸载前先查看删除范围；完全卸载还会要求专门确认，备份另行选择。"
-        text_block $'1. 快捷命令帮助\n4. 终端维护记录\n5. 维护工具依赖\n6. APT / dpkg 健康检查\n\n卸载操作（请先核对范围）\n2. 普通卸载\n   保留网站、数据库和共享软件\n3. 完全卸载\n   删除网站、数据库、面板及相关运行环境\n\n0. 返回'
+        text_block $'1. 快捷命令帮助\n4. 终端维护记录\n5. 维护工具依赖\n6. APT / dpkg 健康检查\n7. 生成脱敏诊断摘要\n\n卸载操作（请先核对范围）\n2. 普通卸载\n   保留网站、数据库和共享软件\n3. 完全卸载\n   删除网站、数据库、面板及相关运行环境\n\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 1) page "命令帮助"; panel_help;;
           2) uninstall_panel --uninstall; return;; 3) uninstall_panel --purge; return;;
           4) page "终端维护记录"; read_view history;; 5) page "依赖检查"; read_view dependencies;;
-          6) page "APT / dpkg 健康检查"; read_view apt-health;; *) echo "无效选项";;
+          6) page "APT / dpkg 健康检查"; read_view apt-health;;
+          7) diagnostic_report;; *) echo "无效选项";;
         esac
         pause_page
     done
 }
 panel_summary() {
-        read_view home || red "首页状态未完整读取，请刷新或运行 o status。"
-        echo ""
-        text_block "面板登录地址（整行复制）"
+        read_view home || red "下一步：进入 7.面板管理 → 3.运行诊断，或执行 o status。"
         read_view login-addresses
 }
 network_menu() {
@@ -1424,6 +1565,10 @@ case "${1:-}" in
     history) page "终端维护记录"; read_view history ;;
     processes) page "高占用进程列表" "只读短时采样；不会终止进程。"; read_view processes ;;
     health) page "快速体检" "只读检查，不自动修复。"; read_view health ;;
+    report)
+        if [ "$#" -ne 1 ]; then printf '%s\n' '用法: o report'; exit 2; fi
+        diagnostic_report
+        ;;
     ssh) ssh_page ;;
     ssh-confirm) ssh_confirm "${2:-}" ;;
     restart)
