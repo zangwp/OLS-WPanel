@@ -23,7 +23,7 @@ func TestMonitoringRetentionKeepsBoundaryAndRetriesAfterDatabaseFailure(t *testi
 	start := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	var retention housekeeping.Cleanup
 	// The first attempt fails because the table is not ready. The next ordinary
-	// collection tick must retry instead of postponing retention for an hour.
+	// collection tick must retry instead of postponing retention for a full interval.
 	cleanupDue(&retention, start)
 	if _, err := db.Exec(`CREATE TABLE monitoring_metrics (id INTEGER PRIMARY KEY, recorded_at DATETIME NOT NULL)`); err != nil {
 		t.Fatal(err)
@@ -39,9 +39,9 @@ func TestMonitoringRetentionKeepsBoundaryAndRetriesAfterDatabaseFailure(t *testi
 	assertMetricCount(t, db, 0, 0)
 	assertMetricCount(t, db, 1, 1)
 	assertMetricCount(t, db, 2, 1)
-	cleanupDue(&retention, retry.Add(59*time.Minute))
+	cleanupDue(&retention, retry.Add(29*time.Minute))
 	assertMetricCount(t, db, 1, 1)
-	cleanupDue(&retention, retry.Add(time.Hour))
+	cleanupDue(&retention, retry.Add(30*time.Minute))
 	assertMetricCount(t, db, 1, 0)
 	assertMetricCount(t, db, 2, 1)
 }

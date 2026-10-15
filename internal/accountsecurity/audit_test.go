@@ -362,7 +362,7 @@ func TestAuditQueuedNotificationExpiresBeforeDelivery(t *testing.T) {
 	if len(s.queue) != 2 {
 		t.Fatalf("expected both valid events to be queued, got %d", len(s.queue))
 	}
-	// The first event crosses the cutoff while queued, before hourly cleanup.
+	// The first event crosses the cutoff while queued, before periodic cleanup.
 	now = now.Add(time.Millisecond)
 	for len(s.queue) > 0 {
 		s.deliver(<-s.queue)

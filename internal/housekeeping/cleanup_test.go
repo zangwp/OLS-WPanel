@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestCleanupKeepsHourlyCadenceAndDoesNotCatchUp(t *testing.T) {
+func TestCleanupKeepsHalfHourlyCadenceAndDoesNotCatchUp(t *testing.T) {
 	var schedule Cleanup
 	start := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	calls := 0
@@ -16,8 +16,8 @@ func TestCleanupKeepsHourlyCadenceAndDoesNotCatchUp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if calls != 24 {
-		t.Fatalf("daily sweeps = %d, want 24 while worker still ticks every minute", calls)
+	if calls != 48 {
+		t.Fatalf("daily sweeps = %d, want 48 while worker still ticks every minute", calls)
 	}
 	later := start.Add(72 * time.Hour)
 	if err := schedule.Run(later, clean); err != nil {
@@ -26,7 +26,7 @@ func TestCleanupKeepsHourlyCadenceAndDoesNotCatchUp(t *testing.T) {
 	if err := schedule.Run(later.Add(time.Minute), clean); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 25 {
+	if calls != 49 {
 		t.Fatalf("delayed worker replayed missed sweeps: %d", calls)
 	}
 }
@@ -43,13 +43,13 @@ func TestCleanupRetriesFailureOnNextWorkerTick(t *testing.T) {
 	if err := schedule.Run(start.Add(time.Minute), clean); err != nil {
 		t.Fatal(err)
 	}
-	if err := schedule.Run(start.Add(time.Hour), clean); err != nil {
+	if err := schedule.Run(start.Add(30*time.Minute), clean); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
 		t.Fatalf("successful retry did not establish its own interval: %d", calls)
 	}
-	if err := schedule.Run(start.Add(time.Hour+time.Minute), clean); err != nil {
+	if err := schedule.Run(start.Add(31*time.Minute), clean); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
