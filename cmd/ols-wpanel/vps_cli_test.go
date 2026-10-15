@@ -4,7 +4,23 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/zangwp/OLS-WPanel/internal/executor"
 )
+
+func TestVPSDiagnosticCommandsAreReadOnlyAndRejectArguments(t *testing.T) {
+	for _, action := range []string{"process-status", "health-status"} {
+		if vpsCLIMutates(action) || !executor.IsVPSMaintenanceCLI(action) {
+			t.Fatalf("diagnostic action must use the read-only maintenance path: %s", action)
+		}
+		if err := executor.ValidateVPSMaintenanceCLI(action, "", nil); err != nil {
+			t.Fatalf("read-only inspection rejected: %s: %v", action, err)
+		}
+		if err := executor.ValidateVPSMaintenanceCLI(action, "--fix", nil); err == nil {
+			t.Fatalf("diagnostic action accepted extra arguments: %s", action)
+		}
+	}
+}
 
 func TestVPSCLIAuditDistinguishesHostFailureFromOutputFailure(t *testing.T) {
 	for _, outcome := range []string{"success", "pending", "started"} {

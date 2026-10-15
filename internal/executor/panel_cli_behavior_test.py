@@ -7,6 +7,8 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import sys
+import unicodedata
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +21,20 @@ UPDATE_CODE=SOURCE.split("<<'PYUPDATE'\n",1)[1].split('\nPYUPDATE',1)[0]
 
 def quote(value):
     return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def presentation_source(width, views=None):
+    """Use actual layout functions; only the Python interpreter and read payloads are fixtures."""
+    helpers='text_block() {'+SOURCE.split('text_block() {',1)[1].split('\nrule() {',1)[0]
+    helpers+='\nrule() {'+SOURCE.split('rule() {',1)[1].split('\npage() {',1)[0]
+    helpers+='\npage() {'+SOURCE.split('page() {',1)[1].split('\npause_page() {',1)[0]
+    helpers+='\npython3() { '+quote(pathlib.Path(sys.executable).as_posix())+' "$@"; }\n'
+    helpers+='tput() { echo '+str(width)+'; }\nblue() { printf "%s\\n" "$*"; }\n'
+    if views is not None:
+        helpers+='read_view() { case "$1" in\n'
+        for view,output in views.items():helpers+=quote(view)+') printf "%s" '+quote(output)+';;\n'
+        helpers+='*) echo "[fixture] 状态读取";; esac; }\n'
+    return helpers
 
 
 @unittest.skipUnless(BASH, 'native Bash unavailable')
@@ -65,10 +81,70 @@ pick() { [ "$index" -lt "${#choices[@]}" ] || return 1; choice="${choices[$index
         self.assertNotIn('设置已完成', result.stdout)
 
     def test_background_update_does_not_report_completion(self):
-        result = self.fixture('synthetic_binary() { echo TASK_STARTED; }\nchoices=(1 0)\nupdates_page\n')
+        result = self.fixture('synthetic_binary() { echo TASK_STARTED; }\nread_view() { echo VIEW:$1; }\nchoices=(1 0 0)\nupdates_page\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('后台更新任务已启动', result.stdout)
         self.assertNotIn('操作已完成', result.stdout)
+        self.assertIn('VIEW:update-status',result.stdout)
+
+    def test_failed_update_never_opens_a_success_progress_flow(self):
+        result=self.fixture('read_view() { echo VIEW:$1; }\nchoices=(1 0)\nupdates_page\n')
+        self.assertIn('未成功启动',result.stdout)
+        self.assertNotIn('后台更新任务已启动',result.stdout)
+        self.assertNotIn('VIEW:update-status',result.stdout)
+
+    def test_new_readonly_commands_dispatch_and_preserve_read_failure(self):
+        for command in ['processes','health']:
+            result=self.fixture('read_view() { echo VIEW:$1; return 23; }\n',dispatch=command)
+            self.assertEqual(result.returncode,23)
+            self.assertIn('VIEW:'+command,result.stdout)
+            self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
+        result=self.fixture('read_view() { echo VIEW:$1; return 23; }\nchoices=(1 0)\nreadonly_page processes test\n')
+        self.assertEqual(result.stdout.count('VIEW:processes'),2)
+        self.assertIn('不能据此判断正常',result.stdout)
+
+    def test_home_refresh_health_and_performance_process_entries_only_read(self):
+        result=self.fixture('read_view() { echo VIEW:$1; }\nchoices=(r h 0 0)\nvps_menu\n')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.count('VIEW:home-menu'),3)
+        self.assertIn('VIEW:health',result.stdout)
+        result=self.fixture('read_view() { echo VIEW:$1; }\nchoices=(5 0 6 0 0)\nperformance_menu\n')
+        self.assertIn('VIEW:processes',result.stdout);self.assertIn('VIEW:health',result.stdout)
+        self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
+
+    def test_clean_partial_failure_still_reads_after_state_without_false_success(self):
+        body='read_view() { case "$1" in clean-bytes) echo 1024;; clean-result) echo RESULT:$2;; *) echo VIEW:$1;; esac; }\nchoices=(1 0)\nclean_page\n'
+        result=self.fixture(body)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('RESULT:1024:1024:23',result.stdout)
+        self.assertEqual(result.stdout.count('VIEW:clean'),3)
+        self.assertNotIn('GREEN:',result.stdout)
+
+    def test_account_and_unban_confirmation_describe_actual_scope(self):
+        result=self.fixture('confirm_vps() { printf "CONFIRM:%s\\n" "$*"; return 1; }\nchoices=(6 7 0)\npanel_menu\n')
+        for expected in ['Basic Auth','两层用户名','WordPress','含网站与 SSH 防护','云安全组']:
+            self.assertIn(expected,result.stdout)
+        self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
+
+    def test_help_keeps_existing_commands_and_adds_only_readonly_shortcuts(self):
+        result=self.fixture('',dispatch='help')
+        for command in ['o processes','o health','o ssh-confirm','o update','o system-update-status','o password','o unban','o swap','o advanced']:
+            self.assertIn(command,result.stdout)
+
+    def test_actual_menu_layout_fits_narrow_and_wide_columns(self):
+        from panel_cli_render_test import render
+        for width in [40,72]:
+            views={view:render(view,width)[0] for view in ['home','login-addresses','home-menu']}
+            menus=[('vps_menu','choices=(0)'),('network_menu','choices=(0)'),('system_menu','choices=(0)'),('performance_menu','choices=(0)'),('updates_page','choices=(0)'),('clean_page','choices=(0)'),('panel_menu','choices=(0)'),('advanced_menu','choices=(0)')]
+            for menu,choices in menus:
+                result=self.fixture(presentation_source(width,views)+choices+'\n'+menu+'\n')
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertNotIn('\x1b',result.stdout)
+                self.assertNotIn('SYNTHETIC_FAILURE',result.stderr)
+                for line in result.stdout.splitlines():
+                    if line.startswith(('https://','http://')):continue
+                    cells=sum(0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in 'WF' else 1) for c in line)
+                    self.assertLessEqual(cells,width,(menu,width,line))
 
     def test_readonly_new_menus_never_execute_mutations(self):
         for body in ['choices=(4 5 0)\nnetwork_menu\n', 'choices=(3 4 0 0)\nperformance_menu\n', 'choices=(4 5 6 0)\nadvanced_menu\n', 'choices=(1 0)\nssh_page\n']:

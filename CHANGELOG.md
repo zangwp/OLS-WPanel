@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.1.0 — 2026-10-15
+
+- Refreshes the terminal `o` home and maintenance pages with a local resource summary, consistent width and Chinese-label alignment, clearer action descriptions, and complete copyable login URLs. Preserves menu numbers and existing shortcut commands.
+- Adds `o processes` with bounded, read-only short-interval CPU and resident-memory rankings. Handles disappearing processes and incomplete observations without exposing command lines or environment variables.
+- Adds `o health` to summarize core services, disk/inode capacity, package state and local route/DNS configuration, with explicit unknown states and suggested next steps. Checks do not apply repairs or initialize the database.
+- Opens the system-update progress view after starting a background update. Clarifies cleanup measurements, settings effects, SSH confirmation steps, credential-reset scope and maintenance-history outcomes.
+
+Upgrade notes: no new dependency or database migration. Existing website, backup, SSH, firewall and signed-update behavior is preserved. Process CPU is per core and may exceed 100%; health checks describe local observations, not a public reachability guarantee.
+
 ## v2.0.14 — 2026-10-15
 
 - Rejects redirects from managed WordPress cron requests instead of recording an unexecuted job as successful. Daily backup schedules keep their local calendar time across daylight-saving transitions.

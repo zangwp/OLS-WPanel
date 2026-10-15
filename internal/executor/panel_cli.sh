@@ -18,7 +18,7 @@ color() {
 red() { color 31 "$*"; }
 green() { color 32 "$*"; }
 blue() { color '1;34' "$*"; }
-dim() { color 2 "$*"; }
+dim() { printf '%s\n' "$*"; }
 audit_cli() {
     local outcome=success
     [ "$2" -eq 0 ] || outcome=failed
@@ -106,11 +106,11 @@ diag() {
         green "✓ 二进制: $BIN"
     elif [ -f "$BIN" ]; then
         red "✗ 二进制无执行权限: $BIN"
-        echo "   → 修复: chmod +x $BIN"
+        text_block " → 修复: chmod +x $BIN"
         issues=$((issues+1))
     else
         red "✗ 二进制不存在: $BIN"
-        echo "   → 面板可能未安装或安装不完整，请重新运行 install.sh"
+        text_block " → 面板可能未安装或安装不完整，请重新运行 install.sh"
         issues=$((issues+1))
         return $issues
     fi
@@ -129,12 +129,12 @@ PYDIAG
             config_ready=1
         else
             red "✗ 配置文件 JSON 格式错误: $CFG"
-            echo "   → 修复: 检查文件内容或从备份恢复"
+            text_block " → 修复: 检查文件内容或从备份恢复"
             issues=$((issues+1))
         fi
     else
         red "✗ 配置文件不存在: $CFG"
-        echo "   → 面板可能未安装，请重新运行 install.sh"
+        text_block " → 面板可能未安装，请重新运行 install.sh"
         issues=$((issues+1))
         return $issues
     fi
@@ -150,7 +150,7 @@ PYDB
         green "✓ 数据库: $db"
     elif [ -n "$db" ]; then
         red "✗ 数据库文件不存在: $db"
-        echo "   → 数据库文件丢失，检查磁盘空间或从备份恢复"
+        text_block " → 数据库文件丢失，检查磁盘空间或从备份恢复"
         issues=$((issues+1))
     else
         red "✗ 配置中未能读取数据库路径"
@@ -163,7 +163,7 @@ PYDB
         green "✓ systemd 服务文件: /etc/systemd/system/${SVC}.service"
     else
         red "✗ systemd 服务文件缺失"
-        echo "   → 修复: 重新运行 install.sh"
+        text_block " → 修复: 重新运行 install.sh"
         issues=$((issues+1))
     fi
 
@@ -235,11 +235,17 @@ except ValueError: WIDTH=72
 def cells(s):return sum(0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in 'WF' else 1) for c in s)
 def wrapped(s,width):
     lines=[];line=''
-    for c in safe(s):
-        if c=='\n' or cells(line+c)>width:
-            lines.append(line);line=''
-            if c=='\n':continue
-        line+=c
+    for token in re.findall(r'\n|[ ]+|[\x21-\x7e]+|[^\x00-\x7f]',safe(s)):
+        if token=='\n':lines.append(line.rstrip());line='';continue
+        if cells(token)<=width:
+            if line and cells(line+token)>width:
+                lines.append(line.rstrip());line=''
+                if token.isspace():continue
+            line+=token
+        else:
+            for c in token:
+                if cells(line+c)>width:lines.append(line.rstrip());line=''
+                line+=c
     if line or not lines:lines.append(line)
     return lines
 def note(s):
@@ -249,7 +255,7 @@ def row(label,value):
     label=safe(label).replace('\n',' ')
     value=value if value is not None and value!='' else '未检测到'
     col=16 if WIDTH>=52 else 12
-    if cells(label)>col:note(label);prefix='    '
+    if WIDTH<52 or cells(label)>col:note(label);prefix='    '
     else:prefix='  '+label+' '*(col-cells(label))+'  '
     for i,line in enumerate(wrapped(str(value),max(12,WIDTH-cells(prefix)-2))):print((prefix if i==0 else ' '*cells(prefix))+line)
 def dns_rows(values):
@@ -275,10 +281,17 @@ def dns_current(d):
     dns_rows(d.get('current',[]))
     row('读取来源',d.get('current_source') or '来源未知')
     note('地址按配置顺序显示；不是逐次查询使用记录。')
-def memory_rows():
+def memory_rows(include_swap=True):
     m={k:int(v)*1024 for k,v in re.findall(r'(?m)^(\w+):\s+(\d+) kB',text('/proc/meminfo'))}
-    row('内存',usage(m.get('MemTotal',0)-m.get('MemAvailable',0),m.get('MemTotal',0)))
-    row('Swap',usage(m.get('SwapTotal',0)-m.get('SwapFree',0),m.get('SwapTotal',0)) if m.get('SwapTotal') else '未配置')
+    known=m.get('MemTotal',0)>0 and 'MemAvailable' in m and m['MemAvailable']<=m['MemTotal']
+    row('内存',usage(m['MemTotal']-m['MemAvailable'],m['MemTotal']) if known else '未知：内存数据未完整读取')
+    if include_swap:
+        known='SwapTotal' in m and 'SwapFree' in m and m['SwapFree']<=m['SwapTotal']
+        row('Swap',(usage(m['SwapTotal']-m['SwapFree'],m['SwapTotal']) if m['SwapTotal'] else '未配置') if known else '未知：Swap 数据未完整读取')
+def disk_row():
+    try:
+        disk=shutil.disk_usage('/');row('系统盘',usage(disk.used,disk.total))
+    except OSError:row('系统盘','未知：空间读取失败')
 def size(n):
     n=float(n)
     for unit in ['B','KiB','MiB','GiB','TiB']:
@@ -313,8 +326,52 @@ def cpu_usage():
         except (ValueError,IndexError):return None
     a=ticks();time.sleep(.15);b=ticks()
     return f'{100*(1-(b[1]-a[1])/(b[0]-a[0])):.1f}%' if a and b and b[0]>a[0] else None
+def sampled():row('采样时间',datetime.datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %z'))
+def uptime():
+    try:
+        seconds=int(float(text('/proc/uptime').split()[0]));return f'{seconds//86400} 天 {seconds%86400//3600} 小时 {seconds%3600//60} 分钟'
+    except (ValueError,IndexError):return None
+def distribution():
+    match=re.search(r'(?m)^PRETTY_NAME=[\"\']?([^\"\'\n]+)',text('/etc/os-release'))
+    return match.group(1) if match else None
+def percent(value):
+    return f'{value:.1f}%' if isinstance(value,(int,float)) and not isinstance(value,bool) and value>=0 and value<float('inf') else '未知'
+def process_rows(items):
+    if not isinstance(items,list):raise ValueError('进程列表格式无效')
+    if not items:note('未读取到可显示的进程；不能据此判定服务器空闲。')
+    for item in items:
+        if not isinstance(item,dict):raise ValueError('进程记录格式无效')
+        row('PID '+str(item.get('pid','?')),item.get('name') or '名称未读取')
+        rss=item.get('rss_bytes');rss=size(rss) if isinstance(rss,(int,float)) and rss>=0 else '未知'
+        note('CPU '+percent(item.get('cpu_percent'))+' · 内存 '+percent(item.get('memory_percent'))+' · RSS '+rss)
 
-if view=='login-addresses':
+if view=='home':
+    row('主机 / 系统',platform.node()+' · '+str(distribution() or '发行版未知'))
+    row('运行时长',uptime())
+    info=run(binary,'--info','--config',cfg) or ''
+    version=re.search(r'(?m)^版本:\s+(\S+)',info)
+    state=run('systemctl','show','ols-wpanel','--property=ActiveState','--value')
+    row('面板版本 / 服务',(version.group(1) if version else '版本未读取到')+' · '+{'active':'[正常] 运行中','inactive':'[未运行]','failed':'[异常] 启动失败','activating':'正在启动','deactivating':'正在停止'}.get(state,'[未知] 请用 o status 检查'))
+    row('CPU 短时采样',str(cpu_usage() or '未知')+' · '+str(os.cpu_count() or '?')+' 核')
+    memory_rows(include_swap=False);disk_row();sampled()
+elif view=='home-menu':
+    items=[('1. 系统信息','资源与地址'),('2. 系统软件更新','更新与任务进度'),('3. 系统清理','缓存与过期日志'),('4. 网络设置','DNS / IP / SSH'),('5. 系统设置','时间 / 语言 / Swap'),('6. 性能状态','资源、进程与服务'),('7. 面板管理','版本、账号与排障'),('8. 帮助 / 高级操作','命令、记录与卸载')]
+    for offset in range(0,8,2):
+        if offset in [0,6]:print('');note('VPS 维护' if offset==0 else '面板与帮助')
+        print('')
+        if WIDTH>=68:
+            col=(WIDTH-6)//2
+            for position in [0,1]:
+                left,right=items[offset][position],items[offset+1][position]
+                left_lines,right_lines=wrapped(left,col),wrapped(right,col)
+                for index in range(max(len(left_lines),len(right_lines))):
+                    a=left_lines[index] if index<len(left_lines) else ''
+                    b=right_lines[index] if index<len(right_lines) else ''
+                    print('  '+a+' '*(col-cells(a)+2)+b)
+        else:
+            for title,description in items[offset:offset+2]:note(title);note('  '+description)
+    print('');note('r. 刷新首页   h. 快速体检');note('0. 退出')
+elif view=='login-addresses':
     try:
         p=json.loads(text(cfg))['panel']
         tls=int(p.get('tls_port',0))>0 and bool(p.get('tls_cert_path')) and bool(p.get('tls_key_path'))
@@ -326,7 +383,7 @@ if view=='login-addresses':
                 state=json.loads(text(str(pathlib.Path(p['tls_cert_path']).parent/'panel-tls-active.json')))
                 if re.fullmatch(r'[A-Za-z0-9.-]+',state.get('domain','')):domain=state['domain']
             except (ValueError,TypeError):pass
-        if domain:row('登录域名',f'{scheme}://{domain}:{port}/{suffix}')
+        if domain:note('域名登录地址');print(f'{scheme}://{domain}:{port}/{suffix}')
         count=0
         for family in [4,6]:
             for address in interfaces(family):
@@ -334,9 +391,9 @@ if view=='login-addresses':
                 except ValueError:continue
                 if ip.is_loopback or ip.is_link_local:continue
                 host='['+address+']' if family==6 else address
-                row(f'网卡 IPv{family}',f'{scheme}://{host}:{port}/{suffix}');count+=1
+                note(f'网卡 IPv{family} 登录地址');print(f'{scheme}://{host}:{port}/{suffix}');count+=1
         if not count and not domain:note('未读取到网卡地址；使用服务器公网地址与端口 '+str(port)+' 访问。')
-        note('网卡地址可能需要 NAT 映射或放行入站规则；出口地址可用 o network 检测。')
+        note('网卡地址可能需 NAT 映射或放行入站；出站检测：o network。')
     except (ValueError,TypeError,KeyError):note('登录地址读取失败，请运行 o info / o status 检查。');sys.exit(1)
 elif view=='info':
     section('系统')
@@ -349,8 +406,8 @@ elif view=='info':
     section('资源')
     cpu=re.search(r'(?m)^(?:model name|Hardware)\s*:\s*(.+)$',text('/proc/cpuinfo'))
     row('处理器',(cpu.group(1) if cpu else platform.machine())+f' · {os.cpu_count() or "?"} 核')
-    row('CPU 使用率',cpu_usage());row('负载 1/5/15 分',' / '.join(f'{x:.2f}' for x in os.getloadavg()))
-    memory_rows();disk=shutil.disk_usage('/');row('系统盘',usage(disk.used,disk.total))
+    row('CPU 短时采样',cpu_usage());row('负载 1/5/15 分',' / '.join(f'{x:.2f}' for x in os.getloadavg()))
+    memory_rows();disk_row()
     section('网络地址')
     row('网卡 IPv4',addresses(4));row('网卡 IPv6',addresses(6))
     try:dns_current(dns_status())
@@ -360,6 +417,52 @@ elif view=='info':
         seconds=int(float(text('/proc/uptime').split()[0]));row('运行时长',f'{seconds//86400} 天 {seconds%86400//3600} 小时 {seconds%3600//60} 分钟')
     except (ValueError,IndexError):row('运行时长',None)
     row('系统时间',run('date','+%Y-%m-%d %H:%M:%S %Z'))
+    sampled()
+elif view=='network-summary':
+    section('当前网络概况')
+    for family in [4,6]:
+        row('网卡 IPv'+str(family),addresses(family));row('IPv'+str(family)+' 默认路由',route(family))
+    try:dns_current(dns_status())
+    except ValueError as e:note('[未知] '+str(e))
+    content=text('/etc/gai.conf');block=re.search(r'# OLS WPanel IP priority begin\n(.*?)# OLS WPanel IP priority end',content,re.S)
+    row('面板地址偏好',('IPv6 优先' if 'precedence ::/0 100' in block.group(1) else 'IPv4 优先') if block else '未设置面板规则')
+    note('配置快照不代表公网可达；出站检测、入站规则与 SSH 变更请进入对应子项。')
+    sampled()
+elif view=='system-summary':
+    section('当前系统设置')
+    d=properties('timedatectl','show');row('时区',d.get('Timezone'))
+    row('自动校时',{'yes':'已开启','no':'未开启'}.get(d.get('NTP'),'未知'))
+    row('时间同步',{'yes':'已同步','no':'尚未同步'}.get(d.get('NTPSynchronized'),'未知'))
+    match=re.search(r'(?m)^LANG=[\"\']?([^\"\'\n]+)',text('/etc/default/locale'))
+    row('系统默认语言',match.group(1) if match else None)
+    memory_rows()
+    row('静态主机名',run('hostnamectl','--static'));sampled()
+elif view in ['processes','health']:
+    try:
+        d=tool_status('process-status' if view=='processes' else 'health-status')
+        if view=='processes':
+            if d.get('cpu_basis')!='one_core':raise ValueError('CPU 统计口径未确认')
+            row('采样时间',d.get('sampled_at'));row('采样窗口',str(d.get('sample_seconds','未知'))+' 秒')
+            row('CPU 核心',d.get('cpu_count'));note('CPU 按单核 100% 计算，多线程进程可超过 100%；未知值不按 0 计算。')
+            note('内存为 RSS / 物理总内存，可能重复包含共享页；仅显示进程名，不显示启动参数或环境变量。')
+            if d.get('incomplete'):note('[不完整] 部分进程未能采样，请结合下方说明。')
+            for warning in d.get('warnings') or []:note('[提示] '+str(warning))
+            section('CPU 占用较高的进程');process_rows(d.get('top_cpu'))
+            section('内存占用较高的进程');process_rows(d.get('top_memory'))
+        else:
+            state=d.get('status');checks=d.get('checks')
+            if state not in ['ok','warning','unknown'] or not isinstance(checks,list) or not checks:raise ValueError('体检结果不完整')
+            row('检查时间',d.get('checked_at'));row('体检结论',{'ok':'[正常] 本次检查未发现异常','warning':'[注意] 发现需检查的项目','unknown':'[未知] 部分项目无法确认'}[state])
+            for item in checks:
+                if not isinstance(item,dict):raise ValueError('体检项目格式无效')
+                print('')
+                note({'ok':'[正常]','warning':'[注意]','unknown':'[未知]'}.get(item.get('status'),'[未知]')+' '+str(item.get('name') or item.get('id') or '检查项'))
+                note(item.get('summary') or '未返回详细结果')
+                if item.get('next_step'):note('下一步：'+str(item['next_step']))
+            section('检查范围')
+            note('本次只读检查，不执行修复；本机配置正常不保证网站业务或公网入站正常。')
+            for limitation in d.get('limitations') or []:note(str(limitation))
+    except (ValueError,TypeError,KeyError) as e:note('[读取失败] '+str(e));sys.exit(1)
 elif view in ['dns','dns-preset','dns-restore-ready']:
     try:
         d=dns_status()
@@ -452,8 +555,9 @@ elif view in ['tuning','queues','queue-menu']:
     queue_values=[run('sysctl','-n',k) for k in ['net.core.somaxconn','net.ipv4.tcp_max_syn_backlog']]
     if view=='tuning':
         section('实时资源')
-        row('CPU',str(os.cpu_count())+' 核 · '+str(cpu_usage() or '使用率未知'))
+        row('CPU 短时采样',str(os.cpu_count())+' 核 · '+str(cpu_usage() or '使用率未知'))
         row('负载 1/5/15 分',' / '.join(f'{x:.2f}' for x in os.getloadavg()));memory_rows()
+        sampled()
         section('网络参数')
         row('拥塞控制',run('sysctl','-n','net.ipv4.tcp_congestion_control'));row('队列规则',run('sysctl','-n','net.core.default_qdisc'))
     else:section('当前连接配置')
@@ -560,8 +664,9 @@ elif view in ['ports','services','service-log','bbr','history','ssh','ssh-start'
             note('这里只读检查，不安装内核或自动切换拥塞控制。')
         elif view=='history':
             section('终端维护记录 · 最近 200 条')
+            labels={'ssh-port-start':'发起 SSH 端口变更','ssh-port-confirm':'确认 SSH 新端口','dns':'DNS 设置 / 恢复','dns-test':'候选 DNS 检测','dns-custom':'自定义 DNS','ip-priority':'地址选择优先级','tuning':'连接队列设置','timezone':'系统时区','hostname':'静态主机名','locale':'系统语言','locale-install':'安装语言工具','swap-custom':'调整受管 Swap','swap-swappiness':'调整 swappiness','swap-remove':'移除受管 Swap','swap-recommended':'应用 Swap 建议','time-sync':'自动校时','clean':'系统清理','system-update':'启动系统更新','restart':'重启面板','update':'更新面板','repair':'修复面板','unban':'清除受管 IP 封禁','password':'重置两层登录账号'}
             for item in d.get('entries') or []:
-                row(item.get('at','时间'),str(item.get('action',''))+' '+str(item.get('value','')))
+                row(item.get('at','时间'),labels.get(item.get('action'),str(item.get('action') or '未知操作'))+' '+str(item.get('value','')))
                 note({'success':'成功','failed':'失败','started':'当时已启动后台任务','pending':'发起时等待确认','cancelled':'已取消'}.get(item.get('status'),str(item.get('status','')))+' · '+str(item.get('message','')))
             if not d.get('entries'):note('尚无终端维护记录。')
             note('这是操作时的记录；更新结果请用 o system-update-status，SSH 当前状态请用 o ssh。')
@@ -619,10 +724,11 @@ elif view=='dependencies':
     if missing:note('可在系统软件更新前检查这些依赖：'+', '.join(dict.fromkeys(missing)))
     note('本页不会安装软件；locales 可在“系统语言”中确认安装。')
 elif view in ['updates','update-status','update-details']:
+    failed=False
     if view=='updates':
         section('可用软件包更新')
         out=run('env','LC_ALL=C','apt','list','--upgradable',timeout=20)
-        if out is None:row('软件包列表','读取失败')
+        if out is None:row('软件包列表','[读取失败] 未确认可更新数量');failed=True
         else:
             packages=[x for x in out.splitlines() if '/' in x and '[upgradable' in x]
             row('可更新软件包',len(packages));row('安全源更新',sum('-security' in x.split()[0] for x in packages))
@@ -630,7 +736,9 @@ elif view in ['updates','update-status','update-details']:
     out=run(binary,'--vps-tool','system-update-status','--config',cfg,timeout=15)
     try:
         if out is None:raise ValueError('任务读取失败')
-        d=json.loads(out);status=d.get('status');remaining=d.get('remaining_count',0);section('正在执行的任务' if status=='running' else '最近一次更新记录（历史）')
+        d=json.loads(out)
+        if not isinstance(d,dict) or not isinstance(d.get('status'),str):raise ValueError('任务格式无效')
+        status=d.get('status');remaining=d.get('remaining_count',0);section('正在执行的任务' if status=='running' else '最近一次更新记录（历史）')
         outcome={'idle':'尚无任务','running':'执行中','success':'成功','succeeded':'成功','failed':'失败','completed':'已完成'}.get(status,status)
         if remaining and status=='success':outcome='本轮完成，仍有待更新软件包'
         row('任务结果',outcome)
@@ -647,7 +755,7 @@ elif view in ['updates','update-status','update-details']:
             if 'acme-challenge' in d['detail'] and 'not accessible' in d['detail']:
                 note('OpenLiteSpeed 无法访问证书验证目录。');print('')
             note(d['detail'])
-    except ValueError:row('更新任务','读取失败')
+    except ValueError:row('更新任务','[读取失败] 未确认执行结果');failed=True
     if view=='update-details':
         section('软件包列表（本机索引）')
         note(run('env','LC_ALL=C','apt','list','--upgradable',timeout=20) or '读取失败')
@@ -655,6 +763,7 @@ elif view in ['updates','update-status','update-details']:
         print('');note('这是上次任务的记录。失败原因请选“查看详细记录”。')
     print('')
     row('重启标记','需要重启' if os.path.exists('/var/run/reboot-required') else '系统未报告（不保证无需重启）')
+    if failed:sys.exit(1)
 elif view=='clean':
     section('当前占用')
     for label,path in [('APT 下载缓存','/var/cache/apt/archives'),('持久化系统日志','/var/log/journal'),('内存系统日志','/run/log/journal')]:
@@ -663,6 +772,20 @@ elif view=='clean':
     note('保留活动日志、近 14 天日志、网站、数据库、备份和已安装软件。')
 elif view=='clean-bytes':
     n=total_cache();print(n if n is not None else '')
+elif view=='clean-result':
+    try:
+        before,after,status=value.split(':')
+        if status!='0':note('[未完整完成] 清理过程失败，部分缓存可能已清理；请查看上方原因并刷新占用。')
+        if not before.isdigit() or not after.isdigit():
+            note('[统计未知] 无法确认清理前后占用，不报告已释放容量。')
+        else:
+            before,after=int(before),int(after)
+            row('清理前 / 后',size(before)+' / '+size(after))
+            if after<before:row('实际占用减少',size(before-after))
+            elif after==before:note('占用未减少：可能没有可清理内容。')
+            else:note('统计时占用增加 '+size(after-before)+'，并发日志写入可能影响结果。')
+        if status=='0':note('[命令完成] 缓存清理与过期归档日志清理已执行；容量以实际统计为准。')
+    except ValueError:note('[统计未知] 无法读取清理结果。');sys.exit(1)
 PYVIEW
 }
 vps_info() { read_view info; }
@@ -682,7 +805,7 @@ text_block() {
     width=$(tput cols 2>/dev/null) || width=72
     python3 - "$width" "$*" <<'PYTEXT' || printf '  %s\n' "$*"
 import sys,unicodedata
-try:width=max(28,min(88,int(sys.argv[1])))-4
+try:width=max(32,min(88,int(sys.argv[1])))-4
 except ValueError:width=68
 line='';used=0
 for c in sys.argv[2]:
@@ -699,8 +822,8 @@ rule() {
     local width bar
     width=$(tput cols 2>/dev/null) || width=72
     [[ "$width" =~ ^[0-9]+$ ]] || width=72
-    [ "$width" -le 76 ] || width=76
-    [ "$width" -ge 28 ] || width=28
+    [ "$width" -le 88 ] || width=88
+    [ "$width" -ge 32 ] || width=32
     printf -v bar '%*s' "$((width-4))" ""
     dim "  ${bar// /─}"
 }
@@ -746,12 +869,12 @@ swap_page() {
         if ! read_view swap "$status"; then pause_page; return 1; fi
         actions=$(read_view swap-actions "$status") || return 1
         read -r recommended_ready custom_ready remove_ready <<< "$actions"
-        echo ""; echo "  1. 刷新状态"
-        [ "$recommended_ready" != 1 ] || echo "  2. 应用建议配置"
-        [ "$custom_ready" != 1 ] || echo "  3. 自定义 Swap 文件容量"
-        echo "  4. 仅设置 swappiness"
-        [ "$remove_ready" != 1 ] || echo "  5. 删除受管 Swap 文件"
-        echo ""; echo "  0. 返回"
+        echo ""; text_block "1. 刷新状态"
+        [ "$recommended_ready" != 1 ] || text_block "2. 应用建议配置"
+        [ "$custom_ready" != 1 ] || text_block "3. 自定义 Swap 文件容量"
+        text_block "4. 仅设置 swappiness"
+        [ "$remove_ready" != 1 ] || text_block "5. 删除受管 Swap 文件"
+        echo ""; text_block "0. 返回"
         pick || return 0
         case "$choice" in
           0) return 0;;
@@ -814,60 +937,60 @@ settings_page() {
             dns_ready=1
             read_view dns || dns_ready=0
             echo ""
-            echo "  1. Cloudflare · 查看 / 检测"
-            echo "  2. 阿里云     · 查看 / 检测"
-            if [ "$dns_ready" -eq 1 ] && read_view dns-restore-ready; then echo "  3. 恢复系统 / 接管前 DNS 配置"; fi
-            echo "  4. 自定义 DNS · 查看 / 检测"
+            text_block "1. Cloudflare · 查看 / 检测"
+            text_block "2. 阿里云     · 查看 / 检测"
+            if [ "$dns_ready" -eq 1 ] && read_view dns-restore-ready; then text_block "3. 恢复系统 / 接管前 DNS 配置"; fi
+            text_block "4. 自定义 DNS · 查看 / 检测"
             ;;
           ip)
             page "IPv4 / IPv6 优先级" "设置新连接的地址选择偏好。"
             ip_ready=1
             read_view ip || ip_ready=0
             echo ""
-            if [ "$ip_ready" -eq 1 ]; then echo "  1. IPv4 优先"; echo "  2. IPv6 优先"; fi
-            echo "  3. 移除面板规则（保留其他规则）"
+            if [ "$ip_ready" -eq 1 ]; then text_block "1. IPv4 优先"; text_block "2. IPv6 优先"; fi
+            text_block "3. 移除面板规则（保留其他规则）"
             ;;
           tuning)
             page "高级设置 · 连接队列" "手动调整内核参数，不会自动优化网站。"
             queue_ready=1
             read_view queue-menu || queue_ready=0
             echo ""
-            echo "  1. 两项上限设为 4096 / 4096"
+            text_block "1. 两项上限设为 4096 / 4096"
             echo ""
-            echo "  2. 两项上限设为 8192 / 8192"
+            text_block "2. 两项上限设为 8192 / 8192"
             echo ""
-            echo "  3. 查看当前参数与恢复详情"
-            if [ "$queue_ready" -eq 1 ]; then echo "  4. 恢复修改前的值"; fi
+            text_block "3. 查看当前参数与恢复详情"
+            if [ "$queue_ready" -eq 1 ]; then text_block "4. 恢复修改前的值"; fi
             ;;
           locale)
             page "系统语言" "影响系统命令提示与新 SSH 会话，网页面板语言单独设置。"
             locale_ready=1; read_view locale || locale_ready=0
             if [ "$locale_ready" -eq 1 ]; then
-                echo ""; echo "  1. English · en_US.UTF-8"; echo "  2. 简体中文 · zh_CN.UTF-8"; echo "  3. 繁體中文 · zh_TW.UTF-8"
-            else echo ""; echo "  4. 安装 locales 语言工具"; fi
+                echo ""; text_block "1. English · en_US.UTF-8"; text_block "2. 简体中文 · zh_CN.UTF-8"; text_block "3. 繁體中文 · zh_TW.UTF-8"
+            else echo ""; text_block "4. 安装 locales 语言工具"; fi
             ;;
           time)
             page "时区与时间同步" "时区影响日志和定时任务的本地时间；自动校时用于保持服务器时钟准确。"
             read_view time
-            echo ""; echo "  1. 时区设为 UTC"; echo "  2. 时区设为 Asia/Shanghai"; echo "  3. 启动自动校时"
-            echo "  4. 输入其他 IANA 时区"; echo "  5. 查看系统可用时区"
+            echo ""; text_block "1. 时区设为 UTC"; text_block "2. 时区设为 Asia/Shanghai"; text_block "3. 启动自动校时"
+            text_block "4. 输入其他 IANA 时区"; text_block "5. 查看系统可用时区"
             text_block "   缺少服务时安装 systemd-timesyncd"
             ;;
           hostname)
             page "主机名"; read_view hostname
-            echo ""; echo "  1. 修改静态主机名"
+            echo ""; text_block "1. 修改静态主机名"
             ;;
         esac
-        echo ""; echo "  0. 返回"
+        echo ""; text_block "0. 返回"
         pick || return 0
         if [ "$kind" = dns ] && [ "$dns_ready" -eq 0 ] && [ "$choice" = 3 ]; then
             echo "当前 DNS 不满足安全修改条件，请查看上方管理方式与原因。"; pause_page; continue
         fi
         if [ "$kind" = ip ] && [ "$ip_ready" -eq 0 ] && [[ "$choice" =~ ^[12]$ ]]; then
-            echo "  已有其他地址选择规则，无法自动覆盖。"; pause_page; continue
+            text_block "已有其他地址选择规则，无法自动覆盖。"; pause_page; continue
         fi
         if [ "$kind" = tuning ] && [ "$queue_ready" -eq 0 ] && [ "$choice" = 4 ]; then
-            echo "  无有效恢复记录，未执行修改。"; pause_page; continue
+            text_block "无有效恢复记录，未执行修改。"; pause_page; continue
         fi
         if [ "$kind" = locale ] && [ "$locale_ready" -eq 0 ] && [[ "$choice" =~ ^[123]$ ]]; then
             echo "缺少语言生成工具，请先确认安装 locales。"; pause_page; continue
@@ -928,21 +1051,21 @@ dns_preset_page() {
         page "DNS · 候选方案"
         ready=1
         read_view dns-preset "$preset" || ready=0
-        echo ""; echo "  1. 检测候选 DNS"
-        if [ "$ready" -eq 1 ]; then echo "  2. 应用此方案（先检测）"; fi
-        echo "  0. 返回 DNS"
+        echo ""; text_block "1. 检测候选 DNS"
+        if [ "$ready" -eq 1 ]; then text_block "2. 应用此方案（先检测）"; fi
+        text_block "0. 返回 DNS"
         pick || return 0
         case "$choice" in
           0) return 0;;
           1) page "DNS · 检测结果"; read_view dns-test "$preset" || true; pause_page;;
           2)
-            if [ "$ready" -eq 0 ]; then echo "  当前不支持修改 DNS。"; pause_page; continue; fi
+            if [ "$ready" -eq 0 ]; then text_block "当前不支持修改 DNS。"; pause_page; continue; fi
             if need_root && confirm_vps "应用候选 DNS？执行前检测地址；首次管理普通 resolv.conf 会备份并替换 nameserver，保留 search/options，临时解除文件锁后恢复原锁定状态。"; then
                 result "$BIN" --vps-tool dns --vps-value "$preset" --config "$CFG"
                 read_view dns || true
-            else echo "  已取消"; fi
+            else text_block "已取消"; fi
             pause_page;;
-          *) echo "  无效选项"; pause_page;;
+          *) text_block "无效选项"; pause_page;;
         esac
     done
 }
@@ -954,9 +1077,9 @@ dns_custom_page() {
     while true; do
         page "自定义 DNS"; text_block "$value"
         ready=1; read_view dns || ready=0
-        echo ""; echo "  1. 检测指定 DNS"
-        [ "$ready" -ne 1 ] || echo "  2. 应用（全部检测通过后）"
-        echo "  0. 返回 DNS"; pick || return 0
+        echo ""; text_block "1. 检测指定 DNS"
+        [ "$ready" -ne 1 ] || text_block "2. 应用（全部检测通过后）"
+        text_block "0. 返回 DNS"; pick || return 0
         case "$choice" in
           0) return 0;;
           1) read_view dns-custom-test "$value"; pause_page;;
@@ -975,8 +1098,7 @@ services_page() {
     local choice="" service=""
     while true; do
         page "核心服务检查" "状态与日志均为只读，不会重启服务。"; read_view services
-        echo ""; echo "  1. 刷新状态"; echo "  2. 面板日志"; echo "  3. OpenLiteSpeed 日志"
-        echo "  4. MariaDB 日志"; echo "  5. Redis 日志"; echo "  6. Fail2ban 日志"; echo "  7. nftables 日志"; echo "  0. 返回"
+        text_block $'\n1. 刷新状态\n2. 面板日志\n3. OpenLiteSpeed 日志\n4. MariaDB 日志\n5. Redis 日志\n6. Fail2ban 日志\n7. nftables 日志\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 1) continue;; 2) service=panel;; 3) service=ols;; 4) service=mariadb;;
@@ -990,7 +1112,7 @@ ssh_page() {
     while true; do
         page "SSH 端口" "使用双端口过渡；必须在新 SSH 连接确认，超时自动恢复。"
         ready=1; read_view ssh || ready=0
-        echo ""; echo "  1. 刷新状态"; [ "$ready" -ne 1 ] || echo "  2. 发起端口变更"; echo "  0. 返回"
+        echo ""; text_block "1. 刷新状态"; [ "$ready" -ne 1 ] || text_block "2. 发起端口变更"; text_block "0. 返回"
         pick || return 0
         case "$choice" in
           0) return 0;; 1) continue;;
@@ -1026,27 +1148,58 @@ performance_menu() {
     while true; do
         page "性能状态" "只读查看；刷新不会修改配置。"
         read_view tuning
-        echo ""; echo "  1. 刷新状态"; echo "  2. 高级设置 · 调整连接队列"; echo "  3. 核心服务检查"; echo "  4. 磁盘空间与 inode"; echo ""; echo "  0. 返回"
+        text_block $'\n资源与排查\n1. 刷新状态\n5. 高占用进程列表\n3. 核心服务检查\n4. 磁盘空间与 inode\n6. 快速体检\n\n高级设置\n2. 调整连接队列（手动）\n\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 1) continue;; 2) settings_page tuning;; 3) services_page;; 4) page "磁盘检查"; read_view disk; pause_page;;
+          5) readonly_page processes "高占用进程列表";; 6) readonly_page health "快速体检";;
+          *) echo "无效选项"; pause_page;;
+        esac
+    done
+}
+readonly_page() {
+    local view="$1" title="$2" choice=""
+    while true; do
+        page "$title" "按需采样与只读检查；不会修改配置、终止进程或自动修复。"
+        read_view "$view" || red "本次读取未完成，不能据此判断正常；可刷新重试。"
+        text_block $'\n1. 刷新\n0. 返回'
+        pick || return 0
+        case "$choice" in 0) return 0;; 1) continue;; *) echo "无效选项"; pause_page;; esac
+    done
+}
+updates_progress_page() {
+    local choice=""
+    while true; do
+        page "系统更新 · 任务进度" "关闭本页不会终止后台任务；完成结果以任务记录为准。"
+        read_view update-status || red "任务状态未确认，请刷新重试。"
+        text_block $'\n1. 刷新进度\n2. 查看详细记录\n0. 返回，任务继续在后台执行'
+        pick || return 0
+        case "$choice" in
+          0) return 0;; 1) continue;;
+          2) page "系统更新 · 详细记录"; read_view update-details; pause_page;;
           *) echo "无效选项"; pause_page;;
         esac
     done
 }
 updates_page() {
-    local choice=""
+    local choice="" started=""
     while true; do
         page "更新 VPS 软件包" "更新系统软件；面板版本在“面板管理”中更新。"
         read_view updates
-        echo ""; echo "  1. 开始系统更新"; echo "  2. 刷新本机状态"; echo "  3. 查看详细记录"; echo ""; echo "  0. 返回"
+        text_block $'\n1. 开始系统更新\n2. 刷新本机状态\n3. 查看详细记录\n4. 查看后台任务进度\n\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 2) continue;;
+          4) updates_progress_page; continue;;
           3) page "软件更新 · 详细记录"; read_view update-details; pause_page; continue;;
           1) if need_root && confirm_vps "更新 VPS 软件包，不更新面板、不自动重启服务器。"; then
-                if "$BIN" --vps-tool system-update --config "$CFG"; then green "后台更新任务已启动，完成结果请查看进度。";
-                else red "更新任务未成功启动，请查看上方原因。"; fi
+                if started=$("$BIN" --vps-tool system-update --config "$CFG"); then
+                    green "后台更新任务已启动；尚未代表更新完成。"
+                    updates_progress_page; continue
+                else
+                    [ -z "$started" ] || text_block "$started"
+                    red "更新任务未成功启动，请查看上方原因。"
+                fi
              else echo "已取消"; fi;;
           *) echo "无效选项";;
         esac
@@ -1054,23 +1207,21 @@ updates_page() {
     done
 }
 clean_page() {
-    local choice="" before="" after=""
+    local choice="" before="" after="" status=0
     while true; do
         page "系统清理" "清理软件包缓存与超过 14 天的归档日志。"
         read_view clean
-        echo ""; echo "  1. 执行清理"; echo "  2. 刷新占用"; echo ""; echo "  0. 返回"
+        text_block $'\n1. 执行清理\n2. 刷新占用\n\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 2) continue;;
           1)
             if need_root && confirm_vps "清理上述缓存及过期归档日志？"; then
                 before=$(read_view clean-bytes)
-                if ! result "$BIN" --vps-tool clean --config "$CFG"; then pause_page; continue; fi
+                status=0
+                "$BIN" --vps-tool clean --config "$CFG" || status=$?
                 after=$(read_view clean-bytes)
-                if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]]; then
-                    echo "清理前占用: $before 字节；清理后占用: $after 字节"
-                    if [ "$before" -ge "$after" ]; then echo "本次占用减少: $((before-after)) 字节（并发日志写入可能影响统计）"; fi
-                fi
+                read_view clean-result "$before:$after:$status"
                 read_view clean
             else echo "已取消"; fi;;
           *) echo "无效选项";;
@@ -1114,38 +1265,40 @@ PYUPDATE
 panel_help() {
     blue "OLS WPanel · 命令帮助"
     echo "用法: o <命令>（也可使用大写 O）"
-    echo "  o / o menu       打开管理菜单"
-    echo "  o vps            查看 VPS 信息"
-    echo "  o info           查看面板详情与安装路径"
-    echo "  o status         诊断检查"
-    echo "  o log [N]        查看最近日志（默认30条）"
-    echo "  o check-update   检查项目更新"
-    echo "  o update         签名更新 / 修复面板"
-    echo "  o restart        重启面板"
-    echo "  o password       重置登录账号密码"
-    echo "  o unban          清除面板 IP 封禁"
-    echo "  o uninstall      普通卸载（保留网站和数据库）"
-    echo "  o advanced       高级操作与完全卸载"
+    text_block "o / o menu       打开管理菜单"
+    text_block "o vps            查看 VPS 信息"
+    text_block "o info           查看面板详情与安装路径"
+    text_block "o status         诊断检查"
+    text_block "o log [N]        查看最近日志（默认30条）"
+    text_block "o check-update   检查项目更新"
+    text_block "o update         签名更新 / 修复面板"
+    text_block "o restart        重启面板"
+    text_block "o password       重置两层登录账号密码"
+    text_block "o unban          清除受管 IP 封禁"
+    text_block "o uninstall      普通卸载（保留网站和数据库）"
+    text_block "o advanced       高级操作与完全卸载"
     echo ""
-    echo "  o system-update          更新 VPS 软件包"
-    echo "  o swap                   Swap 容量与 swappiness 管理"
-    echo "  o system-update-status   查看更新任务"
-    echo "  o clean                  清理缓存与过期日志"
-    echo "  o dns / o ip             DNS / 地址优先级"
-    echo "  o tuning                 性能状态与连接设置"
-    echo "  o language               系统语言"
-    echo "  o network        双栈网络检测"
-    echo "  o time           时区与时间同步"
-    echo "  o hostname       修改静态主机名"
-    echo "  o ports          本机监听与入站规则诊断"
-    echo "  o services       核心服务状态与错误日志"
-    echo "  o bbr            实际 BBR / 队列与持久配置"
-    echo "  o disk           磁盘空间与 inode 检查"
-    echo "  o apt-check      APT / dpkg 只读健康检查"
-    echo "  o dependencies   维护工具依赖检查"
-    echo "  o history        终端维护操作记录"
-    echo "  o ssh            SSH 双端口过渡与超时恢复"
-    echo "  o ssh-confirm <令牌>  在新端口 SSH 连接中确认"
+    text_block "o system-update          更新 VPS 软件包"
+    text_block "o swap                   Swap 容量与 swappiness 管理"
+    text_block "o system-update-status   查看更新任务"
+    text_block "o clean                  清理缓存与过期日志"
+    text_block "o dns / o ip             DNS / 地址优先级"
+    text_block "o tuning                 性能状态与连接设置"
+    text_block "o language               系统语言"
+    text_block "o network        双栈网络检测"
+    text_block "o time           时区与时间同步"
+    text_block "o hostname       修改静态主机名"
+    text_block "o ports          本机监听与入站规则诊断"
+    text_block "o services       核心服务状态与错误日志"
+    text_block "o bbr            实际 BBR / 队列与持久配置"
+    text_block "o disk           磁盘空间与 inode 检查"
+    text_block "o apt-check      APT / dpkg 只读健康检查"
+    text_block "o dependencies   维护工具依赖检查"
+    text_block "o history        终端维护操作记录"
+    text_block "o processes      高占用进程（只读短时采样）"
+    text_block "o health         快速体检（只读，不自动修复）"
+    text_block "o ssh            SSH 双端口过渡与超时恢复"
+    text_block "o ssh-confirm <令牌>  在新端口 SSH 连接中确认"
     dim "项目: https://github.com/zangwp/OLS-WPanel"
     dim "访问排查: 放行面板端口；运行 o status 或 o log"
 }
@@ -1170,15 +1323,7 @@ advanced_menu() {
     local choice=""
     while true; do
         page "帮助与高级操作" "卸载前先查看删除范围；完全卸载还会要求专门确认，备份另行选择。"
-        echo "  1. 快捷命令帮助"
-        echo ""
-        echo "  2. 普通卸载"
-        text_block "   保留网站、数据库和共享软件"
-        echo ""
-        echo "  3. 完全卸载"
-        text_block "   删除网站、数据库、面板及相关运行环境"
-        echo ""; echo "  4. 终端维护记录"; echo "  5. 维护工具依赖"; echo "  6. APT / dpkg 健康检查"
-        echo ""; echo "  0. 返回"
+        text_block $'1. 快捷命令帮助\n4. 终端维护记录\n5. 维护工具依赖\n6. APT / dpkg 健康检查\n\n卸载操作（请先核对范围）\n2. 普通卸载\n   保留网站、数据库和共享软件\n3. 完全卸载\n   删除网站、数据库、面板及相关运行环境\n\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 1) page "命令帮助"; panel_help;;
@@ -1190,32 +1335,20 @@ advanced_menu() {
     done
 }
 panel_summary() {
-        local version="" state=""
-        dim "  VPS 日常维护与 OLS WPanel 管理"
-        version=$("$BIN" --info --config "$CFG" 2>/dev/null | sed -n 's/^版本: \([^ ]*\).*/\1/p')
-        echo "  面板版本: ${version:-未读取到}"
-        state=$(systemctl show "$SVC" --property=ActiveState --value 2>/dev/null)
-        case "$state" in
-            active) green "  服务状态: 运行中";;
-            inactive) dim "  服务状态: 未运行";;
-            failed) red "  服务状态: 启动失败";;
-            activating) dim "  服务状态: 正在启动";;
-            deactivating) dim "  服务状态: 正在停止";;
-            *) dim "  服务状态: 未能读取，请用 o status 检查";;
-        esac
+        read_view home || red "首页状态未完整读取，请刷新或运行 o status。"
         echo ""
+        text_block "面板登录地址（整行复制）"
         read_view login-addresses
 }
 network_menu() {
     local choice=""
     while true; do
         page "网络设置" "管理域名解析、地址选择优先级，或检测服务器出站连接。"
-        read_view ip
-        echo ""; echo "  1. DNS 设置与检测"; echo "  2. IPv4 / IPv6 优先级"; echo "  3. 网络连通性检测"
-        echo "  4. 端口与进程诊断"; echo "  5. BBR / 队列状态"; echo "  6. SSH 端口管理"; echo ""; echo "  0. 返回"
+        read_view network-summary
+        text_block $'\n1. DNS 设置与检测\n2. IPv4 / IPv6 优先级\n3. 网络连通性检测（出站）\n4. 端口与监听进程诊断\n5. BBR / 队列状态（只读）\n6. SSH 端口管理（需新连接确认）\n\nr. 刷新概况\n0. 返回'
         pick || return 0
         case "$choice" in
-          0) return 0;; 1) settings_page dns;; 2) settings_page ip;;
+          0) return 0;; r|R) continue;; 1) settings_page dns;; 2) settings_page ip;;
           3) page "网络连通性检测"; read_view network; pause_page;;
           4) page "端口与进程诊断"; read_view ports; pause_page;; 5) page "BBR / 队列状态"; read_view bbr; pause_page;;
           6) ssh_page;; *) echo "无效选项"; pause_page;;
@@ -1226,63 +1359,39 @@ system_menu() {
     local choice=""
     while true; do
         page "系统设置" "查看时间、同步状态、语言与 Swap，按需调整。"
-        read_view time
-        echo ""; echo "  1. 时区与时间同步"; echo "  2. 系统语言"; echo "  3. Swap 管理"; echo "  4. 主机名"; echo ""; echo "  0. 返回"
+        read_view system-summary
+        text_block $'\n1. 时区与时间同步\n2. 系统语言（新 SSH 会话生效）\n3. Swap 容量与 swappiness\n4. 静态主机名\n\nr. 刷新概况\n0. 返回'
         pick || return 0
-        case "$choice" in 0) return 0;; 1) settings_page time;; 2) settings_page locale;; 3) swap_page;; 4) settings_page hostname;; *) echo "无效选项"; pause_page;; esac
+        case "$choice" in 0) return 0;; r|R) continue;; 1) settings_page time;; 2) settings_page locale;; 3) swap_page;; 4) settings_page hostname;; *) echo "无效选项"; pause_page;; esac
     done
 }
 panel_menu() {
     local choice=""
     while true; do
         page "面板管理"; panel_summary
-        echo ""; echo "  1. 检查更新"; echo "  2. 更新 / 修复 OLS WPanel"; echo "  3. 运行诊断"
-        echo "  4. 查看日志"; echo "  5. 重启面板"; echo "  6. 重置登录账号密码"; echo "  7. 清除面板 IP 封禁"; echo "  8. 面板详情"; echo ""; echo "  0. 返回"
+        text_block $'\n1. 检查更新（查看签名入口实际目标）\n2. 更新 / 修复 OLS WPanel\n3. 运行诊断\n4. 查看日志\n5. 重启面板\n6. 重置浏览器认证与面板登录账号\n7. 清除受管 IP 封禁\n8. 面板详情与安装路径\n\n0. 返回'
         pick || return 0
         case "$choice" in
           0) return 0;; 1) page "检查项目更新"; check_project_update;;
           2) if need_root && confirm_vps "通过签名发布链更新或修复面板？"; then "$0" update; fi;;
           3) page "诊断检查"; "$0" status;; 4) page "面板日志"; "$0" log;;
           5) if need_root && confirm_vps "重启面板服务？管理连接会短暂中断。"; then "$0" restart; fi;;
-          6) if need_root && confirm_vps "重置面板登录账号密码？"; then "$0" password; fi;;
-          7) if need_root && confirm_vps "清除面板管理的 IP 封禁？"; then "$0" unban; fi;;
+          6) if need_root && confirm_vps "重置 Basic Auth 浏览器认证和面板网页登录？两层用户名都改为 wpadmin，并分别生成新密码；随后重启面板。不会修改网站 WordPress 账号或 SSH 账号。"; then "$0" password; fi;;
+          7) if need_root && confirm_vps "清空面板封禁记录、受管持久封禁集合和受管 Fail2ban 封禁（含网站与 SSH 防护）？不会修改云安全组或其他程序管理的规则。"; then "$0" unban; fi;;
           8) page "面板详情"; "$0" info;; *) echo "无效选项";;
         esac
         pause_page
     done
 }
 vps_menu() {
-    local choice="" width=""
+    local choice=""
     while true; do
         page "管理主页"; panel_summary
-        width=$(tput cols 2>/dev/null) || width=0
-        [[ "$width" =~ ^[0-9]+$ ]] || width=0
-        echo ""
-        blue "  VPS 维护"
-        if [ "$width" -ge 68 ]; then
-            echo "  1. 系统信息              2. 系统软件更新"
-            echo ""
-            echo "  3. 系统清理              4. 网络设置"
-            echo ""
-            echo "  5. 系统设置              6. 性能状态"
-            echo ""
-            blue "  面板与帮助"
-            echo "  7. 面板管理              8. 帮助 / 高级操作"
-        else
-            echo "  1. 系统信息"; echo "  2. 系统软件更新"
-            echo ""
-            echo "  3. 系统清理"; echo "  4. 网络设置"
-            echo ""
-            echo "  5. 系统设置"; echo "  6. 性能状态"
-            echo ""
-            blue "  面板与帮助"
-            echo "  7. 面板管理"; echo "  8. 帮助 / 高级操作"
-        fi
-        echo ""
-        echo "  0. 退出"
+        read_view home-menu
         pick 退出 || return 0
         case "$choice" in
-          0) return 0;; 1) page "系统信息" "服务器资源、地址与时间。"; vps_info; pause_page;;
+          0) return 0;; r|R) continue;; h|H) readonly_page health "快速体检";;
+          1) page "系统信息" "服务器资源、地址与时间；以下为本次快照。"; vps_info; pause_page;;
           2) updates_page;; 3) clean_page;; 4) network_menu;; 5) system_menu;; 6) performance_menu;; 7) panel_menu;; 8) advanced_menu;;
           *) echo "无效选项"; pause_page;;
         esac
@@ -1313,6 +1422,8 @@ case "${1:-}" in
     apt-check) page "APT / dpkg 健康检查"; read_view apt-health ;;
     dependencies) page "维护工具依赖"; read_view dependencies ;;
     history) page "终端维护记录"; read_view history ;;
+    processes) page "高占用进程列表" "只读短时采样；不会终止进程。"; read_view processes ;;
+    health) page "快速体检" "只读检查，不自动修复。"; read_view health ;;
     ssh) ssh_page ;;
     ssh-confirm) ssh_confirm "${2:-}" ;;
     restart)

@@ -10,7 +10,7 @@ curl -fsSL https://ols.zangyubin.top/install | bash
 
 The Cloudflare entry serves a fixed, deployed stable Release. It verifies the signed bootstrap manifest before returning the script. The bootstrap installs missing download, CA, and OpenSSL prerequisites, downloads the fixed-version installer, verifies its Ed25519 signature and SHA-256 digest, and only then starts it.
 
-GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v2.0.14`; its assets must exist on GitHub before it can be used.
+GitHub publication and deployment of this short entry are separate steps. If the entry has not yet been updated to the desired release, use the explicit signed-version procedure below. The example targets `v2.1.0`; its assets must exist on GitHub before it can be used.
 
 ## First login and server maintenance
 
@@ -30,6 +30,14 @@ Swap maintenance should run without simultaneous edits from other administrator 
 
 Additional terminal commands are `o ports`, `o services`, `o bbr`, `o disk`, `o apt-check`, `o dependencies`, `o hostname` and `o history`. Port inspection reports local listeners and host firewall policy, not cloud-security-group or public reachability. Disk/inode and APT health checks are read-only; they do not kill package processes or remove lock files. Terminal changes are recorded independently of SQLite in a protected history under `/var/lib/ols-wpanel/vps-cli`, bounded to 200 entries. SSH confirmation tokens and credentials are excluded from that history.
 
+The home menu retains options 1–8 and adds `r` to refresh its local resource snapshot and `h` for a quick health check. Domain, IPv4 and IPv6 login addresses are printed in full on separate lines, without inserted line breaks. Narrow terminals may visually wrap them. Opening the home menu does not probe external network services.
+
+`o processes` lists the highest CPU and resident-memory processes from a short sampling interval. CPU is expressed as a percentage of one core, so a process using multiple cores can exceed 100%; it is not the whole-server percentage or the process lifetime average. Resident memory can include shared pages and must not be added together as unique usage. Only process names and PIDs are shown, not command lines or environment variables. Exited processes are omitted; incomplete or unavailable samples are marked. This command never terminates a process.
+
+`o health` summarizes core services, disk space/inodes, package state and local route/DNS configuration with suggested follow-up commands. Unknown observations remain unknown. The bounded check does not repair, install or restart anything, initialize the panel database, or change firewall rules. Local network configuration does not prove Internet access or public inbound reachability; use `o network` for explicit outbound probes and `o ports` for local listener details.
+
+After a system update starts, the terminal progress view shows the recorded stage and last update time. Refresh to inspect progress or return while the background task continues. A started task is not a completed update. Cleanup reports readable before/after sizes and measurement failures separately; its existing package-cache and old-journal scope is retained.
+
 `o ssh` reuses the protected dual-port SSH transaction: first allow the new port in any cloud firewall, retain the current window, connect through the new port in another SSH window, then execute the returned `o ssh-confirm <token>` command there. The old port is removed only after connection and configuration checks. An independent systemd watchdog restores unconfirmed changes after the deadline. Unsupported SSH/socket/firewall configurations remain blocked.
 
 If SSH is changed through the provider console or another tool, refresh Access Control to observe the current listener. A changed SSH port pauses an unsaved access-policy draft until you confirm a refresh. This read does not migrate firewall allowances, Fail2ban ports or cloud security-group rules; review those separately. Changing only a cloud security-group rule does not change the VPS's SSH listener.
@@ -47,7 +55,7 @@ workdir="$(mktemp -d /tmp/ols-wpanel-install.XXXXXXXXXX)"
 trap 'rm -rf -- "$workdir"' EXIT
 cd "$workdir"
 
-version='v2.0.14'
+version='v2.1.0'
 base="https://github.com/zangwp/OLS-WPanel/releases/download/${version}"
 wget --no-config --https-only --no-hsts \
   "$base/install.sh" \

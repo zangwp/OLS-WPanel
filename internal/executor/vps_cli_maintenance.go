@@ -22,7 +22,7 @@ import (
 // starts the daemon, reconciles firewall rules, or migrates the database.
 func IsVPSMaintenanceCLI(action string) bool {
 	switch action {
-	case "ports-status", "services-status", "service-log", "bbr-status", "ssh-port-status", "ssh-port-start", "ssh-port-confirm", "vps-history":
+	case "ports-status", "services-status", "service-log", "bbr-status", "ssh-port-status", "ssh-port-start", "ssh-port-confirm", "vps-history", "process-status", "health-status":
 		return true
 	}
 	return false
@@ -39,6 +39,10 @@ func RunVPSMaintenanceCLI(ctx context.Context, action, value string, cfg *config
 		return nil, err
 	}
 	switch action {
+	case "process-status":
+		return inspectVPSCLIProcesses(ctx)
+	case "health-status":
+		return inspectVPSCLIHealth(ctx, cfg)
 	case "ports-status":
 		// This existing inspection performs only list/show/read operations.
 		// Unlike ReconcileFirewallPortRules, it does not apply host rules.
@@ -114,7 +118,7 @@ func inspectVPSCLIPortsWithoutDatabase(ctx context.Context, cfg *config.Config) 
 // opens the existing database for SSH transaction operation logs.
 func ValidateVPSMaintenanceCLI(action, value string, cfg *config.Config) error {
 	switch action {
-	case "ports-status", "services-status", "bbr-status", "ssh-port-status", "vps-history":
+	case "ports-status", "services-status", "bbr-status", "ssh-port-status", "vps-history", "process-status", "health-status":
 		if value != "" {
 			return errors.New("此只读操作不接受额外参数")
 		}
