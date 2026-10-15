@@ -251,7 +251,7 @@ test('leaving security for logs cancels a real API maintenance read without a br
             return {status:200, ok:true, headers:{get:() => 'application/json'}, json:async () => response(route)};
         },
     });
-    vm.runInContext(app.slice(app.indexOf('function api('), app.indexOf('const __apiGetCache')) + app.slice(app.indexOf('function friendlyAPIError('), app.indexOf('function formatBytes(')), context);
+    vm.runInContext(app.slice(app.indexOf('function api('), app.indexOf('function deferTask(')) + app.slice(app.indexOf('function friendlyAPIError('), app.indexOf('function formatBytes(')), context);
     page.init(); await settle();
     assert.equal(page.maintenanceLoading, true);
     page.setDetailTab('logs'); await settle();
@@ -342,7 +342,7 @@ test('a real API log timeout is localized and emitted once by the log view', asy
             return {status:200, ok:true, headers:{get:() => 'application/json'}, json:async () => response(route)};
         },
     });
-    vm.runInContext(app.slice(app.indexOf('function api('), app.indexOf('const __apiGetCache')) + app.slice(app.indexOf('function friendlyAPIError('), app.indexOf('function formatBytes(')), context);
+    vm.runInContext(app.slice(app.indexOf('function api('), app.indexOf('function deferTask(')) + app.slice(app.indexOf('function friendlyAPIError('), app.indexOf('function formatBytes(')), context);
     const pending = page.loadLogs(); await settle(); [...timers.values()][0](); await pending;
     assert.equal(page.logsLoaded, false); assert.equal(page.logsLoading, false); assert.equal(timers.size, 0);
     assert.equal(page.logContentError, 'website.load_logs_failed: common.request_timeout');

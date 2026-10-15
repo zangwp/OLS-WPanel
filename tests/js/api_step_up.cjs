@@ -1,6 +1,6 @@
 const fs = require('fs'), vm = require('vm'), assert = require('assert'), path = require('path');
 const script = fs.readFileSync(path.resolve(__dirname, '../../web/js/app.js'), 'utf8');
-const start = script.indexOf('function api('), end = script.indexOf('const __apiGetCache', start);
+const start = script.indexOf('function api('), end = script.indexOf('function deferTask(', start);
 let response, request;
 const ctx = {t: key => key, document: {body: {dataset: {panelPrefix: '/panel'}}, querySelector: () => ({content: 'csrf'})}, window: {location: {href: ''}}, FormData, AbortController, setTimeout, clearTimeout, console: {error() {}}, friendlyAPIError: error => error.message, showToast() {}, fetch: async (url, options) => {request = options; return response;}};
 vm.createContext(ctx); vm.runInContext(script.slice(start, end), ctx);

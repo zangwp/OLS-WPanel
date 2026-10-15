@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/database"
+	"github.com/zangwp/OLS-WPanel/internal/housekeeping"
 )
 
 // Persist only classified security events. Each producer has its own cursor;
@@ -362,6 +363,10 @@ func topWPSecurityEventPaths(db *sql.DB, eventType string, since time.Time, ip s
 
 // PruneWPSecurityEvents 删除超过保留期限的历史事件，避免表无限增长。
 func PruneWPSecurityEvents(retentionDays int) error {
+	return pruneWPSecurityEvents(time.Now(), retentionDays)
+}
+
+func pruneWPSecurityEvents(now time.Time, retentionDays int) error {
 	db := database.GetDB()
 	if db == nil {
 		return fmt.Errorf("database is nil")
@@ -369,13 +374,14 @@ func PruneWPSecurityEvents(retentionDays int) error {
 	if retentionDays <= 0 {
 		retentionDays = wpSecurityEventRetentionDays
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	cutoff := now.UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	_, err := db.Exec(`DELETE FROM wp_security_events WHERE occurred_at < ?`, cutoff)
 	return err
 }
 
 // StartWPSecurityEventIngestor 启动后台增量摄取调度：每 wpSecurityIngestorInterval
-// 读取一次新增日志，并顺带清理过期历史事件。StopWPSecurityEventIngestor 可关闭
+// 读取一次新增日志；启动时及每小时清理过期历史，失败在下一轮摄取时重试。
+// StopWPSecurityEventIngestor 可关闭
 // 该调度，供 main.go 在收到 SIGINT/SIGTERM 时调用（审核优化项 3.2）。
 //
 // 保留初始 runWPSecurityEventIngestCycle() 调用（select 之前），保证面板启动后
@@ -398,13 +404,14 @@ func StartWPSecurityEventIngestor() {
 
 	go func() {
 		defer close(done)
-		runWPSecurityEventIngestCycle()
+		var cleanup housekeeping.Cleanup
+		runWPSecurityEventIngestCycle(time.Now(), &cleanup)
 		ticker := time.NewTicker(wpSecurityIngestorInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				runWPSecurityEventIngestCycle()
+				runWPSecurityEventIngestCycle(time.Now(), &cleanup)
 			case <-stopCh:
 				return
 			}
@@ -423,11 +430,13 @@ func StopWPSecurityEventIngestor() {
 	}
 }
 
-func runWPSecurityEventIngestCycle() {
+func runWPSecurityEventIngestCycle(now time.Time, cleanup *housekeeping.Cleanup) {
 	if _, err := IngestWPSecurityEvents(); err != nil {
 		log.Printf("wp security event ingest failed: %v", err)
 	}
-	if err := PruneWPSecurityEvents(wpSecurityEventRetentionDays); err != nil {
+	if err := cleanup.Run(now, func() error {
+		return pruneWPSecurityEvents(now, wpSecurityEventRetentionDays)
+	}); err != nil {
 		log.Printf("wp security event prune failed: %v", err)
 	}
 }

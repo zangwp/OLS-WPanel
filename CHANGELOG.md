@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.1.2 — 2026-10-15
+
+- Shares an hourly retention-cleanup schedule across monitoring history, account security history and WordPress security events. Existing sampling, log ingestion and notification dispatch cadences continue; failed cleanup retries on the next ordinary worker tick.
+- Keeps expired account events out of notification dispatch and rechecks expiry before delivery, including events that expire while queued. Monitoring and account-history views retain their existing time boundaries.
+- Reuses the existing panel-update cache reset and removes an unreferenced frontend GET-cache helper. Production page, plugin and branding assets retain their existing references.
+
+Upgrade notes: no new dependency or database migration. Retention durations remain 15 days for monitoring and 90 days for account/WordPress security history. Expired rows may remain physically stored for about one additional hour during normal operation; database failures can delay deletion further. This reduces periodic cleanup attempts, not monitoring precision, and does not claim a measured reduction in VPS memory usage.
+
 ## v2.1.1 — 2026-10-15
 
 - Simplifies the terminal home page to the panel version, service state, grouped login URLs and existing navigation. Keeps host/resource details under System information and preserves menu numbers and shortcut commands.
