@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.10 — 2026-10-15
+
+- Fixes first-time SSH port migration preflight by checking dual-port creation and final replacement in a single read-only nftables transaction. Retains verified confirmation, timeout rollback and reverse migration to port 22.
+- Refreshes the access policy after panel-managed SSH changes, detects external port changes on refresh, and pauses stale drafts for review. Prioritizes observed SSH listeners and rejects obsolete asynchronous responses and previews without automatically changing firewall access or cloud security groups.
+
 ## v2.0.9 — 2026-10-14
 
 - Displays the installed version in the top bar as a static badge, removing the update-page link and its hover/focus styles. Keeps update controls in panel settings.

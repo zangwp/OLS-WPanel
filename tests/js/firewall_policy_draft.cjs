@@ -109,13 +109,158 @@ test('ordinary status refresh updates observations but preserves all draft scope
     assert.equal(page.accessDirty,true); assert.equal(page.accessPreview,null); assert.equal(page.portsLoading,false);
 });
 
-test('the actual SSH-port-changed handler keeps an existing draft while updating the observed SSH port', async () => {
-    const {page, state} = setup(), before = draft(page);
-    page.accessPreview = {rules:page.accessPayload(),fingerprint:'stale-preview'}; state.status.ssh_port = 3333;
+const observeSSH = page => {
+    const handler = portsHTML.match(/@ssh-port-observed\.window="([^"]+)"/)?.[1]; assert(handler);
+    return vm.runInNewContext('with (page) { ' + handler + ' }', {page});
+};
+
+test('an observed external SSH port change rebuilds an unchanged draft without migrating firewall rules', async () => {
+    const {page, state, calls} = setup();
+    state.status.access_enabled = true;
+    state.status.access_rules = [{protocol:'tcp',port:2222,source:'203.0.113.9/32'},{protocol:'tcp',port:9443,source:''}];
+    page.portStatus = clone(state.status); page.resetAccessRows();
+    state.status.ssh_port = 22; await observeSSH(page);
+    assert.equal(page.portStatus.ssh_port,22); assert.equal(page.accessDirty,false); assert.equal(page.accessSSHStale,false);
+    const ssh = page.accessRows.find(row=>row.label==='SSH');
+    assert.equal(ssh.port,22); assert.equal(ssh.fixed,true); assert.equal(ssh.scope,'closed');
+    assert.equal(page.accessPayload().some(rule=>rule.port===22),false,'Observing a listener must not invent a firewall allowance.');
+    assert(page.accessPayload().some(rule=>rule.port===2222 && rule.source==='203.0.113.9/32'));
+    assert.deepEqual(calls.map(call=>[call.url,call.options.method]),[['/firewall/ports',undefined]]);
+});
+
+test('an external SSH port change pauses a dirty draft until the user accepts an explicit reload', async () => {
+    const {page, state, context, calls} = setup(), before = draft(page);
+    page.accessPreview = {rules:page.accessPayload(),fingerprint:'old-ssh-endpoint'};
+    state.status.ssh_port = 22; await observeSSH(page);
+    assert.equal(page.portStatus.ssh_port,22); assert.equal(page.accessSSHStale,true); assert.equal(page.accessPreview,null);
+    assert.equal(page.accessError,'firewall.access_ssh_changed'); assert.deepEqual(clone(page.accessRows),before);
+    const readCount = calls.length;
+    await page.startAccessSave(); await page.applyAccess();
+    assert.equal(calls.length,readCount,'A paused SSH draft cannot preview or apply old access rules.');
+    page.accessCustomPort='8099'; page.addAccessRow();
+    assert.equal(page.accessRows.some(row=>row.port===8099),false);
+    assert.equal(page.canRemoveAccessRow(page.accessRows.find(row=>row.port===8088)),false);
+    context.confirmModal = async()=>false; await page.refreshAccess();
+    assert.equal(page.accessSSHStale,true); assert.deepEqual(clone(page.accessRows),before);
+    context.confirmModal = async()=>true; await page.refreshAccess();
+    assert.equal(page.accessSSHStale,false); assert.equal(page.accessDirty,false); assert.equal(page.accessError,'');
+    assert.equal(page.accessRows.find(row=>row.label==='SSH').port,22);
+    assert.equal(page.accessRows.some(row=>row.port===8088),false);
+    assert.equal(calls.some(call=>call.options.method),false,'Reloading observations is read-only.');
+});
+
+test('a failed parent status read after SSH observation keeps the old editor locked until an explicit refresh succeeds', async () => {
+    const {page,context,calls} = setup(), originalAPI=context.api, before=draft(page), response=deferred();
+    page.accessPreview={rules:page.accessPayload(),fingerprint:'old'};
+    context.api=()=>response.promise;
+    const pending=observeSSH(page);
+    assert.equal(page.portStatus.access_available,false); assert.equal(page.accessPreview,null); assert.equal(page.portsLoading,true);
+    response.reject(Error('port status unavailable')); await pending;
+    assert.equal(page.portStatus.access_available,false); assert.deepEqual(clone(page.accessRows),before);
+    context.api=originalAPI; const count=calls.length;
+    await page.previewAccess();
+    page.accessPreview={rules:page.accessPayload(),fingerprint:'obsolete'}; await page.applyAccess();
+    assert.equal(calls.length,count,'A failed read cannot leave a route to applying the stale policy.');
+    await page.refreshAccess();
+    assert.equal(page.portStatus.access_available,true); assert.equal(page.accessDirty,false); assert.equal(page.accessPreview,null);
+});
+
+for (const result of ['success','failure']) {
+    test('a late preview ' + result + ' cannot restore an old SSH review or hide the external-change warning', async () => {
+        const {page, state, context, notices} = setup(), response = deferred(), originalAPI = context.api;
+        draft(page);
+        context.api = (url,options)=>url.endsWith('/access/preview') ? response.promise : originalAPI(url,options);
+        const pending = page.previewAccess();
+        state.status.ssh_port = 22; await observeSSH(page);
+        if (result==='success') response.resolve({success:true,data:{rules:[],fingerprint:'old'}});
+        else response.reject(Error('old preview failure'));
+        await pending;
+        assert.equal(page.accessPreview,null); assert.equal(page.accessSSHStale,true); assert.equal(page.accessBusy,false);
+        assert.equal(page.accessError,'firewall.access_ssh_changed'); assert.equal(notices.length,0);
+    });
+}
+
+test('an external SSH change while application confirmation is open prevents the obsolete policy write', async () => {
+    const {page, state, context, calls} = setup(), confirmation = deferred();
+    draft(page); await page.previewAccess();
+    context.confirmModal = ()=>confirmation.promise;
+    const pending = page.applyAccess();
+    state.status.ssh_port = 22; await observeSSH(page);
+    confirmation.resolve(true); await pending;
+    assert.equal(page.accessSSHStale,true); assert.equal(page.accessPreview,null); assert.equal(page.accessBusy,false);
+    assert.equal(calls.some(call=>call.url.endsWith('/access/apply')),false);
+});
+
+test('the external-change lock disables editing and saving while leaving explicit refresh available', () => {
+    const {page} = setup(); page.accessSSHStale = true;
+    const accessHTML = fs.readFileSync(path.join(__dirname,'../../web/templates/firewall_access.html'),'utf8');
+    const fieldsetDisabled = accessHTML.match(/<fieldset :disabled="([^"]+)"/)[1];
+    assert.equal(vm.runInNewContext('with (page) { '+fieldsetDisabled+' }',{page}),true);
+    for (const method of ['startAccessSave','applyAccess']) {
+        const disabled = accessHTML.match(new RegExp('<button[^>]*@click="'+method+'\\(\\)"[^>]*:disabled="([^"]+)"'))[1];
+        assert.equal(vm.runInNewContext('with (page) { '+disabled+' }',{page}),true);
+    }
+    const refreshDisabled = accessHTML.match(/<button[^>]*@click="refreshAccess\(\)"[^>]*:disabled="([^"]+)"/)[1];
+    assert.equal(vm.runInNewContext('with (page) { '+refreshDisabled+' }',{page}),false);
+});
+
+test('the actual SSH-port-changed handler retires the old SSH draft and rebuilds the saved policy', async () => {
+    const {page, state} = setup();
+    state.status.ssh_port = 22; page.portStatus = clone(state.status); page.resetAccessRows();
+    page.accessCustomPort = '2222'; page.addAccessRow();
+    page.accessPreview = {rules:page.accessPayload(),fingerprint:'stale-preview'};
+    state.status.ssh_port = 2222; state.status.access_enabled = true;
+    state.status.access_rules = [{protocol:'tcp',port:2222,source:'203.0.113.9/32'},{protocol:'tcp',port:9443,source:''}];
     const handler = portsHTML.match(/@ssh-port-changed\.window="([^"]+)"/)?.[1]; assert(handler);
     await vm.runInNewContext('with (page) { ' + handler + ' }', {page});
-    assert.equal(page.portStatus.ssh_port,3333); assert.deepEqual(clone(page.accessRows),before);
-    assert.equal(page.accessDirty,true); assert.equal(page.accessPreview,null);
+    assert.equal(page.portStatus.ssh_port,2222); assert.equal(page.accessDirty,false); assert.equal(page.accessPreview,null);
+    assert.equal(page.accessRows.some(row=>row.port===22),false,'The old SSH draft must not re-open port 22.');
+    const ssh = page.accessRows.filter(row=>row.port===2222);
+    assert.equal(ssh.length,1); assert.equal(ssh[0].fixed,true); assert.equal(ssh[0].label,'SSH');
+    assert.equal(ssh[0].scope,'specific'); assert.equal(ssh[0].sources,'203.0.113.9/32');
+    assert.equal(page.canRemoveAccessRow(ssh[0]),false,'The new active SSH endpoint remains protected.');
+    assert.equal(page.accessPayload().some(rule=>rule.port===22),false);
+});
+
+test('an SSH transition status-read failure disables the stale policy until an explicit successful refresh', async () => {
+    const {page, context} = setup(), before = draft(page), api = context.api;
+    page.accessPreview = {rules:page.accessPayload(),fingerprint:'stale-preview'};
+    context.api = async()=>{throw Error('status unavailable');};
+    const handler = portsHTML.match(/@ssh-port-changed\.window="([^"]+)"/)?.[1]; assert(handler);
+    await vm.runInNewContext('with (page) { ' + handler + ' }', {page});
+    assert.equal(page.portStatus.access_available,false); assert.equal(page.accessPreview,null);
+    assert.deepEqual(clone(page.accessRows),before,'A failed read must not invent replacement policy.');
+    context.api = api; await page.refreshAccess();
+    assert.equal(page.portStatus.access_available,true); assert.equal(page.accessDirty,false);
+});
+
+for (const oldResult of ['success','failure']) {
+    test('a late old port-status ' + oldResult + ' cannot overwrite the confirmed SSH endpoint', async () => {
+        const {page, context, state, notices} = setup(), old = deferred(), latest = deferred();
+        const oldStatus = {...clone(state.status), ssh_port:22}; let reads = 0;
+        context.api = () => (++reads === 1 ? old.promise : latest.promise);
+        const first = page.fetchPortStatus();
+        const handler = portsHTML.match(/@ssh-port-changed\.window="([^"]+)"/)[1];
+        const second = vm.runInNewContext('with (page) { ' + handler + ' }', {page});
+        latest.resolve({success:true,data:{...clone(state.status),ssh_port:2222}}); await second;
+        if (oldResult === 'success') old.resolve({success:true,data:oldStatus}); else old.reject(Error('stale failure'));
+        assert.equal(await first,false);
+        assert.equal(page.portStatus.ssh_port,2222); assert.equal(page.portsLoading,false);
+        assert.equal(page.accessRows.some(row=>row.port===22),false); assert.equal(notices.length,0);
+    });
+}
+
+test('an older status response cannot re-enable policy editing while an SSH transition read is pending or fails', async () => {
+    const {page, context, state} = setup(), old = deferred(), latest = deferred(); let reads = 0;
+    context.api = () => (++reads === 1 ? old.promise : latest.promise);
+    const first = page.fetchPortStatus();
+    const handler = portsHTML.match(/@ssh-port-changed\.window="([^"]+)"/)[1];
+    const second = vm.runInNewContext('with (page) { ' + handler + ' }', {page});
+    old.resolve({success:true,data:clone(state.status)}); assert.equal(await first,false);
+    assert.equal(page.portsLoading,true); assert.equal(page.portStatus.access_available,false);
+    latest.reject(Error('current status unavailable')); await second;
+    assert.equal(page.portsLoading,false); assert.equal(page.portStatus.access_available,false);
+    assert.equal(page.accessPreview,null);
 });
 
 test('explicit refresh requires consent before discarding a draft, and accepted refresh loads current rules', async () => {

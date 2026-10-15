@@ -8,7 +8,7 @@
     <p class="access-introduction">{{t .Lang "firewall.access_help"}}</p>
     <p class="text-xs text-gray-500 mb-4">{{t .Lang "firewall.access_direction_help"}}</p>
     <p class="access-workflow">{{t .Lang "firewall.access_steps"}}</p>
-    <fieldset :disabled="accessBusy || portSubmitting || !!accessToken || !portStatus.access_available" @change="markAccessDirty()">
+    <fieldset :disabled="accessBusy || portSubmitting || !!accessToken || accessSSHStale || !portStatus.access_available" @change="markAccessDirty()">
         <div class="access-rules"><div class="access-rule-head text-xs text-gray-400"><span>{{t .Lang "firewall.service_preset"}}</span><span>{{t .Lang "firewall.access_scope"}}</span><span>{{t .Lang "firewall.source_scope"}}</span><span class="access-actions-heading">{{t .Lang "firewall.actions"}}</span></div>
             <template x-for="row in accessRows" :key="row.key">
                 <div class="access-rule">
@@ -41,11 +41,11 @@
         <label class="flex items-start gap-2 text-sm text-gray-300 mt-3"><input type="checkbox" x-model="accessChecked" :disabled="accessBusy || accessExpired"><span x-text="accessSSHValidation ? t('firewall.access_verified_ssh') : t('firewall.access_verified')"></span></label>
     </div>
     <div class="access-action-row access-save-actions">
-        <button type="button" class="btn-primary" x-show="!accessPreview && !accessToken" @click="startAccessSave()" :disabled="accessBusy || portSubmitting || portsLoading || !portStatus.access_available">{{t .Lang "firewall.access_save"}}</button>
-        <button type="button" class="btn-primary" x-show="accessPreview && !accessToken" @click="applyAccess()" :disabled="accessBusy || portSubmitting || portsLoading || !portStatus.access_available" x-text="accessNeedsConfirmation() ? t('firewall.access_apply') : t('firewall.access_apply_direct')"></button>
+        <button type="button" class="btn-primary" x-show="!accessPreview && !accessToken" @click="startAccessSave()" :disabled="accessBusy || portSubmitting || portsLoading || accessSSHStale || !portStatus.access_available">{{t .Lang "firewall.access_save"}}</button>
+        <button type="button" class="btn-primary" x-show="accessPreview && !accessToken" @click="applyAccess()" :disabled="accessBusy || portSubmitting || portsLoading || accessSSHStale || !portStatus.access_available" x-text="accessNeedsConfirmation() ? t('firewall.access_apply') : t('firewall.access_apply_direct')"></button>
         <button type="button" class="btn-primary" x-show="accessToken" @click="confirmAccess()" :disabled="!accessChecked || accessExpired || accessBusy || portSubmitting">{{t .Lang "firewall.access_confirm"}}</button>
         <button type="button" class="btn-secondary" x-show="accessToken && accessRollbackReady" @click="checkAccessRollback()" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.access_check_status"}}</button>
-        <button type="button" class="btn-secondary" x-show="accessPreview && !accessToken" @click="editAccessDraft()" :disabled="accessBusy || portSubmitting">{{t .Lang "firewall.access_edit"}}</button>
+        <button type="button" class="btn-secondary" x-show="accessPreview && !accessToken" @click="editAccessDraft()" :disabled="accessBusy || portSubmitting || accessSSHStale">{{t .Lang "firewall.access_edit"}}</button>
         <button type="button" class="btn-secondary" x-show="!accessPreview && !accessToken" @click="refreshAccess()" :disabled="accessBusy || portSubmitting || portsLoading">{{t .Lang "firewall.refresh"}}</button>
         <p class="access-save-help" x-show="!accessToken" x-text="accessPreview ? (accessNeedsConfirmation() ? t('firewall.access_apply_help') : t('firewall.access_ordinary_review')) : t('firewall.access_draft_help')"></p>
     </div>
