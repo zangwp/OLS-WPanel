@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.6 — 2026-10-16
+
+- Fixes the signed bootstrap rejecting valid installers after the descriptive header was translated. Installer identity now checks the first-line Bash interpreter directive while retaining Ed25519 signature, checksum, pinned key and exact release-version verification.
+- Executes the real bootstrap verifier against signed copies of the actual installer in regression tests, including translated or absent descriptive comments and rejection of altered bytes, signatures, identities and manifests. CI and release runs require these verifier tests instead of silently skipping missing runtimes.
+
+Upgrade notes: v2.1.5's `o update` bootstrap could stop before executing the main installer; this release restores that signed upgrade path. No panel feature, runtime dependency, worker or database migration changes.
+
 ## v2.1.5 — 2026-10-16
 
 - Refreshes only server time and NTP status after requesting time synchronization. Unrelated account buttons remain enabled, and unsaved account, server, proxy, timezone and automatic-update inputs are preserved.
