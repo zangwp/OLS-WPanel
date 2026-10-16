@@ -37,9 +37,9 @@ import (
 type FileHandler struct{}
 
 const (
-	// maxArchiveEntries 保护的是"单次网页请求内同步跑完的条目数"，不是恶意压缩包的下限。
-	// 30 万大约是常见 WooCommerce/多插件站点全量包（数万商品图 + 数万插件文件）的 3 倍冗余；
-	// 真撞到这条线的包，交给 archiveTooHeavyMessage 引导去 SSH 解压，而不是简单调大数字了事。
+	// maxArchiveEntries bounds work completed synchronously in one HTTP request.
+	// 300,000 allows roughly three times a typical WooCommerce archive. Larger archives
+	// should use SSH extraction through archiveTooHeavyMessage.
 	maxArchiveEntries      = 300000
 	maxPanelArchiveBytes   = int64(5 * 1024 * 1024 * 1024)
 	maxPanelExtractedBytes = int64(20 * 1024 * 1024 * 1024)
@@ -530,7 +530,7 @@ func resolvePathForAccess(path string) (string, error) {
 	if resolved, err := filepath.EvalSymlinks(cleanPath); err == nil {
 		return resolved, nil
 	}
-	// 向上逐级查找第一个存在的目录
+	// Walk upward to the nearest existing directory.
 	for p := filepath.Dir(cleanPath); ; p = filepath.Dir(p) {
 		resolved, err := filepath.EvalSymlinks(p)
 		if err == nil {
@@ -542,7 +542,7 @@ func resolvePathForAccess(path string) (string, error) {
 		}
 		parent := filepath.Dir(p)
 		if p == "/" || p == "." || parent == p {
-			// 根目录不存在则无法验证，退回到 Clean 结果
+			// An absent root cannot be verified; fall back to the cleaned path.
 			return cleanPath, nil
 		}
 	}
@@ -1685,12 +1685,9 @@ func archiveSSHExtractCommand(archivePath, format string) string {
 	}
 }
 
-// archiveTooHeavyMessage 是"这个压缩包对面板在线解压来说太重"的统一出口。
-// 面板在线解压在一次网页请求里同步完成，没有后台任务队列也没有进度显示：
-// 处理时间一长，浏览器关闭、网络波动或系统重启都会让解压中途中断，
-// 留下部分文件已写入、部分没写的半成品状态，且面板不会知道要不要回滚。
-// 体积和条目数任一超限都归到这里，统一引导去 SSH 手动解压——
-// SSH 端可以后台运行（配合 nohup/tmux）、实时看进度，不受网页会话影响。
+// archiveTooHeavyMessage directs archives exceeding size or entry limits to SSH.
+// Online extraction runs synchronously; disconnects or restarts can leave partial
+// output without rollback. SSH allows background execution and progress monitoring.
 func archiveTooHeavyMessage(archivePath, format, reason string) string {
 	base := fmt.Sprintf(
 		"压缩包%s，面板在线解压是在一次网页请求里同步完成的，没有后台任务和进度显示，"+

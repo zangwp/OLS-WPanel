@@ -467,7 +467,6 @@ func seedS3TestFile(t *testing.T, size int64) string {
 }
 
 // ------------------------------------------------------------------
-// 远程全量基线探测（RemoteHasFullFileBackup 及底层 remoteHasFullBackup/s3HasFullBackup）
 // ------------------------------------------------------------------
 
 func TestRemoteHasFullFileBackupContextStopsS3ProbeAtCallerDeadline(t *testing.T) {
@@ -617,8 +616,8 @@ func TestRemoteHasFullFileBackupRsyncMissingHostReturnsError(t *testing.T) {
 		t.Fatalf("update remote_backup_settings: %v", err)
 	}
 
-	// host 为空时应返回 error（未确认远程状态），调用方据此强制走全量备份，
-	// 而不是静默当作"远程已有全量基线"处理。
+	// An empty host leaves the remote state unknown; return an error so callers
+	// require a full backup instead of assuming a baseline exists.
 	hasFull, err := RemoteHasFullFileBackup("example.com")
 	if err == nil {
 		t.Fatal("RemoteHasFullFileBackup error = nil, want error when remote enabled but host is empty")
@@ -635,7 +634,7 @@ func TestRemoteHasFullFileBackupRejectsInvalidBackupType(t *testing.T) {
 		t.Fatalf("update remote_backup_settings: %v", err)
 	}
 
-	// 无效 backup_type 不应静默落入 rsync 分支，应和 SyncBackupToRemote 一样拒绝并返回 error。
+	// Reject invalid backup_type values rather than falling through to rsync.
 	hasFull, err := RemoteHasFullFileBackup("example.com")
 	if err == nil {
 		t.Fatal("RemoteHasFullFileBackup error = nil, want error for invalid backup_type")
@@ -699,7 +698,6 @@ func TestS3HasFullBackupNoResultsReturnsFalse(t *testing.T) {
 }
 
 // ------------------------------------------------------------------
-// updateBackupTransportStatus 回写 db_backups / file_backups 的 transport_status
 // ------------------------------------------------------------------
 
 func insertMinimalWebsite(t *testing.T, domain string) {
@@ -754,12 +752,11 @@ func TestUpdateBackupTransportStatusWritesFileBackups(t *testing.T) {
 
 func TestUpdateBackupTransportStatusIgnoresZeroSiteID(t *testing.T) {
 	openTestDB(t)
-	// 不应 panic：siteID 为 0（未落库的记录）时直接跳过写入。
+	// Skip unpersisted records (siteID=0) without panicking.
 	updateBackupTransportStatus(BackupSourceDB, 0, "whatever.sql.gz", "synced", "")
 }
 
 // ------------------------------------------------------------------
-// 历史备份远程状态核对（ReconcileBackupTransportStatus 及其辅助函数）
 // ------------------------------------------------------------------
 
 func TestParseRemoteFileListStripsRemotePathPrefix(t *testing.T) {
@@ -782,7 +779,7 @@ func TestParseRemoteFileListSkipsLinesNotUnderRemotePath(t *testing.T) {
 }
 
 func TestParseRemoteFileListRejectsSiblingDirectoryWithSamePrefix(t *testing.T) {
-	// /home/backup2/x 文本前缀和 /home/backup 相同，但不是它的子目录，不应该被误配进去。
+	// /home/backup2/x shares a text prefix but is not a child of /home/backup.
 	output := []byte("/home/backup2/x.tar.gz\n/home/backup/example.com/db/a.sql.gz\n")
 	files := parseRemoteFileList(output, "/home/backup")
 	if len(files) != 1 || !files["example.com/db/a.sql.gz"] {
@@ -842,7 +839,7 @@ func TestApplyReconciledTransportStatusOnlyUpdatesMatchedLocalRows(t *testing.T)
 	}
 	remoteKeys := map[string]bool{
 		"ols-wpanel/reconcile.example.com/db/a.sql.gz": true,
-		// file_full_c.tar.gz 故意不在远程 key 集合里，模拟"确实还没同步"的情况。
+		// Omit file_full_c.tar.gz from remote keys to simulate an unsynced file.
 	}
 
 	updated := applyReconciledTransportStatus(pending, remoteKeys, "s3", "ols-wpanel")
@@ -931,8 +928,8 @@ func TestApplyReconciledTransportStatusClearsSyncedRowsForEmptyRemote(t *testing
 
 func TestReconcileBackupTransportStatusErrorsWhenDisabled(t *testing.T) {
 	openTestDB(t)
-	// 现在是管理员显式点击"核对远程状态"按钮才会调用，远程备份没启用时应该明确报错，
-	// 而不是静默返回成功——按钮式的操作不应该让用户以为"核对过了"却其实什么都没做。
+	// An explicit admin reconciliation must report disabled remote backups
+	// instead of claiming that a check succeeded without doing any work.
 	if _, err := ReconcileBackupTransportStatus(); err == nil {
 		t.Fatal("ReconcileBackupTransportStatus() error = nil, want error when remote backup is disabled")
 	}
@@ -944,8 +941,8 @@ func TestReconcileBackupTransportStatusSkipsRemoteCallWhenNothingPending(t *test
 	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled = 1, backup_type = 's3', s3_endpoint = 'https://invalid.example.invalid', s3_bucket = 'x', s3_access_key_id = 'k', s3_secret_key = 'secret' WHERE id = 1`); err != nil {
 		t.Fatalf("update remote_backup_settings: %v", err)
 	}
-	// 没有任何 transport_status 为 local/synced 的记录时，函数应该在发起任何远程请求之前就直接返回；
-	// 如果它真的尝试连了 https://invalid.example.invalid 就会报网络错误，err==nil 证明短路生效。
+	// With no local/synced records, return before any remote request. The invalid
+	// endpoint would fail if contacted, so err==nil verifies the short circuit.
 	updated, err := ReconcileBackupTransportStatus()
 	if err != nil {
 		t.Fatalf("ReconcileBackupTransportStatus() error = %v, want nil (no remote call should be attempted)", err)
@@ -975,15 +972,15 @@ func TestApplyReconciledTransportStatusSkipsFailedUpdateWithoutCountingIt(t *tes
 	}
 
 	pending := []pendingTransportStatusRow{
-		// id=999 在 db_backups 里不存在，UPDATE 会成功执行但影响 0 行——这里改用一个真正会
-		// 报错的场景：table 名故意写错，触发 db.Exec 报错，验证不会被计入 updated。
+		// An absent ID would update zero rows without error. Use an invalid table to
+		// force db.Exec to fail and verify that failed writes are not counted.
 		{table: "db_backups", id: 1, domain: "update-fail.example.com", filename: "a.sql.gz", subdir: "db", status: "local"},
 	}
 	remoteKeys := map[string]bool{
 		"update-fail.example.com/db/a.sql.gz": true,
 	}
 
-	// 正常情况：这条应该成功回写并计入 updated=1。
+	// Count the successful update.
 	updated := applyReconciledTransportStatus(pending, remoteKeys, "rsync", "")
 	if updated != 1 {
 		t.Fatalf("applyReconciledTransportStatus() = %d, want 1", updated)
@@ -996,7 +993,7 @@ func TestApplyReconciledTransportStatusSkipsFailedUpdateWithoutCountingIt(t *tes
 		t.Fatalf("transport_status = %q, want synced", status)
 	}
 
-	// 现在把表删掉，模拟回写失败：不应该 panic，也不应该把失败的记录计入 updated。
+	// Drop the table to verify failed writes neither panic nor increment the count.
 	if _, err := db.Exec(`DROP TABLE db_backups`); err != nil {
 		t.Fatalf("drop db_backups: %v", err)
 	}

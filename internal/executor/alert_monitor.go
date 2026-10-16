@@ -177,8 +177,8 @@ func (m *alertManager) runChecks() {
 		}
 	}
 
-	// 站点访问和 SSL/CDN 探测可能等待网络。先在后台启动，让资源与服务规则
-	// 立即评估；轮到对应规则时再接收结果，避免网络等待串行叠加。
+	// Start network probes in the background so resource and service rules can run
+	// while they wait; collect results when their rules are evaluated.
 	var siteResultCh chan alertCheckResult
 	if runtimeReady["alert_site"] && isRuleEnabled("alert_site") {
 		siteResultCh = make(chan alertCheckResult, 1)
@@ -256,7 +256,7 @@ func processAlertCheckResult(r *alertRule, result alertCheckResult, now time.Tim
 			logAlert(r.key, "info", recoveryDetail)
 		}
 		_ = resolveOpenAlertRows(r)
-		// 即时告警（无阈值）直接发送恢复通知，有阈值的等 5 分钟防抖
+		// Send recovery immediately for alerts without thresholds; debounce others for five minutes.
 		sendRecovery := now.Sub(r.lastFired) > 5*time.Minute || r.thresholdDuration <= 0
 		if r.sendRecovery && hasSMTP && sendRecovery {
 			go SendMail("", getPanelTitle()+" 恢复通知", formatEmailHTML(alertLabel(r.key)+" 已恢复正常", recoveryDetail, getEmailTip(r.key, true), false))
@@ -351,9 +351,8 @@ func alertResendInterval(key string) time.Duration {
 		"alert_system_update", "alert_panel_update":
 		return 24 * time.Hour
 	case "alert_wp_fake_search_bot":
-		// 判定条件本身就是"过去 24 小时内达到阈值"的滚动窗口，只要攻击没有停止，
-		// 这个条件会持续成立一整天；用默认的 30 分钟重发会在攻击期间连续发出
-		// 几十封"持续中"邮件，这里和系统/面板更新一样按 24 小时重发一次。
+		// This rolling 24-hour threshold can remain true throughout an attack. Resend
+		// once daily, as with update alerts, to avoid repeated ongoing-attack emails.
 		return 24 * time.Hour
 	}
 	return 30 * time.Minute
@@ -584,7 +583,7 @@ func logAlert(alertType, level, message string) {
 		return
 	}
 	db.Exec("INSERT INTO alert_log (alert_type, level, message) VALUES (?, ?, ?)", alertType, level, message)
-	// 告警历史按时间保留，避免高频事件在数小时内挤掉所有上下文。
+	// Retain history by age so frequent events cannot erase recent context.
 	db.Exec("DELETE FROM alert_log WHERE created_at < datetime('now', '-90 days')")
 }
 
@@ -1125,7 +1124,7 @@ func checkRemoteBackupState() alertCheckResult {
 		return normalAlertCheck()
 	}
 
-	// 失败记录只有在对应备份后续同步成功、transport_status 被更新后才算恢复。
+	// A failed backup recovers only after a later successful sync updates transport_status.
 	var failCount int
 	if err := db.QueryRow(`SELECT
 		(SELECT COUNT(*) FROM db_backups WHERE transport_status = 'failed') +
@@ -1460,14 +1459,11 @@ func checkPanelUpdateState() alertCheckResult {
 	return normalAlertCheck()
 }
 
-// 方案 D 阶段四：SQL 注入探测 / 伪装搜索引擎爬虫告警，默认关闭。
-// 只做"记录 → 超过阈值提醒管理员"，不自动封禁，最终是否封禁仍由管理员在
-// 「安全防御」页面手动决定。
-//
-// threshold / window 通过 security_settings 表中的 alert_wp_security_threshold
-// 与 alert_wp_security_window_hours 配置（审核优化项 3.1）；这里的常量仅作为
-// DB 读取失败或值非法时的 fallback。pathLimit / maxOffenders 是展示细节，
-// 不对用户开放，保持硬编码。
+// SQL injection and fake crawler alerts are disabled by default. They notify
+// admins when thresholds are exceeded; bans remain a manual decision.
+// Threshold and window come from alert_wp_security_threshold and
+// alert_wp_security_window_hours in security_settings. Defaults cover invalid
+// or unreadable settings; path and offender limits are fixed display limits.
 const (
 	defaultWPSecurityAlertThreshold = 10
 	defaultWPSecurityAlertWindow    = 24 * time.Hour
@@ -1475,7 +1471,7 @@ const (
 	wpSecurityAlertMaxOffenders     = 10
 )
 
-// wpSecurityAlertConfig 汇总一次告警判定所需的全部参数。
+// wpSecurityAlertConfig holds the parameters for one alert evaluation.
 type wpSecurityAlertConfig struct {
 	threshold    int
 	window       time.Duration
@@ -1558,12 +1554,10 @@ func checkWPSecurityEventThresholdState(eventType, label string) alertCheckResul
 		return normalAlertCheck()
 	}
 
-	// 分布式扫描可能同时有几十上百个 IP 超过阈值，不截断的话邮件正文会膨胀到
-	// 几百 KB，Webhook 走 URL 路径段的渠道（如 Bark）还会直接投递失败。
-	// 告警专用查询已在 SQL 层按次数排序并限制为影响最大的前 N 个，并且只为
-	// 这些最终展示的 IP 查询热门路径，避免对所有攻击来源执行逐个路径查询。
-	// 邮件正文按单个 <p> 段落渲染，换行符不会被转成 <br>，因此和其余告警规则一样
-	// 使用「；」分隔多条信息，避免所有 IP 挤成一整行无法阅读。
+	// Limit offenders in SQL by hit count to keep distributed scans from producing
+	// oversized emails or breaking URL-based webhooks such as Bark. Fetch paths
+	// only for the displayed IPs to avoid a query for every source. Separate entries
+	// with semicolons because email paragraphs do not render newlines as breaks.
 	entries := make([]string, 0, len(offenders))
 	for _, o := range offenders {
 		paths := "（无样本）"

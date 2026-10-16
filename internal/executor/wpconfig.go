@@ -33,7 +33,7 @@ func FixWPConfigCredentials(webRoot, domain, dbName, dbUser, tablePrefix string)
 	text := string(content)
 	result := text
 
-	// 替换 DB_NAME（支持单引号和双引号格式）
+	// Replace DB_NAME in either quote style.
 	reNameSingle := regexp.MustCompile(`define\(\s*'DB_NAME'\s*,\s*'[^']*'\s*\)`)
 	reNameDouble := regexp.MustCompile(`define\(\s*"DB_NAME"\s*,\s*"[^"]*"\s*\)`)
 	if reNameSingle.MatchString(result) {
@@ -44,7 +44,7 @@ func FixWPConfigCredentials(webRoot, domain, dbName, dbUser, tablePrefix string)
 		return fmt.Errorf("未找到 DB_NAME 定义 (路径: %s)，wp-config.php 可能格式异常或使用了非常规引号", configPath)
 	}
 
-	// 替换 DB_USER（支持单引号和双引号格式）
+	// Replace DB_USER in either quote style.
 	reUserSingle := regexp.MustCompile(`define\(\s*'DB_USER'\s*,\s*'[^']*'\s*\)`)
 	reUserDouble := regexp.MustCompile(`define\(\s*"DB_USER"\s*,\s*"[^"]*"\s*\)`)
 	if reUserSingle.MatchString(result) {
@@ -55,7 +55,7 @@ func FixWPConfigCredentials(webRoot, domain, dbName, dbUser, tablePrefix string)
 		return fmt.Errorf("未找到 DB_USER 定义 (路径: %s)，wp-config.php 可能格式异常或使用了非常规引号", configPath)
 	}
 
-	// 如果提供了 tablePrefix，替换 $table_prefix
+	// Replace $table_prefix when tablePrefix is provided.
 	if tablePrefix != "" {
 		tablePrefix = strings.TrimSpace(tablePrefix)
 		if !IsValidWPTablePrefix(tablePrefix) {

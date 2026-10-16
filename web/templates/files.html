@@ -464,7 +464,7 @@ function fileManager() {
                 if (current()) { this.sitesLoading = false; this.sitesController = null; }
             }
             if (!loaded || this.disposed) return;
-            // 从 URL 参数自动选择网站（从网站管理页面跳转过来）
+            // Honor the site selected by a link from website management.
             const params = new URLSearchParams(window.location.search);
             const sid = params.get('site_id');
             if (sid !== null && (sid === '0' || this.sites.some(site => String(site.id) === sid))) {

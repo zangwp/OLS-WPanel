@@ -1,12 +1,9 @@
 package executor
 
-// RecommendInnoDBBufferPoolSizeMB 计算 MariaDB innodb_buffer_pool_size 建议值（单位 MB）。
-//
-// ols-wpanel 部署场景是 MariaDB、LSPHP、Redis、OpenLiteSpeed 和面板自身共用同一台宿主机，
-// 不是专用数据库服务器，所以这里按总内存分档取值，比专用 MariaDB 服务器常见的
-// 60%~70% 保守得多（大致在总内存的 12.5%~25% 区间），避免挤占其它组件的内存。
-// 最后统一夹一层"不超过总内存 30%"的硬上限，防止分档表本身配置不合理时
-// 导致数据库因内存不足无法启动。
+// RecommendInnoDBBufferPoolSizeMB recommends an InnoDB buffer pool size in MB.
+// MariaDB shares the host with LSPHP, Redis, OpenLiteSpeed, and the panel, so
+// memory tiers use roughly 12.5-25% of RAM rather than dedicated-server ratios.
+// A 30% cap protects other services even if the tier values are misconfigured.
 func RecommendInnoDBBufferPoolSizeMB(facts SystemFacts) int {
 	totalMB := int(facts.TotalMemoryBytes / 1024 / 1024)
 
@@ -27,13 +24,13 @@ func RecommendInnoDBBufferPoolSizeMB(facts SystemFacts) int {
 	case totalMB <= 32768:
 		recommended = 6144
 	default:
-		recommended = totalMB / 4 // 总内存的 25%
+		recommended = totalMB / 4 // 25% of total RAM
 		if recommended > 12288 {
 			recommended = 12288
 		}
 	}
 
-	hardCap := totalMB * 3 / 10 // 总内存的 30%
+	hardCap := totalMB * 3 / 10 // 30% of total RAM
 	if recommended > hardCap {
 		recommended = hardCap
 	}
@@ -43,12 +40,10 @@ func RecommendInnoDBBufferPoolSizeMB(facts SystemFacts) int {
 	return recommended
 }
 
-// RecommendRedisMaxmemoryMB 计算 Redis maxmemory 建议值（单位 MB）。
-//
-// Redis 官方文档提醒 maxmemory 并不是进程实际占用内存的上限——allocator 开销、内存
-// 碎片和持久化时 fork 产生的额外消耗都在这个值之外，所以这里比 OPcache/MariaDB 更
-// 保守：硬上限是总内存的 10%，且绝对值不超过 1024MB。WordPress object cache 场景下
-// 如果确实需要更大的缓存，应该是管理员主动调优，而不是面板给出的默认建议。
+// RecommendRedisMaxmemoryMB recommends Redis maxmemory in MB.
+// Allocator overhead, fragmentation, and persistence forks consume memory
+// beyond maxmemory. Cap defaults at 10% of RAM and 1024 MB; larger WordPress
+// object caches require deliberate tuning.
 func RecommendRedisMaxmemoryMB(facts SystemFacts) int {
 	totalMB := int(facts.TotalMemoryBytes / 1024 / 1024)
 
@@ -72,7 +67,7 @@ func RecommendRedisMaxmemoryMB(facts SystemFacts) int {
 		recommended = 1024
 	}
 
-	hardCap := totalMB / 10 // 总内存的 10%
+	hardCap := totalMB / 10 // 10% of total RAM
 	if hardCap > 1024 {
 		hardCap = 1024
 	}

@@ -24,7 +24,7 @@ var wpPackageAutoCheckStarted sync.Once
 // StartWPPackageAutoUpdateScheduler periodically checks wordpress.org for a
 // WordPress release newer than the panel's locally cached install package
 // (the one managed on the settings page) and, if found, downloads it through
-// the same validated publish path as the manual "在线下载" button. Enabled by
+// the same validated publish path as the manual "Download online" button. Enabled by
 // default; can be turned off on the settings page.
 //
 // A failed check (or a failed download) never touches the existing local

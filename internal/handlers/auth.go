@@ -67,7 +67,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	).Scan(&adminID, &hash)
 
 	if err != nil {
-		// 防止计时攻击：空跑一次校验
+		// Run a dummy verification to reduce timing differences.
 		bcrypt.CompareHashAndPassword([]byte("$2a$12$vI8aWBnW3fID.ZQ4/zo1G.q1lRps.9cGLcZEiGDMVr5yUP1KUOYTa"), []byte(req.Password))
 		if !h.recordLoginFailure(c, req.Username) {
 			return

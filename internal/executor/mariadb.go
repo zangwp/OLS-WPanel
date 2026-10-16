@@ -142,7 +142,7 @@ func createMariaDBDatabase(dbName, dbUser, dbPassword string, cfg *config.Config
 		return err
 	}
 
-	// DROP + CREATE 确保密码始终一致，避免 IF NOT EXISTS 下旧用户密码不更新的问题
+	// Recreate the user so an existing account cannot retain an outdated password.
 	runMySQL(cfg.MariaDB.RootPassword, "-u", cfg.MariaDB.RootUser, "-e",
 		fmt.Sprintf("DROP USER IF EXISTS '%s'@'localhost'", dbUser))
 	// Use the same literal-password handling as ALTER USER, and disable client
@@ -330,8 +330,7 @@ func executeChangeDBPassword(task *Task) TaskResult {
 	return result
 }
 
-// DetectDBTablePrefix 查询数据库中实际的 WordPress 表前缀
-// 返回推荐前缀、所有候选前缀列表、错误
+// DetectDBTablePrefix returns the recommended WordPress table prefix and all candidates.
 func DetectDBTablePrefix(dbName string, cfg *config.Config) (string, []string, error) {
 	if !isValidMySQLIdentifier(dbName) {
 		return "", nil, fmt.Errorf("invalid database name")
@@ -383,7 +382,7 @@ func tablePrefixFromOptionsTable(tableName string) (string, bool) {
 	return prefix, true
 }
 
-// ReadWPSiteURLs 从 wp_options 读取 siteurl 和 home
+// ReadWPSiteURLs reads siteurl and home from wp_options.
 func ReadWPSiteURLs(dbName, tablePrefix string, cfg *config.Config) (siteURL, homeURL string, err error) {
 	if cfg == nil {
 		return "", "", fmt.Errorf("面板配置未初始化")
@@ -471,7 +470,7 @@ func ReadWPDiagnosticOptions(dbName, tablePrefix string, cfg *config.Config) (ma
 	return result, nil
 }
 
-// UpdateWPSiteURLs 更新 wp_options 中的 siteurl 和 home（仅更新非空字段）
+// UpdateWPSiteURLs updates nonempty siteurl and home values in wp_options.
 func UpdateWPSiteURLs(dbName, tablePrefix, newSiteURL, newHomeURL string, cfg *config.Config) error {
 	if newSiteURL == "" && newHomeURL == "" {
 		return fmt.Errorf("至少需要提供一个 URL")

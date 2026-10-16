@@ -69,11 +69,10 @@ type WPUpdatePlan struct {
 	DownloadURL            string
 	DatabaseBackupMode     string
 	DatabaseBackupSourceID int64
-	// SkipAutoRollback 为 true 时，健康检查/更新失败不会自动回滚，任务终止在
-	// requires_attention=1、rollback_status='pending'，等待人工选择回滚或忽略。
-	// 零值 false 与现有所有调用方保持一致：始终自动回滚。
+	// SkipAutoRollback leaves failed updates/health checks at requires_attention=1 and
+	// rollback_status=pending for manual rollback or ignore. The false default keeps automatic rollback.
 	SkipAutoRollback bool
-	// BatchID 非空时标记该任务属于哪个批量更新分组，供批量汇总查询使用。
+	// BatchID identifies the batch for aggregate queries when nonempty.
 	BatchID string
 }
 
@@ -892,14 +891,14 @@ func (s *wpUpdateStore) recordPluginRunnerJournal(ctx context.Context, id, owner
 	return tx.Commit()
 }
 
-// recordEvent 在任务仍处于 running 且由 owner 持锁时，写入一条带 error_code 的事件。
-// 用于把健康检查/回滚等关键步骤的失败原因落到 wp_update_task_events，方便前端一键复制日志。
+// recordEvent writes an error-coded event while owner holds a running task,
+// making health-check and rollback failure details available for frontend log export.
 func (s *wpUpdateStore) recordEvent(ctx context.Context, id, owner, stage, result, code string, now time.Time) error {
 	return s.recordEventWithStatus(ctx, id, owner, wpUpdateRunning, stage, result, code, now)
 }
 
-// recordEventWithStatus 在任务仍处于 status 且由 owner 持锁时，写入一条带 error_code 的事件。
-// status='running' 供自动执行使用；status='failed' 供批量更新失败后的人工回滚使用。
+// recordEventWithStatus writes an error-coded event under the expected status and owner.
+// Use running for automatic execution or failed for manual rollback.
 func (s *wpUpdateStore) recordEventWithStatus(ctx context.Context, id, owner, status, stage, result, code string, now time.Time) error {
 	if s == nil || s.db == nil {
 		return errors.New("update store unavailable")
@@ -929,8 +928,8 @@ func (s *wpUpdateStore) ownsRunningTask(ctx context.Context, id, owner string) (
 	return s.ownsTaskWithStatus(ctx, id, owner, wpUpdateRunning)
 }
 
-// ownsTaskWithStatus 供自动执行（status='running'）和批量更新失败后的人工回滚
-// （status='failed'）共用同一套持有权校验。
+// ownsTaskWithStatus shares ownership checks between automatic execution (running)
+// and manual rollback after a failed batch update (failed).
 func (s *wpUpdateStore) ownsTaskWithStatus(ctx context.Context, id, owner, status string) (bool, error) {
 	var owned int
 	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM wp_update_tasks
@@ -988,8 +987,8 @@ func (s *wpUpdateStore) finishAutomaticRollback(ctx context.Context, id, owner s
 	return tx.Commit()
 }
 
-// haltForManualRollback 用于 auto_rollback=0 的任务（批量更新）：健康检查/更新失败时不做任何
-// 文件或数据库改动，直接终态化为 failed，rollback_status='pending'，等待用户选择回滚或忽略。
+// haltForManualRollback finalizes auto_rollback=0 tasks as failed with rollback_status=pending,
+// without changing files or the database, and waits for rollback or ignore.
 func (s *wpUpdateStore) haltForManualRollback(ctx context.Context, id, owner, failureStage string, now time.Time) error {
 	if failureStage == "" {
 		return errors.New("failure stage is required")
@@ -1016,12 +1015,9 @@ func (s *wpUpdateStore) haltForManualRollback(ctx context.Context, id, owner, fa
 	return tx.Commit()
 }
 
-// beginManualRollback 认领一个等待人工决定的失败任务（status='failed', rollback_status='pending'），
-// 为其临时加租约以执行用户触发的回滚。租约过期（wpUpdateLease）后可被重新认领，避免执行中途崩溃导致永久卡死。
-// beginManualRollback 认领条件用 requires_attention=1（而不是死抠 rollback_status=
-// 'pending'）：一次人工回滚本身执行失败后 rollback_status 会变成 'failed'，但只要
-// requires_attention 仍是 1、manual_disposition 还没写入，就说明用户还没有对这个任务
-// 做出最终决定，应该允许重新发起回滚（比如上次是磁盘抖动之类的瞬时故障）。
+// beginManualRollback leases a failed task awaiting a decision. Expired wpUpdateLease claims
+// can be reclaimed after crashes. Require requires_attention=1 and no manual_disposition,
+// allowing retries even when an earlier rollback changed rollback_status from pending to failed.
 func (s *wpUpdateStore) beginManualRollback(ctx context.Context, id, owner string, now time.Time) error {
 	if owner == "" {
 		return errors.New("rollback owner is required")
@@ -1041,11 +1037,9 @@ func (s *wpUpdateStore) beginManualRollback(ctx context.Context, id, owner strin
 	return nil
 }
 
-// renewManualRollbackClaim 在人工回滚执行过程中的每一步之前续租，把 lease_expires_at
-// 重新推到 now+wpUpdateLease。人工回滚是同步执行的（没有像 worker 那样的独立心跳协程），
-// 如果只在 beginManualRollback 时设置一次固定 10 分钟租约、执行期间从不续租，遇到大数据库
-// 恢复等耗时步骤就可能在回滚还没跑完时租约过期，被第二个请求重新认领、与仍在运行的第一次
-// 执行短暂并发。RowsAffected==1 本身就同时证明了「仍然持有」和「续租成功」。
+// renewManualRollbackClaim extends lease_expires_at to now+wpUpdateLease at each step.
+// Renewing during execution prevents a second request from reclaiming a long-running rollback.
+// RowsAffected==1 confirms both ownership and successful renewal.
 func (s *wpUpdateStore) renewManualRollbackClaim(ctx context.Context, id, owner string, now time.Time) (bool, error) {
 	result, err := s.db.ExecContext(ctx, `UPDATE wp_update_tasks SET lease_expires_at=?,updated_at=?
 		WHERE id=? AND lease_owner=? AND status='failed'`, wpUpdateDBTime(now.Add(wpUpdateLease)), wpUpdateDBTime(now), id, owner)
@@ -1056,13 +1050,10 @@ func (s *wpUpdateStore) renewManualRollbackClaim(ctx context.Context, id, owner 
 	return changed == 1, err
 }
 
-// abandonManualRollback 释放一次未能进入实际回滚步骤（如加载执行上下文失败）的认领，
-// 使任务立即回到可重新认领状态，而不必等待租约自然过期。
-// abandonManualRollback 释放认领时不能再要求 rollback_status='pending'：一次重试
-// （上一次回滚本身失败过，rollback_status 已经是 'failed'）在 loadExecution/Prepare
-// 阶段又失败，也必须能正确释放，否则 lease_owner 会一直非空——Ignore 要求
-// lease_owner=”（见 disposeFailedTaskIgnored），用户会被卡死，既不能重试也不能忽略。
-// 必须检查 RowsAffected，0 行时说明持有权已经不在这个 owner 手上，视为错误而不是静默成功。
+// abandonManualRollback releases claims that fail before rollback starts, allowing immediate retry.
+// Accept rollback_status=failed after previous rollback failures; requiring pending would leave
+// lease_owner set and block both retry and Ignore if loadExecution/Prepare fails again.
+// Zero affected rows means ownership was lost and must be reported as an error.
 func (s *wpUpdateStore) abandonManualRollback(ctx context.Context, id, owner string, now time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE wp_update_tasks SET lease_owner='',lease_expires_at=NULL,updated_at=?
 		WHERE id=? AND lease_owner=? AND status='failed' AND requires_attention=1 AND manual_disposition=''`,
@@ -1076,8 +1067,8 @@ func (s *wpUpdateStore) abandonManualRollback(ctx context.Context, id, owner str
 	return nil
 }
 
-// finishManualRollback 记录人工触发回滚的最终结果；无论成功与否 status 都保持 failed
-// （原始更新终归是失败的），rollback_status 记录回滚本身是否成功。
+// finishManualRollback records rollback success separately in rollback_status.
+// Task status remains failed because the original update failed.
 func (s *wpUpdateStore) finishManualRollback(ctx context.Context, id, owner string, succeeded bool, now time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1089,8 +1080,8 @@ func (s *wpUpdateStore) finishManualRollback(ctx context.Context, id, owner stri
 	if !succeeded {
 		rollbackStatus, attention, disposition, resultType, code = "failed", 1, "", "failed", "manual_rollback_failed"
 	}
-	// 不要求 rollback_status='pending'：一次重试（上次回滚本身失败过，rollback_status
-	// 已经是 'failed'）也要能正常写入这次的结果，只靠 lease_owner+status 校验持有权即可。
+	// Check lease_owner and status only; retries after a failed rollback must still save results
+	// when rollback_status is already failed.
 	result, err := tx.ExecContext(ctx, `UPDATE wp_update_tasks SET rollback_status=?,requires_attention=?,manual_disposition=?,
 		lease_owner='',lease_expires_at=NULL,updated_at=? WHERE id=? AND lease_owner=? AND status='failed'`,
 		rollbackStatus, attention, disposition, stamp, id, owner)
@@ -1106,8 +1097,8 @@ func (s *wpUpdateStore) finishManualRollback(ctx context.Context, id, owner stri
 	return tx.Commit()
 }
 
-// disposeFailedTaskIgnored 供用户在批量更新失败项上选择「忽略，我自己去后台检查」时使用：
-// 不做任何文件/数据库改动，只是清除 requires_attention 并记录处置结果。
+// disposeFailedTaskIgnored clears requires_attention and records the user's decision
+// without changing files or the database.
 func (s *wpUpdateStore) disposeFailedTaskIgnored(ctx context.Context, id string, now time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1115,12 +1106,9 @@ func (s *wpUpdateStore) disposeFailedTaskIgnored(ctx context.Context, id string,
 	}
 	defer tx.Rollback()
 	stamp := wpUpdateDBTime(now)
-	// lease_owner 必须为空（且租约已过期或从未设置）才能忽略：如果一个人工回滚正
-	// 认领着这个任务在执行，不能让「忽略」在回滚跑完前抢先改写处置结果，否则会
-	// 出现回滚和忽略同时“成功”、互相覆盖 manual_disposition 的竞态。
-	// 不要求 rollback_status='pending'：哪怕上一次人工回滚本身失败过（rollback_status=
-	// 'failed'），只要 requires_attention 仍是 1 且还没有处置结果，用户也应该能选择
-	// 「不再重试了，我自己去后台确认」，而不是被卡死在无法忽略的状态。
+	// Ignore requires an empty lease_owner and an expired or unset lease to prevent racing
+	// an active manual rollback and overwriting manual_disposition. A previous failed rollback
+	// may still be ignored while requires_attention=1 and no disposition has been recorded.
 	result, err := tx.ExecContext(ctx, `UPDATE wp_update_tasks SET manual_disposition='marked_failed_no_action',
 		requires_attention=0,updated_at=? WHERE id=? AND status='failed' AND requires_attention=1 AND manual_disposition=''
 		AND lease_owner='' AND (lease_expires_at IS NULL OR lease_expires_at<?)`,
@@ -1366,9 +1354,8 @@ func newWPUpdateTaskID() (string, error) {
 	return "wpu_" + hex.EncodeToString(raw[:]), nil
 }
 
-// WPUpdateDBTime 将时间格式化为 wp_update_tasks 等表里 DATETIME 列存储/比较时使用的
-// 统一字符串（2006-01-02 15:04:05.000000）。handler 与清理逻辑共用同一格式，避免字符串
-// 比较时因格式不一致（如缺少小数秒）导致的边界错判。
+// WPUpdateDBTime formats DATETIME storage/comparison values as 2006-01-02 15:04:05.000000.
+// Handlers and cleanup share this format to avoid boundary errors from inconsistent string comparisons.
 func WPUpdateDBTime(t time.Time) string { return t.UTC().Format("2006-01-02 15:04:05.000000") }
 
 func wpUpdateDBTime(t time.Time) string { return WPUpdateDBTime(t) }

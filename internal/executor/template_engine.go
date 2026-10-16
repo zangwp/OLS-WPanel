@@ -135,15 +135,15 @@ func siteMigrationLockedByOLSVHostConfig(targetPath string) (bool, error) {
 	return count > 0, err
 }
 
-// ApplyOLSVHostConfigKeepDisabled 校验并写入 OpenLiteSpeed 配置文件内容（含旧配置备份），
-// 但不创建/恢复 sites-enabled 软链接，也不触发 reload。
-// 用于刷新已暂停网站的配置模板，避免把暂停中的站点重新暴露为可访问。
+// ApplyOLSVHostConfigKeepDisabled validates and writes the config with a backup,
+// without creating sites-enabled links or reloading OLS. This refreshes suspended
+// sites without making them accessible again.
 func (e *TemplateEngine) ApplyOLSVHostConfigKeepDisabled(configContent string, targetPath string) error {
 	return e.writeOLSVHostConfigFile(configContent, targetPath)
 }
 
-// writeOLSVHostConfigFile 校验 OpenLiteSpeed 配置语法，备份旧文件后写入 targetPath。
-// 不涉及启用链接和 OpenLiteSpeed 重载，由调用方决定是否启用。
+// writeOLSVHostConfigFile validates OLS syntax, backs up the old file, and writes
+// targetPath. Callers control enable links and reloading.
 func (e *TemplateEngine) writeOLSVHostConfigFile(configContent string, targetPath string) error {
 	if err := validateOLSVHostContent(configContent, targetPath); err != nil {
 		return err

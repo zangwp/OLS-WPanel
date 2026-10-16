@@ -1,11 +1,9 @@
 package executor
 
-// RecommendOPcacheMemoryConsumptionMB 计算 opcache.memory_consumption 建议值（单位 MB）。
-//
-// 按总内存分档取基础值，再按站点数量做小幅修正，最后夹在
-// [64, min(768, 总内存*12.5%)] 区间内，并向下对齐到 32MB 的整数倍。
-// 之所以不用"总内存的固定百分比"这种线性公式，是因为小内存 VPS 和大内存服务器对
-// OPcache 的实际需求差异很大，线性公式在大内存机器上会给出不合理的巨大数值。
+// RecommendOPcacheMemoryConsumptionMB recommends OPcache memory in MB.
+// Memory tiers and site count determine the value, bounded by 64 MB and
+// min(768 MB, 12.5% of RAM), then rounded down to a 32 MB multiple.
+// Tiers avoid oversized caches on large servers from a fixed RAM percentage.
 func RecommendOPcacheMemoryConsumptionMB(facts SystemFacts) int {
 	totalMB := int(facts.TotalMemoryBytes / 1024 / 1024)
 
@@ -41,7 +39,7 @@ func RecommendOPcacheMemoryConsumptionMB(facts SystemFacts) int {
 		siteAdjust = 256
 	}
 
-	hardCap := totalMB * 125 / 1000 // 总内存的 12.5%
+	hardCap := totalMB * 125 / 1000 // 12.5% of total RAM
 	if hardCap > 768 {
 		hardCap = 768
 	}
@@ -64,12 +62,11 @@ func RecommendOPcacheMemoryConsumptionMB(facts SystemFacts) int {
 	return result
 }
 
-// RecommendLSPHPMaxChildren 计算新建站点的 LSPHP 子进程上限建议值。
-//
-// 分别按总内存和 CPU 核心数算出两个上限，取较小值。这个值只在建站时计算一次并持久化，
-// 之后不会因为服务器又建了多少个站点而重新计算。当前受管虚拟主机在 OLS 启动时
-// 启动 PHP 父进程，子进程按请求需求扩展。此值是单站并发上限，不是整台服务器的
-// 内存预算；多个站点同时繁忙时仍需结合实际资源使用调整。
+// RecommendLSPHPMaxChildren recommends a new site's PHP child-process limit.
+// It uses the lower RAM or CPU limit and is persisted when the site is created.
+// Managed vhosts start PHP parents with OLS; children scale with requests.
+// This per-site concurrency limit is not a server-wide memory budget; busy
+// sites still require tuning against actual resource usage.
 func RecommendLSPHPMaxChildren(facts SystemFacts) int {
 	totalMB := int(facts.TotalMemoryBytes / 1024 / 1024)
 
@@ -113,11 +110,9 @@ func RecommendLSPHPMaxChildren(facts SystemFacts) int {
 	return cpuCap
 }
 
-// RecommendOPcacheMaxAcceleratedFiles 返回 opcache.max_accelerated_files 建议值。
-//
-// PHP 内部会把这个值向上取整到预定义的质数哈希表档位（如 16229/32531/65407/130987/
-// 262237/524521），这里直接按站点数量返回对应的档位值，避免"配置写的是一个数字，
-// 实际生效的是另一个数字"这种落差。
+// RecommendOPcacheMaxAcceleratedFiles recommends opcache.max_accelerated_files.
+// PHP rounds up to predefined prime hash-table sizes. Return those sizes
+// directly by site count so the configured and effective values match.
 func RecommendOPcacheMaxAcceleratedFiles(facts SystemFacts) int {
 	switch {
 	case facts.SiteCount <= 1:

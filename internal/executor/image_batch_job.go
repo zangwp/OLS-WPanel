@@ -12,9 +12,8 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
 
-// imageBatchRunningJob 把取消函数和它所属的 jobID 绑在一起——runImageOptimizationJob
-// 结束时按 jobID 比对再删，避免"旧任务收尾的 defer 删除掉了新任务刚写入的 cancel"
-// 这种竞态（Go 的函数值不可比较，只能靠额外的 jobID 判断是不是同一个条目）。
+// imageBatchRunningJob pairs cancellation with a job ID so an old job's deferred
+// cleanup cannot delete a newer job's cancel function. Go function values cannot be compared.
 type imageBatchRunningJob struct {
 	JobID  int64
 	Cancel context.CancelFunc
@@ -22,15 +21,13 @@ type imageBatchRunningJob struct {
 
 var (
 	imageBatchMu      sync.Mutex
-	imageBatchCancels = map[int]imageBatchRunningJob{} // site_id -> 正在运行任务
+	imageBatchCancels = map[int]imageBatchRunningJob{} // site_id -> running job
 )
 
-// imageBatchPace 是两个文件之间的处理间隔，低速批处理避免压垮小服务器，
-// 跟现有缓存预加载功能的节奏保持一致。
+// imageBatchPace limits load on small servers, matching the cache preload pace.
 const imageBatchPace = 300 * time.Millisecond
 
-// imageBatchManifestFlushSize 攒够这么多个文件的 filesize 变更就回写一次，
-// 不要攒到整个任务结束才一次性回写一个巨大清单。
+// imageBatchManifestFlushSize bounds each filesize writeback instead of accumulating the entire job.
 const imageBatchManifestFlushSize = 50
 
 type ImageOptimizationJobStatus struct {
@@ -50,10 +47,8 @@ type ImageOptimizationJobStatus struct {
 	FinishedAt     sql.NullString
 }
 
-// ResetStuckImageOptimizationJobs 在面板启动时把上次进程退出前遗留的
-// queued/running 任务清成 stopped——这些任务的执行 goroutine 随进程一起消失了，
-// 但行还留着，唯一索引会一直拒绝该站点的新任务，必须在启动时清掉，不能等用户
-// 手动改库。
+// ResetStuckImageOptimizationJobs stops queued/running jobs left by the previous process.
+// Their goroutines no longer exist, but their rows would block new jobs through the unique index.
 func ResetStuckImageOptimizationJobs() {
 	db := database.GetDB()
 	res, err := db.Exec(`UPDATE site_image_optimization_jobs
@@ -68,9 +63,8 @@ func ResetStuckImageOptimizationJobs() {
 	}
 }
 
-// StartImageOptimizationJob 为站点创建一个新的历史图库批量优化任务并异步执行。
-// 同一站点同时只能有一个 queued/running 任务，由
-// ux_site_image_optimization_jobs_active_site 唯一索引保证。
+// StartImageOptimizationJob starts an asynchronous batch image optimization job.
+// The ux_site_image_optimization_jobs_active_site unique index permits one queued/running job per site.
 func StartImageOptimizationJob(siteID int) (int64, error) {
 	if !ImageBatchBinariesReady() {
 		return 0, errors.New("服务器尚未就绪：jpegoptim/optipng 还没有安装完成，请稍后重试")
@@ -83,10 +77,9 @@ func StartImageOptimizationJob(siteID int) (int64, error) {
 		return 0, fmt.Errorf("站点不存在或不是 WordPress 站点: %w", err)
 	}
 
-	// 跟备份恢复、WP 核心/插件/主题更新共用同一把站点级独占锁——jpegoptim/optipng
-	// 在任务运行期间持续原地重写 wp-content/uploads/ 下的文件，如果这时候有恢复
-	// 或更新操作同时替换同一批文件，会导致文件损坏或数据不一致，见 site_lock.go。
-	// 锁持有到任务结束（成功/失败/停止），不是只护住创建这一步。
+	// Hold the site lock shared with restores and WordPress updates for the entire job.
+	// jpegoptim/optipng rewrite uploads in place; concurrent file replacement could corrupt data.
+	// See site_lock.go.
 	if !TryAcquireSiteOpLock(siteID, "image_optimizer") {
 		return 0, errors.New("站点当前有其他维护操作正在进行（更新、备份恢复等），请稍后重试")
 	}
@@ -111,7 +104,7 @@ func StartImageOptimizationJob(siteID int) (int64, error) {
 	return jobID, nil
 }
 
-// StopImageOptimizationJob 取消该站点当前正在运行的任务。
+// StopImageOptimizationJob cancels the running job for the site.
 func StopImageOptimizationJob(siteID int) error {
 	imageBatchMu.Lock()
 	job, ok := imageBatchCancels[siteID]
@@ -123,11 +116,9 @@ func StopImageOptimizationJob(siteID int) error {
 	return nil
 }
 
-// StopAllImageOptimizationJobsForShutdown 面板收到 SIGINT/SIGTERM 时调用：取消所有仍在
-// 运行的批量优化任务并等待它们的 goroutine 退出（有超时上限）。main.go 的 defer
-// database.Close() 会在 main() 返回后立刻执行，如果这时候还有任务 goroutine 在跑，
-// 它接下来的 db.Exec 会对着已关闭的连接报错；跟 wp 核心更新等其他后台任务的关闭
-// 处理保持同样的"取消 + 限时等待"模式。
+// StopAllImageOptimizationJobsForShutdown cancels jobs and waits for their goroutines
+// with a timeout on SIGINT/SIGTERM. They must finish before main's deferred database.Close()
+// to avoid database writes against a closed connection, as with other background workers.
 func StopAllImageOptimizationJobsForShutdown(timeout time.Duration) {
 	imageBatchMu.Lock()
 	jobs := make([]imageBatchRunningJob, 0, len(imageBatchCancels))
@@ -160,7 +151,7 @@ func StopAllImageOptimizationJobsForShutdown(timeout time.Duration) {
 	}
 }
 
-// GetImageOptimizationJobStatus 返回该站点最近一次任务的状态，没有任务时返回 nil。
+// GetImageOptimizationJobStatus returns the latest job, or nil if none exists.
 func GetImageOptimizationJobStatus(siteID int) (*ImageOptimizationJobStatus, error) {
 	db := database.GetDB()
 	row := db.QueryRow(`SELECT id, site_id, status, total_files, processed_files, succeeded_files, failed_files, skipped_files,
@@ -177,10 +168,8 @@ func GetImageOptimizationJobStatus(siteID int) (*ImageOptimizationJobStatus, err
 	return &s, nil
 }
 
-// GetImageOptimizationLifetimeSavedBytes 汇总该站点历史上所有批量任务实际节省的
-// 字节数——单次任务的 bytes_before/bytes_after 只统计"这次任务处理过的文件"，
-// 跳过的文件（幂等命中）不会计入，所以一次任务展示的节省量会随着可优化文件越
-// 来越少而趋近于 0；这里把所有历史任务加总，给出"这个站点总共省了多少"。
+// GetImageOptimizationLifetimeSavedBytes sums savings across all jobs for the site.
+// Per-job totals exclude unchanged files skipped by fingerprints, so they shrink as fewer files need work.
 func GetImageOptimizationLifetimeSavedBytes(siteID int) (int64, error) {
 	db := database.GetDB()
 	var saved sql.NullInt64
@@ -211,8 +200,7 @@ func runImageOptimizationJob(ctx context.Context, jobID int64, siteID int, webRo
 	}
 
 	pending := filterAlreadyOptimizedImages(db, siteID, candidates)
-	// skipped 是幂等指纹命中、本次不需要重新处理的文件数——只在界面上展示，
-	// 让用户能看出"总数变小了"是因为跳过了已处理文件，不是又从头扫描一遍。
+	// Show fingerprint matches as skipped so users can distinguish reused results from a smaller scan.
 	skipped := len(candidates) - len(pending)
 	db.Exec(`UPDATE site_image_optimization_jobs SET total_files=?, skipped_files=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		len(pending), skipped, jobID)
@@ -234,9 +222,7 @@ func runImageOptimizationJob(ctx context.Context, jobID int64, siteID int, webRo
 
 		before, after, newModUnix, optErr := optimizeImageFile(ctx, webRoot, systemUser, c.RelativePath, c.Mime)
 		if optErr != nil && ctx.Err() != nil {
-			// 文件正在处理时被点了停止：子进程是被 context 取消杀掉的，不是真的
-			// 处理失败，不计入 processed/failed，避免日志和统计里出现误导性的
-			// "处理失败"记录。
+			// A canceled subprocess is a stopped operation, not a processing failure; exclude it from both counts.
 			stopped = true
 			break
 		}
@@ -251,9 +237,8 @@ func runImageOptimizationJob(ctx context.Context, jobID int64, siteID int, webRo
 			if after < before {
 				manifest[c.RelativePath] = after
 			}
-			// 存重编码*之后*的 mtime（newModUnix），不是扫描阶段读到的旧值
-			// （c.ModUnix）——jpegoptim/optipng 原地重写文件必然会刷新 mtime，
-			// 存旧值会导致下次扫描永远对不上指纹，整个媒体库每次都被重新处理。
+			// Store the mtime after re-encoding. In-place rewrites change mtime, so storing the scan's
+			// old value would invalidate every fingerprint and reprocess the entire library next time.
 			db.Exec(`INSERT INTO site_image_optimization_files (site_id, relative_path, original_size, optimized_size, mtime_unix, processed_at)
 				VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
 				ON CONFLICT(site_id, relative_path) DO UPDATE SET
@@ -267,9 +252,8 @@ func runImageOptimizationJob(ctx context.Context, jobID int64, siteID int, webRo
 			WHERE id=?`, processed, succeeded, failed, bytesBefore, bytesAfter, jobID)
 
 		if len(manifest) >= imageBatchManifestFlushSize {
-			// flush 失败（例如恰好被 Stop 取消）时不清空 manifest，让这些条目留到
-			// 循环结束后用 context.Background() 重试，避免指纹已落库（上面的
-			// INSERT）但 filesize 回写永久丢失、下次任务又因为指纹匹配被跳过。
+			// Retain the manifest on flush failure and retry with context.Background() after the loop.
+			// Otherwise saved fingerprints could skip files whose filesize metadata was never written back.
 			if flushImageFilesizeManifest(ctx, webRoot, systemUser, siteID, manifest) {
 				manifest = make(map[string]int64)
 			}
@@ -278,8 +262,7 @@ func runImageOptimizationJob(ctx context.Context, jobID int64, siteID int, webRo
 		time.Sleep(imageBatchPace)
 	}
 
-	// 即便任务被停止，已经优化成功的文件也要把 filesize 回写掉，不要因为中途
-	// 停止就留下一批"文件已经变小、元数据还是旧值"的不一致状态。
+	// Write back sizes of successfully optimized files even after cancellation to keep metadata consistent.
 	if len(manifest) > 0 {
 		if !flushImageFilesizeManifest(context.Background(), webRoot, systemUser, siteID, manifest) {
 			forgetImageOptimizationFingerprints(db, siteID, manifest)
@@ -311,8 +294,7 @@ func finishImageOptimizationJob(db *sql.DB, jobID int64, status, lastError strin
 	}
 }
 
-// filterAlreadyOptimizedImages 幂等过滤：文件大小和修改时间跟上次处理后记录的
-// 一致，说明这个文件自上次处理以来没有变化，跳过，不重复处理。
+// filterAlreadyOptimizedImages skips files whose size and mtime match their last optimization.
 func filterAlreadyOptimizedImages(db *sql.DB, siteID int, candidates []imageBatchCandidate) []imageBatchCandidate {
 	var pending []imageBatchCandidate
 	for _, c := range candidates {
@@ -327,7 +309,7 @@ func filterAlreadyOptimizedImages(db *sql.DB, siteID int, candidates []imageBatc
 	return pending
 }
 
-// flushImageFilesizeManifest 返回是否成功——调用方据此决定要不要清空 manifest。
+// flushImageFilesizeManifest reports success so the caller can decide whether to clear the manifest.
 func flushImageFilesizeManifest(ctx context.Context, webRoot, systemUser string, siteID int, manifest map[string]int64) bool {
 	updated, total, err := runFilesizeRewrite(ctx, webRoot, systemUser, manifest)
 	if err != nil {

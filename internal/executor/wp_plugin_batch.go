@@ -15,8 +15,8 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
-// WPUpdateBatch 是一次批量插件更新的分组记录：一次批量对应若干个串行派发的
-// wp_update_tasks（每个任务 auto_rollback=0，batch_id 指向本记录）。
+// WPUpdateBatch groups sequential plugin update tasks, each with auto_rollback=0
+// and batch_id referring to this record.
 type WPUpdateBatch struct {
 	ID                     string
 	SiteID                 int
@@ -28,9 +28,8 @@ type WPUpdateBatch struct {
 	UpdatedAt              string
 }
 
-// WPUpdateBatchItem 是批量中的一项（一个插件），在被派发前只是一个待处理的
-// component_key；派发成功后 TaskID 指向真正的 wp_update_tasks 行，Task*/CurrentVersion/
-// TargetVersion 是从该任务行冗余读取的快照，供前端不必再单独查询任务详情即可展示进度。
+// WPUpdateBatchItem holds a pending plugin key, then the dispatched TaskID.
+// Task*/CurrentVersion/TargetVersion snapshot the task for frontend progress display.
 type WPUpdateBatchItem struct {
 	ID                    int64
 	BatchID               string
@@ -61,9 +60,8 @@ func newWPUpdateBatchID() (string, error) {
 	return "wpub_" + hex.EncodeToString(raw[:]), nil
 }
 
-// createPluginBatch 为一个站点创建一次批量插件更新分组，componentKeys 决定派发顺序。
-// 站点当前存在阻塞任务，或者已经有一个 running 状态的批量时会失败
-// （ux_wp_update_batches_active_site 唯一索引兜底）。
+// createPluginBatch preserves componentKeys dispatch order and rejects sites with a blocking
+// task or running batch. ux_wp_update_batches_active_site enforces batch uniqueness.
 func (s *wpUpdateStore) createPluginBatch(ctx context.Context, siteID int, createdBy string, componentKeys []string, now time.Time) (WPUpdateBatch, error) {
 	if s == nil || s.db == nil || siteID <= 0 || createdBy == "" || len(componentKeys) == 0 {
 		return WPUpdateBatch{}, errors.New("invalid plugin batch request")
@@ -166,7 +164,7 @@ func (s *wpUpdateStore) listBatchItems(ctx context.Context, batchID string) ([]W
 	return items, rows.Err()
 }
 
-// listRunningBatches 返回所有仍在进行中的批量，供编排器每次 tick 扫描。
+// listRunningBatches returns active batches for each orchestrator tick.
 func (s *wpUpdateStore) listRunningBatches(ctx context.Context) ([]WPUpdateBatch, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,site_id,created_by,status,total_count,database_backup_source_id,created_at,updated_at
 		FROM wp_update_batches WHERE status='running' ORDER BY created_at`)
@@ -189,8 +187,8 @@ func (s *wpUpdateStore) listRunningBatches(ctx context.Context) ([]WPUpdateBatch
 	return batches, rows.Err()
 }
 
-// siteHasBlockingTask 与 create*ManualPlan 中内联的阻塞检查一致：站点当前存在
-// preparing/queued/running 任务，或存在尚未处置的 interrupted_unknown 任务时视为阻塞。
+// siteHasBlockingTask matches create*ManualPlan: preparing/queued/running tasks
+// and undisposed interrupted_unknown tasks block the site.
 func (s *wpUpdateStore) siteHasBlockingTask(ctx context.Context, siteID int) (bool, error) {
 	var blocked int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM wp_update_tasks WHERE site_id=? AND (
@@ -199,10 +197,8 @@ func (s *wpUpdateStore) siteHasBlockingTask(ctx context.Context, siteID int) (bo
 	return blocked != 0, err
 }
 
-// nextPendingBatchItem 取批量中位置最靠前的待派发项；没有剩余待处理项时返回 sql.ErrNoRows。
-// 即使这一项因为瞬时错误正在退避等待重试（next_retry_at 在未来），这里也照样把它当作
-// "最靠前的待处理项"返回——调用方（advance）据此决定本次 tick 是否要停下来等，而不是
-// 在这里就跳过它去派发后面的项，那样会破坏 componentKeys 定好的派发顺序。
+// nextPendingBatchItem returns the earliest pending item, or sql.ErrNoRows.
+// Return it even during retry backoff so advance waits instead of violating componentKeys order.
 func (s *wpUpdateStore) nextPendingBatchItem(ctx context.Context, batchID string) (WPUpdateBatchItem, error) {
 	var it WPUpdateBatchItem
 	err := s.db.QueryRowContext(ctx, `SELECT id,batch_id,position,component_key,status,message,COALESCE(task_id,''),retry_count,COALESCE(next_retry_at,''),created_at,updated_at
@@ -235,9 +231,8 @@ func (s *wpUpdateStore) markBatchItemFailed(ctx context.Context, itemID int64, m
 	return nil
 }
 
-// retryBatchItem 记录一次派发前置检查（Preview/ConfirmForBatch）的瞬时失败：不把这一项
-// 标成 failed，而是留在 pending，写入这次失败的原因和下一次允许重试的时间，
-// 等待编排器在之后的 tick 里再次尝试同一项。
+// retryBatchItem keeps transient Preview/ConfirmForBatch failures pending,
+// recording the error and next retry time for a later tick.
 func (s *wpUpdateStore) retryBatchItem(ctx context.Context, itemID int64, message string, retryCount int, nextRetryAt, now time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE wp_update_batch_items SET message=?,retry_count=?,next_retry_at=?,updated_at=?
 		WHERE id=? AND status='pending'`, message, retryCount, wpUpdateDBTime(nextRetryAt), wpUpdateDBTime(now), itemID)
@@ -250,18 +245,13 @@ func (s *wpUpdateStore) retryBatchItem(ctx context.Context, itemID int64, messag
 	return nil
 }
 
-// completeBatchIfExhausted 只有在批量里没有 pending 项、且所有已派发任务都已经走到
-// 「真正终态」时才标记为 completed：
-//   - failed 状态用 requires_attention 判断是否还在等待决定（回滚成功或用户忽略都会
-//     把它清零；哪怕人工回滚本身失败过、又被再次忽略，disposeFailedTaskIgnored 同样
-//     会清零，所以不需要再看 rollback_status）。
-//   - interrupted_unknown 状态用 manual_disposition 判断（disposeInterrupted 对
-//     'escalated'/'marked_failed_no_action' 这两种处置结果故意保留
-//     requires_attention=1 以便在单任务的更新日志里继续高亮，所以这里不能用
-//     requires_attention 判断，必须看 manual_disposition 是否已经写入）。
+// completeBatchIfExhausted requires no pending items and truly terminal dispatched tasks.
+// For failed tasks, successful rollback or explicit ignore clears requires_attention, even after a failed rollback.
+// For interrupted_unknown tasks, check manual_disposition: escalation and marked_failed_no_action
+// intentionally retain requires_attention for highlighting in the individual task log.
 //
-// 哪怕只是最后一项停在等待人工决定，也必须保持 running，否则批量会在用户还没来得及
-// 处理时就“提前完成”，导致刷新页面/关闭进度框后再也找不到入口去做「回滚」或「忽略」。
+// Keep the batch running while any item needs a decision, so reopening progress still
+// offers rollback or ignore.
 func (s *wpUpdateStore) completeBatchIfExhausted(ctx context.Context, batchID string, siteID int, now time.Time) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -300,12 +290,9 @@ func (s *wpUpdateStore) completeBatchIfExhausted(ctx context.Context, batchID st
 	return true, nil
 }
 
-// ensureBatchDatabaseBackupSource 在批量的共享数据库备份来源尚未确定时，从批量里已经
-// 派发过的项目（按 position 顺序）中找到第一个已经就绪的数据库备份，并把它固定写回
-// wp_update_batches——一旦写入就不再改变，即使这一项后来失败、被标记 requires_attention。
-// 这样后续所有项都能稳定复用同一份备份，而不是像 recentDatabaseBackup 那样一旦某个任务
-// 进入 requires_attention 状态就查不到、从而被迫为后续每一项都重新备份一次数据库。
-// 返回 0 且 err 为 nil 表示目前还没有任何可用的备份（比如第一项还没跑到 backups_ready）。
+// ensureBatchDatabaseBackupSource pins the first ready backup in item order, once only.
+// Later items reuse it even if its task fails or needs attention; recentDatabaseBackup would
+// otherwise exclude that task and force repeated backups. Zero with no error means none is ready.
 func (s *wpUpdateStore) ensureBatchDatabaseBackupSource(ctx context.Context, batchID string, now time.Time) (int64, error) {
 	var existing sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, `SELECT database_backup_source_id FROM wp_update_batches WHERE id=?`, batchID).Scan(&existing); err != nil {
@@ -332,12 +319,9 @@ func (s *wpUpdateStore) ensureBatchDatabaseBackupSource(ctx context.Context, bat
 	return backupID, nil
 }
 
-// validateBatchDatabaseBackup 与 validateDatabaseBackupChoice 校验同样的备份文件完整性
-// （站点归属、受保护未删除、路径受控、大小与 sha256 一致），但故意不检查备份所属任务
-// 当前的 requires_attention/rollback_status——批量复用的备份来源一旦由
-// ensureBatchDatabaseBackupSource 固定下来，就不应该因为那一项后来失败/需要人工介入而
-// 失效：备份本身在拍摄那一刻就已经是完整且正确的，与该任务后续的健康检查结果无关。
-// 同样故意不做 6 小时新鲜度窗口限制：批量的持续时间不该被这个为“临时复用”设计的窗口卡住。
+// validateBatchDatabaseBackup checks site ownership, protection, controlled path, size, and SHA-256.
+// Ignore the source task's later attention/rollback state: a pinned backup remains valid after task failure.
+// The six-hour temporary-reuse window also does not limit a batch's duration.
 func (s *wpUpdateStore) validateBatchDatabaseBackup(ctx context.Context, siteID int, mode string, sourceID int64, root string) error {
 	if mode == "fresh" && sourceID == 0 {
 		return nil
@@ -368,9 +352,8 @@ func (s *wpUpdateStore) validateBatchDatabaseBackup(ctx context.Context, siteID 
 	return nil
 }
 
-// findBatchItemExistingTask 供派发前的幂等恢复使用：如果上一次派发已经通过
-// ConfirmForBatch 建出了真实任务，但紧接着的 markBatchItemDispatched 因为进程崩溃/
-// 数据库错误没有跑完，这里能找到那个「孤儿」任务并回填，而不是重新创建第二个任务。
+// findBatchItemExistingTask recovers a task created by ConfirmForBatch when a crash or database
+// error prevented markBatchItemDispatched from linking it, avoiding duplicate task creation.
 func (s *wpUpdateStore) findBatchItemExistingTask(ctx context.Context, batchID, componentKey string) (string, error) {
 	var taskID string
 	err := s.db.QueryRowContext(ctx, `SELECT id FROM wp_update_tasks
@@ -381,14 +364,14 @@ func (s *wpUpdateStore) findBatchItemExistingTask(ctx context.Context, batchID, 
 	return taskID, err
 }
 
-// wpPluginBatchConfirmer 是编排器派发下一项时需要的最小接口，由 WPPluginUpdateService 实现。
+// wpPluginBatchConfirmer is the dispatch interface implemented by WPPluginUpdateService.
 type wpPluginBatchConfirmer interface {
 	Preview(ctx context.Context, siteID int, username, componentKey string) (models.WPPluginUpdatePreview, error)
 	ConfirmForBatch(ctx context.Context, siteID int, username, componentKey, token, target, backupMode, batchID string, databaseBackupSourceID int64) (models.WPPluginUpdateTask, error)
 }
 
-// wpPluginBatchOrchestrator 挂在现有更新 worker 的 sweep 节奏上，每次 tick 为每个仍在进行
-// 中的批量派发「下一项」——同一时刻每个站点只有一个活跃任务，所以批量天然是串行推进的。
+// wpPluginBatchOrchestrator dispatches each running batch's next item on worker ticks.
+// The single active task per site keeps each batch sequential.
 type wpPluginBatchOrchestrator struct {
 	store      *wpUpdateStore
 	confirmer  wpPluginBatchConfirmer
@@ -413,7 +396,7 @@ func newWPPluginBatchOrchestrator(store *wpUpdateStore, confirmer wpPluginBatchC
 	}, nil
 }
 
-// lockBatch 返回指定 batch 的互斥锁，并增加引用计数；调用方必须调用 unlockBatch。
+// lockBatch acquires a referenced batch mutex; callers must invoke unlockBatch.
 func (o *wpPluginBatchOrchestrator) lockBatch(batchID string) *batchLock {
 	o.mu.Lock()
 	bl, ok := o.batchLocks[batchID]
@@ -427,7 +410,7 @@ func (o *wpPluginBatchOrchestrator) lockBatch(batchID string) *batchLock {
 	return bl
 }
 
-// unlockBatch 释放 batch 锁并减少引用计数。
+// unlockBatch releases the mutex and its reference.
 func (o *wpPluginBatchOrchestrator) unlockBatch(bl *batchLock) {
 	bl.mu.Unlock()
 	o.mu.Lock()
@@ -435,7 +418,7 @@ func (o *wpPluginBatchOrchestrator) unlockBatch(bl *batchLock) {
 	o.mu.Unlock()
 }
 
-// pruneBatchLocks 删除不再运行且引用计数为 0 的 batch 锁，避免已结束批量泄漏内存。
+// pruneBatchLocks removes unreferenced locks for finished batches to prevent leaks.
 func (o *wpPluginBatchOrchestrator) pruneBatchLocks(running map[string]bool) {
 	o.mu.Lock()
 	for id, bl := range o.batchLocks {
@@ -446,13 +429,11 @@ func (o *wpPluginBatchOrchestrator) pruneBatchLocks(running map[string]bool) {
 	o.mu.Unlock()
 }
 
-// Tick 扫描所有 running 批量，为每个「站点当前没有阻塞任务」的批量派发一项。
-// 单个批量在一次 tick 内最多派发一项，派发失败的项标记为 failed 后立即继续下一项，
-// 避免一次 tick 里因为连续多个坏插件而做无界的工作量。
+// Tick dispatches at most one real task per unblocked batch. Permanently rejected items
+// are marked failed before advancing, with bounded work to avoid unlimited processing in one tick.
 //
-// Tick 同时被 worker 主循环（1s 节奏 + task 完成即触发）和 sweep（30s 兜底）调用。
-// 为了防止两个 goroutine 并发派发同一项导致重复建任务，每个 batch 有独立的互斥锁；
-// 不同 batch 可以并发处理，避免某个 batch 的 Preview/下载阻塞其它 batch 的推进。
+// The worker loop and 30s sweep can call Tick concurrently. A mutex per batch prevents
+// duplicate tasks while allowing other batches to advance during slow previews or downloads.
 func (o *wpPluginBatchOrchestrator) Tick(ctx context.Context) {
 	batches, err := o.store.listRunningBatches(ctx)
 	if err != nil {
@@ -500,14 +481,11 @@ func (o *wpPluginBatchOrchestrator) advance(ctx context.Context, batch WPUpdateB
 			return err
 		}
 		if item.NextRetryAt != "" && item.NextRetryAt > wpUpdateDBTime(now) {
-			// 最靠前的这一项还在退避等待中：不能跳过去派发后面的项（会打乱
-			// componentKeys 定好的顺序），本次 tick 到此为止，等下一次 tick 再看。
+			// Wait for the first pending item's backoff to preserve componentKeys order.
 			return nil
 		}
-		// 幂等恢复必须先于「站点是否被阻塞」判断：如果这一项此前已经通过 ConfirmForBatch
-		// 建出了真实任务（只是紧接着的 markBatchItemDispatched 没跑完），那个孤儿任务本身
-		// 就是站点被占用的原因——如果先判断 blocked 就直接因为它而 return，这个孤儿任务
-		// 永远没有机会被发现和回填，批量会卡死在这一项上。
+		// Recover orphan tasks before checking site blockage: the orphan itself may occupy the site.
+		// Checking blockage first would prevent its recovery and leave the batch stuck forever.
 		if existingTaskID, err := o.store.findBatchItemExistingTask(ctx, batch.ID, item.ComponentKey); err != nil {
 			return err
 		} else if existingTaskID != "" {
@@ -528,12 +506,10 @@ func (o *wpPluginBatchOrchestrator) advance(ctx context.Context, batch WPUpdateB
 			return dispatchErr
 		}
 		if outcome != wpBatchDispatchFailed {
-			// 要么成功占用了站点唯一活跃任务名额，要么这一项进入了退避重试等待——
-			// 两种情况本次 tick 都到此为止。
+			// Stop this tick after dispatching a task or scheduling a retry.
 			return nil
 		}
-		// 这一项在派发前就被永久拒绝（已标记 failed），同一 tick 内继续尝试下一项，
-		// 但仍然只会占用最多一个真正的任务名额。
+		// A permanent pre-dispatch rejection allows the next item to be tried in the same tick.
 	}
 }
 
@@ -545,14 +521,12 @@ const (
 	wpBatchDispatchRetrying
 )
 
-// wpPluginBatchMaxDispatchRetries 是派发前置检查（Preview/ConfirmForBatch）瞬时失败时
-// 允许重试的次数上限，超过之后即使还是可重试的错误类型也会永久标记为 failed，
-// 避免一个持续故障的插件源无限期占着批量不前进。
+// wpPluginBatchMaxDispatchRetries bounds transient Preview/ConfirmForBatch retries
+// so a persistently failing plugin source cannot block the batch indefinitely.
 const wpPluginBatchMaxDispatchRetries = 3
 
-// wpPluginBatchRetryBackoff 按已重试次数计算下一次重试前的等待时间。编排器的 tick 节奏
-// 本身是 30s 一次，这里的退避主要是避免在上游持续故障（比如 api.wordpress.org 抖动）时
-// 每个 tick 都重新发起一次探测请求。
+// wpPluginBatchRetryBackoff spaces repeated checks during upstream failures,
+// such as api.wordpress.org outages.
 func wpPluginBatchRetryBackoff(retryCount int) time.Duration {
 	switch {
 	case retryCount <= 1:
@@ -564,11 +538,9 @@ func wpPluginBatchRetryBackoff(retryCount int) time.Duration {
 	}
 }
 
-// isRetryableWPPluginBatchDispatchError 判断派发前置检查失败是否值得重试：只有网络/上游
-// 抖动一类的瞬时错误才重试（这正是 better-search-replace 误判为「不在官方仓库」的真实
-// 原因——wp_update_plugins() 内部请求 api.wordpress.org 瞬时失败，被误当作永久性结论）；
-// 状态真的不一致的错误（冲突、找不到组件、许可证失效）重试没有意义，应该立刻标记失败
-// 等待用户处理，不能无限期占着批量不前进。
+// isRetryableWPPluginBatchDispatchError retries transient network/upstream errors.
+// A failed wp_update_plugins() request must not imply permanent absence from the official repository.
+// Conflicts, missing components, and invalid licenses require user action and fail immediately.
 func isRetryableWPPluginBatchDispatchError(err error) bool {
 	switch {
 	case errors.Is(err, ErrWPPluginUpdateNotInRepository),
@@ -581,8 +553,8 @@ func isRetryableWPPluginBatchDispatchError(err error) bool {
 	}
 }
 
-// dispatch 尝试把 item 变成一个真正的 wp_update_tasks 行。调用方已经确认站点当前没有
-// 阻塞任务、且这一项不存在可回填的孤儿任务。
+// dispatch creates the item's wp_update_tasks row after the caller checks that the site
+// is unblocked and no orphan task can be recovered.
 func (o *wpPluginBatchOrchestrator) dispatch(ctx context.Context, batch WPUpdateBatch, item WPUpdateBatchItem, now time.Time) (wpBatchDispatchOutcome, error) {
 	preview, err := o.confirmer.Preview(ctx, batch.SiteID, batch.CreatedBy, item.ComponentKey)
 	if err != nil || !preview.Available {
@@ -592,9 +564,8 @@ func (o *wpPluginBatchOrchestrator) dispatch(ctx context.Context, batch WPUpdate
 		}
 		return o.rejectBatchItem(ctx, item, err, message, now)
 	}
-	// 批量共享的数据库备份来源一旦确定就固定不变（见 ensureBatchDatabaseBackupSource
-	// 的注释），不使用 Preview 响应里那个会被 requires_attention 状态污染的
-	// RecentDatabaseBackup 字段。
+	// Use the pinned batch backup, not Preview's RecentDatabaseBackup, which can disappear
+	// when its source task requires attention. See ensureBatchDatabaseBackupSource.
 	backupSourceID, err := o.store.ensureBatchDatabaseBackupSource(ctx, batch.ID, now)
 	if err != nil {
 		return wpBatchDispatchFailed, err
@@ -614,8 +585,8 @@ func (o *wpPluginBatchOrchestrator) dispatch(ctx context.Context, batch WPUpdate
 	return wpBatchDispatchDispatched, nil
 }
 
-// rejectBatchItem 处理派发前置检查失败：可重试的瞬时错误在重试次数上限内转入退避等待，
-// 否则（错误类型本身不值得重试，或者已经用完重试次数）才真正标记为 failed。
+// rejectBatchItem backs off transient pre-dispatch failures within the retry limit;
+// nonretryable errors and exhausted retries permanently fail the item.
 func (o *wpPluginBatchOrchestrator) rejectBatchItem(ctx context.Context, item WPUpdateBatchItem, cause error, message string, now time.Time) (wpBatchDispatchOutcome, error) {
 	if isRetryableWPPluginBatchDispatchError(cause) && item.RetryCount < wpPluginBatchMaxDispatchRetries {
 		retryCount := item.RetryCount + 1

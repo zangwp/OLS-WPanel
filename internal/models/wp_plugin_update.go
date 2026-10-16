@@ -43,8 +43,8 @@ type WPPluginUpdateTask struct {
 	Events             []WPCoreUpdateTaskEvent `json:"events,omitempty"`
 }
 
-// WPPluginBatchItem 是批量更新中的一项（一个插件）。TaskStatus/TaskRollbackStatus/
-// TaskRequiresAttention/CurrentVersion/TargetVersion 只在 TaskID 非空（已派发）时有意义。
+// WPPluginBatchItem represents one plugin in a batch. TaskStatus, TaskRollbackStatus,
+// TaskRequiresAttention, CurrentVersion, and TargetVersion apply only when TaskID is set.
 type WPPluginBatchItem struct {
 	Position              int    `json:"position"`
 	ComponentKey          string `json:"component_key"`
@@ -61,7 +61,7 @@ type WPPluginBatchItem struct {
 	TargetVersion         string `json:"target_version,omitempty"`
 }
 
-// WPPluginBatch 是一次批量插件更新，Items 按 position 顺序排列。
+// WPPluginBatch contains a batch update with Items ordered by position.
 type WPPluginBatch struct {
 	ID         string              `json:"batch_id"`
 	SiteID     int                 `json:"site_id"`

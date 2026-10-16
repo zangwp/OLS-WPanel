@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 )
 
-// migratePluginConfigs 将 ols-wpanel-config.json 从 Web 目录内迁移到 Web 目录外，
-// 并轮换已暴露的 plugin_api_key。
+// migratePluginConfigs moves plugin configuration outside the web root
+// and rotates the exposed plugin_api_key.
 func migratePluginConfigs() error {
 	rows, err := DB.Query("SELECT domain, web_root, system_user FROM websites WHERE plugin_api_key IS NOT NULL AND plugin_api_key != ''")
 	if err != nil {
@@ -44,12 +44,10 @@ func migratePluginConfigs() error {
 			continue
 		}
 
-		// 轮换 API Key
 		b := make([]byte, 16)
 		rand.Read(b)
 		newKey := hex.EncodeToString(b)
 
-		// 写入新路径
 		secretsDir := filepath.Join(baseSecretsDir, domain)
 		os.MkdirAll(secretsDir, 0700)
 		newCfg, _ := json.Marshal(map[string]string{
@@ -62,14 +60,13 @@ func migratePluginConfigs() error {
 			continue
 		}
 
-		// 更新数据库
 		if _, err := DB.Exec("UPDATE websites SET plugin_api_key = ? WHERE domain = ?", newKey, domain); err != nil {
 			log.Printf("[迁移] %s: 更新 API Key 失败: %v，清理已写入配置", domain, err)
 			os.Remove(cfgPath)
 			continue
 		}
 
-		// 同步最新插件 PHP 到站点，确保插件从新路径读取配置
+		// Deploy the latest plugin PHP so sites read configuration from the new location.
 		srcPlugin := "/www/ols-wpanel/packages/ols-wpanel-optimizer.php"
 		dstPlugin := filepath.Join(webRoot, "wp-content", "plugins", "ols-wpanel-optimizer", "ols-wpanel-optimizer.php")
 		srcData, err := os.ReadFile(srcPlugin)
@@ -82,7 +79,7 @@ func migratePluginConfigs() error {
 			continue
 		}
 
-		// 以上全部成功后才删除旧配置文件
+		// Delete the exposed configuration only after every preceding step succeeds.
 		os.Remove(oldPath)
 		exec.Command("chown", "-R", systemUser+":"+systemUser, secretsDir).Run()
 

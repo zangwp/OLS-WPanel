@@ -182,11 +182,9 @@ var configDefaults = map[string]string{
 	"maxmemory":               "0",
 }
 
-// adaptiveConfigFallback 是 opcache.memory_consumption / opcache.max_accelerated_files
-// 这两个硬件自适应参数的展示兜底。它们理论上从 EnsurePHPRuntimeConfigFile 第一次跑完
-// 之后就会一直存在于配置文件里，这里现算只是给配置文件被外部删除之类的极端情况兜底——
-// 不能像 configDefaults 那样写死一个固定数字，否则会跟"重新计算推荐值"按钮实际算出来
-// 的结果对不上，徒增困惑。
+// adaptiveConfigFallback recalculates hardware-dependent OPcache values if the
+// runtime configuration is missing. Use the same formulas as Recommend so the
+// displayed values agree with recalculated recommendations.
 func adaptiveConfigFallback(key string) string {
 	switch key {
 	case "opcache.memory_consumption":
@@ -461,12 +459,10 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 		return
 	}
 
-	// MariaDB/Redis 没有可靠的配置语法预检查工具（不像 OpenLiteSpeed 有 -t 可以先验证
-	// 再重载），只能靠"原子写入 → 重启 → 健康检查 → 失败自动回滚"这套事务性流程保证
-	// 安全，不能像过去那样重启命令返回值都不检查就告诉用户"已更新"。
+	// MariaDB and Redis lack a reliable configuration preflight check. Apply writes
+	// atomically, restart, check readiness, and roll back on failure before reporting success.
 	if req.Name == "MariaDB" || req.Name == "Redis" {
-		// 值没变就不要触发一次真实的重启——前端已经会跳过没改过的值，但后端不该只
-		// 依赖前端做这层保护（比如以后有人直接调 API，或者前端逻辑被改动）。
+		// Enforce unchanged-value checks here too; direct API callers must not trigger needless restarts.
 		if newContent == content {
 			c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.config_unchanged")}))
 			return
@@ -565,8 +561,8 @@ func (h *SoftwareHandler) SaveConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.config_updated_reloaded", i18n.P{"service": serviceName})}))
 }
 
-// softwareReadinessCheck 返回指定软件重启后的健康检查函数，供 SafeApplyRestartConfig
-// 验证服务是否真的恢复可用，而不只是看 systemctl 返回码。
+// softwareReadinessCheck lets SafeApplyRestartConfig verify service availability
+// after restart instead of relying only on the systemctl exit code.
 func softwareReadinessCheck(name string) func(context.Context) error {
 	switch name {
 	case "MariaDB":
@@ -578,9 +574,8 @@ func softwareReadinessCheck(name string) func(context.Context) error {
 	}
 }
 
-// Recommend 根据当前服务器硬件规格和站点数量，为指定软件计算配置建议值。
-// 纯只读计算，不写入任何文件、不触发任何服务重启——是否真正应用由管理员在软件
-// 管理页手动确认后点击"保存并重载"决定。
+// Recommend calculates settings from server hardware and site count without
+// writing files or restarting services. Administrators apply them explicitly.
 func (h *SoftwareHandler) Recommend(c *gin.Context) {
 	lang := softwareLang(c)
 	name := c.Query("name")
@@ -603,10 +598,8 @@ func (h *SoftwareHandler) Recommend(c *gin.Context) {
 
 	reasonKey := "software.recommend_reason"
 	if name == "PHP" {
-		// PHP 卡片有 8 个配置项，但只有 opcache 这两项跟硬件规格相关、会被这个按钮更新，
-		// 其余 6 项（memory_limit/upload_max_filesize 等）取决于业务需求而非硬件规格，
-		// 从设计上就不提供推荐值。用专门的提示文案明确告诉管理员"只改了这两项"，
-		// 避免以为点了按钮会重新计算整张卡片。
+		// Only two OPcache fields depend on hardware; the other six reflect workload needs.
+		// Name the changed fields so administrators know the recommendation covers only those two.
 		reasonKey = "software.recommend_reason_php"
 	}
 	reason := i18n.T(lang, reasonKey, i18n.P{
@@ -625,9 +618,8 @@ func (h *SoftwareHandler) Recommend(c *gin.Context) {
 	}))
 }
 
-// ClearOpcache 清空 PHP OPcache 字节码缓存。这是全局操作，不区分站点，只在面板
-// 管理员这一侧提供入口（不对站点管理员开放，避免任意一个站点的管理员能影响同一
-// 台服务器上其它所有站点的短暂性能抖动）。
+// ClearOpcache clears the global PHP bytecode cache. Restrict this server-wide
+// operation to panel administrators because it briefly affects every site.
 func (h *SoftwareHandler) ClearOpcache(c *gin.Context) {
 	lang := softwareLang(c)
 	if err := softwareClearOPcache(); err != nil {

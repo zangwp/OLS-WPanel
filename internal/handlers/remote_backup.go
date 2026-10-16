@@ -63,7 +63,6 @@ func GetRemoteBackup(c *gin.Context) {
 	if s.ConnectionMode != "legacy" && s.S3BasePrefix == "" {
 		s.S3BasePrefix = "ols-wpanel"
 	}
-	// 读取公钥
 	if s.BackupType == "rsync" && s.AuthType == "key" {
 		keyData, err := os.ReadFile("/www/ols-wpanel/remote_backup_key.pub")
 		if err == nil {

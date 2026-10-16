@@ -790,8 +790,8 @@ function backupsOverview() {
             finally { delete this.backupMutations[site.site_id]; }
         },
         expandAll() {
-            // 用 document 而不是 this.$el：在方法体内 this.$el 指向触发这次调用的元素（这里是
-            // 按钮本身），不是 x-data 根节点，用 this.$el 会在按钮内部找、永远找不到任何 <details>。
+            // Use document: this.$el may be the clicked button, not the x-data root.
+            // Searching inside that button would never find the backup details.
             document.querySelectorAll('details.site-backup-card').forEach(d => { d.open = true; });
         },
         collapseAll() {

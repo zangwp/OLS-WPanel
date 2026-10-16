@@ -22,14 +22,11 @@ import (
 //go:embed assets/image-filesize-runner/filesize_runner.php
 var imageFilesizeRunnerPHPSource []byte
 
-// imageBatchBinaryArgs 是历史图库批量优化允许调用的二进制及其固定参数——参数是
-// 硬编码集合，不接受任何来自请求的动态输入，真实的安全边界由这个固定集合、
-// 目标文件路径校验和降权执行三者共同构成（不依赖 executor/commander.go 的
-// allowedCommands 白名单，见 ADR-0003 决策 2）。
-// jpegoptim 只剥 comment/IPTC/XMP，刻意不传 --strip-all：历史照片里可能存在
-// "像素本身未转正、靠 EXIF orientation 标签显示方向"的 JPEG（2019 年前上传、
-// 或从其他面板迁移来的文件），--strip-all 会把 orientation 标签连同 EXIF 一起
-// 剥掉，导致这些照片批量转向且不可逆。保留 EXIF/ICC，只去掉不影响显示的部分。
+// imageBatchBinaryArgs fixes the allowed binaries and arguments; request input cannot change them.
+// This allowlist, target path validation, and privilege dropping form the security boundary,
+// independent of commander.go's allowedCommands (ADR-0003, decision 2).
+// Keep EXIF/ICC and strip only comments/IPTC/XMP. --strip-all would remove orientation tags
+// from older or migrated JPEGs whose pixels were never rotated, permanently changing their display.
 var imageBatchBinaryArgs = map[string][]string{
 	"jpegoptim": {"--strip-com", "--strip-iptc", "--strip-xmp"},
 	"optipng":   {"-o2", "-quiet"},
@@ -43,13 +40,10 @@ const (
 	imageFilesizeResultMax = 4 << 10
 )
 
-// lookupSiteSystemUser 查找并校验站点系统用户，optimizeImageFile 和
-// runFilesizeRewrite 共用这段逻辑，避免两处各自重复实现一遍 uid/gid 解析。
+// lookupSiteSystemUser shares validated UID/GID lookup between optimization and filesize writeback.
 //
-// 不再判断"用户名是不是纯数字"——调用方在这之前都已经用 wpInventoryUserPattern
-// （要求 wp_ 前缀）校验过 systemUser 的格式，而面板生成 systemUser 时也是
-// 固定拼 "wp_" 前缀（见 website_tasks.go），不存在被误当成 uid 解析的可能，
-// 这层校验对这个项目来说是不可达的死代码。
+// Callers validate the wp_ prefix with wpInventoryUserPattern, and website_tasks.go
+// generates the same prefix, so systemUser cannot be misinterpreted as a numeric UID.
 func lookupSiteSystemUser(systemUser string) (*user.User, int, int, error) {
 	u, err := user.Lookup(systemUser)
 	if err != nil {
@@ -74,14 +68,11 @@ func binaryForMime(mime string) string {
 	}
 }
 
-// optimizeImageFile 对站点 wp-content/uploads/ 下的一个文件做原地无损重编码。
-// 结构照抄 wp_core_update_runner.go 的降权范式：root 解析 system_user → 校验
-// 二进制路径和属主 → runuser 降权执行 → 返回处理前后的真实文件大小。
+// optimizeImageFile losslessly re-encodes an upload in place using the privilege-drop pattern
+// from wp_core_update_runner.go: resolve the site user, validate the binary, then run as that user.
 //
-// 返回值里的 modUnix 是重编码*之后*的文件修改时间——jpegoptim/optipng 原地
-// 重写文件必然会把 mtime 刷新成处理时刻，调用方拿这个值（而不是扫描阶段读到
-// 的旧 mtime）存进幂等指纹表，否则下次扫描读到的 mtime 永远对不上存的值，
-// 指纹形同虚设，每次都会把整个媒体库重新处理一遍。
+// modUnix is the mtime after re-encoding. Callers must store it in the fingerprint;
+// the old scan mtime would cause every rewritten file to be processed again next time.
 func optimizeImageFile(ctx context.Context, webRoot, systemUser, relativePath, mime string) (before, after, modUnix int64, err error) {
 	binaryName := binaryForMime(mime)
 	if binaryName == "" {
@@ -150,8 +141,7 @@ func optimizeImageFile(ctx context.Context, webRoot, systemUser, relativePath, m
 		return before, before, beforeInfo.ModTime().Unix(), err
 	}
 	after = afterInfo.Size()
-	// 安全网：如果重编码后文件反而变大，理论上 jpegoptim/optipng 不应该发生，
-	// 但不假设"无损重编码一定更小"，让调用方决定要不要按失败处理。
+	// Report unexpected file growth so the caller can decide whether to treat it as a failure.
 	return before, after, afterInfo.ModTime().Unix(), nil
 }
 
@@ -193,9 +183,8 @@ type imageFilesizeResult struct {
 	ErrorCode string `json:"error_code"`
 }
 
-// runFilesizeRewrite 把"相对路径 -> 新文件大小"的清单交给降权执行的 PHP 脚本，
-// 由脚本在 WordPress 运行环境里用 update_post_meta() 完成回写。面板 Go 侧不直接
-// 操作 MySQL——_wp_attachment_metadata 是 PHP 序列化格式，直接改库会破坏结构。
+// runFilesizeRewrite passes relative paths and sizes to PHP running as the site user.
+// The script uses WordPress update_post_meta(); direct SQL could corrupt PHP-serialized attachment metadata.
 func runFilesizeRewrite(ctx context.Context, webRoot, systemUser string, manifest map[string]int64) (updated, total int, err error) {
 	if len(manifest) == 0 {
 		return 0, 0, nil
@@ -272,7 +261,7 @@ func runFilesizeRewrite(ctx context.Context, webRoot, systemUser string, manifes
 	}
 	cmd := exec.CommandContext(execCtx, runuserPath, args...)
 	if runErr := cmd.Run(); runErr != nil && !errors.Is(execCtx.Err(), context.DeadlineExceeded) {
-		// PHP 可能已经在退出码非 0 之前写好了结果文件，继续尝试读取。
+		// PHP may have written the result before exiting with an error; still try to read it.
 	}
 
 	result, err := readImageFilesizeResult(resultPath, token)

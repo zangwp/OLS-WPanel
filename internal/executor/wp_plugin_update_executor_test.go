@@ -289,11 +289,9 @@ func TestWPPluginUpdateExecutorManualRollbackRequiresPendingDecision(t *testing.
 	}
 }
 
-// TestWPPluginUpdateExecutorAbandonManualRollbackCleanupSurvivesCancelledContext 覆盖
-// 第三方审核发现的问题：loadExecution/Prepare 失败后的放弃认领清理，必须用不受调用方
-// ctx 取消影响的 controlContext，而不是直接复用可能已经被取消的原始 ctx——否则请求
-// 断开/超时导致 loadExecution 失败时，紧跟着的放弃认领会因为同一个已取消的 ctx 立刻
-// 再次失败，lease_owner 永远清不掉，用户既不能重试回滚也不能 Ignore。
+// TestWPPluginUpdateExecutorAbandonManualRollbackCleanupSurvivesCancelledContext ensures
+// claim cleanup survives the request cancellation that may have caused loadExecution/Prepare
+// to fail. Otherwise lease_owner would remain set, blocking rollback retries and Ignore.
 func TestWPPluginUpdateExecutorAbandonManualRollbackCleanupSurvivesCancelledContext(t *testing.T) {
 	executor, store, task, _ := prepareAutoRollbackDisabledPluginTask(t, true)
 	if err := store.haltForManualRollback(context.Background(), task.ID, "worker-plugin", "health_check", time.Now().UTC()); err != nil {
@@ -308,8 +306,7 @@ func TestWPPluginUpdateExecutorAbandonManualRollbackCleanupSurvivesCancelledCont
 	}
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	// 即便传入的 ctx 已经取消（模拟 loadExecution/Prepare 正是因为请求断开而失败的场景），
-	// 放弃认领本身也必须成功，因为它内部用的是 controlContext（context.WithoutCancel）。
+	// Cleanup must succeed even with a canceled request because it uses context.WithoutCancel.
 	executor.abandonManualRollbackCleanup(cancelledCtx, task.ID, owner)
 	released, err := store.getTask(context.Background(), task.ID)
 	if err != nil || released.LeaseOwner != "" {
@@ -418,10 +415,9 @@ func preparePluginExecutorTask(t *testing.T, active bool) (*wpPluginUpdateExecut
 	return executor, store, task, ops
 }
 
-// prepareAutoRollbackDisabledPluginTask 与 preparePluginExecutorTask 相同，但任务的
-// auto_rollback 在计划创建（封存前）就置为 0，模拟批量更新场景。auto_rollback 一旦封存
-// 就不可再改（trg_wp_update_tasks_sealed_auto_rollback_immutable），所以必须在 WPUpdatePlan
-// 里从一开始就带上 SkipAutoRollback，不能像其它字段那样事后用 SQL 直接改。
+// prepareAutoRollbackDisabledPluginTask sets SkipAutoRollback in the initial WPUpdatePlan
+// to simulate a batch task. The sealed auto_rollback field cannot be changed later by SQL
+// because trg_wp_update_tasks_sealed_auto_rollback_immutable enforces immutability.
 func prepareAutoRollbackDisabledPluginTask(t *testing.T, active bool) (*wpPluginUpdateExecutor, *wpUpdateStore, WPUpdateTask, *fakeWPPluginUpdateOperations) {
 	t.Helper()
 	store, siteID := newWPUpdateStoreTest(t)

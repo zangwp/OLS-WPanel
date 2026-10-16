@@ -10,11 +10,9 @@ import (
 
 const redisHealthCheckTimeout = 5 * time.Second
 
-// RedisReady 检查 Redis 是否真的能响应 PING（不只是 systemd 认为它在运行）。
-//
-// 面板从未修改过发行版 redis-server 包默认的监听方式（只改 maxmemory 一行），
-// 所以固定用本机默认 TCP 地址 127.0.0.1:6379，跟面板生成/编辑的 redis.conf
-// 实际生效的监听配置一致；如果以后面板开始允许修改 bind/port，这里需要跟着改。
+// RedisReady verifies that Redis responds to PING. The panel changes only
+// maxmemory, so probe the package's default 127.0.0.1:6379 listener. Update
+// this probe if the panel gains bind or port settings.
 func RedisReady(ctx context.Context) error {
 	checkCtx, cancel := context.WithTimeout(ctx, redisHealthCheckTimeout)
 	defer cancel()
@@ -26,10 +24,9 @@ func RedisReady(ctx context.Context) error {
 	case resp == "PONG":
 		return nil
 	case strings.Contains(resp, "NOAUTH"):
-		// 面板自己从不设置 requirepass，但管理员可以在面板管理范围之外手动给
-		// redis.conf 加密码。这种情况下 PING 会因为鉴权失败返回 NOAUTH——这本身
-		// 已经证明 Redis 进程是活的、能正常处理请求，应该算作"就绪"，而不是让
-		// 每一次保存都因为面板没有认证凭据而被判定成"服务没起来"进而永远回滚。
+		// Admins may set requirepass outside the panel. NOAUTH still proves Redis
+		// can process requests; accept it as ready so missing credentials do not
+		// cause every config save to roll back.
 		return nil
 	case execErr != nil:
 		return fmt.Errorf("%s", resp)

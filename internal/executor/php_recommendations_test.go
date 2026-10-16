@@ -37,7 +37,7 @@ func TestRecommendOPcacheMemoryConsumptionMB(t *testing.T) {
 func TestRecommendOPcacheMemoryConsumptionNeverExceedsHardCap(t *testing.T) {
 	facts := SystemFacts{TotalMemoryBytes: 256 * 1024 * 1024, SiteCount: 200}
 	got := RecommendOPcacheMemoryConsumptionMB(facts)
-	// 256MB 总内存的 12.5% = 32MB，低于 64MB 下限，下限优先，结果应仍为 64。
+	// 12.5% of 256 MB is 32 MB, so the 64 MB minimum takes precedence.
 	if got != 64 {
 		t.Fatalf("expected floor of 64MB on a tiny server, got %d", got)
 	}

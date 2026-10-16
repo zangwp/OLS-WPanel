@@ -662,6 +662,10 @@ function panelSettings() {
         ntpEnabled: false,
         ntpService: '',
         ntpSyncing: false,
+        ntpRefreshTimer: null,
+        timeStatusGeneration: 0,
+        timeStatusController: null,
+        disposed: false,
         proxyTesting: false,
         proxyResult: '',
         proxyOk: false,
@@ -686,7 +690,11 @@ function panelSettings() {
         timeTimer: null,
         hashListener: null,
         destroy() {
+            this.disposed = true;
             if (this.timeTimer) clearInterval(this.timeTimer);
+            if (this.ntpRefreshTimer !== null) clearTimeout(this.ntpRefreshTimer);
+            this.ntpRefreshTimer = null;
+            this.cancelTimeStatusRead();
             if (this.hashListener) window.removeEventListener('hashchange', this.hashListener);
         },
         initPage() {
@@ -723,6 +731,7 @@ function panelSettings() {
             this.accountLoadError = '';
             try {
                 const r = await api('/settings', { timeout: 15000 });
+                if (this.disposed) return;
                 if (!r.success) throw new Error(r.message || t('settings.account_load_failed'));
                 if (r.success) {
                     if (typeof r.data?.username !== 'string' || !r.data.username || typeof r.data.basic_auth_user !== 'string') throw new Error(t('settings.account_load_failed'));
@@ -754,7 +763,8 @@ function panelSettings() {
                     this.autoUpdate.lastSuccessVersion = au.panel_auto_update_last_success_version || '';
                     this.accountLoaded = true;
                 }
-            } catch(e) { this.accountLoadError = e.message || t('settings.account_load_failed'); }
+            } catch(e) { if (!this.disposed) this.accountLoadError = e.message || t('settings.account_load_failed'); }
+            if (this.disposed) return;
             this.tickTime();
             if (this.timeTimer) clearInterval(this.timeTimer);
             this.timeTimer = setInterval(() => { if (settingsSectionActive(this, 'general')) this.tickTime(); }, 1000);
@@ -821,15 +831,60 @@ function panelSettings() {
             } catch(e) { showToast(e.message, 'error'); this.accountSaving = ''; }
         },
         async syncNTP() {
-            if (this.ntpSyncing) return;
+            if (this.disposed || !this.accountLoaded || this.ntpSyncing) return;
+            if (this.ntpRefreshTimer !== null) clearTimeout(this.ntpRefreshTimer);
+            this.ntpRefreshTimer = null;
+            this.cancelTimeStatusRead();
             this.ntpSyncing = true;
             try {
-                await api('/settings', { method: 'PUT', body: { ntp_sync: true }, timeout: 130000 });
-                await this.fetchSettings();
+                const result = await api('/settings', { method: 'PUT', body: { ntp_sync: true }, timeout: 130000, silent: true });
+                if (this.disposed) return;
+                if (!result.success) throw new Error(result.message || t('common.request_failed'));
+                if (!await this.refreshTimeStatus()) return;
                 showToast(t('settings.time_sync_triggered'), 'success');
-                if (!this.ntpSynced) setTimeout(() => this.fetchSettings(), 5000);
-            } catch(e) { showToast(e.message, 'error'); }
+                if (!this.ntpSynced) {
+                    this.ntpRefreshTimer = setTimeout(async () => {
+                        this.ntpRefreshTimer = null;
+                        try { await this.refreshTimeStatus(); }
+                        catch(e) { if (!this.disposed) showToast(e.message, 'error'); }
+                    }, 5000);
+                }
+            } catch(e) { if (!this.disposed) showToast(e.message, 'error'); }
             finally { this.ntpSyncing = false; }
+        },
+        cancelTimeStatusRead() {
+            this.timeStatusGeneration++;
+            this.timeStatusController?.abort();
+            this.timeStatusController = null;
+        },
+        async refreshTimeStatus() {
+            if (this.disposed) return false;
+            this.cancelTimeStatusRead();
+            const generation = this.timeStatusGeneration;
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            this.timeStatusController = controller;
+            try {
+                const result = await api('/settings', { silent: true, timeout: 15000, ...(controller ? { signal: controller.signal } : {}) });
+                if (this.disposed || generation !== this.timeStatusGeneration) return false;
+                const data = result.data;
+                if (!result.success || !Number.isFinite(data?.server_time) || data.server_time <= 0 ||
+                    typeof data.ntp_synced !== 'boolean' || typeof data.ntp_enabled !== 'boolean' || typeof data.ntp_service !== 'string') {
+                    throw new Error(result.message || t('common.request_failed'));
+                }
+                // Preserve editable settings; a time read must never replace another form's draft.
+                this.ntpSynced = data.ntp_synced;
+                this.ntpEnabled = data.ntp_enabled;
+                this.ntpService = data.ntp_service;
+                this.serverTimeBase = data.server_time;
+                this.serverTimeFetchedAt = Date.now();
+                this.tickTime();
+                return true;
+            } catch(e) {
+                if (this.disposed || generation !== this.timeStatusGeneration || e.name === 'AbortError' || e.code === 'request_cancelled') return false;
+                throw e;
+            } finally {
+                if (generation === this.timeStatusGeneration) this.timeStatusController = null;
+            }
         },
         async saveBasic() {
             if (!this.accountLoaded) return;

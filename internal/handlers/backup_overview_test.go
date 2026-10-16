@@ -162,8 +162,8 @@ func TestGetBackupOverviewReportsLocalFileExistence(t *testing.T) {
 		VALUES (1, 'site', 'localcheck.example.com', 'u1', '/www/wwwroot/localcheck.example.com', '/www/wwwlogs/localcheck.example.com', 'db1', 'u1', '/p', '/n')`); err != nil {
 		t.Fatalf("insert website: %v", err)
 	}
-	// db_backups: 'present.sql.gz' 本地文件真实存在；'gone.sql.gz' 标记 synced 但本地文件已被
-	// keep_local=0 清理（数据库记录仍保留，只是磁盘上没有对应文件了）。
+	// present.sql.gz exists locally; synced gone.sql.gz was removed by keep_local=0
+	// while its database record remains.
 	if _, err := db.Exec(`INSERT INTO db_backups (site_id, filename, file_size, db_name, transport_status) VALUES (1, 'present.sql.gz', 10, 'db1', 'local')`); err != nil {
 		t.Fatalf("insert db_backups present: %v", err)
 	}
@@ -182,13 +182,11 @@ func TestGetBackupOverviewReportsLocalFileExistence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dbDir, "present.sql.gz"), []byte("x"), 0600); err != nil {
 		t.Fatalf("write present.sql.gz: %v", err)
 	}
-	// 注意：'gone.sql.gz' 故意不在磁盘上创建，模拟已被清理的情况。
+	// Leave gone.sql.gz absent to simulate local cleanup.
 	//
-	// 数据库备份的本地路径读取可注入的 cfg.Panel.BackupDir（backupRoot），这里能真实覆盖
-	// 本地文件存在/不存在两种情况。文件备份的本地路径固定读取 config.DefaultBackupDir
-	// （生产环境和 executor/file_backup.go 的生成路径保持一致，不受这里注入的 backupRoot
-	// 影响），所以此处不再构造文件备份的本地文件——那部分逻辑由
-	// TestFileBackupLocalExistsFromRoot 单独覆盖，用可注入的 root 验证同样的判定逻辑。
+	// Database backups use the injected Panel.BackupDir to cover present and missing files.
+	// File backups use the fixed DefaultBackupDir; TestFileBackupLocalExistsFromRoot
+	// covers their local-file checks with an injected root.
 
 	oldConfig := config.AppConfig
 	config.AppConfig = &config.Config{Panel: config.PanelConfig{BackupDir: backupRoot}}
@@ -228,8 +226,7 @@ func TestGetBackupOverviewReportsLocalFileExistence(t *testing.T) {
 		t.Fatalf("gone.sql.gz local_exists = %+v, want false", gone)
 	}
 
-	// config.DefaultBackupDir（固定的 /www/ols-wpanel/backups）在测试环境里不存在，
-	// 所以这里 local_exists 必然是 false——这本身就是"目录不存在时不崩溃、如实报告"的有效断言。
+	// The fixed DefaultBackupDir is absent here, so local_exists must be false without an error.
 	fileBackups := resp.Data.Sites[0].FileBackups
 	if len(fileBackups) != 1 || fileBackups[0]["local_exists"] != false {
 		t.Fatalf("file_backups = %+v, want one entry with local_exists=false (config.DefaultBackupDir does not exist in test env)", fileBackups)
@@ -256,8 +253,7 @@ func TestGetBackupOverviewSurfacesQueryErrors(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// db_backups 查询失败时必须显式报错，不能悄悄返回一个"成功但为空"的列表，
-	// 否则会把数据库升级/schema 问题伪装成"暂无备份"。
+	// Query failures must surface as errors so schema problems cannot appear as an empty backup list.
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
@@ -487,13 +483,13 @@ func TestLocalFileExistsTreatsUnknownStatErrorsAsExisting(t *testing.T) {
 		t.Skip("running as root; permission-based stat failure cannot be simulated")
 	}
 
-	// 去掉父目录的执行权限，让 os.Stat(path) 因权限不足失败，而不是"文件不存在"。
+	// Remove parent-directory search permission so stat fails with permission denied.
 	if err := os.Chmod(filepath.Dir(path), 0644); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
 	t.Cleanup(func() { os.Chmod(filepath.Dir(path), 0755) })
 
-	// 权限不足这类"无法确认"的错误不能被当成"文件不存在"，否则会误报"本地文件缺失"。
+	// Permission errors must not produce false missing-file reports.
 	if !localFileExists(path) {
 		t.Fatal("localFileExists() = false, want true when stat fails for a reason other than not-exist")
 	}
@@ -510,8 +506,7 @@ func TestReconcileBackupStatusReturnsErrorWhenRemoteBackupDisabled(t *testing.T)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	// 远程备份未启用时，管理员点了"核对远程状态"按钮应该看到明确的错误提示，
-	// 而不是静默返回"成功，修正 0 条"让人误以为核对真的执行过了。
+	// Disabled remote backups must return an error instead of implying reconciliation succeeded.
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
@@ -531,8 +526,7 @@ func TestReconcileBackupStatusReturnsUpdatedCountWhenNothingPending(t *testing.T
 	gin.SetMode(gin.TestMode)
 	setupBackupOverviewTestDB(t)
 	db := database.GetDB()
-	// 启用远程备份，但没有任何 transport_status 为 local/synced 的记录：应该在不发远程请求的情况下
-	// 直接返回 updated=0。
+	// With no local/synced records, return updated=0 without a remote request.
 	if _, err := db.Exec(`UPDATE remote_backup_settings SET enabled = 1, backup_type = 's3',
 		s3_endpoint = 'https://invalid.example.invalid', s3_bucket = 'x', s3_access_key_id = 'k', s3_secret_key = 'secret' WHERE id = 1`); err != nil {
 		t.Fatalf("update remote_backup_settings: %v", err)

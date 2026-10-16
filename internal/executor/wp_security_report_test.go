@@ -120,9 +120,8 @@ func TestIsFakeSearchBot(t *testing.T) {
 }
 
 func TestIsFakeSearchBotDoesNotFlagWhenOfficialRangesUncached(t *testing.T) {
-	// 官方 IP 段缓存为空（新装或白名单刷新任务尚未跑过）时，没有可比对的数据，
-	// 不能把所有声称是 Googlebot 的 UA 都当成伪装，否则会把真实的 Google 爬虫
-	// （如这里的 66.249.66.1，真实 Googlebot 段）误判为伪装。
+	// An empty official IP range cache cannot establish that a Googlebot UA is fake.
+	// New installations or pending refreshes must not misclassify real crawler addresses such as 66.249.66.1.
 	checker := &searchBotIPChecker{}
 	if isFakeSearchBot("Mozilla/5.0 (compatible; Googlebot/2.1)", "66.249.66.1", checker) {
 		t.Fatal("expected googlebot UA NOT to be flagged as fake when official IP cache is empty")
@@ -255,15 +254,15 @@ func TestBuildWPSecurityReportClassifiesEvents(t *testing.T) {
 
 	logDir := t.TempDir()
 	logContent := strings.Join([]string{
-		// SQL 注入探测：query string 里带 URL 编码的 UNION SELECT
+		// SQL injection probe with URL-encoded UNION SELECT in the query.
 		`217.216.37.82 - - [15/Jan/2026:10:00:00 +0800] "GET /index.php?id=1%20UNION%20SELECT%201,2,3-- HTTP/1.1" 200 512 "-" "sqlmap/1.6"`,
-		// 伪装 Googlebot：UA 声明 Googlebot，但 IP 不在官方段
+		// Fake Googlebot: the UA claims Googlebot but the IP is outside the official ranges.
 		`1.2.3.4 - - [15/Jan/2026:10:01:00 +0800] "GET /blog/hello-world/ HTTP/1.1" 200 300 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"`,
-		// 真实 Googlebot：IP 在官方段内，不应被判定为伪装
+		// A Googlebot IP in the official ranges must not be classified as fake.
 		`66.249.66.1 - - [15/Jan/2026:10:02:00 +0800] "GET /blog/hello-world/ HTTP/1.1" 200 300 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"`,
-		// 敏感文件扫描
+		// Sensitive-file scan.
 		`94.154.43.10 - - [15/Jan/2026:10:03:00 +0800] "GET /.env HTTP/1.1" 404 150 "-" "curl/7.68.0"`,
-		// 合法搜索请求，不应被误判为 SQLi（含 "or" 子串的正常词）
+		// Legitimate search words containing "or" must not trigger SQL injection detection.
 		`203.0.113.6 - - [15/Jan/2026:10:04:00 +0800] "GET /?s=color HTTP/1.1" 200 800 "-" "Mozilla/5.0"`,
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(logDir, "wp-security.log"), []byte(logContent), 0644); err != nil {
@@ -387,11 +386,9 @@ func containsString(items []string, target string) bool {
 	return false
 }
 
-// TestCloneWPSecurityReportItemsPreservesEmptyTypesAsNonNil 锁定一个真实 bug：
-// append([]string(nil), emptySlice...) 会返回 nil 而不是空切片，JSON 序列化后
-// 前端拿到的就是 "types": null，导致 Alpine 的 x-for 遍历 null 报错。
-// IP 只命中兜底的"WordPress 异常路径访问"（没有 4 类明确分类）时 Types 就是空的，
-// 这是很常见的情况，必须保证克隆后仍是非 nil 的空切片。
+// TestCloneWPSecurityReportItemsPreservesEmptyTypesAsNonNil covers empty Types on
+// unclassified IPs. append([]string(nil), emptySlice...) would produce JSON null and break
+// Alpine x-for iteration; clones must retain a non-nil empty slice.
 func TestCloneWPSecurityReportItemsPreservesEmptyTypesAsNonNil(t *testing.T) {
 	items := []WPSecurityReportItem{{
 		IPAddress: "203.0.113.20",
@@ -432,8 +429,7 @@ func TestBuildWPSecurityReportDoesNotFlagSingleMissingStaticAssetAsPHPProbe(t *t
 	wpSecurityLogDirAllowed = func(string) bool { return true }
 	t.Cleanup(func() { wpSecurityLogDirAllowed = oldAllowed })
 
-	// 一条普通的缺图 404（很常见、无害），不应该被打上 suspicious_php 标签，
-	// 单次出现也不应该被判定为中风险。
+	// A single missing-image 404 must not receive suspicious_php or medium risk.
 	errorLog := `2026/01/15 10:00:00 [error] 1234#0: *1 open() "/var/www/example.com/missing.jpg" failed (2: No such file or directory), client: 203.0.113.5, server: example.com, request: "GET /missing.jpg HTTP/1.1", host: "example.com"` + "\n"
 	if err := os.WriteFile(filepath.Join(logDir, "error.log"), []byte(errorLog), 0644); err != nil {
 		t.Fatal(err)
@@ -470,9 +466,9 @@ func TestBuildWPSecurityReportFlagsMissingPHPFileAndPrimaryScriptUnknown(t *test
 	t.Cleanup(func() { wpSecurityLogDirAllowed = oldAllowed })
 
 	errorLog := strings.Join([]string{
-		// 请求路径确实是 .php，应该判定为 suspicious_php / 中风险
+		// An actual .php request should be suspicious_php with medium risk.
 		`2026/01/15 10:00:00 [error] 1234#0: *1 open() "/var/www/example.com/shell.php" failed (2: No such file or directory), client: 203.0.113.6, server: example.com, request: "GET /shell.php HTTP/1.1", host: "example.com"`,
-		// Primary script unknown，单次命中就应该是高风险
+		// One Primary script unknown event should be high risk.
 		`2026/01/15 10:00:01 [error] 1234#0: *2 LiteSpeed sent in stderr: "Primary script unknown" while reading response header from upstream, client: 203.0.113.7, server: example.com, request: "GET /wp-config.php HTTP/1.1", host: "example.com"`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(logDir, "error.log"), []byte(errorLog), 0644); err != nil {

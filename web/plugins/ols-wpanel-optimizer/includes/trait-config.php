@@ -1,9 +1,7 @@
 <?php
 /**
- * OLS WPanel Optimizer — 面板 API 通信模块
- *
- * 配置加载（面板地址/API Key）、与面板 REST API 的全部 HTTP 通信、
- * 文件锁状态同步、插件自身版本检查。
+ * OLS WPanel Optimizer panel API support.
+ * Loads configuration, sends REST requests, syncs file locks, and checks plugin versions.
  */
 
 if (!defined('ABSPATH')) exit;
@@ -201,8 +199,8 @@ trait OLSW_Optimizer_Config_Trait {
         $code = wp_remote_retrieve_response_code($response);
         if ($code >= 400) {
             $body = wp_remote_retrieve_body($response);
-            // 面板错误响应是 {"success":false,"message":"..."} 这样的 JSON，取出 message
-            // 字段展示给用户；不是这个形状（例如反代/网关的错误页）才退回原始响应体。
+            // Show the message from panel JSON errors; fall back to the raw response
+            // for other formats, such as proxy or gateway error pages.
             $decoded = $body ? json_decode($body, true) : null;
             if (is_array($decoded) && !empty($decoded['message'])) {
                 $msg = $decoded['message'];

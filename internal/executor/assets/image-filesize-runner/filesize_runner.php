@@ -1,11 +1,8 @@
 <?php
-// 历史图库批量优化 filesize 回写 runner。
-//
-// 面板 Go 侧扫描 wp-content/uploads/ 并调用 jpegoptim/optipng 原地无损重编码后，
-// 文件字节数变了但文件名没变；_wp_attachment_metadata 里缓存的 filesize 字段
-// 不会自动更新。这个脚本接收一份"相对路径 -> 新字节数"的清单，在 WordPress
-// 运行环境里用 update_post_meta()/wp_update_attachment_metadata() 完成回写——
-// 序列化格式和对象缓存失效都交给 WordPress 自己处理，这个脚本不直接碰数据库。
+// Update attachment filesize metadata after lossless batch optimization.
+// Go rewrites image bytes in place without renaming files, leaving cached sizes stale.
+// Apply the relative-path => new-size manifest through WordPress metadata APIs
+// so WordPress handles serialization and object-cache invalidation.
 //
 // argv: token, site_root, manifest_file, result_file
 $token = $argv[1] ?? '';
@@ -59,8 +56,8 @@ if (ob_get_length() > 0) {
     exit(1);
 }
 
-// relative_path => new_size，按目录分组，一个目录一次 postmeta 查询，
-// 避免逐个附件反查（WordPress 没有"按文件路径找 attachment"的核心 API）。
+// Group relative_path => new_size entries by directory for one postmeta query per directory.
+// WordPress has no core API to find attachments by file path.
 $byDir = [];
 foreach ($manifest as $relativePath => $newSize) {
     $relativePath = ltrim((string) $relativePath, '/');
@@ -77,9 +74,8 @@ $total = 0;
 foreach ($byDir as $dir => $basenames) {
     $total += count($basenames);
     if ($dir === '.') {
-        // 附件直接放在 uploads/ 根目录（未按年/月分文件夹）时 dirname() 返回 '.'，
-        // 但 _wp_attached_file 里存的是不带任何目录前缀的纯文件名——LIKE './%' 永远
-        // 匹配不到，得按文件名精确匹配，不能拼目录前缀。
+        // Root-level uploads store bare filenames in _wp_attached_file. Match them exactly;
+        // dirname() returns ".", but LIKE './%' would never match.
         $placeholders = implode(',', array_fill(0, count($basenames), '%s'));
         $rows = $wpdb->get_results(
             $wpdb->prepare(
@@ -100,9 +96,8 @@ foreach ($byDir as $dir => $basenames) {
 
     $matchedInDir = [];
     foreach ($rows as $row) {
-        // LIKE '<dir>/%' 也会命中子目录（如 <dir>/sub/foo.jpg），子目录里同名文件
-        // 会被 basename 误配到 <dir> 下的清单条目；用 dirname 严格限定在当前目录，
-        // 子附件的 sizes/backup 文件按 WordPress 约定都跟主图同目录，一并覆盖。
+        // LIKE also matches subdirectories; require an exact directory before matching basenames.
+        // WordPress keeps generated sizes and backup images beside their attachment.
         if (dirname((string) $row->meta_value) !== $dir) {
             continue;
         }
@@ -151,7 +146,7 @@ foreach ($byDir as $dir => $basenames) {
             update_post_meta($attachmentId, '_wp_attachment_backup_sizes', $backup);
         }
     }
-    // 按文件（basename）计数，跟 $total 的统计口径一致，而不是按附件计数。
+    // Count files by basename, matching $total rather than the number of attachments.
     $updated += count($matchedInDir);
 }
 
