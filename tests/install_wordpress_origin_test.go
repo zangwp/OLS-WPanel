@@ -225,7 +225,7 @@ func TestInstallerWordPressReceiptMatchesPublishedBytesAndReplacesSymlink(t *tes
 func TestInstallerWordPressSourceReceiptIsNeverInventedForRetainedCache(t *testing.T) {
 	script := readInstallScript(t, installScriptPath)
 	start := requiredIndex(t, script, "WP_ZIP=\"$INSTALL_DIR/packages/wordpress.zip\"")
-	end := requiredIndex(t, script[start:], "# 生成面板安全凭证")
+	end := requiredIndex(t, script[start:], "# Generate panel credentials.")
 	block := script[start : start+end]
 	repairEnd := requiredIndex(t, block, "\nelse\n")
 	if strings.Contains(block[:repairEnd], "write_wordpress_origin_receipt") {
@@ -245,7 +245,7 @@ func TestInstallerWordPressCachePublicationNeverMarksFailedOrRetainedDownloads(t
 	php, _ := installerWordPressPHPRuntime(t, false)
 	script := readInstallScript(t, installScriptPath)
 	start := requiredIndex(t, script, "WP_ZIP=\"$INSTALL_DIR/packages/wordpress.zip\"")
-	end := requiredIndex(t, script[start:], "# 生成面板安全凭证")
+	end := requiredIndex(t, script[start:], "# Generate panel credentials.")
 	block := script[start : start+end]
 	helpers := extractShellFunction(t, script, "file_size_within_limit", "download_file") + "\n" + extractShellFunction(t, script, "write_wordpress_origin_receipt", "verify_signed_release_asset")
 	helpers = strings.Replace(helpers, `local php_cli="/usr/local/lsws/lsphp85/bin/php"`, "local php_cli="+strconv.Quote(filepath.ToSlash(php)), 1)

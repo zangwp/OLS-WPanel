@@ -60,7 +60,7 @@ func TestInstallerPreservesExistingFirewallOwnership(t *testing.T) {
 	}
 
 	call := requiredIndex(t, script, "configure_fresh_firewall\n")
-	mariaDB := requiredIndex(t, script, "# MariaDB 安全加固")
+	mariaDB := requiredIndex(t, script, "# Harden MariaDB.")
 	if call >= mariaDB {
 		t.Fatalf("firewall baseline must be configured before MariaDB setup: firewall=%d mariadb=%d", call, mariaDB)
 	}

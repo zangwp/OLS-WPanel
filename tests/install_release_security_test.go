@@ -413,7 +413,7 @@ func TestInstallerPlatformAndArtifactPreflightPrecedeSystemWrites(t *testing.T) 
 		`[[ "$machine" == "$dpkg_arch" ]]`,
 		`PANEL_ASSET_NAME="ols-wpanel-linux-${PLATFORM_ARCH}"`,
 		`select_platform_source`,
-		`配置 OpenLiteSpeed/LSPHP 软件源`,
+		`configure_litespeed_repository() {`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("install.sh missing platform restriction %q", required)

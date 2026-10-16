@@ -62,7 +62,7 @@ func TestOrdinaryUninstallDisclosesDeletedAndPreservedDataBeforeMutation(t *test
 
 func TestPurgeRequiresYConfirmationAfterScopeBeforeMutation(t *testing.T) {
 	script := readUninstallSafetyScript(t)
-	purge := extractUninstallSafetyFunction(t, script, "do_purge", "# ============================================================\n# 权限、平台与发布包安全预检")
+	purge := extractUninstallSafetyFunction(t, script, "do_purge", "# ============================================================\n# Check privileges, platform and signed release inputs.")
 
 	for _, required := range []string{
 		"全部 OpenLiteSpeed/LSPHP 站点配置",
@@ -336,7 +336,7 @@ func TestPurgePackageFailureStopsAndSysctlFailureContinues(t *testing.T) {
 		t.Skip("bash unavailable")
 	}
 	script := readUninstallSafetyScript(t)
-	purge := extractUninstallSafetyFunction(t, script, "do_purge", "# ============================================================\n# 权限、平台与发布包安全预检")
+	purge := extractUninstallSafetyFunction(t, script, "do_purge", "# ============================================================\n# Check privileges, platform and signed release inputs.")
 	// Replace only the interactive input source in the fixture. All destructive
 	// commands below are shell stubs; no services, packages or host files change.
 	purge = strings.ReplaceAll(purge, "< /dev/tty 2>/dev/null", "")
