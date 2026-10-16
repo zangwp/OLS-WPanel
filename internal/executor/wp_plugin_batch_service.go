@@ -10,9 +10,8 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
-// WPPluginBatchService 是批量插件更新的 HTTP 层入口：创建批量、查询批量/单项状态、
-// 对失败挂起的项执行「回滚」或「忽略」。真正的派发（Preview+Confirm 下一项）由
-// wpPluginBatchOrchestrator 在后台 worker 里完成，本服务不参与派发。
+// WPPluginBatchService exposes batch creation, status, rollback, and ignore to HTTP handlers.
+// The background wpPluginBatchOrchestrator dispatches items through Preview/Confirm.
 type WPPluginBatchService struct {
 	store    *wpUpdateStore
 	executor *wpPluginUpdateExecutor
@@ -36,7 +35,7 @@ func NewWPPluginBatchService(db *sql.DB, backupDir, wwwRoot string) (*WPPluginBa
 	return &WPPluginBatchService{store: store, executor: executor, now: time.Now}, nil
 }
 
-// Create 校验站点当前没有阻塞任务后，创建一个批量插件更新分组；实际派发由后台编排器完成。
+// Create checks for blocking tasks and creates a batch for background dispatch.
 func (s *WPPluginBatchService) Create(ctx context.Context, siteID int, username string, componentKeys []string) (models.WPPluginBatch, error) {
 	if s == nil || siteID <= 0 || username == "" || len(componentKeys) == 0 {
 		return models.WPPluginBatch{}, ErrWPPluginUpdateInvalid
@@ -48,7 +47,7 @@ func (s *WPPluginBatchService) Create(ctx context.Context, siteID int, username 
 	return s.batchModel(ctx, batch, true)
 }
 
-// Get 返回一个批量及其所有项的当前状态，用于前端轮询展示进度。
+// Get returns the batch and item statuses for frontend progress polling.
 func (s *WPPluginBatchService) Get(ctx context.Context, siteID int, batchID string) (models.WPPluginBatch, error) {
 	if s == nil || siteID <= 0 || batchID == "" {
 		return models.WPPluginBatch{}, ErrWPPluginUpdateInvalid
@@ -63,7 +62,7 @@ func (s *WPPluginBatchService) Get(ctx context.Context, siteID int, batchID stri
 	return s.batchModel(ctx, batch, true)
 }
 
-// ListForSite 返回一个站点最近的批量历史（不含每项明细），用于列表页展示。
+// ListForSite returns recent batch history without item details.
 func (s *WPPluginBatchService) ListForSite(ctx context.Context, siteID int) ([]models.WPPluginBatch, error) {
 	if s == nil || siteID <= 0 {
 		return nil, ErrWPPluginUpdateInvalid
@@ -83,10 +82,9 @@ func (s *WPPluginBatchService) ListForSite(ctx context.Context, siteID int) ([]m
 	return result, nil
 }
 
-// Rollback 对批量中一个失败挂起（status='failed', requires_attention=1）的任务执行用户
-// 触发的回滚，哪怕上一次回滚本身失败过（rollback_status='failed'）也允许重试。
-// interrupted_unknown 状态的任务不允许回滚——执行结果本身不确定，贸然恢复文件/数据库
-// 可能覆盖掉一次其实已经成功的更新，只能通过 Ignore acknowledgment 掉。
+// Rollback lets users restore failed tasks requiring attention, including retrying a failed rollback.
+// Reject interrupted_unknown: restoring could overwrite an update that actually succeeded.
+// Those tasks can only be acknowledged through Ignore.
 func (s *WPPluginBatchService) Rollback(ctx context.Context, siteID int, taskID string) error {
 	defer signalWorker(wpUpdateWake)
 	task, err := s.loadBatchTaskForDecision(ctx, siteID, taskID)
@@ -102,12 +100,9 @@ func (s *WPPluginBatchService) Rollback(ctx context.Context, siteID int, taskID 
 	return nil
 }
 
-// Ignore 让用户对批量中一个卡住的任务选择「忽略，我自己去后台检查」，覆盖两种情况：
-//   - status='failed' 且 requires_attention=1：更新失败挂起，或人工回滚本身也失败了。
-//   - status='interrupted_unknown' 且 manual_disposition 为空字符串：runner 执行结果不确定
-//     （比如进程被杀但无法确认是否已经开始/完成写入）。这类任务本来就会被
-//     siteHasBlockingTask 当作阻塞任务，批量必须有办法处置掉它，否则会卡住整个批量
-//     后续的插件，违反"某一项失败不阻塞其它项"的设计目标。
+// Ignore acknowledges a failed task requiring attention or an undisposed interrupted_unknown task.
+// This includes failed manual rollbacks and uncertain runner outcomes, allowing later batch items
+// to proceed instead of leaving the site blocked indefinitely.
 func (s *WPPluginBatchService) Ignore(ctx context.Context, siteID int, taskID string) error {
 	defer signalWorker(wpUpdateWake)
 	task, err := s.loadBatchTaskForDecision(ctx, siteID, taskID)

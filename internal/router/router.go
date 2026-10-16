@@ -2335,7 +2335,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	r.Use(middleware.CustomRecovery())
 	r.Use(middleware.SecurityHeaders())
 
-	// /healthz 必须在 ScanDefense 之前注册，否则本机健康检查会被扫描防御误封
+	// Register /healthz before ScanDefense so it does not block local health checks.
 	r.GET("/healthz", func(c *gin.Context) {
 		ip := net.ParseIP(c.ClientIP())
 		if ip == nil || !ip.IsLoopback() {
@@ -2414,7 +2414,6 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	panelGroup.Use(middleware.BasicAuth(basicAuthChecker))
 	authHandler := &handlers.AuthHandler{DB: db, Prefix: suffix, Tracker: attemptTracker, MFA: mfaService, Audit: auditService}
 
-	// 面板根路径重定向到登录页（解决用户访问面板地址不带 /login 的问题）
 	panelGroup.GET("", func(c *gin.Context) {
 		if c.Request.URL.Path == "/"+suffix {
 			c.Redirect(http.StatusFound, "/"+suffix+"/login")

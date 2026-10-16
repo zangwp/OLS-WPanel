@@ -1000,7 +1000,7 @@ func init() {
 	database.RegisterUpgrade("1.0.4", HardenSiteUnixIsolation)
 }
 
-// HardenSiteUnixIsolation 对所有已有站点执行 Unix 用户组隔离和敏感文件权限加固（升级迁移用）。
+// HardenSiteUnixIsolation migrates existing sites to isolated Unix groups and stricter sensitive-file permissions.
 func HardenSiteUnixIsolation() error {
 	db := database.GetDB()
 	rows, err := db.Query("SELECT domain, web_root, system_user FROM websites")
@@ -1023,8 +1023,8 @@ func HardenSiteUnixIsolation() error {
 	return rows.Err()
 }
 
-// InstallPluginPermissions 安装插件时设置插件目录和密钥目录权限。
-// 与 HardenSiteSensitivePermissions 不同，此函数不 chown 整站。
+// InstallPluginPermissions sets plugin and key directory permissions without
+// changing ownership across the entire site.
 func InstallPluginPermissions(domain, systemUser, pluginDir string) error {
 	systemUser = strings.TrimSpace(systemUser)
 	if systemUser == "" {

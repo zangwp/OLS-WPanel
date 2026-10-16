@@ -881,7 +881,7 @@ func normalizeSQLPrefix(s string) string {
 	return strings.Join(fields, " ")
 }
 
-// ClearDatabaseTables 清空指定数据库中的所有表（保留数据库本身）
+// ClearDatabaseTables removes all tables while keeping the database.
 func ClearDatabaseTables(siteID int64, dbName, dbPass string) error {
 	return clearDatabaseObjects(siteID, dbName, dbPass, false)
 }
@@ -1200,7 +1200,7 @@ func cleanupOldDBBackupsWith(backups []oldDBBackup, removeFile func(string) erro
 	}
 }
 
-// RunAutoBackup 手动触发一次自动备份，用于测试验证。
+// RunAutoBackup manually triggers an automatic backup for verification.
 func RunAutoBackup() {
 	log.Println("手动触发自动备份...")
 	executeAutoBackups()
@@ -1218,7 +1218,7 @@ func StartAutoBackupScheduler() {
 	}()
 }
 
-// StartDBBackupScheduler 面板 SQLite 数据库自动备份调度器（每天凌晨 2:30）
+// StartDBBackupScheduler schedules panel SQLite backups daily at 02:30.
 func StartDBBackupScheduler() {
 	go func() {
 		for {

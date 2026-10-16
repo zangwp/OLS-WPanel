@@ -147,8 +147,8 @@ func TestBackupUsageListsMultipleAndDisabledCronJobs(t *testing.T) {
 		VALUES ('nightly backup', '0 2 * * *', 'ols-wpanel file backup', 'file_backup', 'incremental', 1, 1)`); err != nil {
 		t.Fatalf("insert cron_jobs: %v", err)
 	}
-	// 删除网站前，已禁用但仍关联该网站的备份计划任务也应该出现在列表里；
-	// 如果管理员确认删除网站，这些关联任务会随删除流程自动删除。
+	// Include disabled backup cron jobs in the pre-deletion summary;
+	// deleting the site also removes its associated jobs.
 	if _, err := db.Exec(`INSERT INTO cron_jobs (name, cron_expression, command, task_type, backup_mode, site_id, enabled)
 		VALUES ('weekly full backup', '0 3 * * 0', 'ols-wpanel file backup', 'file_backup', 'full', 1, 0)`); err != nil {
 		t.Fatalf("insert cron_jobs: %v", err)

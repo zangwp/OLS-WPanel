@@ -69,8 +69,8 @@ func getSitePasswordResetMode(t *testing.T, db *sql.DB) string {
 	return m
 }
 
-// TestSetPasswordResetModeTransitionConsistency 验证每次模式切换后，DB 记录与磁盘
-// mu-plugin 文件内容始终一致（allow 移除文件 / all 隐藏链接 / admin 仅限管理员）。
+// TestSetPasswordResetModeTransitionConsistency checks database and mu-plugin agreement:
+// allow removes the file, all hides reset links, and admin restricts resets to administrators.
 func TestSetPasswordResetModeTransitionConsistency(t *testing.T) {
 	oldConfig := config.AppConfig
 	config.AppConfig = &config.Config{Paths: config.PathsConfig{LSPHPCLI: "/bin/true"}}
@@ -115,7 +115,6 @@ func TestSetPasswordResetModeTransitionConsistency(t *testing.T) {
 		t.Fatalf("admin mu-plugin unexpected content: %s", c)
 	}
 
-	// admin -> allow（文件移除）
 	rec = doSetPasswordResetMode(router, "1", "allow")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("admin->allow status = %d, body = %s", rec.Code, rec.Body.String())
@@ -128,9 +127,8 @@ func TestSetPasswordResetModeTransitionConsistency(t *testing.T) {
 	}
 }
 
-// TestSetPasswordResetModeApplyFailureRollsBackToPrev 覆盖评审意见第 1 点：
-// apply 写盘成功后若 chown 失败（这里用不存在的系统用户触发），handler 必须按 DB
-// 当前已提交模式回滚磁盘文件，使磁盘与 DB 保持一致性，而不是留下新模式的文件。
+// TestSetPasswordResetModeApplyFailureRollsBackToPrev triggers chown failure after
+// writing the mu-plugin. The handler must restore the committed database mode.
 func TestSetPasswordResetModeApplyFailureRollsBackToPrev(t *testing.T) {
 	webRoot := t.TempDir()
 	db := setupPasswordResetTestSite(t, webRoot, "no-such-system-user-xyz-12345", "allow")
@@ -142,11 +140,11 @@ func TestSetPasswordResetModeApplyFailureRollsBackToPrev(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("apply-failure status = %d, want 500, body = %s", rec.Code, rec.Body.String())
 	}
-	// DB 必须仍为 allow（apply 失败时从未落库）。
+	// Failed apply must leave the database in allow mode.
 	if got := getSitePasswordResetMode(t, db); got != "allow" {
 		t.Fatalf("db mode = %q, want allow (no DB write on apply failure)", got)
 	}
-	// 磁盘必须回滚到 allow（文件被移除），与 DB 一致。
+	// Rollback to allow must remove the mu-plugin file.
 	if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
 		t.Fatalf("mu-plugin must be rolled back (removed) on apply failure, but file exists")
 	}

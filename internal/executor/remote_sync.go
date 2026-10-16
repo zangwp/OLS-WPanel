@@ -29,7 +29,7 @@ import (
 
 const backupsRoot = config.DefaultBackupDir
 
-// BackupSource 标识一次远程同步对应的备份记录来源表，用于同步完成后回写 transport_status。
+// BackupSource identifies the backup table whose transport_status is updated after sync.
 type BackupSource string
 
 const (
@@ -244,9 +244,9 @@ func loadRemoteBackupTarget(ctx context.Context) (remoteBackupTarget, error) {
 	return target, nil
 }
 
-// SyncBackupToRemote 将单个备份文件同步到远程服务器，保留 domain/db/ 或 domain/files/ 目录结构。
-// 若 keep_local=0，同步成功后删除本地文件。source/siteID/filename 用于同步完成后回写对应
-// 备份记录（db_backups 或 file_backups）的 transport_status/transport_message。
+// SyncBackupToRemote syncs one file, preserving domain/db/ or domain/files/.
+// When keep_local=0, remove the local copy after success. source, siteID, and
+// filename identify the backup record whose transport status and message are updated.
 func SyncBackupToRemote(localFile string, source BackupSource, siteID int, filename string) bool {
 	return SyncBackupToRemoteContext(context.Background(), localFile, source, siteID, filename)
 }
@@ -287,7 +287,7 @@ func syncBackupToRemoteTargetContext(ctx context.Context, target remoteBackupTar
 		target.host, target.port, target.username, target.authType, target.password, target.remotePath, target.keepLocal)
 }
 
-// updateBackupTransportStatus 把远程同步结果回写到对应备份记录表（db_backups 或 file_backups）。
+// updateBackupTransportStatus writes the sync result to the matching backup record.
 func updateBackupTransportStatus(source BackupSource, siteID int, filename, status, message string) {
 	if siteID == 0 || filename == "" {
 		return
@@ -303,10 +303,10 @@ func updateBackupTransportStatus(source BackupSource, siteID int, filename, stat
 	}
 }
 
-// RemoteHasFullFileBackup 检查当前远程备份目标（若已启用）是否已经存在指定站点的全量文件备份基线。
-// 返回值 (false, err) 表示无法确认远程状态（连接失败、配置无效等），调用方应按"未确认完整"处理，
-// 避免更换远程服务器或远程数据被清空后，增量备份被同步到缺少全量基线的目标上。
-// 远程备份未启用时返回 (true, nil)，不对本地判定施加额外约束。
+// RemoteHasFullFileBackup checks the current remote for a site's full file baseline.
+// (false, err) means the remote state is unknown; callers must not assume a
+// baseline exists after a remote replacement or data loss. Disabled remote
+// backups return (true, nil), leaving local decisions unconstrained.
 func RemoteHasFullFileBackup(domain string) (bool, error) {
 	return RemoteHasFullFileBackupContext(context.Background(), domain)
 }
@@ -350,18 +350,18 @@ func remoteTargetHasFullFileBackupContext(ctx context.Context, target remoteBack
 	return remoteHasFullBackupContext(ctx, domain, target.host, target.port, target.username, target.authType, target.password, target.remotePath)
 }
 
-// pendingTransportStatusRow 是一条需要和当前远程目标核对的备份记录。
+// pendingTransportStatusRow is a backup record to reconcile with the current remote.
 type pendingTransportStatusRow struct {
-	table    string // "db_backups" 或 "file_backups"
+	table    string // "db_backups" or "file_backups"
 	id       int
 	domain   string
 	filename string
-	subdir   string // "db" 或 "files"，用于拼出和 SyncBackupToRemote 一致的相对路径
-	status   string // "local" 或 "synced"
+	subdir   string // "db" or "files", matching SyncBackupToRemote paths
+	status   string // "local" or "synced"
 }
 
-// loadPendingTransportStatusRows 查出 db_backups/file_backups 里 local/synced 的记录并 JOIN websites
-// 取 domain。failed 保留上次同步失败信息，不由远程枚举覆盖。查询失败时返回 error，不静默丢弃结果。
+// loadPendingTransportStatusRows loads local/synced backups with their website domains.
+// Preserve failed statuses and their messages. Return query errors rather than partial results.
 func loadPendingTransportStatusRows() ([]pendingTransportStatusRow, error) {
 	db := database.GetDB()
 	var pending []pendingTransportStatusRow
@@ -409,8 +409,8 @@ func loadPendingTransportStatusRows() ([]pendingTransportStatusRow, error) {
 	return pending, nil
 }
 
-// applyReconciledTransportStatus 把记录逐条和当前远程目标比对：存在则为 synced，不存在则为 local。
-// 只回写状态发生变化的记录，返回实际成功回写的条数。纯逻辑、不发网络请求，方便单独测试。
+// applyReconciledTransportStatus marks remote files synced and missing files local.
+// It makes no network requests and counts only successful status changes.
 func applyReconciledTransportStatus(pending []pendingTransportStatusRow, remoteKeys map[string]bool, backupType, s3PathPrefix string) int {
 	if len(pending) == 0 {
 		return 0
@@ -446,9 +446,9 @@ func applyReconciledTransportStatus(pending []pendingTransportStatusRow, remoteK
 	return updated
 }
 
-// ReconcileBackupTransportStatus 把 local/synced 记录与当前远程目标双向校准，返回实际修正条数。
-// 只在存在可核对记录时发起一次远程列表请求。该函数只应由管理员显式触发，不挂在页面加载路径上，
-// 避免慢或不可达的远端拖慢只读列表接口。
+// ReconcileBackupTransportStatus reconciles local/synced records with the current
+// remote and returns the number corrected. List remote files only when records
+// exist. Call explicitly from admin actions so slow remotes cannot delay list pages.
 func ReconcileBackupTransportStatus() (int, error) {
 	db := database.GetDB()
 	var enabled, port int
@@ -495,9 +495,9 @@ func ReconcileBackupTransportStatus() (int, error) {
 	return applyReconciledTransportStatus(pending, remoteKeys, backupType, s3PathPrefix), nil
 }
 
-// remoteHasFullBackup 通过只读 SSH 命令探测 rsync 远程目标 domain/files 目录下是否已有
-// file_full_*.tar.gz 全量基线。命令参数沿用 syncBackupToRsync 的连接方式（已校验过的
-// host/port/username/remotePath），远程目录路径做 shell 单引号转义，不拼接未校验输入。
+// remoteHasFullBackup checks for file_full_*.tar.gz in domain/files via read-only SSH.
+// Reuse syncBackupToRsync's validated connection settings and shell-quote the
+// remote path; never interpolate unvalidated input.
 func remoteHasFullBackup(domain, host string, port int, username, authType, password, remotePath string) (bool, error) {
 	return remoteHasFullBackupContext(context.Background(), domain, host, port, username, authType, password, remotePath)
 }
@@ -570,8 +570,8 @@ func remoteHasFullBackupContext(ctx context.Context, domain, host string, port i
 	return strings.TrimSpace(string(out)) != "", nil
 }
 
-// listRsyncRemoteFiles 通过一次只读 ssh find 命令列出 rsync 远程目标下的全部文件（相对路径），
-// 用于核对历史备份记录（transport_status 还停留在默认值 local）是否其实已经同步到远程。
+// listRsyncRemoteFiles lists relative paths with one read-only SSH find command
+// to reconcile old records that may still have the default local status.
 func listRsyncRemoteFiles(host string, port int, username, authType, password, remotePath string) (map[string]bool, error) {
 	if host == "" {
 		return nil, fmt.Errorf("远程服务器地址为空")
@@ -630,9 +630,8 @@ func listRsyncRemoteFiles(host string, port int, username, authType, password, r
 	return parseRemoteFileList(out, remotePath), nil
 }
 
-// parseRemoteFileList 把 `find <remotePath> -type f` 的输出解析成相对于 remotePath 的路径集合，
-// 和 localBackupRelPath 算出来的相对路径格式（domain/db|files/filename）保持一致。
-// 拆成独立函数是为了在不连真实 SSH 的情况下也能单独测试解析逻辑。
+// parseRemoteFileList converts find output to paths relative to remotePath,
+// matching localBackupRelPath's domain/db|files/filename format.
 func parseRemoteFileList(output []byte, remotePath string) map[string]bool {
 	base := strings.TrimRight(remotePath, "/") + "/"
 	files := map[string]bool{}
@@ -641,8 +640,7 @@ func parseRemoteFileList(output []byte, remotePath string) map[string]bool {
 		if line == "" {
 			continue
 		}
-		// 必须严格以 remotePath + "/" 为前缀，避免像 base=/home/backup 却误配
-		// /home/backup2/x 这类同前缀但不是子目录的路径。
+		// Require remotePath + "/" so /home/backup2/x cannot match /home/backup.
 		if !strings.HasPrefix(line, base) {
 			continue
 		}
@@ -655,8 +653,8 @@ func parseRemoteFileList(output []byte, remotePath string) map[string]bool {
 	return files
 }
 
-// s3HasFullBackup 通过只读 ListObjectsV2 请求探测 S3 远程目标下是否已有该站点的全量文件备份基线。
-// 复用现有 SigV4 签名请求基础设施，不引入新的第三方 SDK。
+// s3HasFullBackup checks for a full file baseline via read-only ListObjectsV2,
+// reusing SigV4 requests without an additional SDK.
 func s3HasFullBackup(ctx context.Context, endpoint, bucket, region, accessKeyID, secretKey, pathPrefix, domain string) (bool, error) {
 	if region == "" {
 		region = "auto"
@@ -689,9 +687,9 @@ const (
 	s3ListPageSize = 1000
 )
 
-// listS3ObjectKeys 列出 S3 兼容存储里 pathPrefix 前缀下的全部对象 key，用于核对历史备份记录
-// （transport_status 还停留在默认值 local）是否其实已经同步到远程。翻页上限 s3ListMaxPages，
-// 超过后返回错误，不能把不完整清单当成“远端文件不存在”，否则会错误触发补传或基线重建。
+// listS3ObjectKeys lists every key under pathPrefix to reconcile old local-status
+// records. Fail beyond s3ListMaxPages: treating an incomplete listing as missing
+// files could trigger unnecessary uploads or baseline rebuilds.
 func listS3ObjectKeys(ctx context.Context, endpoint, bucket, region, accessKeyID, secretKey, pathPrefix string) (map[string]bool, error) {
 	if region == "" {
 		region = "auto"
@@ -776,7 +774,7 @@ func syncBackupToRsyncContext(ctx context.Context, localFile string, source Back
 		return false
 	}
 
-	// 用 /. 标记分离备份根目录和相对路径，rsync -R 保留 ./ 之后的结构
+	// The /. marker lets rsync -R preserve the path below the backup root.
 	if err := RequireSSHBackupDependencies(authType); err != nil {
 		message := err.Error() + "；请在软件管理中补齐备份工具"
 		syncLog("", message, "failed")
@@ -894,8 +892,8 @@ func syncBackupToS3Context(ctx context.Context, localFile string, source BackupS
 	return true
 }
 
-// deleteRemoteBackupFile 删除当前远程目标中的一个已校验相对路径。调用方必须传入冻结的旧链名单，
-// 不接受通配符，也不递归删除目录。
+// deleteRemoteBackupFile removes one validated relative path from the current remote.
+// Callers must use the frozen old-chain list; wildcards and recursive deletion are forbidden.
 func deleteRemoteBackupFile(relPath string) error {
 	target, err := loadRemoteBackupTarget(context.Background())
 	if err != nil {

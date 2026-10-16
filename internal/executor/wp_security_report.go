@@ -15,8 +15,8 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
 
-// WordPress 安全事件类型。sqli_blocked 表示 OpenLiteSpeed 已在 PHP 前拒绝请求；
-// 其它类型仍是调查证据，不能据此断言站点存在漏洞或攻击已经成功。
+// WordPress security event types. sqli_blocked means OpenLiteSpeed rejected the request
+// before PHP; other types are investigative evidence, not proof of a vulnerability or successful attack.
 const (
 	SecurityEventSensitiveFileScan = "sensitive_file_scan"
 	SecurityEventSQLiProbe         = "sqli_probe"
@@ -65,11 +65,11 @@ type searchBotIPChecker struct {
 }
 
 var (
-	// combined 日志格式：$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"
+	// Combined log format: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"
 	combinedLogRe = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^\]]+)\] "([A-Z]+) ([^" ]+) [^"]*" ([0-9]{3}) \S+ "[^"]*" "([^"]*)"`)
 	webErrorRe    = regexp.MustCompile(`client: ([^,]+), server: ([^,]+), request: "([A-Z]+) ([^" ]+) [^"]*"`)
 
-	// 保守的 SQL 注入探测正则，只记录不拦截；误报率优先于漏报率
+	// Conservative SQL injection detection: record without blocking, prioritizing fewer false positives.
 	sqliProbePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)union\s+select`),
 		regexp.MustCompile(`(?i)sleep\s*\(`),
@@ -79,7 +79,7 @@ var (
 		regexp.MustCompile(`(?i)\bwaitfor\s+delay\b`),
 		regexp.MustCompile(`(?i)\bload_file\s*\(`),
 		regexp.MustCompile(`(?i)\binto\s+outfile\b`),
-		// 兼容 ' OR 1=1 和经典的 ' OR '1'='1（等号两侧都带引号）两种写法
+		// Accept both ' OR 1=1 and the classic ' OR '1'='1 with quoted operands.
 		regexp.MustCompile(`(?i)(?:'|%27)\s*or\s*(?:'|%27)?\s*[0-9]+\s*(?:'|%27)?\s*=\s*(?:'|%27)?\s*[0-9]+`),
 		regexp.MustCompile(`(?i)0x[0-9a-f]{16,}`),
 		regexp.MustCompile(`(?i)(?:;|%3b)\s*(?:drop|insert|update|delete)\s+`),
@@ -94,7 +94,7 @@ var (
 		regexp.MustCompile(`(?i)(?:'|%27)(?:\s|%20|\+)*or(?:\s|%20|\+)+(?:'|%27)?[0-9]+(?:'|%27)?(?:\s|%20|\+)*(?:=|%3d)(?:\s|%20|\+)*(?:'|%27)?[0-9]+(?:'|%27)?(?:\s|%20|\+)*(?:--|%2d%2d|#|%23)`),
 	}
 
-	// 敏感文件扫描路径特征（与 fail2ban filter 保持一致）
+	// Sensitive-file scan patterns, kept consistent with the fail2ban filter.
 	sensitiveFilePatterns = []string{
 		".env", ".git", "config.bak", "wp-config.php", "secrets.json", "secrets.yaml", "secrets.yml",
 		"settings.py", "application.properties", "config.toml", ".sql", ".tar", ".gz", ".zip",
@@ -183,10 +183,9 @@ func cloneWPSecurityReportItems(items []WPSecurityReportItem) []WPSecurityReport
 		out[i] = item
 		out[i].SamplePaths = append([]string(nil), item.SamplePaths...)
 		out[i].Evidence = append([]string(nil), item.Evidence...)
-		// 注意：append(nil, x...) 在 x 为空切片时会返回 nil 而不是空切片，
-		// JSON 序列化后前端拿到的就是 null。Types 对没有命中 4 类明确分类的
-		// IP（只有兜底的"WordPress 异常路径访问"）是常见的空值场景，
-		// 必须显式保留为非 nil 的空切片，否则前端 x-for 遍历 null 会报错。
+		// append(nil, x...) returns nil for an empty slice, encoding as JSON null.
+		// Unclassified IPs commonly have empty Types; preserve a non-nil empty slice so frontend
+		// x-for iteration does not fail on null.
 		out[i].Types = append([]string{}, item.Types...)
 	}
 	return out
@@ -236,17 +235,16 @@ func readWebErrorLog(site wpSecuritySite, path string, aggregates map[string]*wp
 		risk := "low"
 		switch {
 		case strings.Contains(line, "Primary script unknown"):
-			// LSPHP 收到了一个不存在的 PHP 脚本请求，这只会在探测 PHP 文件时发生，
-			// 单次命中就直接判高危，和分类系统加入之前的行为一致。
+			// LSPHP reports a nonexistent PHP script, indicating PHP probing.
+			// One occurrence retains the pre-classification high-risk behavior.
 			reason = "Primary script unknown：不存在 PHP 文件进入 LSPHP"
 			eventType = SecurityEventSuspiciousPHP
 			risk = "high"
 		case strings.Contains(line, "open()") && strings.Contains(line, "failed (2: No such file or directory)"):
 			reason = "open() failed：不存在文件访问"
-			// 通用的"文件不存在"在 error.log 里绝大多数是缺图片/CSS/JS 之类的正常
-			// 404，只有当请求的确实是 .php 文件时才算"不存在 PHP 探测"这类明确
-			// 分类事件；否则保持未分类，和旧行为一样靠累计次数（events >= 3）
-			// 才升到中风险，避免单条缺图记录就被打成中风险噪音。
+			// Most generic missing-file errors are harmless image/CSS/JS 404s. Classify only .php
+			// requests as PHP probing; leave others unclassified so they reach medium risk only after
+			// three events, preserving the previous threshold and avoiding noise from a single missing image.
 			if strings.HasSuffix(strings.ToLower(reqPath), ".php") {
 				eventType = SecurityEventSuspiciousPHP
 				risk = "medium"
@@ -298,24 +296,24 @@ func addWPSecurityEvent(aggregates map[string]*wpSecurityAggregate, domain, ip s
 	}
 }
 
-// classifySecurityEvent 根据请求特征和实际响应判断安全事件类型。
+// classifySecurityEvent uses request features and the actual response to identify event types.
 func classifySecurityEvent(method, uri, ua, ip string, status int, checker *searchBotIPChecker) (eventType, riskLevel, message string) {
 	lowerURI := strings.ToLower(uri)
 
-	// 1. SQL 注入探测（优先判断，因为 query string 中可能同时命中其他模式）
+	// Check SQL injection first because its query string may also match other patterns.
 	// HTTP 403 alone may be generated by WordPress, a plugin or a CDN. Only
 	// parseWPSecurityLogEvidence can confirm this panel's native blocking marker.
 	if !isWordPressCoreSearchRequest(uri) && isSQLiProbe(uri) {
 		return SecurityEventSQLiProbe, "high", "SQL 注入探测"
 	}
 
-	// 2. 伪装搜索引擎爬虫
+	// Fake search engine bot.
 	if isFakeSearchBot(ua, ip, checker) {
 		return SecurityEventFakeSearchBot, "medium", "UA 声明为搜索引擎爬虫，但来源 IP 不在官方段"
 	}
 
-	// 3. 敏感文件扫描。OpenLiteSpeed 的 $uri 会解码 %2eenv 后决定写入安全日志，
-	// 但 combined 日志保留原始请求 URI，因此这里同时检查解码后的形式。
+	// Check decoded sensitive paths too: OpenLiteSpeed decodes $uri before selecting the
+	// security log, but the combined log keeps the original request URI, such as %2eenv.
 	sensitiveURIs := []string{lowerURI}
 	if decoded, err := url.QueryUnescape(uri); err == nil && decoded != uri {
 		sensitiveURIs = append(sensitiveURIs, strings.ToLower(decoded))
@@ -328,7 +326,7 @@ func classifySecurityEvent(method, uri, ua, ip string, status int, checker *sear
 		}
 	}
 
-	// 4. 不存在 PHP 文件探测
+	// Nonexistent PHP file probe.
 	if strings.HasSuffix(lowerURI, ".php") && status == 404 {
 		return SecurityEventSuspiciousPHP, "low", "不存在 PHP 文件探测"
 	}
@@ -367,9 +365,8 @@ func isWordPressCoreSearchRequest(requestURI string) bool {
 	}
 }
 
-// isSQLiProbe 对 URI 原文和 URL 解码后的形式都做匹配。
-// Web 服务器记录的是请求行原文，攻击者常见工具会把空格编码为 %20 或 +，
-// 只匹配原文会漏掉这类编码后的 payload（如 UNION%20SELECT）。
+// isSQLiProbe checks both raw and URL-decoded URIs. Logs preserve encoded spaces
+// such as %20 or +, so raw matching alone would miss payloads such as UNION%20SELECT.
 func isSQLiProbe(uri string) bool {
 	candidates := []string{uri}
 	if decoded, err := url.QueryUnescape(uri); err == nil && decoded != uri {
@@ -494,7 +491,7 @@ func buildWPSecurityReportItem(agg *wpSecurityAggregate) WPSecurityReportItem {
 }
 
 func classifyWPSecurityRisk(agg *wpSecurityAggregate, paths, evidence []string) string {
-	// 如果分类器已经识别到高风险事件类型，直接采用其风险等级
+	// Use a high-risk event classification directly.
 	if agg.riskLevel == "high" || agg.events >= 10 || hasHighSignalPath(paths) || hasEvidence(evidence, "Primary script unknown") {
 		return "高"
 	}
@@ -672,7 +669,7 @@ func isAllowedSiteLogDir(logDir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.ContainsAny(rel, `/\`)
 }
 
-// wpSecurityLogDirAllowed 是可在测试中替换的函数变量，生产环境保持 isAllowedSiteLogDir 的行为不变。
+// wpSecurityLogDirAllowed defaults to isAllowedSiteLogDir and can be replaced in tests.
 var wpSecurityLogDirAllowed = isAllowedSiteLogDir
 
 func formatReportTime(t time.Time) string {
@@ -707,9 +704,8 @@ func riskWeight(risk string) int {
 	}
 }
 
-// eventRiskWeight 对应 classifySecurityEvent/readWebErrorLog 使用的英文风险等级
-// （"high"/"medium"/"low"），与 riskWeight 使用的中文 "高"/"中"/"低" 词表分开维护，
-// 避免两套词表混用导致比较结果恒为 false。
+// eventRiskWeight uses the English high/medium/low values from classifySecurityEvent
+// and readWebErrorLog, separately from riskWeight's localized labels to avoid mismatched comparisons.
 func eventRiskWeight(risk string) int {
 	switch risk {
 	case "high":

@@ -1,27 +1,13 @@
-// Package database — 版本升级机制说明
+// Package database maintains the schema for fresh installs and upgrades.
 //
-// 两个文件的分工：
+// migrations.go defines the current schema and seed data. It runs on every startup
+// with IF NOT EXISTS and OR IGNORE for idempotency. upgrades.go applies missing
+// versioned steps in order. Fresh installs record the latest version without replaying them.
 //
-//   - migrations.go   全量建表 + 种子数据，给全新安装用，始终代表数据库的最新状态。
-//                     每次启动都会完整执行一遍（依赖 IF NOT EXISTS / OR IGNORE 保证幂等）。
-//   - upgrades.go     增量升级步骤，给老版本升级用。仅在版本落后时顺序执行。
-//
-// 数据库变更流程：
-//
-//   1. 在 migrations.go 对应位置添加 CREATE / INSERT 语句（新装用）。
-//   2. 在 upgrades.go 末尾追加 Upgrade 条目（升级用）。
-//   3. 升级条目永久保留，严禁删除。用户可能跨多个版本升级，删除升级条目会导致
-//      老版本跳过必要的 ALTER TABLE 等增量迁移。
-//
-// 运行时逻辑（main.go 启动 → database.Open → RunMigrations → RunUpgrades）：
-//
-//   新装：  migrations 创建全部表 + 种子 → upgrades 发现版本表为空 → 跳过所有升级 → 写入最新版本号
-//   升级：  migrations 幂等执行（无实际变化）→ upgrades 发现版本落后 → 逐条执行缺失的升级 → 更新版本号
-//   已最新：migrations 幂等执行 → upgrades 发现版本已是最新 → 跳过
-//
-// 版本号约定：
-//   使用语义化版本号（如 "1.0.0"），与 Git tag 保持一致。LatestVersion() 返回 upgrades 列表中
-//   最后一条的版本号（列表为空时返回 "1.0.0"），即当前代码所代表的数据库版本。
+// For schema changes, update migrations.go and append an Upgrade here. Never delete
+// upgrade entries: users may skip releases and need the complete migration chain.
+// Versions follow semantic versioning and match Git tags. LatestVersion reports
+// the final upgrade version, or 1.0.0 when no upgrades are registered.
 
 package database
 
@@ -37,26 +23,25 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/config"
 )
 
-// Upgrade 定义一次版本升级需要执行的数据库变更。
-// SQL 中的语句应使用 IF NOT EXISTS / OR IGNORE 等幂等写法，确保重复执行安全。
-// Func 为可选的 Go 代码迁移，在 SQL 之后执行，用于文件系统清理等非数据库操作。
+// Upgrade defines the changes for a target version. SQL must be safe to repeat.
+// Func runs after SQL and can handle filesystem or other non-database changes.
 type Upgrade struct {
-	Version     string       // 目标版本号，如 "1.0.0"
-	Description string       // 本次升级做了什么
-	SQL         []string     // 要执行的 SQL 语句
-	Func        func() error // 可选的 Go 函数迁移
+	Version     string       // Target version, such as "1.0.0".
+	Description string
+	SQL         []string
+	Func        func() error
 }
 
-// registeredFuncs 存放外部包注册的升级函数，解决循环依赖问题（database 不能 import executor）。
+// registeredFuncs allows external migrations without an import cycle with executor.
 var registeredFuncs = map[string]func() error{}
 
-// RegisterUpgrade 供外部包注册升级函数，version 必须与 upgrades 列表中的 Version 匹配。
+// RegisterUpgrade registers a function for a matching Version in upgrades.
 func RegisterUpgrade(version string, fn func() error) {
 	registeredFuncs[version] = fn
 }
 
-// upgrades 按版本顺序排列（旧→新），永久保留，严禁删除旧条目（跨版本升级依赖完整迁移链）。
-// v1.0.0 正式版发布时清空过一次历史，此后所有升级条目持续累积。
+// Keep every upgrade in ascending version order; skipped releases need the full chain.
+// History was reset at v1.0.0 and has accumulated since then.
 var upgrades = []Upgrade{
 	{
 		Version:     "1.0.1",
@@ -838,7 +823,7 @@ func ensureWPUpdateDatabaseBackupColumns() error {
 	return err
 }
 
-// ensureWPUpdateBatchSchema 为批量插件更新新增 auto_rollback/batch_id 字段与批量编排表。
+// ensureWPUpdateBatchSchema adds batch update columns and orchestration tables.
 func ensureWPUpdateBatchSchema() error {
 	var tableExists int
 	if err := DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='wp_update_tasks'`).Scan(&tableExists); err != nil {
@@ -974,8 +959,8 @@ func ensureFileLockModeColumns() error {
 	return err
 }
 
-// ensurePasswordResetModeColumn 为 websites 表新增 password_reset_mode 列，
-// 旧站点默认 'allow'（允许找回密码），与新装迁移的默认值保持一致。
+// ensurePasswordResetModeColumn adds password_reset_mode to websites.
+// Existing sites default to allow, matching fresh installs.
 func ensurePasswordResetModeColumn() error {
 	var tableExists int
 	if err := DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'websites'`).Scan(&tableExists); err != nil {
@@ -1042,16 +1027,14 @@ func ensureFileLockEnabledAtColumn() error {
 	return err
 }
 
-// backfillFileBackupsFromDisk 把升级前已经生成、但 file_backups 表还没有记录的
-// 网站文件备份（file_full_*.tar.gz / file_inc_*.tar.gz）补录进 file_backups 表。
-// 历史文件无法确认是否曾经同步到远程，统一记为 transport_status='local'。
-// 按 (site_id, filename) 查重，重复执行不会重复插入；目录不存在/不可读的网站直接跳过。
+// backfillFileBackupsFromDisk records existing file_full_*.tar.gz and file_inc_*.tar.gz backups.
+// Unknown remote history is recorded as local. Deduplicate by (site_id, filename)
+// and skip sites whose backup directories are missing or unreadable.
 func backfillFileBackupsFromDisk() error {
 	return backfillFileBackupsFromRoot(config.DefaultBackupDir)
 }
 
-// backfillFileBackupsFromRoot 是 backfillFileBackupsFromDisk 的可测试实现，backupsRoot 参数
-// 便于单元测试注入临时目录，生产代码固定传入真实的面板备份根目录。
+// backfillFileBackupsFromRoot accepts a backup root for tests; production uses the fixed panel backup root.
 func backfillFileBackupsFromRoot(backupsRoot string) error {
 	var fileBackupsExists, websitesExists int
 	if err := DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'file_backups'`).Scan(&fileBackupsExists); err != nil {
@@ -1128,8 +1111,8 @@ func backfillFileBackupsFromRoot(backupsRoot string) error {
 	return nil
 }
 
-// parseFileBackupTimestamp 从 file_full_<ts>.tar.gz / file_inc_<ts>.tar.gz 文件名中解析出
-// ExecuteFileBackup 生成时使用的时间戳（20060102_150405），解析失败返回零值。
+// parseFileBackupTimestamp reads the ExecuteFileBackup timestamp (20060102_150405)
+// from a full or incremental backup filename, returning zero on failure.
 func parseFileBackupTimestamp(name string) time.Time {
 	base := strings.TrimSuffix(name, ".tar.gz")
 	base = strings.TrimPrefix(base, "file_full_")
@@ -1229,7 +1212,7 @@ func ensureSSLExportEnabledColumn() error {
 	return err
 }
 
-// LatestVersion 返回 upgrades 列表中的最新版本号。
+// LatestVersion returns the latest registered upgrade version.
 func LatestVersion() string {
 	if len(upgrades) == 0 {
 		return "1.0.0"
@@ -1237,8 +1220,8 @@ func LatestVersion() string {
 	return upgrades[len(upgrades)-1].Version
 }
 
-// newInstallCanary 从 upgrades 列表中提取最后一条 ALTER TABLE ADD COLUMN 的表名和字段名，
-// 用于判断数据库是否已包含最新 schema（新装检测的 canary 列）。
+// newInstallCanary finds the last ALTER TABLE ADD COLUMN target in upgrades
+// to detect databases that already have the latest schema.
 func newInstallCanary() (table, column string) {
 	for i := len(upgrades) - 1; i >= 0; i-- {
 		for _, sql := range upgrades[i].SQL {
@@ -1270,13 +1253,12 @@ func isBetaVersion(v string) bool {
 	return strings.Contains(strings.ToLower(v), "beta")
 }
 
-// RunUpgrades 执行所有尚未应用的版本升级。新装数据库已是最新版本，跳过所有升级。
+// RunUpgrades applies missing versioned migrations, skipping them for fresh installs.
 func RunUpgrades() error {
 	if DB == nil {
 		return fmt.Errorf("数据库未初始化")
 	}
 
-	// 确保版本追踪表存在
 	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS schema_version (
 		version    TEXT NOT NULL,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1284,14 +1266,13 @@ func RunUpgrades() error {
 		return fmt.Errorf("创建 schema_version 表失败: %w", err)
 	}
 
-	// 查询当前版本
 	var currentVersion string
 	if err := DB.QueryRow("SELECT version FROM schema_version ORDER BY updated_at DESC, rowid DESC LIMIT 1").Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("查询当前版本失败: %w", err)
 	}
 
-	// 新装检测：currentVersion 为空时，检查数据库是否已包含最新 schema。
-	// migrations.go 已全量建表，若最新升级中的字段已存在则说明是新装，无需执行任何升级。
+	// With no recorded version, the latest column identifies a fresh install
+	// whose schema was already created by migrations.go.
 	if currentVersion == "" {
 		if table, col := newInstallCanary(); col != "" {
 			var exists int
@@ -1308,7 +1289,7 @@ func RunUpgrades() error {
 		}
 	}
 
-	// Beta 版本归一化到 1.0.0 正式基线
+	// Normalize beta versions to the 1.0.0 release baseline.
 	if currentVersion != "" && isBetaVersion(currentVersion) {
 		log.Printf("[升级] beta 版本 %s 归一化到 1.0.0", currentVersion)
 		if _, err := DB.Exec("DELETE FROM schema_version"); err != nil {
@@ -1320,7 +1301,7 @@ func RunUpgrades() error {
 		}
 	}
 
-	// 验证当前版本合法性：必须在 upgrades 列表中，或者是基线 1.0.0，或者是空（新装）
+	// Accept registered versions, the 1.0.0 baseline, or an empty version for fresh installs.
 	if currentVersion != "" && currentVersion != "1.0.0" && currentVersion != LatestVersion() {
 		found := false
 		for _, u := range upgrades {
@@ -1334,7 +1315,7 @@ func RunUpgrades() error {
 		}
 	}
 
-	// 基线 1.0.0 视为已应用所有旧升级，从 upgrades 第一条开始执行
+	// The 1.0.0 baseline predates all retained upgrades; start at the first entry.
 	applied := currentVersion == "" || currentVersion == "1.0.0"
 
 	for _, u := range upgrades {
@@ -1374,7 +1355,7 @@ func RunUpgrades() error {
 		log.Printf("[升级] %s 完成", u.Version)
 	}
 
-	// 新装数据库：无任何版本记录，直接写入最新版本号，下次启动跳过所有升级
+	// Record the latest version for fresh installs so later startups skip upgrades.
 	var count int
 	if err := DB.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count); err != nil {
 		log.Printf("[升级] 查询版本记录失败: %v", err)

@@ -103,8 +103,7 @@ func TestPHPConfigRequiresVHostRegeneration(t *testing.T) {
 	if phpConfigRequiresVHostRegeneration("max_input_vars") {
 		t.Fatal("max_input_vars should only restart OpenLiteSpeed")
 	}
-	// OPcache 参数只存在于全局 ini，改动只需要重启 OpenLiteSpeed，
-	// 不应该触发全站点虚拟主机批量重建。
+	// Global OPcache changes require an OpenLiteSpeed restart, not a rebuild of every virtual host.
 	for _, key := range []string{"opcache.memory_consumption", "opcache.max_accelerated_files"} {
 		if phpConfigRequiresVHostRegeneration(key) {
 			t.Fatalf("%s should only restart OpenLiteSpeed, not regenerate vhosts", key)
@@ -112,9 +111,8 @@ func TestPHPConfigRequiresVHostRegeneration(t *testing.T) {
 	}
 }
 
-// TestAdaptiveConfigFallbackMatchesRecommendFormula 确认 opcache 两项的展示兜底值
-// 不是写死的固定数字，而是复用跟"重新计算推荐值"按钮相同的公式现算出来的——避免
-// 两处出现不一致的数字造成困惑（代码审核发现的问题）。
+// TestAdaptiveConfigFallbackMatchesRecommendFormula ensures fallback display values
+// use the same hardware formulas as recommendations.
 func TestAdaptiveConfigFallbackMatchesRecommendFormula(t *testing.T) {
 	facts := executor.CollectSystemFacts()
 	wantMem := strconv.Itoa(executor.RecommendOPcacheMemoryConsumptionMB(facts))

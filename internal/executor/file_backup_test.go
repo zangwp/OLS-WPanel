@@ -316,7 +316,7 @@ func TestCleanOldBackupsKeepsDBRowWhenFileRemovalFails(t *testing.T) {
 		}
 	}
 
-	// 去掉目录写权限，让 os.Remove 因权限不足失败（Linux 下删除文件需要父目录的写权限）。
+	// Removing a file on Linux requires write permission on its parent directory.
 	if err := os.Chmod(dir, 0555); err != nil {
 		t.Fatalf("chmod dir: %v", err)
 	}
@@ -324,8 +324,7 @@ func TestCleanOldBackupsKeepsDBRowWhenFileRemovalFails(t *testing.T) {
 
 	cleanOldBackups(dir, 2, 1)
 
-	// 文件删除失败，仍留在磁盘上：对应的 file_backups 记录不能被删除，
-	// 否则总览页面会漏掉一个实际仍存在的本地备份文件。
+	// Retain the record when deletion fails so the overview still lists the file.
 	if _, err := os.Stat(filepath.Join(dir, names[0])); err != nil {
 		t.Fatalf("oldest backup file should still be on disk after failed removal: %v", err)
 	}
@@ -362,8 +361,7 @@ func TestRecordFileBackupLogsWithoutPanicOnInsertFailure(t *testing.T) {
 		t.Fatalf("drop file_backups: %v", err)
 	}
 
-	// file_backups 写入失败不应 panic，也不应影响调用方（已生成的备份文件保留）；
-	// 失败情况通过日志可见，而不是静默吞掉。
+	// A failed insert must be logged without panicking or discarding the backup.
 	recordFileBackup(1, "file_full_20260101_000000.tar.gz", 123, "full", "record-fail.example.com")
 }
 

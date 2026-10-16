@@ -54,8 +54,7 @@ func TestRecommendReturnsOpcacheKeysForPHP(t *testing.T) {
 	if resp.Data.Reason == "" {
 		t.Fatal("expected a non-empty reason explaining the recommendation")
 	}
-	// PHP 卡片有 8 个配置项但只有 2 项会被这个按钮更新，理由文案必须明确点名
-	// 这两个 key，避免管理员误以为整张卡片的值都被重新计算了。
+	// Name both updated OPcache keys so the message does not imply all eight fields changed.
 	for _, key := range []string{"opcache.memory_consumption", "opcache.max_accelerated_files"} {
 		if !strings.Contains(resp.Data.Reason, key) {
 			t.Fatalf("expected PHP reason to explicitly name %q, got: %s", key, resp.Data.Reason)

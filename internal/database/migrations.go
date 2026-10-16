@@ -214,7 +214,7 @@ var migrations = append([]string{
 
 	// ============================================================
 	// firewall_port_rules
-	// 面板只记录自己创建的放行规则；不会接管或删除管理员的既有规则。
+	// Track only panel-created allow rules; preserve existing administrator rules.
 	// ============================================================
 	`CREATE TABLE IF NOT EXISTS firewall_port_rules (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -410,9 +410,6 @@ var migrations = append([]string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_backups_site ON db_backups(site_id, created_at)`,
 
-	// ============================================================
-	// file_backups（网站文件备份记录）
-	// ============================================================
 	`CREATE TABLE IF NOT EXISTS file_backups (
 		id                INTEGER PRIMARY KEY AUTOINCREMENT,
 		site_id           INTEGER NOT NULL,
@@ -494,7 +491,7 @@ var migrations = append([]string{
 	`CREATE INDEX IF NOT EXISTS idx_oom_events_occurred ON system_oom_events(occurred_at)`,
 
 	// ============================================================
-	// wp_extension_config — 默认主题/插件自动安装配置
+	// Default theme and plugin installation settings.
 	// ============================================================
 	`CREATE TABLE IF NOT EXISTS wp_extension_config (
 		id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -515,7 +512,6 @@ var migrations = append([]string{
 		('plugin', 'woocommerce',       'WooCommerce',      1),
 		('plugin', 'redis-cache',          'Redis Cache',      1)`,
 
-	// 远程备份设置
 	`CREATE TABLE IF NOT EXISTS remote_backup_settings (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
 			enabled     INTEGER NOT NULL DEFAULT 0,
@@ -654,8 +650,7 @@ var migrations = append([]string{
 	`CREATE INDEX IF NOT EXISTS idx_log_analysis_jobs_status ON log_analysis_jobs(status, updated_at)`,
 
 	// ============================================================
-	// wp_security_events — 方案 D 阶段三：持久化 WordPress 安全探测事件，
-	// 避免仅依赖日志尾部读取导致 logrotate 跨天后历史丢失
+	// Persist WordPress security events so log rotation does not erase history.
 	// ============================================================
 	`CREATE TABLE IF NOT EXISTS wp_security_events (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -677,8 +672,8 @@ var migrations = append([]string{
 	`CREATE INDEX IF NOT EXISTS idx_wp_security_events_site_time ON wp_security_events(site_id, occurred_at)`,
 
 	// ============================================================
-	// wp_security_log_positions — 记录每个站点 wp-security.log 已读取到的字节偏移，
-	// 支撑增量读取（配合 copytruncate 轮转：文件变小即视为已轮转，从头重新读取）
+	// Track per-site log offsets for incremental reads. With copytruncate rotation,
+	// restart at the beginning when the file shrinks.
 	// ============================================================
 	`CREATE TABLE IF NOT EXISTS wp_security_log_positions (
 		site_id     INTEGER PRIMARY KEY,
@@ -693,8 +688,7 @@ var migrations = append([]string{
 	wpSecuritySourcePositionsSchema,
 
 	// ============================================================
-	// 方案 D 阶段四：WordPress 安全探测告警开关，默认关闭；
-	// 阈值与统计窗口可配置（审核优化项 3.1）
+	// Security alerts are disabled by default, with configurable thresholds and windows.
 	// ============================================================
 	`INSERT OR IGNORE INTO security_settings (skey, svalue, description) VALUES
 		('alert_wp_sqli_probe',          'false', 'WordPress SQL 注入探测告警（默认关闭）'),
@@ -707,8 +701,8 @@ var migrations = append([]string{
 		('wp_sqli_ban_window_seconds',    '600',   'SQL 注入自动封禁统计窗口（秒）')`,
 }, append(wpInventorySchemaStatements, append(wpUpdateSchemaStatements, append(imageOptimizerSchemaStatements, siteMigrationSchemaStatements...)...)...)...)
 
-// wpInventorySchemaStatements 同时供全新安装和 1.0.31 增量升级使用，避免两条路径的
-// 表结构、约束或索引随维护产生漂移。
+// wpInventorySchemaStatements is shared by fresh installs and the 1.0.31 upgrade
+// to keep their tables, constraints, and indexes in sync.
 var wpInventorySchemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS site_wp_inventory_state (
 		site_id                           INTEGER PRIMARY KEY,

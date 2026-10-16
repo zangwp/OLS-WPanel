@@ -1467,7 +1467,7 @@ func (h *WebsiteHandler) DetectDBTablePrefix(c *gin.Context) {
 		return
 	}
 
-	// 如果 wp-config.php 中的前缀存在于候选列表中，优先推荐
+	// Prefer the wp-config.php prefix when it appears among the candidates.
 	if site.WebRoot != "" {
 		if configPrefix, err := executor.ReadWPTablePrefix(site.WebRoot); err == nil {
 			for _, c := range candidates {
@@ -1654,7 +1654,7 @@ func (h *WebsiteHandler) UpdateWPSiteURLs(c *gin.Context) {
 		return
 	}
 
-	// 异步清理 LiteSpeed 和 Redis Object Cache，避免旧缓存继续返回旧站点 URL。
+	// Clear LiteSpeed and Redis caches asynchronously so they stop serving the old site URL.
 	executor.GoSafe(func() { executor.ClearWPSiteRuntimeCaches(site.ID, site.Domain, site.WebRoot) })
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "站点 URL 已更新"}))
@@ -2360,7 +2360,7 @@ func (h *WebsiteHandler) InstallPlugin(c *gin.Context) {
 
 	cfg := config.AppConfig
 	panelURL := fmt.Sprintf("https://127.0.0.1:%d/%s", cfg.Panel.TLSPort, cfg.Panel.RandomSuffix)
-	// 清理旧路径下的配置文件（迁移到 Web 目录外之前的位置）
+	// Remove legacy configuration from inside the web root.
 	os.Remove(filepath.Join(pluginDir, "ols-wpanel-config.json"))
 
 	if err := executor.WriteSitePluginIdentity(domain, systemUser, panelURL, apiKey, site.DisableApplicationPasswords); err != nil {
@@ -2639,7 +2639,7 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 	}
 	db := database.GetDB()
 
-	// 检查 LiteSpeed / XML-RPC 配置是否变化，决定是否重载 OpenLiteSpeed
+	// Reload OpenLiteSpeed only when LiteSpeed or XML-RPC settings change.
 	var domain string
 	var oldLSCacheEnabled, oldLSCacheTTL, oldXMLRPCEnabled, oldDisableWPUpdates, oldDisableApplicationPasswords int
 	if err := db.QueryRow("SELECT domain, litespeed_cache_enabled, litespeed_cache_ttl, xmlrpc_enabled, disable_wp_updates, disable_application_passwords FROM websites WHERE id = ?", id).
@@ -2740,7 +2740,6 @@ func (h *WebsiteHandler) SaveWPOptimizations(c *gin.Context) {
 		}
 	}
 
-	// LiteSpeed / XML-RPC 配置变化时重载 OpenLiteSpeed
 	if oldLSCacheEnabled != fcEnabled || oldLSCacheTTL != req.LSCacheTTL || oldXMLRPCEnabled != xmlrpcEnabled {
 		if err := publishSiteOLSWithCacheRollback(id, oldLSCacheEnabled, oldLSCacheTTL); err != nil {
 			recordHandlerOperationLog("wp_optimizations", domain, "failed", err.Error())
@@ -3127,7 +3126,7 @@ func reinstallWordPressErrorMessage(err error) string {
 }
 
 // ============================================================
-// CacheHelperHandler — WordPress 插件 API
+// CacheHelperHandler serves the WordPress plugin API.
 // ============================================================
 
 func escapeLike(s string) string {
@@ -3535,7 +3534,6 @@ func (h *CacheHelperHandler) UpdateOptimizerSettings(c *gin.Context) {
 		return
 	}
 
-	// LiteSpeed 配置变化时重载 OpenLiteSpeed
 	if oldLSCacheEnabled != fcEnabled || oldLSCacheTTL != req.TTL {
 		if err := publishSiteOLSWithCacheRollback(site.ID, oldLSCacheEnabled, oldLSCacheTTL); err != nil {
 			recordHandlerOperationLog("wp_optimizations", req.Domain, "failed", err.Error())

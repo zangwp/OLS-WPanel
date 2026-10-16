@@ -29,20 +29,19 @@ var regenerateSiteOLSForCache = RegenerateSiteOLSConfig
 
 var errCompanionRemovedBeforePublish = errors.New("installed companion was removed before publish")
 
-// cacheHelperPluginFS 保存程序入口在启动时传入的插件资源，供单个站点的
-// 部署和版本检查使用。EnsureCacheHelperPlugin 负责初始化这些资源。
+// cacheHelperPluginFS stores startup-provided assets for site deployment and version checks.
+// EnsureCacheHelperPlugin initializes it.
 var cacheHelperPluginFS fs.FS
 
-// EnsureCacheHelperPlugin 把面板内嵌的配套插件目录同步到本地参照副本
-// （/www/ols-wpanel/packages/ols-wpanel-optimizer/），仅用于版本比对，不直接服务任何站点，
-// 所以不需要 AutoDeployPluginUpdates 那套原子切换，按文件内容比对同步即可。
+// EnsureCacheHelperPlugin syncs embedded assets to /www/ols-wpanel/packages/ols-wpanel-optimizer/.
+// This reference copy only supports version checks and serves no sites, so content-based sync is sufficient.
 func EnsureCacheHelperPlugin(pluginFS fs.FS) {
 	cacheHelperPluginFS = pluginFS
 	pkgDir := "/www/ols-wpanel/packages"
 	refDir := filepath.Join(pkgDir, pluginDirName)
 	os.MkdirAll(pkgDir, 0755)
 
-	// 清理旧版本面板遗留的单文件参照副本
+	// Remove the legacy single-file reference copy.
 	os.Remove(filepath.Join(pkgDir, pluginDirName+".php"))
 
 	srcFiles, err := readEmbeddedPluginFiles(pluginFS)
@@ -63,7 +62,7 @@ func EnsureCacheHelperPlugin(pluginFS fs.FS) {
 		os.WriteFile(dst, data, 0644)
 	}
 
-	// 清理参照目录里源码已经不存在的旧文件（比如本次重构删除的老单文件模块）
+	// Remove reference files no longer present in the embedded source.
 	filepath.WalkDir(refDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
@@ -76,10 +75,9 @@ func EnsureCacheHelperPlugin(pluginFS fs.FS) {
 	})
 }
 
-// AutoDeployPluginUpdates 扫描所有运行中且仍安装配套插件的 WordPress 站点，
-// 不论插件是否启用，只要目录内容落后于面板内置版本就自动更新。
-// plugin_api_key 只用于筛选受管站点，不能作为插件仍然存在的证据。
-// 每次面板启动时调用，实现插件无感自动升级。
+// AutoDeployPluginUpdates updates outdated companion plugins on running WordPress sites,
+// including inactive plugins. plugin_api_key selects managed sites but does not prove installation.
+// Called at panel startup.
 func AutoDeployPluginUpdates(pluginFS fs.FS) {
 	srcFiles, version, err := embeddedPluginFilesWithVersion(pluginFS)
 	if err != nil || len(srcFiles) == 0 {
@@ -251,8 +249,8 @@ func sealCompanionDirectory(dir string, gid int) error {
 	})
 }
 
-// PluginNeedsUpdate 供网站详情页判断该站点已部署的插件是否落后于面板内置版本。
-// installed 为 false 时 needsUpdate 无意义。
+// PluginNeedsUpdate compares the site's plugin with the embedded version.
+// needsUpdate is meaningful only when installed is true.
 func PluginNeedsUpdate(webRoot string) (installed bool, needsUpdate bool) {
 	pluginDir := filepath.Join(webRoot, "wp-content", "plugins", pluginDirName)
 	if _, err := os.Stat(filepath.Join(pluginDir, pluginDirName+".php")); err != nil {
@@ -265,7 +263,7 @@ func PluginNeedsUpdate(webRoot string) (installed bool, needsUpdate bool) {
 	return true, pluginDeployedVersion(pluginDir) != version
 }
 
-// readEmbeddedPluginFiles 把内嵌的 ols-wpanel-optimizer 目录展开为「相对路径 -> 文件内容」的映射。
+// readEmbeddedPluginFiles maps relative plugin paths to embedded file contents.
 func readEmbeddedPluginFiles(pluginFS fs.FS) (map[string][]byte, error) {
 	if pluginFS == nil {
 		return nil, fs.ErrNotExist
@@ -296,18 +294,13 @@ func readEmbeddedPluginFiles(pluginFS fs.FS) (map[string][]byte, error) {
 	return files, nil
 }
 
-// pluginVersionMarkerFile 是随插件一起部署到每个站点的版本标记文件，内容是
-// pluginSourceVersion() 算出的 hash。不是真正的插件功能文件，纯粹用来快速判断
-// "站点上部署的版本是不是面板内置的最新版本"——原来的做法是把插件所有文件挨个
-// 读出来逐字节比对，还要再遍历一遍目标目录揪出多余文件，每次面板启动、每个站点
-// 都要做一整套文件系统操作；换成比对一个标记字符串，逻辑和开销都小得多。
-// 以 "." 开头，WordPress 的 get_plugins() 只识别插件目录下 .php 文件的头部注释，
-// 不会把它当成任何东西。
+// pluginVersionMarkerFile stores pluginSourceVersion() in each deployed plugin directory.
+// Comparing one marker avoids reading and comparing every plugin file at startup.
+// Its dot prefix keeps it outside WordPress get_plugins() discovery.
 const pluginVersionMarkerFile = ".olsw-version"
 
-// embeddedPluginFilesWithVersion 读取内嵌插件源码，算出版本标记后把标记本身也
-// 作为一个文件加进返回的映射里，这样调用方不管是部署整目录（deployPluginDirectory）
-// 还是同步本地参照副本，标记都会跟着一起写下去，不需要额外单独处理。
+// embeddedPluginFilesWithVersion adds the version marker to the source map so both
+// site deployment and local reference sync write it alongside the plugin files.
 func embeddedPluginFilesWithVersion(pluginFS fs.FS) (map[string][]byte, string, error) {
 	srcFiles, err := readEmbeddedPluginFiles(pluginFS)
 	if err != nil {
@@ -318,9 +311,8 @@ func embeddedPluginFilesWithVersion(pluginFS fs.FS) (map[string][]byte, string, 
 	return srcFiles, version, nil
 }
 
-// pluginSourceVersion 对内嵌插件源码整体算一个 hash：按相对路径排序后把
-// "路径+内容"逐个喂进同一个 hash，结果稳定、不依赖 map 遍历顺序（Go 的 map
-// 遍历顺序是随机的），源码任何一个文件变了这个值就会变。
+// pluginSourceVersion hashes sorted paths and contents, producing a stable version
+// independent of Go map iteration order that changes whenever any source file changes.
 func pluginSourceVersion(srcFiles map[string][]byte) string {
 	rels := make([]string, 0, len(srcFiles))
 	for rel := range srcFiles {
@@ -337,10 +329,8 @@ func pluginSourceVersion(srcFiles map[string][]byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// pluginDeployedVersion 读取已部署到某个站点的插件目录里的版本标记。目录不存在、
-// 标记文件缺失（例如老版本面板部署的、还没有这个标记）统一返回空字符串——调用方
-// 拿它跟当前源码版本比对时，空字符串必然不相等，会触发一次部署，效果等价于以前
-// "逐文件比对发现不一致"，行为不变。
+// pluginDeployedVersion reads a site's version marker. Missing directories or markers
+// return an empty string, causing legacy deployments to update on the next comparison.
 func pluginDeployedVersion(pluginDir string) string {
 	data, err := os.ReadFile(filepath.Join(pluginDir, pluginVersionMarkerFile))
 	if err != nil {
@@ -349,12 +339,10 @@ func pluginDeployedVersion(pluginDir string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// deployPluginDirectory 把 srcFiles 部署到 pluginDir。目标目录常态下已存在且非空
-// （插件更新场景），Linux rename(2) 无法用单次调用原子覆盖这种目标，因此按五步走：
-// ① 清理上次部署遗留的临时/备份目录残留；② 新版本整体构建在与目标同一文件系统的临时
-// 目录里；③ 当前生效目录挪到备份路径；④ 新目录挪到最终路径，失败必须回滚到步骤③之前
-// 的状态；⑤ 成功后删除备份目录。临时/备份目录名以 "." 开头，WordPress 的 get_plugins()
-// 会跳过这类条目，不会被误当成一个插件出现在后台插件列表里。
+// deployPluginDirectory replaces pluginDir, which is usually nonempty and cannot be
+// atomically overwritten by a single Linux rename. Clean stale directories, build on the same
+// filesystem, move the current directory to backup, install the new directory, then remove backup.
+// Roll back if installation fails. Dot-prefixed temporary/backup names are ignored by get_plugins().
 func deployPluginDirectory(pluginsDir, pluginDir string, srcFiles map[string][]byte) error {
 	return deployPluginDirectoryPrepared(pluginsDir, pluginDir, srcFiles, nil, nil)
 }
@@ -412,9 +400,8 @@ func deployPluginDirectoryPrepared(pluginsDir, pluginDir string, srcFiles map[st
 	return nil
 }
 
-// logUnexpectedPluginFiles 在丢弃旧插件目录（backupDir）之前记录一次源码里没有的多余
-// 文件——通常是用户手动放进插件目录的调试脚本之类。整目录原子替换会把它们一并丢弃，
-// 这里只做诊断日志，不做保留（保留会破坏"部署结果与内嵌源码逐文件一致"这个不变量）。
+// logUnexpectedPluginFiles records files absent from source before discarding the backup.
+// They are not preserved: deployment must exactly match the embedded source.
 func logUnexpectedPluginFiles(backupDir string, srcFiles map[string][]byte) {
 	var extra []string
 	filepath.WalkDir(backupDir, func(path string, d fs.DirEntry, err error) error {
@@ -435,10 +422,9 @@ func logUnexpectedPluginFiles(backupDir string, srcFiles map[string][]byte) {
 	}
 }
 
-// recoverOrCleanupStalePluginDirs 处理上一次部署可能遗留的临时/备份目录（例如面板恰好
-// 在步骤③和④之间被强制重启）。如果插件目录缺失但存在备份目录，说明上次部署卡在
-// "旧目录已挪走、新目录还没就位"的中间状态，直接把备份挪回来恢复站点原有插件，
-// 而不是把这份还完好的内容当垃圾删掉；处理完之后再清理所有残留的临时/备份目录。
+// recoverOrCleanupStalePluginDirs handles interrupted deployments. If the plugin directory
+// is missing but its backup exists, restore the backup before cleaning stale directories;
+// the process may have stopped after moving the old directory but before installing the new one.
 func recoverOrCleanupStalePluginDirs(pluginsDir, pluginDir string) {
 	stagingPrefix := "." + pluginDirName + ".staging-"
 	backupPrefix := "." + pluginDirName + ".backup-"
@@ -780,7 +766,7 @@ func RegenerateSiteOLSConfig(siteID int) error {
 	}
 
 	if status == string(models.StatusPaused) || status == string(models.StatusMigrated) {
-		// 已暂停或已搬家的源站只刷新未启用配置，不改变当前运行链接。
+		// For paused or migrated source sites, refresh inactive config without changing the live link.
 		if err := engine.ApplyOLSVHostConfigKeepDisabled(config, olsVHostConfigPath); err != nil {
 			return fmt.Errorf("应用 OpenLiteSpeed 配置失败(site %d): %w", siteID, err)
 		}
@@ -793,7 +779,7 @@ func RegenerateSiteOLSConfig(siteID int) error {
 	return nil
 }
 
-// RegenerateAllSitesOLSConfigs 重建全部网站的 OpenLiteSpeed 虚拟主机配置。
+// RegenerateAllSitesOLSConfigs rebuilds every site's OpenLiteSpeed virtual host config.
 func RegenerateAllSitesOLSConfigs() error {
 	db := database.GetDB()
 	rows, err := db.Query("SELECT id FROM websites")

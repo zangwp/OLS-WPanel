@@ -31,8 +31,9 @@ type heartbeatPayload struct {
 var telemetryVersion string
 var telemetrySettingsChanged = make(chan struct{}, 1)
 
-// StartTelemetry 启动可选运行统计调度：首次明确启用后上报一次，此后每天 UTC 00:00 附近上报。
-// 上报内容仅含稳定伪匿名 ID（machine-id 的 SHA256 前 16 字节）和面板版本号。
+// StartTelemetry schedules optional statistics after explicit opt-in, then near
+// 00:00 UTC daily. Reports contain only a stable pseudonymous ID (the first
+// 16 SHA-256 bytes of machine-id) and the panel version.
 func StartTelemetry(version string) {
 	telemetryVersion = version
 
@@ -41,12 +42,12 @@ func StartTelemetry(version string) {
 	}
 
 	go func() {
-		// 已启用且从未成功上报时立即尝试，更新/重启则跳过。
+		// Try immediately if enabled and no heartbeat has succeeded.
 		if isFirstHeartbeat() {
 			sendHeartbeat()
 		}
 
-		// 计算距下一个 UTC 00:00 的间隔，加 ±5 分钟随机抖动
+		// Schedule the next UTC midnight with up to five minutes of jitter.
 		now := time.Now().UTC()
 		midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
 		jitter := telemetryMidnightJitter()
@@ -90,7 +91,7 @@ func NotifyTelemetrySettingsChanged() {
 	}
 }
 
-// isFirstHeartbeat 检查是否从未成功上报过心跳（新装面板）。
+// isFirstHeartbeat reports whether no heartbeat has succeeded yet.
 func isFirstHeartbeat() bool {
 	db := database.GetDB()
 	if db == nil {
@@ -138,7 +139,7 @@ func sendHeartbeat() {
 		return
 	}
 
-	// 标记首次心跳已发送，后续成功上报不得覆盖首次成功时间。
+	// Record the first successful heartbeat without overwriting its timestamp.
 	if err := recordFirstHeartbeatSent(time.Now()); err != nil {
 		log.Printf("[遥测] 已上报但无法记录首次成功时间: %v", err)
 	}

@@ -1,9 +1,7 @@
 <?php
 /**
- * OLS WPanel Optimizer — 缓存与预加载模块
- *
- * LiteSpeed 缓存清除（手动/自动）、缓存预加载队列与批处理、
- * 管理栏清缓存按钮、缓存/预加载相关的后台通知。
+ * OLS WPanel Optimizer cache and preload support.
+ * Handles cache purges, preload batches, admin-bar actions, and related notices.
  */
 
 if (!defined('ABSPATH')) exit;

@@ -322,9 +322,9 @@ func (s *WPPackageService) publishLocked(ctx context.Context, src io.Reader, max
 	if err := writeWordPressPackageOrigin(s.target, report, sourceURL); err == nil {
 		report.OfficialDownload = sourceURL == wordpressLatestURL
 	}
-	// rename 已经原子发布；若后续目录 fsync 失败，无法在不破坏原子语义的
-	// 前提下可靠恢复旧 inode。此时返回失败以表示持久化保证未完成，但目标
-	// 在当前文件系统视图中可能已经是通过完整校验的新包。
+	// rename has already published the package atomically. A subsequent directory fsync failure
+	// cannot safely restore the old inode without breaking atomicity. Return a durability error,
+	// although the fully validated new package may already be visible at the destination.
 	parent, err := os.Open(dir)
 	if err != nil {
 		return report, archiveError("package_publish_failed", err)

@@ -191,8 +191,8 @@ func countWPUpdateLogEvents(t *testing.T, db *sql.DB, taskID string) int {
 	return n
 }
 
-// TestCleanupExpiredUpdateLogsDeletesOldEvents 验证严格 7 天清理：已结束且 finished_at
-// 超过保留窗口的任务，其事件日志一律删除（不区分成功/失败/需人工介入）。
+// TestCleanupExpiredUpdateLogsDeletesOldEvents verifies all events are removed for tasks
+// finished beyond the seven-day window, regardless of success, failure, or attention status.
 func TestCleanupExpiredUpdateLogsDeletesOldEvents(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	service, err := newWPUpdateArtifactService(store, t.TempDir(), func(context.Context, string, string) error { return nil })
@@ -219,8 +219,8 @@ func TestCleanupExpiredUpdateLogsDeletesOldEvents(t *testing.T) {
 	}
 }
 
-// TestCleanupExpiredUpdateLogsKeepsRecentAndUnfinished 验证近 7 天内结束的任务与
-// 尚未结束（finished_at IS NULL）的任务事件都保留，不被误删。
+// TestCleanupExpiredUpdateLogsKeepsRecentAndUnfinished preserves events for tasks
+// finished within seven days or still having finished_at IS NULL.
 func TestCleanupExpiredUpdateLogsKeepsRecentAndUnfinished(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	service, err := newWPUpdateArtifactService(store, t.TempDir(), func(context.Context, string, string) error { return nil })
@@ -235,9 +235,9 @@ func TestCleanupExpiredUpdateLogsKeepsRecentAndUnfinished(t *testing.T) {
 	}
 	insertWPUpdateLogEventForTest(t, store.db, recentTask.ID, "complete", "success")
 
-	// recentTask 已置为 success（非 active），同一站点可再创建一个 active 任务。
+	// recentTask is successful, freeing the site for another active task.
 	runningTask := createAndSealUpdateTask(t, store, siteID, now.Add(-time.Minute))
-	// runningTask 保持 finished_at IS NULL（未结束）。
+	// runningTask remains unfinished with finished_at IS NULL.
 	insertWPUpdateLogEventForTest(t, store.db, runningTask.ID, "claimed", "info")
 
 	recentBefore := countWPUpdateLogEvents(t, store.db, recentTask.ID)

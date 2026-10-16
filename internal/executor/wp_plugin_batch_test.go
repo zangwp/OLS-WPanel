@@ -53,8 +53,8 @@ func TestWPUpdateStoreCreatePluginBatchRejectsDuplicatesAndBlockedSite(t *testin
 	}
 }
 
-// fakePluginBatchConfirmer 模拟 WPPluginUpdateService：ConfirmForBatch 成功时会在
-// wp_update_tasks 里插入一行真实占用站点名额的记录，供编排器的「站点是否被阻塞」判断使用。
+// fakePluginBatchConfirmer creates real wp_update_tasks rows on ConfirmForBatch success
+// so the orchestrator's blocking checks see each occupied site slot.
 type fakePluginBatchConfirmer struct {
 	store           *wpUpdateStore
 	unavailable     map[string]bool
@@ -135,12 +135,12 @@ func TestWPPluginBatchOrchestratorDispatchesSequentially(t *testing.T) {
 	if items[0].Status != "dispatched" || items[0].TaskID == "" || items[1].Status != "pending" {
 		t.Fatalf("items=%+v", items)
 	}
-	// 第一项仍占用站点唯一活跃任务名额，第二次 tick 不应该派发第二项。
+	// The first item still occupies the site slot, so the next tick must not dispatch the second.
 	orchestrator.Tick(context.Background())
 	if len(confirmer.confirmed) != 1 {
 		t.Fatalf("confirmed=%v want only the first item dispatched while site is blocked", confirmer.confirmed)
 	}
-	// 模拟 worker 把第一项跑完。
+	// Simulate the worker completing the first item.
 	if _, err := store.db.Exec(`UPDATE wp_update_tasks SET status='success',finished_at=?,updated_at=? WHERE id=?`,
 		wpUpdateDBTime(now.Add(time.Minute)), wpUpdateDBTime(now.Add(time.Minute)), items[0].TaskID); err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestWPPluginBatchOrchestratorDispatchesSequentially(t *testing.T) {
 	if err != nil || items[1].Status != "dispatched" {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
-	// 模拟第二项也跑完，批量应当整体完成。
+	// Completing the second item should complete the batch.
 	if _, err := store.db.Exec(`UPDATE wp_update_tasks SET status='success',finished_at=?,updated_at=? WHERE id=?`,
 		wpUpdateDBTime(now.Add(2*time.Minute)), wpUpdateDBTime(now.Add(2*time.Minute)), items[1].TaskID); err != nil {
 		t.Fatal(err)
@@ -179,11 +179,9 @@ func insertFakeDatabaseBackup(t *testing.T, store *wpUpdateStore, taskID string)
 	return id
 }
 
-// TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem 覆盖第三方审核发现的
-// 「首个插件失败后，后续插件会再次备份数据库」问题：item1 的备份就绪后即使 item1 本身
-// 失败进入 requires_attention=1，item2 也必须复用同一份备份，而不是重新走 fresh。
-// 同时覆盖「批量在末项待决定时不能被判定为已完成」——item1 一直卡在失败待决定状态，
-// 批量不应该在 item2 成功后就被标记 completed，直到 item1 也被处置（忽略）为止。
+// TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem ensures a failed item
+// does not invalidate the shared backup. The batch must also remain running while that item
+// awaits a decision, even after later items succeed, and complete only after it is ignored.
 func TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -205,7 +203,7 @@ func TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem(t *testing.
 		t.Fatalf("first item backup mode=%q want=fresh", confirmer.confirmedMode["a/a.php"])
 	}
 	backupID := insertFakeDatabaseBackup(t, store, items[0].TaskID)
-	// item1 更新失败，进入「等待人工决定」状态：requires_attention=1, rollback_status='pending'。
+	// The failed first item awaits a decision with requires_attention=1 and rollback_status=pending.
 	if _, err := store.db.Exec(`UPDATE wp_update_tasks SET status='failed',rollback_status='pending',requires_attention=1,
 		finished_at=?,updated_at=? WHERE id=?`, wpUpdateDBTime(now.Add(time.Minute)), wpUpdateDBTime(now.Add(time.Minute)), items[0].TaskID); err != nil {
 		t.Fatal(err)
@@ -226,7 +224,7 @@ func TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem(t *testing.
 	if items[0].DatabaseBackupMode != "fresh" || items[1].DatabaseBackupMode != "reuse" {
 		t.Fatalf("item backup modes=%q/%q, want fresh/reuse for accurate rollback warnings", items[0].DatabaseBackupMode, items[1].DatabaseBackupMode)
 	}
-	// item2 也"完成"（成功），但 item1 仍然卡在等待决定，批量不能被判定为已完成。
+	// The second item succeeds, but the first still awaits a decision, keeping the batch running.
 	if _, err := store.db.Exec(`UPDATE wp_update_tasks SET status='success',finished_at=?,updated_at=? WHERE id=?`,
 		wpUpdateDBTime(now.Add(2*time.Minute)), wpUpdateDBTime(now.Add(2*time.Minute)), items[1].TaskID); err != nil {
 		t.Fatal(err)
@@ -236,7 +234,7 @@ func TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem(t *testing.
 	if err != nil || stillRunning.Status != "running" {
 		t.Fatalf("batch=%+v err=%v, want still running while item1 awaits a decision", stillRunning, err)
 	}
-	// 用户忽略 item1 之后，批量才能被判定为完成。
+	// Ignoring the first item allows the batch to complete.
 	if err := store.disposeFailedTaskIgnored(context.Background(), items[0].TaskID, now.Add(3*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -247,10 +245,8 @@ func TestWPPluginBatchOrchestratorReusesSharedBackupAcrossFailedItem(t *testing.
 	}
 }
 
-// TestWPPluginBatchOrchestratorRecoversOrphanedTaskInsteadOfDuplicating 覆盖第三方审核发现的
-// 「Confirm 成功但标记 dispatched 失败」问题：批量项仍是 pending，但真实任务已经存在
-// （比如上一次派发在 markBatchItemDispatched 之前崩溃）。编排器必须回填这个已有任务，
-// 而不是再调用一次 Confirm 创建重复任务。
+// TestWPPluginBatchOrchestratorRecoversOrphanedTaskInsteadOfDuplicating covers a crash
+// after Confirm but before markBatchItemDispatched: link the existing task rather than confirm again.
 func TestWPPluginBatchOrchestratorRecoversOrphanedTaskInsteadOfDuplicating(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -282,9 +278,8 @@ func TestWPPluginBatchOrchestratorRecoversOrphanedTaskInsteadOfDuplicating(t *te
 	}
 }
 
-// TestWPPluginBatchOrchestratorIsolatesMultipleSites 覆盖第三方审核建议补充的多站点隔离
-// 测试：两个站点各自的批量互不干扰，一个站点的活跃任务不会阻塞另一个站点的批量派发，
-// 且各自的共享数据库备份来源也不会串到对方身上。
+// TestWPPluginBatchOrchestratorIsolatesMultipleSites verifies that site slots and shared
+// database backups remain independent across batches on different sites.
 func TestWPPluginBatchOrchestratorIsolatesMultipleSites(t *testing.T) {
 	store, siteA := newWPUpdateStoreTest(t)
 	siteB := seedSecondWebsiteForBatchTest(t, store)
@@ -314,7 +309,7 @@ func TestWPPluginBatchOrchestratorIsolatesMultipleSites(t *testing.T) {
 	if err != nil || itemsB[0].Status != "dispatched" {
 		t.Fatalf("itemsB=%+v err=%v", itemsB, err)
 	}
-	// site B 的任务完成不应该影响 site A 仍然被自己的第一项占用而无法派发第二项。
+	// Completing site B must not release site A's occupied task slot.
 	if _, err := store.db.Exec(`UPDATE wp_update_tasks SET status='success',updated_at=? WHERE id=?`,
 		wpUpdateDBTime(now), itemsB[0].TaskID); err != nil {
 		t.Fatal(err)
@@ -330,9 +325,8 @@ func TestWPPluginBatchOrchestratorIsolatesMultipleSites(t *testing.T) {
 	}
 }
 
-// TestWPPluginBatchOrchestratorSlowBatchDoesNotBlockOthers 验证修复点：
-// 全局锁不再覆盖 Preview/ConfirmForBatch 等网络/IO 操作；一个 batch 的慢 Preview
-// 不会阻塞同一 Tick 中其它 batch 的派发。
+// TestWPPluginBatchOrchestratorSlowBatchDoesNotBlockOthers ensures the global lock
+// does not cover Preview/ConfirmForBatch I/O, so a slow batch cannot delay other batches.
 func TestWPPluginBatchOrchestratorSlowBatchDoesNotBlockOthers(t *testing.T) {
 	store, siteA := newWPUpdateStoreTest(t)
 	siteB := seedSecondWebsiteForBatchTest(t, store)
@@ -357,7 +351,7 @@ func TestWPPluginBatchOrchestratorSlowBatchDoesNotBlockOthers(t *testing.T) {
 		defer wg.Done()
 		orchestrator.Tick(context.Background())
 	}()
-	// 等 Tick 的 A 协程进入 Preview 阻塞；B 协程应当不受阻塞地完成派发。
+	// Wait for A to block in Preview; B must complete dispatch independently.
 	time.Sleep(100 * time.Millisecond)
 	itemsA, err := store.listBatchItems(context.Background(), batchA.ID)
 	if err != nil {
@@ -397,10 +391,8 @@ func seedSecondWebsiteForBatchTest(t *testing.T, store *wpUpdateStore) int {
 	return int(id)
 }
 
-// TestWPPluginBatchOrchestratorInterruptedUnknownBlocksUntilAcknowledged 覆盖第三方审核
-// 发现的「interrupted_unknown 会阻塞后续插件，且批量无法处置」问题：item1 进入
-// interrupted_unknown 后，item2 不会被派发（站点被阻塞）；只有在用户通过
-// disposeInterrupted 确认之后，批量才能继续推进到 item2。
+// TestWPPluginBatchOrchestratorInterruptedUnknownBlocksUntilAcknowledged ensures
+// an uncertain first task blocks later items until disposeInterrupted acknowledges it.
 func TestWPPluginBatchOrchestratorInterruptedUnknownBlocksUntilAcknowledged(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -418,8 +410,8 @@ func TestWPPluginBatchOrchestratorInterruptedUnknownBlocksUntilAcknowledged(t *t
 	if err != nil || items[0].Status != "dispatched" {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
-	// item1 的 runner supervision 不确定，进入 interrupted_unknown（先模拟 worker 已经
-	// 认领并在跑这个任务，interruptOwned 要求 status='running' 且 lease_owner 匹配）。
+	// Simulate an owned running task before interruptOwned, which requires running status
+	// and a matching lease_owner, to produce an uncertain runner outcome.
 	runningStamp := wpUpdateDBTime(now.Add(30 * time.Second))
 	if _, err := store.db.Exec(`UPDATE wp_update_tasks SET status='running',lease_owner='worker-plugin',
 		lease_expires_at=?,updated_at=? WHERE id=?`, runningStamp, runningStamp, items[0].TaskID); err != nil {
@@ -436,7 +428,7 @@ func TestWPPluginBatchOrchestratorInterruptedUnknownBlocksUntilAcknowledged(t *t
 	if err != nil || batchStillRunning.Status != "running" {
 		t.Fatalf("batch=%+v err=%v", batchStillRunning, err)
 	}
-	// 用户确认（等价于批量 UI 的「忽略」按钮对 interrupted_unknown 的处理）。
+	// Acknowledge the task, matching the batch UI's Ignore action.
 	if err := store.disposeInterrupted(context.Background(), items[0].TaskID, "escalated", now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -474,9 +466,8 @@ func TestWPPluginBatchOrchestratorSkipsUnavailableItemInSameTick(t *testing.T) {
 	}
 }
 
-// TestWPPluginBatchOrchestratorRetriesRetryablePreviewError 验证 Preview 返回可重试的瞬时错误
-// （如 api.wordpress.org 抖动误判为「不在仓库」）时，编排器不会把这一项永久标记 failed，
-// 而是写入退避重试状态保持 pending，且同一 tick 不跳过去派发后面的项（保序）。
+// TestWPPluginBatchOrchestratorRetriesRetryablePreviewError keeps transient upstream
+// errors pending with backoff and preserves item order rather than skipping to later items.
 func TestWPPluginBatchOrchestratorRetriesRetryablePreviewError(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -519,8 +510,8 @@ func TestWPPluginBatchOrchestratorRetriesRetryablePreviewError(t *testing.T) {
 	}
 }
 
-// TestWPPluginBatchOrchestratorWaitsDuringBackoff 验证退避期内（next_retry_at 在未来）
-// 编排器本次 tick 直接返回，既不重试也不派发；退避期过后才重新尝试同一项。
+// TestWPPluginBatchOrchestratorWaitsDuringBackoff ensures no retry or dispatch occurs
+// until next_retry_at, then retries the same item.
 func TestWPPluginBatchOrchestratorWaitsDuringBackoff(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -544,7 +535,7 @@ func TestWPPluginBatchOrchestratorWaitsDuringBackoff(t *testing.T) {
 		t.Fatalf("after first tick RetryCount=%d want 1", items[0].RetryCount)
 	}
 
-	// 第二次 tick：next_retry_at 仍在未来，必须原地等待，不重试。
+	// The second tick must wait while next_retry_at is still in the future.
 	orchestrator.Tick(context.Background())
 	items, _ = store.listBatchItems(context.Background(), batch.ID)
 	if items[0].RetryCount != 1 {
@@ -554,7 +545,7 @@ func TestWPPluginBatchOrchestratorWaitsDuringBackoff(t *testing.T) {
 		t.Fatalf("during backoff Status=%q want pending", items[0].Status)
 	}
 
-	// 把 next_retry_at 改成过去模拟退避期满；同时移除 previewErr 让重试能成功。
+	// Expire backoff and clear previewErr so the retry can succeed.
 	if _, err := store.db.Exec(`UPDATE wp_update_batch_items SET next_retry_at=? WHERE batch_id=?`,
 		wpUpdateDBTime(now.Add(-time.Minute)), batch.ID); err != nil {
 		t.Fatal(err)
@@ -571,7 +562,7 @@ func TestWPPluginBatchOrchestratorWaitsDuringBackoff(t *testing.T) {
 	}
 }
 
-// TestWPPluginBatchOrchestratorRetriesThenSucceeds 验证重试几次后上游恢复时这一项能正常派发。
+// TestWPPluginBatchOrchestratorRetriesThenSucceeds covers recovery after transient failures.
 func TestWPPluginBatchOrchestratorRetriesThenSucceeds(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -589,9 +580,9 @@ func TestWPPluginBatchOrchestratorRetriesThenSucceeds(t *testing.T) {
 	}
 	orchestrator.now = func() time.Time { return now }
 
-	// 第一次 tick：进入退避。
+	// The first tick starts backoff.
 	orchestrator.Tick(context.Background())
-	// 退避期满后第二次 tick：移除错误源，重试应成功。
+	// After backoff, remove the error source so the second tick succeeds.
 	if _, err := store.db.Exec(`UPDATE wp_update_batch_items SET next_retry_at=? WHERE batch_id=?`,
 		wpUpdateDBTime(now.Add(-time.Minute)), batch.ID); err != nil {
 		t.Fatal(err)
@@ -608,8 +599,8 @@ func TestWPPluginBatchOrchestratorRetriesThenSucceeds(t *testing.T) {
 	}
 }
 
-// TestWPPluginBatchOrchestratorMarksFailedAfterMaxRetries 验证重试次数用尽后，
-// 即使错误类型仍可重试也会永久标记为 failed，避免故障插件源无限期占着批量不前进。
+// TestWPPluginBatchOrchestratorMarksFailedAfterMaxRetries prevents persistent upstream
+// failures from holding the batch indefinitely, even when the error remains retryable.
 func TestWPPluginBatchOrchestratorMarksFailedAfterMaxRetries(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()
@@ -627,7 +618,7 @@ func TestWPPluginBatchOrchestratorMarksFailedAfterMaxRetries(t *testing.T) {
 	}
 	orchestrator.now = func() time.Time { return now }
 
-	// 重试上限是 3 次：retry_count 会从 0 递增到 3（每次 tick 之间把退避时间改到过去）。
+	// Exhaust three retries, expiring backoff between ticks.
 	for attempt := 0; attempt < wpPluginBatchMaxDispatchRetries; attempt++ {
 		orchestrator.Tick(context.Background())
 		if _, err := store.db.Exec(`UPDATE wp_update_batch_items SET next_retry_at=? WHERE batch_id=?`,
@@ -643,7 +634,7 @@ func TestWPPluginBatchOrchestratorMarksFailedAfterMaxRetries(t *testing.T) {
 		t.Fatalf("Status=%q want pending (still retryable at the cap)", items[0].Status)
 	}
 
-	// 再 tick 一次：重试次数已达上限，必须永久 failed。
+	// The next tick must fail the item permanently after the retry limit.
 	orchestrator.Tick(context.Background())
 	items, _ = store.listBatchItems(context.Background(), batch.ID)
 	if items[0].Status != "failed" {
@@ -654,8 +645,8 @@ func TestWPPluginBatchOrchestratorMarksFailedAfterMaxRetries(t *testing.T) {
 	}
 }
 
-// TestWPPluginBatchOrchestratorFailsImmediatelyOnNonRetryableError 验证不可重试的错误
-// （如状态真不一致）立即标记 failed，不浪费退避时间，且同一 tick 继续派发下一项。
+// TestWPPluginBatchOrchestratorFailsImmediatelyOnNonRetryableError ensures permanent
+// errors fail immediately and allow the next item to dispatch in the same tick.
 func TestWPPluginBatchOrchestratorFailsImmediatelyOnNonRetryableError(t *testing.T) {
 	store, siteID := newWPUpdateStoreTest(t)
 	now := time.Now().UTC()

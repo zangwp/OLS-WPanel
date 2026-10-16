@@ -239,7 +239,7 @@ func TestDeleteSiteAndAssociatedCronJobsDeletesOnlyMatchingSite(t *testing.T) {
 		t.Fatal("unrelated non-file_backup cron job should NOT be deleted")
 	}
 
-	// 幂等：再次调用不应报错，且因为已经没有匹配任务，应返回 false。
+	// A second call should succeed and return false because no matching jobs remain.
 	deletedAgain, err := deleteSiteAndAssociatedCronJobs(db, 1)
 	if err != nil {
 		t.Fatalf("second deleteSiteAndAssociatedCronJobs error = %v", err)

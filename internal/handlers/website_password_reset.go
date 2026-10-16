@@ -12,8 +12,8 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
-// SetPasswordResetMode 设置站点的密码找回保护模式（allow / all / admin）。
-// 由面板以托管 mu-plugin 形式落地到 wp-content/mu-plugins，数据库仅记录当前模式。
+// SetPasswordResetMode applies allow/all/admin protection through a managed
+// mu-plugin in wp-content/mu-plugins; the database records the current mode.
 func (h *WebsiteHandler) SetPasswordResetMode(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -65,9 +65,8 @@ func (h *WebsiteHandler) SetPasswordResetMode(c *gin.Context) {
 		return
 	}
 
-	// 加锁后从 DB 重新读取当前已提交的模式作为回滚基准。site 对象是加锁前读取的快照，
-	// 可能被并发请求改写；若此处仍用旧值，本请求回滚时会把磁盘恢复到过时状态，
-	// 与 DB 当前值不一致（评审意见第 2 点）。
+	// Re-read the committed mode under the lock. The earlier site snapshot may be
+	// stale after a concurrent request; rollback must match the current database state.
 	var prevMode string
 	if err := database.GetDB().QueryRow(
 		"SELECT COALESCE(password_reset_mode, 'allow') FROM websites WHERE id = ?", id,
@@ -84,7 +83,7 @@ func (h *WebsiteHandler) SetPasswordResetMode(c *gin.Context) {
 		}
 	}
 
-	// rollbackToPrev 把磁盘 mu-plugin 恢复到 prevMode，使磁盘状态与 DB 中已提交的模式一致。
+	// rollbackToPrev restores the mu-plugin to the committed database mode.
 	rollbackToPrev := func(reason string) bool {
 		if rbErr := executor.ApplyWPPasswordResetMode(site.WebRoot, site.SystemUser, prevMode); rbErr != nil {
 			recordHandlerOperationLog("wp_password_reset", site.Domain, "failed",
@@ -97,8 +96,8 @@ func (h *WebsiteHandler) SetPasswordResetMode(c *gin.Context) {
 	}
 
 	if err := executor.ApplyWPPasswordResetMode(site.WebRoot, site.SystemUser, mode); err != nil {
-		// apply 失败：文件可能已写入新模式（如 chown 失败），按 prevMode 回滚磁盘，
-		// 保持磁盘与 DB 一致（评审意见第 1 点）。
+		// Apply may write the new mode before failing (for example, on chown).
+		// Restore the committed mode so disk and database stay consistent.
 		if !rollbackToPrev(fmt.Sprintf("apply failed: %v", err)) {
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("保存失败且恢复原策略也失败，请立即检查密码找回策略文件"))
 			return
@@ -111,7 +110,7 @@ func (h *WebsiteHandler) SetPasswordResetMode(c *gin.Context) {
 		"UPDATE websites SET password_reset_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		mode, id,
 	); err != nil {
-		// 数据库落库失败则回滚 mu-plugin 文件，保持磁盘与状态一致。
+		// Roll back the mu-plugin if the database write fails.
 		if !rollbackToPrev(fmt.Sprintf("save failed: %v", err)) {
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("数据库保存失败且恢复原策略也失败，请立即检查密码找回策略文件"))
 			return

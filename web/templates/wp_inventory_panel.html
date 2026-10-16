@@ -1096,7 +1096,7 @@ function wpInventoryPanel() {
                 const running = Array.isArray(response.data) ? response.data.find(b => b.status === 'running') : null;
                 this.pluginBatch.activeBatchID = running && typeof running.batch_id === 'string' ? running.batch_id : '';
             } catch (_) {
-                // 静默失败：这只是恢复「查看批量进度」按钮的可见性，不影响其他功能。
+                // This optional visibility refresh must not disrupt other actions on failure.
             }
         },
         pluginBatchSelectableItems() {
@@ -1206,17 +1206,17 @@ function wpInventoryPanel() {
                 this.schedulePluginBatchPoll(5000);
             }
         },
-        // 一个已派发的项需要人工决定，覆盖两种情况：更新失败挂起（或人工回滚本身也失败了，
-        // 只要 requires_attention 还是 1 就还没有处置结果）；或者 runner 执行结果不确定
-        // （interrupted_unknown 且 task_manual_disposition 还是空，说明还没有人确认过）。
+        // Require a decision while attention is unresolved, including a failed rollback,
+        // or when an interrupted runner has an unknown outcome and no recorded decision.
+
         pluginBatchItemNeedsDecision(item) {
             if (item?.status !== 'dispatched') return false;
             if (item.task_status === 'failed') return item.task_requires_attention === true;
             if (item.task_status === 'interrupted_unknown') return !item.task_manual_disposition;
             return false;
         },
-        // interrupted_unknown 不允许回滚：执行结果本身不确定，贸然恢复文件/数据库可能
-        // 覆盖掉一次其实已经成功的更新，只能选择「忽略」去后台自行核实。
+        // Never roll back an unknown runner outcome: it may overwrite a successful update.
+        // Only dismissal is available until the administrator verifies the result.
         pluginBatchItemCanRollback(item) {
             return item?.task_status === 'failed';
         },

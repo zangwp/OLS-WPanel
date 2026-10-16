@@ -37,7 +37,7 @@
 
     <template x-if="site.site_type === 'wordpress'"><div>{{template "wordpress_access" .}}</div></template>
 
-    <!-- Row 1: 基本信息 | 网站运行与配置 -->
+    <!-- Site information and runtime configuration -->
     <div id="site-overview" x-show="detailTab === 'overview'" x-cloak class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start scroll-mt-4">
         <div class="card" :class="aiAccess.status !== 'disabled' ? 'border border-purple-500 shadow-lg shadow-purple-950/30' : ''">
             <h3 class="text-lg font-semibold text-white mb-4">{{t .Lang "website.basic_info"}}</h3>
@@ -184,11 +184,8 @@
     </div>
 
     <!-- Cache and security workspaces share this single-column container. -->
-    <!-- 缓存卡片对 wordpress 和 php 两种 site_type 都会渲染，
-         里面混了通用控件（LiteSpeed 缓存）和多个 WordPress 专属控件。新增/修改任何一个
-         "仅 WordPress 站点显示"的元素时，必须把本卡片内所有同类元素都加上
-         x-show="site.site_type === 'wordpress'"，不能只改自己新加的那一个——
-         之前"高级设置"折叠面板就漏加过，导致通用 PHP 站点也看到了停止更新检查等选项。 -->
+    <!-- This card also serves legacy PHP sites. Keep every WordPress-only control,
+         including nested settings, guarded by site.site_type === 'wordpress'. -->
     <div id="site-performance" x-show="detailTab === 'cache' || detailTab === 'security'" x-cloak class="grid grid-cols-1 gap-6 items-start scroll-mt-4">
         <div x-show="detailTab === 'cache'" class="card">
             <h3 class="text-lg font-semibold text-white mb-1" x-text="site.site_type === 'wordpress' ? t('website.performance_cache') : t('website.litespeed_cache_title')"></h3>
@@ -541,7 +538,7 @@
             </div>
     </div>
 
-    <!-- 日志全屏弹窗 -->
+    <!-- Full-screen log dialog -->
     <div x-show="logFullscreen" class="fixed inset-0 bg-black bg-opacity-90 flex flex-col z-50" @keydown.escape.window="logFullscreen = false">
         <div class="flex items-center justify-between px-6 py-3 border-b border-gray-700">
             <div class="flex items-center space-x-4 text-sm">
@@ -568,7 +565,7 @@
     <!-- Modals -->
     <!-- ============================================================ -->
 
-    <!-- AI 开发访问 -->
+    <!-- AI developer access -->
     <div x-show="aiDevelopmentModalOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="if (!aiAccess.busy) aiDevelopmentModalOpen = false">
         <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[80vh] overflow-y-auto" style="border: 1px solid var(--panel-purple-soft);">
             <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
@@ -660,7 +657,7 @@
         </div>
     </div>
 
-    <!-- 编辑域名 -->
+    <!-- Domain editor -->
     <div x-show="domainModalOpen" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" @click.self="domainModalOpen = false">
         <div class="rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">
             <div class="flex items-center justify-between mb-4">
@@ -729,7 +726,7 @@
         </div>
     </div>
 
-    <!-- SSL 证书 -->
+    <!-- TLS certificate -->
     <div x-show="sslModalOpen" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" @click.self="sslModalOpen = false">
         <div class="rounded-lg shadow-xl w-full max-w-2xl p-6" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">
             <div class="flex items-center justify-between mb-4">

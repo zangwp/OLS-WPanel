@@ -59,8 +59,8 @@ func executeFileBackupContext(ctx context.Context, siteID int, mode string, keep
 		keepCount = 3
 	}
 
-	// 内核文件锁跨主服务和 cron 进程串行备份。锁文件固定保留在 root-only
-	// 运行目录中；不通过 PID 文件推断存活状态，避免 stale-lock TOCTOU。
+	// A kernel lock serializes backups across the service and cron processes. Keep
+	// the lock file in a root-only directory; PID checks would introduce stale-lock TOCTOU races.
 	backupLock, err := acquireFileBackupLock(ctx, fileBackupLockPath)
 	if err != nil {
 		if contextErr := fileBackupContextError(ctx, "等待备份锁"); contextErr != nil {
@@ -113,9 +113,9 @@ func executeFileBackupContext(ctx context.Context, siteID int, mode string, keep
 		return "", fmt.Errorf("无法确认本地增量基线，已保留现有备份链: %w", err)
 	}
 
-	// 增量备份前确认远程是否已有全量基线：远程服务器被更换或远程数据被清空时，
-	// 本地 stamp 文件依然存在，但远程可能只剩增量数据，此时强制转为全量重建基线。
-	// 探测失败（连接失败/配置无效）保留现有链并报告失败，避免贸然换代。
+	// Verify the remote full baseline before creating an incremental backup: local
+	// stamps can outlive a replaced or cleared remote. Rebuild a missing baseline,
+	// but preserve the chain and report failed probes rather than replacing it blindly.
 	forcedFullByRemote := false
 	if !isFull {
 		if err := fileBackupContextError(ctx, "文件备份"); err != nil {
@@ -565,8 +565,9 @@ func loadFileBackupChain(siteID int) []string {
 	return files
 }
 
-// cleanupSupersededFileBackupChain 仅清理新全量开始前冻结的旧链名单。远端删除成功后才删除
-// 本地文件和数据库记录；失败项保留，供后台维护重试。
+// cleanupSupersededFileBackupChain removes only the old chain frozen before
+// the new full backup. Delete local files and records only after remote deletion
+// succeeds; retain failures for background retries.
 func cleanupSupersededFileBackupChain(siteID int, domain, backupDir string, oldChain []string) int {
 	target, err := loadRemoteBackupTarget(context.Background())
 	if err != nil || !target.Enabled {
@@ -661,14 +662,13 @@ func cleanOldBackups(dir string, keep int, siteID int) {
 	sort.Slice(tars, func(i, j int) bool { return tars[i].modTime.Before(tars[j].modTime) })
 	db := database.GetDB()
 	for i := 0; i < len(tars)-keep; i++ {
-		// 文件确实还在磁盘上删除失败（权限/占用/文件系统异常）时，不能删 file_backups 记录，
-		// 否则会出现"磁盘有文件但总览查不到"的反向不一致；下次轮转会重试。
-		// 文件本就已经不存在（IsNotExist）则视为清理成功，照常删除记录。
+		// Keep the record if deletion fails and the file remains, so the overview stays
+		// consistent and rotation can retry. An already missing file counts as cleaned up.
 		if err := os.Remove(filepath.Join(dir, tars[i].name)); err != nil && !os.IsNotExist(err) {
 			log.Printf("清理过期文件备份失败 [%s]: %v", tars[i].name, err)
 			continue
 		}
-		// 保持 file_backups 表和磁盘一致，避免备份总览页面展示已被轮转清理的记录。
+		// Keep records consistent with disk after rotation.
 		db.Exec(`DELETE FROM file_backups WHERE site_id = ? AND filename = ?`, siteID, tars[i].name)
 	}
 }
@@ -703,9 +703,8 @@ func checkDiskSpaceContext(ctx context.Context, backupDir string, minFree int64)
 	return free >= minFree, nil
 }
 
-// recordFileBackup 把生成的文件备份写入 file_backups 表，供备份总览页面展示。
-// 写入失败不影响已经生成的备份文件（文件备份成本较高，不因记录写入失败而丢弃），
-// 但必须可见地记录下来，避免总览页面缺记录却无人知晓。
+// recordFileBackup adds a generated backup to the overview. A failed insert
+// must be logged, but must not discard the costly backup file.
 func recordFileBackup(siteID int, filename string, size int64, mode, domain string) bool {
 	if _, err := database.GetDB().Exec(`INSERT INTO file_backups (site_id, filename, file_size, mode) VALUES (?, ?, ?, ?)`,
 		siteID, filename, size, mode); err != nil {

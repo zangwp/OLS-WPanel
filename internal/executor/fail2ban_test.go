@@ -460,9 +460,8 @@ func TestFail2banSQLiFilterRequiresServerBlockAndAutoBanMarkers(t *testing.T) {
 	}
 }
 
-// TestFail2banWebFilterNoLongerCountsLoginOrXmlrpc 防止未来有人把登录/XML-RPC
-// 检测重新加回 olswpanel 的 filter，导致同一次失败登录被 olswpanel 和 olswpanel-login
-// 两个 jail 分别计数、触发两次独立封禁。
+// TestFail2banWebFilterNoLongerCountsLoginOrXmlrpc prevents login failures from
+// being counted and banned twice by the olswpanel and olswpanel-login jails.
 func TestFail2banWebFilterNoLongerCountsLoginOrXmlrpc(t *testing.T) {
 	if strings.Contains(fail2banFilterConfig, "wp-login") || strings.Contains(fail2banFilterConfig, "xmlrpc") {
 		t.Fatalf("olswpanel filter must not reference wp-login/xmlrpc any more, that belongs to olswpanel-login now:\n%s", fail2banFilterConfig)

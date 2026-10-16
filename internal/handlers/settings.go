@@ -691,7 +691,7 @@ func selectNTPTimeSyncUnit(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-// systemdUnitExists 判断 unit 是否存在且未被 mask（masked 单元 restart 必然失败）。
+// systemdUnitExists excludes missing or masked units, which cannot be restarted.
 func systemdUnitExists(unit string) bool {
 	out, err := exec.Command("systemctl", "list-unit-files", unit).Output()
 	if err != nil {
@@ -723,7 +723,7 @@ func getHostname() string {
 }
 
 // ============================================================
-// WordPress 安装包管理
+// WordPress installation packages.
 // ============================================================
 
 func (h *SettingsHandler) GetWPPackage(c *gin.Context) {
@@ -779,14 +779,13 @@ func (h *SettingsHandler) UploadWPPackage(c *gin.Context) {
 		return
 	}
 
-	// 校验文件扩展名
 	name := strings.ToLower(file.Filename)
 	if !strings.HasSuffix(name, ".zip") {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("仅支持 .zip 格式的安装包"))
 		return
 	}
 
-	// 限制文件大小（WordPress 安装包通常 25-30MB，上限 100MB）
+	// Allow up to 100 MB for WordPress packages, typically 25-30 MB.
 	if file.Size > 100*1024*1024 {
 		c.JSON(http.StatusRequestEntityTooLarge, models.ErrorResponse(i18n.TE(c.Request, "settings.wp_package_too_large")))
 		return
@@ -915,7 +914,7 @@ func updateConfigValue(configPath, section, key, value string) error {
 }
 
 // ============================================================
-// 面板数据库备份管理
+// Panel database backups.
 // ============================================================
 
 func (h *SettingsHandler) GetDBBackups(c *gin.Context) {
@@ -939,7 +938,6 @@ func (h *SettingsHandler) CreateDBBackup(c *gin.Context) {
 		return
 	}
 
-	// 校验备份完整性
 	if verr := database.VerifyDBBackup(path); verr != nil {
 		os.Remove(path)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("备份校验失败: "+verr.Error()))
@@ -971,7 +969,6 @@ func (h *SettingsHandler) RestoreDBBackup(c *gin.Context) {
 		return
 	}
 
-	// 校验备份文件完整性
 	if verr := database.VerifyDBBackup(backupPath); verr != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse("备份文件校验失败，无法恢复: "+verr.Error()))
 		return

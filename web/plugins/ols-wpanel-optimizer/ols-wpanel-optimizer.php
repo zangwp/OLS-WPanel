@@ -11,8 +11,6 @@
  * Domain Path: /languages
  */
 
-// AI/开发者注意：这是由 OLS WPanel 自动部署和更新的托管组件。请勿直接修改
-// 此插件目录；面板可在 AI 开发访问或临时维护期间用内嵌版本完整覆盖这些文件。
 // AI/developer notice: OLS WPanel owns this plugin directory and may replace it
 // from its embedded copy at any time. Do not make site-specific edits here.
 
@@ -47,9 +45,8 @@ function olsw_optimizer_uninstall() {
 }
 
 
-// 拆分成 trait 文件后 __FILE__ 在 trait 内部指向的是 includes/ 下的文件，不是本文件；
-// plugin_action_links_{basename} 这个钩子名必须精确匹配主文件的 basename，用一个
-// 在主文件里求值的常量传给 trait，不能在 trait 内部重新取 __FILE__。
+// Resolve __FILE__ here: inside a trait it points into includes/.
+// The plugin_action_links hook must use the main plugin file's exact basename.
 define('OLSW_OPTIMIZER_PLUGIN_FILE', __FILE__);
 
 require_once __DIR__ . '/includes/trait-config.php';
@@ -99,7 +96,7 @@ add_action('plugins_loaded', ['OLS_WPanel_Optimizer', 'bootstrap'], 1);
 add_action('init', ['OLS_WPanel_Optimizer', 'init']);
 add_action('init', ['OLS_WPanel_Optimizer', 'maintenance_hooks']);
 
-// 自托管分发，语言包只随插件自带；init 阶段 locale 已就绪（含用户个人语言设置）。
+// Translations ship with this self-hosted plugin; init has the final locale, including user preferences.
 add_action('init', function () {
     load_plugin_textdomain('ols-wpanel-optimizer', false, dirname(plugin_basename(OLSW_OPTIMIZER_PLUGIN_FILE)) . '/languages');
 }, 1);

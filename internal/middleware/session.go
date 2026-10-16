@@ -81,7 +81,7 @@ func (s *SessionStore) Get(token string) *Session {
 		delete(s.sessions, token)
 		return nil
 	}
-	// 滑动续期：每次有效访问延长 30 分钟
+	// Extend valid sessions by 30 minutes on each request.
 	session.LastSeenAt = now
 	session.ExpiresAt = now.Add(30 * time.Minute)
 	copy := *session
@@ -171,7 +171,7 @@ func SessionRequired() gin.HandlerFunc {
 			return
 		}
 
-		// 滑动续期客户端 Cookie
+		// Renew the client cookie to match the sliding session expiry.
 		http.SetCookie(c.Writer, &http.Cookie{
 			Name:     "wp_session",
 			Value:    session.Token,

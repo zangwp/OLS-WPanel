@@ -178,8 +178,8 @@ func main() {
 	}
 	defer database.Close()
 
-	// 受管 Cron 的高频短路径：这里只能依赖既有稳定表结构，不能读取需要本次
-	// 主服务启动后才完成迁移的新列或新表，也不能触发迁移、插件部署或调度器。
+	// Managed cron runs frequently and must use the stable schema.
+	// Do not depend on startup migrations or start migrations, plugin deployment, or schedulers.
 	if *runScheduledCron > 0 {
 		result := executor.RunScheduledCron(*runScheduledCron)
 		if !result.Success {
@@ -192,22 +192,22 @@ func main() {
 	if err := database.RunMigrations(); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
-	// 先更新插件包，确保后续迁移复制的是最新版本
+	// Update the plugin package before migrations copy it to sites.
 	executor.EnsureCacheHelperPlugin(web.PluginFS)
 	if err := database.RunUpgrades(); err != nil {
 		log.Fatalf("数据库升级失败: %v", err)
 	}
-	// CLI 短任务不是服务重启，不能收回另一个主进程管理的维护窗口。
+	// Short CLI tasks must not reclaim maintenance windows owned by the main process.
 	if !*resetAdmin && !*refreshWhitelist && !*unbanAll && *fileBackup == "" && !*runAutoBackup {
 		maintenanceCtx, stopMaintenance := context.WithCancel(context.Background())
 		defer stopMaintenance()
-		// Start 同步完成第一轮回锁，然后才启动周期检查；必须先于站点写入和 worker。
+		// Start restores locks synchronously before site writes and workers begin.
 		if err := executor.DefaultMaintenanceManager().Start(maintenanceCtx); err != nil {
 			log.Printf("维护窗口启动恢复未完成（相关网站将保持写操作门禁并自动重试）: %v", err)
 		}
 	}
 	// Optimizer is retired; existing installations are migrated explicitly from Website Details.
-	// 异步补装不应排在维护窗口启动恢复之前。
+	// Restore maintenance windows before starting asynchronous plugin installation.
 	executor.GoSafe(executor.EnsurePHPExifExtension)
 	executor.GoSafe(executor.EnsureImageBatchBinaries)
 	aiDevelopmentService := executor.NewAIDevelopmentAccessService(database.GetDB())
@@ -334,7 +334,7 @@ func main() {
 		log.Printf("Panel ACME routing migration failed: %v", err)
 	}
 	executor.EnsureWordPressBaseline()
-	// 升级后重建全部 OpenLiteSpeed 虚拟主机，确保新模板和 LSPHP 设置生效。
+	// Rebuild all virtual hosts so upgraded templates and LSPHP settings take effect.
 	executor.GoSafe(func() {
 		if err := executor.RegenerateAllSitesOLSConfigs(); err != nil {
 			log.Printf("OpenLiteSpeed 虚拟主机批量重建部分失败: %v", err)
@@ -343,7 +343,7 @@ func main() {
 	log.Println("OpenLiteSpeed + LSPHP + LiteSpeed Cache 运行环境已就绪")
 	log.Println("Fail2ban 配置初始化完成")
 	executor.EnsurePanelCommands()
-	// 远程备份密码认证依赖 sshpass；启动路径只提示，不自动修改服务器软件状态。
+	// Password-based remote backups require sshpass; startup only reports missing software.
 	if _, err := exec.LookPath("sshpass"); err != nil {
 		log.Println("sshpass 未安装，远程备份密码认证功能不可用；请通过安装脚本或包管理器手动安装")
 	}

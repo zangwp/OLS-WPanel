@@ -101,9 +101,9 @@ func (q *TaskQueue) StopCleanup() {
 	<-q.cleanupDone
 }
 
-// Enqueue 把任务交给单 worker 串行执行。
-// 注意：任务执行函数内部不要 Enqueue 另一个任务后同步等待 ResultCh；
-// 单 worker 无法继续处理后续任务，会造成队列自等待死锁。需要复用逻辑时应抽成普通函数直接调用。
+// Enqueue submits a task to a single serial worker. A running task must not
+// enqueue another task and wait on ResultCh: the worker would deadlock waiting
+// for itself. Extract shared logic into a function and call it directly.
 func newTask(taskType TaskType, payload interface{}) *Task {
 	now := time.Now()
 	return &Task{

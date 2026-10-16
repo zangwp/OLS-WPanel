@@ -6,10 +6,8 @@ import (
 	"os"
 )
 
-// DefaultBackupDir 是面板备份根目录的固定值（install.sh 写入 config.json 的 backup_dir 也是这个值）。
-// 网站文件备份（executor/file_backup.go）、远程同步相对路径计算（executor/remote_sync.go）、
-// 文件备份历史数据回填（database/upgrades.go）目前都直接写死这个路径而不是读取 Panel.BackupDir，
-// 统一引用这个常量，避免同一个路径散落成多份字面量、后续改一处漏改一处。
+// DefaultBackupDir is the fixed root used by file backups, remote sync, and history backfills.
+// These paths use this constant rather than Panel.BackupDir; install.sh writes the same default.
 const DefaultBackupDir = "/www/ols-wpanel/backups"
 
 type PanelConfig struct {

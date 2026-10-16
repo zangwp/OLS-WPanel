@@ -17,7 +17,7 @@ import (
 
 func setupWPUpdateLogTest(t *testing.T) {
 	t.Helper()
-	setupWPUpdateBackupTest(t) // 复用：开库 + 迁移 + 插入 wordpress 站点 1、2
+	setupWPUpdateBackupTest(t) // Open the database, run migrations, and create WordPress sites 1 and 2.
 }
 
 func insertWPUpdateLogTask(t *testing.T, siteID int, taskID, status string, finishedAt *time.Time, requiresAttention bool) {
