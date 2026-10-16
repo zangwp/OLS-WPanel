@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.1.5 — 2026-10-16
+
+- Refreshes only server time and NTP status after requesting time synchronization. Unrelated account buttons remain enabled, and unsaved account, server, proxy, timezone and automatic-update inputs are preserved.
+- Keeps the existing single delayed status check, cancels superseded reads and pending checks when leaving the page, and ignores late responses. Failed or malformed reads preserve the current form and status values.
+- Includes the previously saved source-comment cleanup and English translations, with executable tokens and user-visible text preserved.
+
+Upgrade notes: no new dependency, endpoint, background worker or database migration. Existing NTP synchronization behavior and request limits are retained; this change corrects the settings-page refresh interaction.
+
 ## v2.1.4 — 2026-10-15
 
 - Bounds log-analysis aggregation across current and rotated files, releases unused ranking storage, and avoids retaining complete log lines through small result strings. High-cardinality scans return explicitly marked partial results when the aggregation budget is reached.

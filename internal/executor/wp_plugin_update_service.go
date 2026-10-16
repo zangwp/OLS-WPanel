@@ -145,12 +145,10 @@ func (s *WPPluginUpdateService) Confirm(ctx context.Context, siteID int, usernam
 	return s.confirm(ctx, siteID, username, componentKey, token, target, backupMode, false, "", 0)
 }
 
-// ConfirmForBatch 与 Confirm 相同，但用于批量更新编排器代表用户派发批量中的下一项：
-// 生成的任务 auto_rollback=0（失败后不自动回滚，等待用户决定）并打上 batchID 分组标记。
-// databaseBackupSourceID 由编排器通过 ensureBatchDatabaseBackupSource 固定下来，是整个
-// 批量共享的数据库备份来源，不使用 Preview 确认令牌里那个基于「最近可复用备份」推断出的
-// 备份 id——后者一旦批量里某一项失败进入 requires_attention 状态就会失效，导致后续每一项
-// 都被迫重新备份一次数据库，而不是复用批量开始时的那一次。
+// ConfirmForBatch dispatches with auto_rollback=0 and batchID, leaving failure decisions to users.
+// databaseBackupSourceID is pinned by ensureBatchDatabaseBackupSource for the whole batch.
+// Do not use Preview's recent-backup token: a failed source task requiring attention would invalidate
+// it and force every subsequent item to create another database backup.
 func (s *WPPluginUpdateService) ConfirmForBatch(ctx context.Context, siteID int, username, componentKey, token, target, backupMode, batchID string, databaseBackupSourceID int64) (models.WPPluginUpdateTask, error) {
 	if batchID == "" {
 		return models.WPPluginUpdateTask{}, ErrWPPluginUpdateInvalid

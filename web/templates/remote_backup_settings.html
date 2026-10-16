@@ -17,7 +17,7 @@
         </div>
         <fieldset :disabled="!loaded || loading || saving || testing" class="min-w-0">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- 左侧：备份设置 -->
+            <!-- Backup settings -->
             <div>
                 <div class="flex items-center space-x-3 mb-4">
                     <label class="flex items-center space-x-2 text-sm text-gray-300 cursor-pointer">
@@ -147,7 +147,7 @@
                 </div>
             </div>
 
-            <!-- 右侧：设置助手 -->
+            <!-- Setup assistant -->
             <div x-show="cfg.backup_type === 'rsync' && cfg.connection_mode === 'auto'" class="p-4 rounded" style="background-color: var(--panel-surface-muted); border: 1px solid var(--panel-border);">
                 <div class="flex items-center justify-between mb-3">
                     <h4 class="text-sm font-medium text-gray-300">{{t .Lang "settings.remote_helper_title"}}</h4>
@@ -189,7 +189,7 @@
 
         </fieldset>
 
-            <!-- 使用说明弹窗 -->
+            <!-- Usage help dialog -->
             <div x-show="showHelp" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" @click.self="showHelp = false">
                 <div class="rounded-lg shadow-xl w-full max-w-xl p-6 max-h-80vh overflow-y-auto" style="background-color: var(--panel-surface); border: 1px solid var(--panel-border);">
                     <div class="flex items-center justify-between mb-4">

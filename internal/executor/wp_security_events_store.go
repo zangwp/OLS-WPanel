@@ -32,7 +32,7 @@ const (
 
 var wpSecurityIngestCycleMu sync.Mutex
 
-// IngestWPSecurityEvents 对所有 WordPress 站点做一次增量日志摄取，返回新入库的事件数。
+// IngestWPSecurityEvents incrementally ingests all WordPress site logs and returns the new event count.
 func IngestWPSecurityEvents() (int, error) {
 	wpSecurityIngestCycleMu.Lock()
 	defer wpSecurityIngestCycleMu.Unlock()
@@ -110,8 +110,8 @@ func ingestSiteSecuritySource(db *sql.DB, site wpSecuritySite, source string, ch
 		return 0, err
 	}
 	if offset < 0 || info.Size() < offset || (storedPosition.firstLineHash != "" && firstLineHash != "" && storedPosition.firstLineHash != firstLineHash) {
-		// 文件比记录的偏移还小，说明已被 copytruncate 轮转，从头重新读取新内容。
-		// 高流量站点轮转后文件可能很快增长到超过旧偏移，首行指纹可覆盖这个场景。
+		// A file smaller than the saved offset was copytruncated; restart at the beginning.
+		// The first-line fingerprint also detects rotations that rapidly grow past the old offset.
 		offset = 0
 	}
 	if offset > 0 {
@@ -127,8 +127,7 @@ func ingestSiteSecuritySource(db *sql.DB, site wpSecuritySite, source string, ch
 	for lines := 0; lines < wpSecurityMaxBatchLines; lines++ {
 		lineBytes, byteCount, oversized, readErr := readBoundedWPSecurityLine(reader)
 		if readErr == nil {
-			// 只有以换行符结尾的完整行才计入已消费字节；
-			// 末尾还没写完的半行留到下一轮再读，避免把偏移记到半行中间。
+			// Consume only newline-terminated lines; leave a trailing partial line for the next cycle.
 			if oversized {
 				consumed += byteCount
 				continue
@@ -270,8 +269,7 @@ func firstCompleteLineHash(f *os.File) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// CountRecentSecurityEventsByIP 统计指定事件类型在时间窗口内每个 IP 的出现次数，
-// 供方案 D 阶段四的告警规则使用。
+// CountRecentSecurityEventsByIP counts each IP's matching events within the alert window.
 func CountRecentSecurityEventsByIP(eventType string, since time.Time) (map[string]int, error) {
 	db := database.GetDB()
 	if db == nil {
@@ -299,15 +297,15 @@ func CountRecentSecurityEventsByIP(eventType string, since time.Time) (map[strin
 	return counts, rows.Err()
 }
 
-// WPSecurityAlertOffender 是超过告警阈值的单个 IP 摘要，供邮件/Webhook 告警使用。
+// WPSecurityAlertOffender summarizes an IP exceeding the email/webhook alert threshold.
 type WPSecurityAlertOffender struct {
 	IP    string
 	Count int
 	Paths []string
 }
 
-// topWPSecurityOffenders 返回时间窗口内命中次数达到阈值的 IP 列表（按次数降序），
-// 每个 IP 附带命中次数最多的若干条请求路径样本。
+// topWPSecurityOffenders returns IPs meeting the threshold in descending count order,
+// with samples of each IP's most frequently requested paths.
 func topWPSecurityOffenders(eventType string, since time.Time, threshold, pathLimit int) ([]WPSecurityAlertOffender, error) {
 	db := database.GetDB()
 	if db == nil {
@@ -361,7 +359,7 @@ func topWPSecurityEventPaths(db *sql.DB, eventType string, since time.Time, ip s
 	return paths, rows.Err()
 }
 
-// PruneWPSecurityEvents 删除超过保留期限的历史事件，避免表无限增长。
+// PruneWPSecurityEvents removes expired events to bound table growth.
 func PruneWPSecurityEvents(retentionDays int) error {
 	return pruneWPSecurityEvents(time.Now(), retentionDays)
 }
@@ -379,19 +377,17 @@ func pruneWPSecurityEvents(now time.Time, retentionDays int) error {
 	return err
 }
 
-// StartWPSecurityEventIngestor 启动后台增量摄取调度：每 wpSecurityIngestorInterval
-// 读取一次新增日志；启动时及每 30 分钟清理过期历史，失败在下一轮摄取时重试。
-// StopWPSecurityEventIngestor 可关闭
-// 该调度，供 main.go 在收到 SIGINT/SIGTERM 时调用（审核优化项 3.2）。
+// StartWPSecurityEventIngestor ingests on wpSecurityIngestorInterval and prunes at startup
+// and every 30 minutes, retrying failures next cycle. main.go calls StopWPSecurityEventIngestor
+// on SIGINT/SIGTERM.
 //
-// 保留初始 runWPSecurityEventIngestCycle() 调用（select 之前），保证面板启动后
-// 立即摄取一次，而不是等到第一个 tick。代价是 Stop 无法中断正在执行的初始摄取，
-// 但该调用在生产环境秒级完成，可接受。
+// Ingest immediately before select instead of waiting for the first tick.
+// Stop cannot interrupt this initial call, which completes within seconds in production.
 var (
 	wpSecurityIngestorMu       sync.Mutex
 	wpSecurityIngestorStopCh   chan struct{}
 	wpSecurityIngestorDone     chan struct{}
-	wpSecurityIngestorInterval = 5 * time.Minute // var 而非 const，便于测试覆盖
+	wpSecurityIngestorInterval = 5 * time.Minute // Variable to allow test overrides.
 )
 
 func StartWPSecurityEventIngestor() {
@@ -419,8 +415,7 @@ func StartWPSecurityEventIngestor() {
 	}()
 }
 
-// StopWPSecurityEventIngestor 关闭后台摄取调度。幂等：多次调用安全。
-// 调用后 wpSecurityIngestorDone 会被关闭，调用方可 select 等待退出完成。
+// StopWPSecurityEventIngestor is idempotent. Wait on wpSecurityIngestorDone to observe exit.
 func StopWPSecurityEventIngestor() {
 	wpSecurityIngestorMu.Lock()
 	defer wpSecurityIngestorMu.Unlock()

@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// shrinkSafeApplyTimeouts 把轮询超时/间隔调小，避免测试真的等 30/60 秒；
-// 由每个用到失败路径的测试自行调用并在结束时恢复。
+// shrinkSafeApplyTimeouts shortens polling for failure-path tests and restores
+// the original values during cleanup.
 func shrinkSafeApplyTimeouts(t *testing.T) {
 	t.Helper()
 	oldRestart, oldPollTimeout, oldPollInterval := safeApplyRestartTimeout, safeApplyReadinessPollTimeout, safeApplyReadinessPollInterval
@@ -93,9 +93,8 @@ func TestSafeApplyRestartConfigRollsBackWhenReadinessFails(t *testing.T) {
 	restartCalls := 0
 	withFakeRestart(t, func(string) error { restartCalls++; return nil })
 
-	// ready 跟当前处于"应用新配置"还是"回滚阶段"绑定：第一次重启（应用新配置）之后
-	// 服务一直起不来，直到触发回滚、第二次重启（恢复旧配置）之后才恢复正常。
-	// 用 restartCalls 而不是固定次数/时间来判断阶段，避免测试受轮询间隔精度影响而不稳定。
+	// The service becomes ready only after the rollback restart. Track restarts
+	// rather than elapsed time or poll count to avoid timing-dependent failures.
 	ready := func(context.Context) error {
 		if restartCalls >= 2 {
 			return nil
@@ -139,18 +138,16 @@ func TestSafeApplyRestartConfigReportsCriticalFailureWhenRollbackRestartAlsoFail
 	if result.Err == nil {
 		t.Fatal("expected a non-nil error describing the critical failure")
 	}
-	// 关键：即使回滚失败，配置文件内容也应该已经被写回旧值（只是服务没能重启成功），
-	// 不能让磁盘上停留着一个应用失败的新配置。
+	// Even if the rollback restart fails, the old config must be restored on disk.
 	data, _ := os.ReadFile(path)
 	if string(data) != "old" {
 		t.Fatalf("expected file to still be restored to old content even if restart failed, got %q", string(data))
 	}
 }
 
-// TestSafeApplyRestartConfigReportsCriticalFailureWhenRollbackWriteFails 覆盖一个曾经
-// 真实存在的 bug（代码审核发现）：回滚阶段自己的 atomicWriteConfigFile 失败时，早期实现
-// 没有设置 RolledBack:true，导致调用方会误判成"配置保存失败，未做任何改动"——但实际上
-// 坏的新配置已经落盘、服务大概率异常，这是最危险的一种状态却给出了最轻描淡写的提示。
+// TestSafeApplyRestartConfigReportsCriticalFailureWhenRollbackWriteFails ensures
+// a failed restore is reported as a rollback failure: the bad config remains
+// on disk, so claiming that nothing changed would conceal a critical failure.
 func TestSafeApplyRestartConfigReportsCriticalFailureWhenRollbackWriteFails(t *testing.T) {
 	shrinkSafeApplyTimeouts(t)
 	dir := t.TempDir()
@@ -158,8 +155,8 @@ func TestSafeApplyRestartConfigReportsCriticalFailureWhenRollbackWriteFails(t *t
 	os.WriteFile(path, []byte("old"), 0644)
 
 	withFakeRestart(t, func(string) error {
-		// 应用新配置的第一次重启本身就失败，触发回滚；在回滚真正开始写文件之前，
-		// 把整个目录删掉，让回滚的 atomicWriteConfigFile 必然失败。
+		// Fail the first restart and remove the directory before rollback writes
+		// the old config, forcing atomicWriteConfigFile to fail.
 		os.RemoveAll(dir)
 		return errors.New("boom")
 	})
@@ -179,9 +176,9 @@ func TestSafeApplyRestartConfigReportsCriticalFailureWhenRollbackWriteFails(t *t
 	}
 }
 
-// TestSafeApplyRestartConfigSerializesConcurrentCalls 确认两次并发调用不会互相踩踏
-// 同一个 .olswpanel.tmp 临时文件——用一个会记录"同一时刻正在执行的调用数"的假重启函数，
-// 如果互斥锁没生效，多个 goroutine 会同时进入临界区，maxInFlight 就会大于 1。
+// TestSafeApplyRestartConfigSerializesConcurrentCalls detects overlapping
+// restarts that could overwrite the shared temporary file. Without locking,
+// maxInFlight would exceed one.
 func TestSafeApplyRestartConfigSerializesConcurrentCalls(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.conf")
 	os.WriteFile(path, []byte("old"), 0644)
@@ -218,9 +215,8 @@ func TestSafeApplyRestartConfigSerializesConcurrentCalls(t *testing.T) {
 	}
 }
 
-// TestSafeApplyRestartConfigPreservesFilePermissions 覆盖代码审核提出的一点：如果管理员
-// 手动把配置文件加固成更严格的权限（比如 Redis 配置写了 requirepass 后改成 0600），
-// 面板保存配置时不应该把权限悄悄改回 0644。
+// TestSafeApplyRestartConfigPreservesFilePermissions ensures a save preserves
+// hardened modes such as 0600 for Redis configs containing requirepass.
 func TestSafeApplyRestartConfigPreservesFilePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.conf")
 	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
@@ -244,7 +240,7 @@ func TestSafeApplyRestartConfigPreservesFilePermissions(t *testing.T) {
 }
 
 func TestSafeApplyRestartConfigDoesNotTouchServiceWhenInitialWriteFails(t *testing.T) {
-	// 用一个不存在的目录制造写入失败，不需要真的碰权限。
+	// A missing directory forces a write failure without relying on permissions.
 	path := filepath.Join(t.TempDir(), "no-such-dir", "config.conf")
 
 	restartCalls := 0

@@ -1,9 +1,4 @@
-/*
- * OLS WPanel Optimizer — 设置页样式
- *
- * 设计取向：直角、细线、克制配色。层次依靠栅格对齐、字号对比与留白建立，
- * 不使用圆角、渐变色块或外部资源。图标仅用 WordPress 自带 Dashicons。
- */
+/* Settings use square edges, thin borders, spacing and built-in Dashicons. */
 
 .olsw-settings *,
 .olsw-settings *::before,
@@ -36,7 +31,7 @@
     padding-top: 4px;
 }
 
-/* ---------- 页头 ---------- */
+/* Header */
 
 .olsw-settings .olsw-masthead {
     align-items: stretch;
@@ -132,7 +127,7 @@
     margin: 0 18px 0 0;
 }
 
-/* ---------- 状态读数条 ---------- */
+/* Status summary */
 
 .olsw-settings .olsw-readout {
     background: var(--olsw-surface);
@@ -174,7 +169,7 @@
     overflow-wrap: anywhere;
 }
 
-/* 状态方块：直角实心小块，替代圆点与胶囊徽章 */
+/* Solid square status indicators. */
 
 .olsw-settings .olsw-flag {
     flex: 0 0 auto;
@@ -207,7 +202,7 @@
 .olsw-settings .olsw-component-update p { margin: 4px 0 0; }
 .olsw-settings #olsw-component-update-msg { min-width: 180px; }
 
-/* ---------- 标签导航 ---------- */
+/* Tabs */
 
 .olsw-settings .olsw-tabs {
     border-bottom: 1px solid var(--olsw-line);
@@ -259,7 +254,7 @@
     width: 16px;
 }
 
-/* ---------- 面板与分区 ---------- */
+/* Panels */
 
 .olsw-settings .olsw-tab-panel {
     background: #eceff2;
@@ -313,7 +308,7 @@
     padding: 4px 22px 20px;
 }
 
-/* ---------- 字段行 ---------- */
+/* Field rows */
 
 .olsw-settings .olsw-field {
     border-bottom: 1px solid var(--olsw-line-soft);
@@ -359,7 +354,7 @@
     padding: 1px 5px;
 }
 
-/* 只读状态行：用于由面板托管、插件内不可编辑的项 */
+/* Read-only settings managed by the panel. */
 
 .olsw-settings .olsw-locked {
     align-items: baseline;
@@ -378,7 +373,7 @@
     font-size: 13px;
 }
 
-/* ---------- 输入框 ---------- */
+/* Inputs */
 
 .olsw-settings .olsw-input {
     background: #fff;
@@ -429,7 +424,7 @@
     white-space: nowrap;
 }
 
-/* ---------- 开关（直角） ---------- */
+/* Toggles */
 
 .olsw-settings .olsw-switch {
     align-items: center;
@@ -492,7 +487,7 @@
     font-weight: 500;
 }
 
-/* ---------- 单选块（直角） ---------- */
+/* Radio cards */
 
 .olsw-settings .olsw-choice {
     display: grid;
@@ -543,7 +538,7 @@
     margin-top: 12px;
 }
 
-/* ---------- 任务状态 ---------- */
+/* Task status */
 
 .olsw-settings .olsw-task-status {
     align-items: center;
@@ -569,7 +564,7 @@
     margin-top: 4px;
 }
 
-/* ---------- 指标读数 ---------- */
+/* Metrics */
 
 .olsw-settings .olsw-stats {
     border: 1px solid var(--olsw-line-soft);
@@ -605,7 +600,7 @@
     overflow-wrap: anywhere;
 }
 
-/* ---------- 进度条（直角） ---------- */
+/* Progress bars */
 
 .olsw-settings .olsw-meter {
     background: var(--olsw-line-soft);
@@ -621,7 +616,7 @@
     width: 0;
 }
 
-/* ---------- 操作区 ---------- */
+/* Actions */
 
 .olsw-settings .olsw-ops {
     align-items: center;
@@ -661,7 +656,7 @@
     margin: 0;
 }
 
-/* ---------- 按钮 ---------- */
+/* Buttons */
 
 .olsw-settings .button {
     align-items: center;
@@ -723,7 +718,7 @@
     margin-top: 12px;
 }
 
-/* ---------- 提示条 ---------- */
+/* Notices */
 
 .olsw-settings .olsw-page-feedback:empty {
     display: none;
@@ -750,7 +745,7 @@
 .olsw-settings .olsw-page-notice--error { border-left-color: var(--olsw-risk); }
 .olsw-settings .olsw-page-notice--info { border-left-color: var(--olsw-accent); }
 
-/* ---------- 关于页 ---------- */
+/* About */
 
 .olsw-settings .olsw-about-lead {
     color: var(--olsw-muted);
@@ -765,7 +760,7 @@
     grid-template-columns: minmax(0, 1fr);
 }
 
-/* ---------- 缓存操作 ---------- */
+/* Cache actions */
 
 .olsw-settings .olsw-cache-actions {
     display: grid;
@@ -882,7 +877,7 @@
     gap: 8px;
 }
 
-/* 面板内部回环地址属于运维信息，用小号等宽字呈现，不与主信息争视觉权重 */
+/* Keep operational loopback addresses visually secondary and monospace. */
 
 .olsw-settings .olsw-endpoint {
     color: var(--olsw-muted);
@@ -892,7 +887,7 @@
     overflow-wrap: anywhere;
 }
 
-/* ---------- 缓存操作面板 ---------- */
+/* Cache action panel */
 
 .olsw-settings .olsw-cache-status {
     border-top: 1px solid var(--olsw-line);
@@ -903,7 +898,7 @@
     margin-bottom: 0;
 }
 
-/* ---------- 最近清除记录 ---------- */
+/* Recent purges */
 
 .olsw-settings .olsw-log {
     border: 1px solid var(--olsw-line-soft);
@@ -945,7 +940,7 @@
     white-space: nowrap;
 }
 
-/* ---------- 字段头与一句话摘要 ---------- */
+/* Field headings and summaries */
 
 .olsw-settings .olsw-field__head {
     min-width: 0;
@@ -959,7 +954,7 @@
     margin-top: 5px;
 }
 
-/* ---------- 要点列表：把长段落拆成可扫读的短句 ---------- */
+/* Scannable key points */
 
 .olsw-settings .olsw-points {
     list-style: none;
@@ -1007,7 +1002,7 @@
     padding: 1px 5px;
 }
 
-/* ---------- 前置提示：说明"为什么不能/不会生效" ---------- */
+/* Action prerequisites */
 
 .olsw-settings .olsw-hint {
     align-items: flex-start;
@@ -1036,7 +1031,7 @@
     color: var(--olsw-ink);
 }
 
-/* ---------- 边界与风险提示 ---------- */
+/* Boundaries and risks */
 
 .olsw-settings .olsw-callout {
     align-items: flex-start;
@@ -1065,7 +1060,7 @@
     color: #3f2f0d;
 }
 
-/* ---------- 更多说明：原生 details 折叠，不依赖 JS ---------- */
+/* Native details disclosure without JavaScript. */
 
 .olsw-settings .olsw-more {
     border-top: 1px solid var(--olsw-line-soft);
@@ -1126,7 +1121,7 @@
     padding: 1px 5px;
 }
 
-/* ---------- 小节标题 ---------- */
+/* Section headings */
 
 .olsw-settings .olsw-subhead {
     color: var(--olsw-ink);
@@ -1135,7 +1130,7 @@
     margin: 22px 0 0;
 }
 
-/* ---------- 首屏重点模块 ---------- */
+/* Primary overview */
 
 .olsw-settings .olsw-section--featured {
     border-color: #b9cdf7;
@@ -1164,7 +1159,7 @@
     white-space: nowrap;
 }
 
-/* ---------- 推荐值高亮 ---------- */
+/* Recommended values */
 
 .olsw-settings .olsw-key {
     color: var(--olsw-accent);
@@ -1172,7 +1167,7 @@
     font-weight: 700;
 }
 
-/* ---------- 按钮与原因绑定 ---------- */
+/* Actions and their reasons */
 
 .olsw-settings .olsw-ops__group {
     display: flex;
@@ -1193,7 +1188,7 @@
     font-weight: 500;
 }
 
-/* ---------- 结果化状态面板 ---------- */
+/* Result status panels */
 
 .olsw-settings .olsw-stats__item.is-ok .olsw-stats__value { color: var(--olsw-ok); }
 .olsw-settings .olsw-stats__item.is-risk .olsw-stats__value { color: var(--olsw-risk); }
@@ -1240,7 +1235,7 @@
     color: var(--olsw-warn);
 }
 
-/* ---------- 移动端 ---------- */
+/* Mobile */
 
 @media screen and (max-width: 782px) {
     .olsw-settings {
@@ -1312,7 +1307,7 @@
         grid-template-columns: minmax(0, 1fr);
     }
 
-    /* 单列化，避免 minmax 下限在窄屏撑破容器造成横向溢出 */
+    /* One column prevents minmax widths from overflowing narrow screens. */
     .olsw-settings .olsw-grid {
         grid-template-columns: minmax(0, 1fr);
     }

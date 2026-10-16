@@ -10,18 +10,17 @@ import (
 	"time"
 )
 
-// 用 var 而不是 const，方便测试时临时调小，避免真的等 30/60 秒。
+// Variables let tests shorten timeouts without waiting 30-60 seconds.
 var (
 	safeApplyRestartTimeout        = 60 * time.Second
 	safeApplyReadinessPollTimeout  = 30 * time.Second
 	safeApplyReadinessPollInterval = 1 * time.Second
 )
 
-// safeApplyMu 串行化所有 SafeApplyRestartConfig 调用，见该函数注释。
+// safeApplyMu serializes SafeApplyRestartConfig calls.
 var safeApplyMu sync.Mutex
 
-// restartServiceFunc 实际执行 `systemctl restart <service>`，声明成变量是为了让测试
-// 可以替换成假实现，不必依赖真实的 systemd。
+// restartServiceFunc is replaceable so tests can run without systemd.
 var restartServiceFunc = func(serviceName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), safeApplyRestartTimeout)
 	defer cancel()
@@ -32,28 +31,21 @@ var restartServiceFunc = func(serviceName string) error {
 	return nil
 }
 
-// SafeApplyResult 描述一次"写配置 + 重启 + 健康检查"的最终结果，供调用方转成
-// 明确的用户提示，而不是不管成没成功都显示"已更新"。
+// SafeApplyResult lets callers report whether applying or restoring the config succeeded.
 type SafeApplyResult struct {
-	Applied           bool  // 新配置已生效
-	RolledBack        bool  // 曾尝试回滚到旧配置
-	RollbackSucceeded bool  // 回滚是否成功恢复服务（只有 RolledBack 为 true 时才有意义）
-	Err               error // 非 nil 时表示应用失败；nil 且 Applied 为 true 表示成功
+	Applied           bool  // New config is active.
+	RolledBack        bool  // Restoring the old config was attempted.
+	RollbackSucceeded bool  // Service restored; meaningful only when RolledBack is true.
+	Err               error // Apply error; nil with Applied=true means success.
 }
 
-// SafeApplyRestartConfig 用于 MariaDB/Redis 这类"没有可靠配置语法预检查工具、
-// 只能靠重启验证配置是否合法"的服务：原子写入新配置 → 重启 → 轮询健康检查 →
-// 失败则恢复旧配置并重启 → 再次健康检查确认恢复成功。
-//
-// 不做语法预检查（MariaDB/Redis 都没有能独立当语法校验依据的命令），因此每一步
-// 都设了超时，避免面板被外部命令卡死；失败时不会无限重试，最多"新配置重启一次 +
-// 旧配置回滚重启一次"，第二次也失败就明确报告，不再自动尝试。
-//
-// ready 是调用方提供的健康检查函数（真正尝试连接服务，而不只是看 systemctl 状态），
-// 新配置和回滚后的旧配置都会用同一个 ready 函数验证。
-//
-// 用一把全局互斥锁串行化所有调用——这是面板管理员操作，不是高频路径，没必要为每个
-// configPath 单独加锁；串行化能避免两次并发保存互相覆盖对方临时文件/配置内容。
+// SafeApplyRestartConfig atomically writes a config, restarts the service, and
+// polls readiness. On failure it restores the old config, restarts once, and
+// checks readiness again. MariaDB and Redis lack reliable standalone syntax
+// checks, so each step has a timeout; failure after rollback is reported without
+// further retries. ready must connect to the service, not just check systemd.
+// A global lock serializes these infrequent admin actions to prevent concurrent
+// saves from overwriting each other's config or temporary file.
 func SafeApplyRestartConfig(configPath, newContent, oldContent, serviceName string, ready func(context.Context) error) SafeApplyResult {
 	safeApplyMu.Lock()
 	defer safeApplyMu.Unlock()
@@ -72,9 +64,8 @@ func SafeApplyRestartConfig(configPath, newContent, oldContent, serviceName stri
 }
 
 func atomicWriteConfigFile(path, content string) error {
-	// 保留原文件的权限位——如果管理员手动把配置加固成了更严格的模式（比如 Redis
-	// 配置写了 requirepass 后改成 0600），这里不应该在面板保存配置时悄悄改回 0644。
-	// 文件不存在（第一次写入）时才用 0644 兜底，跟历史行为一致。
+	// Preserve existing permissions, including hardened Redis configs containing
+	// requirepass. Use 0644 only for a new file.
 	mode := os.FileMode(0644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
@@ -95,7 +86,7 @@ func atomicWriteConfigFile(path, content string) error {
 	return nil
 }
 
-// pollServiceReady 在总超时时间内每秒重试一次 ready()，直到成功或超时。
+// pollServiceReady retries ready until it succeeds or the total timeout expires.
 func pollServiceReady(ready func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), safeApplyReadinessPollTimeout)
 	defer cancel()
@@ -120,9 +111,9 @@ func pollServiceReady(ready func(context.Context) error) error {
 
 func rollbackConfigAndRestart(configPath, oldContent, serviceName string, ready func(context.Context) error, applyErr error) SafeApplyResult {
 	if err := atomicWriteConfigFile(configPath, oldContent); err != nil {
-		// 这里必须标记 RolledBack:true——新配置已经落盘且大概率导致服务异常，回滚写入
-		// 又失败了，磁盘上现在停留的是坏配置。调用方要把这种情况当成"回滚失败、需要
-		// 管理员立即介入"处理，不能落回默认分支显示"未做任何改动"（那是假的）。
+		// Set RolledBack even when restoring the file fails: the bad config remains
+		// on disk and requires admin intervention. Callers must report rollback
+		// failure rather than claiming that no changes were made.
 		return SafeApplyResult{RolledBack: true, RollbackSucceeded: false, Err: fmt.Errorf("%v；回滚写入配置也失败: %w", applyErr, err)}
 	}
 	if err := restartServiceFunc(serviceName); err != nil {

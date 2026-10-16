@@ -7,23 +7,23 @@ import (
 	"strings"
 )
 
-// WordPress 密码找回保护模式。
-//   - allow：默认值，不限制任何用户通过“忘记密码”找回密码。
-//   - all：全站禁用，禁止所有用户找回密码，并隐藏登录页的“忘记密码？”链接。
-//   - admin：仅禁用管理员账户找回密码，其余用户不受影响。
+// WordPress password reset protection modes:
+//   - allow: default; allow all users to reset passwords.
+//   - all: disable resets for everyone and hide the login page's reset link.
+//   - admin: disable resets only for administrators.
 const (
 	PasswordResetModeAllow = "allow"
 	PasswordResetModeAll   = "all"
 	PasswordResetModeAdmin = "admin"
 )
 
-// olsWPanelPasswordResetMarker 标记该 mu-plugin 文件由面板全权托管，
-// 面板会在 allow 模式下删除它、在其它模式下覆盖它，用户不应手动修改。
+// olsWPanelPasswordResetMarker identifies the panel-managed mu-plugin.
+// The panel deletes it in allow mode and overwrites it otherwise; do not edit it manually.
 const olsWPanelPasswordResetMarker = "OLS-WPANEL-MANAGED:password-reset"
 
 const wpPasswordResetPluginFile = "ols-wpanel-password-reset.php"
 
-// ValidatePasswordResetMode 校验并返回合法的密码找回模式，非法值返回错误。
+// ValidatePasswordResetMode returns a valid password reset mode or an error.
 func ValidatePasswordResetMode(mode string) (string, error) {
 	switch mode {
 	case PasswordResetModeAllow, PasswordResetModeAll, PasswordResetModeAdmin:
@@ -33,12 +33,12 @@ func ValidatePasswordResetMode(mode string) (string, error) {
 	}
 }
 
-// ApplyWPPasswordResetMode 根据模式管理站点 wp-content/mu-plugins 下的托管 mu-plugin：
-//   - allow：删除托管文件（若存在），恢复 WordPress 默认行为。
-//   - all / admin：写入对应逻辑的 mu-plugin，并确保文件归属站点用户。
+// ApplyWPPasswordResetMode manages the site's password reset mu-plugin:
+//   - allow: remove the managed file to restore WordPress defaults.
+//   - all/admin: write the mode's plugin and assign it to the site user.
 //
-// mu-plugins 目录在需要时自动创建；webRoot 必须非空、绝对路径且不能为文件系统根，
-// 同时派生的 mu-plugin 路径必须在 webRoot 之内，避免 DB 字段被篡改后写入非预期位置。
+// Create mu-plugins when needed. webRoot must be absolute, nonempty, and not a filesystem root;
+// the derived path must remain inside it to prevent tampered database paths from redirecting writes.
 func ApplyWPPasswordResetMode(webRoot, systemUser, mode string) error {
 	webRoot = strings.TrimSpace(webRoot)
 	if webRoot == "" {
@@ -83,9 +83,8 @@ func ApplyWPPasswordResetMode(webRoot, systemUser, mode string) error {
 
 	systemUser = strings.TrimSpace(systemUser)
 	if systemUser != "" {
-		// mu-plugin 文件必须归属站点用户，否则以站点用户运行的 LSPHP 无法
-		// 读取它，表现为"面板保存成功但实际不生效"。chown 失败应直接报错，
-		// 而不是静默吞掉让运维难以排查。
+		// The site user running LSPHP must own the mu-plugin to read it.
+		// Report chown failures so a successful save cannot silently leave the policy ineffective.
 		if chErr := ChownSitePath(pluginPath, webRoot, systemUser); chErr != nil {
 			return fmt.Errorf("chown password reset mu-plugin to %s: %w", systemUser, chErr)
 		}
@@ -121,9 +120,8 @@ func WPPasswordResetModeMatches(webRoot, mode string) (bool, error) {
 	return string(data) == renderWPPasswordResetPlugin(mode), nil
 }
 
-// renderWPPasswordResetPlugin 生成带托管标记的 mu-plugin PHP 内容。
-// 全站禁用模式额外在登录页注入 CSS 隐藏“忘记密码？”链接（p#nav 同时包含
-// 该链接与“返回站点”链接，全站禁用场景下一并隐藏是可接受的）。
+// renderWPPasswordResetPlugin generates the managed mu-plugin.
+// In all mode, CSS hides p#nav, including its reset and back-to-site links.
 func renderWPPasswordResetPlugin(mode string) string {
 	var body string
 	switch mode {

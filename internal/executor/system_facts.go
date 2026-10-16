@@ -6,20 +6,17 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/database"
 )
 
-// SystemFacts 是硬件规格自适应配置计算所需的基础事实：服务器总内存、CPU 核心数、
-// 当前面板已建站点数。
-//
-// 采集策略：每次需要生成配置建议时实时 Collect，不做全局缓存——站点数量会随时间变化，
-// 采集成本（一次 /proc/meminfo 读取 + 一条 COUNT(*) 查询）可以忽略不计。
-// 同一次批量操作（例如未来重建全部站点配置）应该只 Collect 一次，在调用方内部传递复用，
-// 不要在循环里对每个站点重复调用。
+// SystemFacts holds total RAM, CPU cores, and site count for adaptive defaults.
+// Collect fresh facts when recommendations are needed because site counts
+// change; reading /proc/meminfo and counting sites is inexpensive. Batch
+// operations should collect once and reuse the result across sites.
 type SystemFacts struct {
 	TotalMemoryBytes uint64
 	CPUCores         int
 	SiteCount        int
 }
 
-// CollectSystemFacts 采集当前系统事实。
+// CollectSystemFacts reads current hardware and site counts.
 func CollectSystemFacts() SystemFacts {
 	return SystemFacts{
 		TotalMemoryBytes: uint64(getTotalMemoryKB()) * 1024,
@@ -28,7 +25,7 @@ func CollectSystemFacts() SystemFacts {
 	}
 }
 
-// TotalSiteCount 返回面板当前管理的站点总数（不区分状态）。
+// TotalSiteCount counts all managed sites regardless of status.
 func TotalSiteCount() int {
 	if database.DB == nil {
 		return 0

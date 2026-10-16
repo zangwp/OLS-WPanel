@@ -14,21 +14,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// OverviewDBBackup 在共享的 models.DBBackup 基础上附加本地文件是否仍然存在的信息。
-// transport_status 记录的是"上次同步尝试的结果"，不代表本地文件现在是否还在
-// （keep_local=0 时同步成功后会删除本地文件），两者要结合起来才能看出完整状态。
+// OverviewDBBackup adds current local-file availability to models.DBBackup.
+// transport_status describes the last sync attempt; keep_local=0 may have removed
+// the local file after a successful sync.
 type OverviewDBBackup struct {
 	models.DBBackup
 	LocalExists bool `json:"local_exists"`
 }
 
-// OverviewFileBackup 同上，针对网站文件备份。
+// OverviewFileBackup adds current local-file availability to a website file backup.
 type OverviewFileBackup struct {
 	models.FileBackup
 	LocalExists bool `json:"local_exists"`
 }
 
-// SiteBackupOverview 汇总单个网站的数据库备份和文件备份列表，供备份总览页面展示。
+// SiteBackupOverview groups a site's database and file backups for the overview page.
 type SiteBackupOverview struct {
 	SiteID                int                  `json:"site_id"`
 	Domain                string               `json:"domain"`
@@ -44,8 +44,8 @@ type SiteBackupOverview struct {
 	FileBackups           []OverviewFileBackup `json:"file_backups"`
 }
 
-// GetBackupOverview 返回所有网站的备份总览（数据库备份 + 文件备份）以及面板自身数据库备份列表。
-// 列表接口只做本地状态汇总；下载/删除由独立备份操作接口处理。
+// GetBackupOverview lists site database/file backups and panel database backups using local state only.
+// Separate backup endpoints handle downloads and deletion.
 func GetBackupOverview(c *gin.Context) {
 	db := database.GetDB()
 	cfg := config.AppConfig
@@ -200,10 +200,10 @@ func GetBackupOverview(c *gin.Context) {
 	}))
 }
 
-// ReconcileBackupStatus 由管理员在备份总览页面显式点击"核对远程状态"触发：把 local/synced
-// 备份记录与当前远程目标双向校准，并补传远端缺失但本地仍存在的文件。
-// 不放在 GetBackupOverview 里自动触发——远程慢或不可达时会拖慢一个本该只读、快速的列表接口，
-// 大型全量重建只允许每天低峰后台任务执行，HTTP 请求不会触发压缩。
+// ReconcileBackupStatus explicitly reconciles local/synced records with the current
+// remote destination and uploads missing remote files still available locally.
+// Keep network access out of GetBackupOverview. Full archive rebuilds run only
+// in the daily background job; HTTP requests must not trigger compression.
 func ReconcileBackupStatus(c *gin.Context) {
 	updated, err := executor.MaintainRemoteBackups(false)
 	if err != nil {
@@ -213,9 +213,8 @@ func ReconcileBackupStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"updated": updated}))
 }
 
-// localFileExists 只做一次本地文件系统 stat，不涉及远程网络请求，性能开销可忽略。
-// 只有明确确认文件不存在（os.IsNotExist）才判定为不存在；权限不足、IO 错误等无法确认的情况
-// 一律当作"存在"处理，避免把"查不了"误报成"本地文件缺失"这种更容易引起恐慌的结论。
+// localFileExists uses only local stat. Only os.IsNotExist means missing;
+// treat permission and I/O errors as present to avoid false missing-file reports.
 func localFileExists(path string) bool {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -228,16 +227,13 @@ func localFileExists(path string) bool {
 	return true
 }
 
-// fileBackupLocalExists 检查网站文件备份对应的本地文件是否还在。文件备份固定存放在
-// config.DefaultBackupDir（与 executor/file_backup.go 的生成路径、executor/remote_sync.go
-// 的远程同步根目录保持一致），不是 cfg.Panel.BackupDir——两者在正常安装下值相同，
-// 但文件备份的落盘路径从来没有真正读取过 Panel.BackupDir，用错会导致误报"本地文件缺失"。
+// fileBackupLocalExists checks the fixed config.DefaultBackupDir used by file backup
+// creation and remote sync. Using Panel.BackupDir could report existing files as missing.
 func fileBackupLocalExists(domain, filename string) bool {
 	return fileBackupLocalExistsFromRoot(config.DefaultBackupDir, domain, filename)
 }
 
-// fileBackupLocalExistsFromRoot 是 fileBackupLocalExists 的可测试实现，root 参数便于单元测试
-// 注入临时目录；生产代码固定通过 fileBackupLocalExists 传入 config.DefaultBackupDir。
+// fileBackupLocalExistsFromRoot accepts a root for tests; production uses config.DefaultBackupDir.
 func fileBackupLocalExistsFromRoot(root, domain, filename string) bool {
 	return localFileExists(filepath.Join(root, domain, "files", filename))
 }

@@ -3,8 +3,8 @@ set -eE
 set -o pipefail
 
 # ============================================================
-# OLS WPanel 安装脚本 — 适用于 Debian 13 / Ubuntu 24.04、26.04 LTS，建议使用纯净系统
-# 自动选择当前架构的已签名二进制，并配置 OpenLiteSpeed/LSPHP 软件源
+# OLS WPanel installer for clean Debian 13 / Ubuntu 24.04 and 26.04 LTS servers.
+# Select a signed native binary and configure the OpenLiteSpeed/LSPHP repositories.
 # ============================================================
 
 RED='\033[0;31m'
@@ -631,7 +631,7 @@ require_ols_listeners() {
 }
 
 # ============================================================
-# 系统内核优化（BBR+FQ、TCP 缓冲、连接队列、文件描述符）
+# Kernel tuning: BBR/FQ, TCP buffers, queues and file descriptor limits.
 # ============================================================
 apply_system_tuning() {
     log_info "应用系统内核优化..."
@@ -702,7 +702,7 @@ BBREOF
         fi
     fi
 
-    # 文件描述符限制
+    # File descriptor limits.
     if ! grep -q "nofile 65535" /etc/security/limits.conf 2>/dev/null; then
         cat >> /etc/security/limits.conf << 'LIMITSEOF'
 * soft nofile 65535
@@ -759,7 +759,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 异常退出时回滚 repair，并只清理由 mktemp 创建的本次工作目录。
+# Roll back failed repairs and clean only this run's mktemp-owned directory.
 trap 'INSTALL_FAILURE_STATUS=$?; INSTALL_FAILURE_LINE=$LINENO' ERR
 trap installer_exit EXIT
 
@@ -1642,8 +1642,8 @@ repair_rollback() {
     local license_file=""
     local license_backup_dir="$REPAIR_BACKUP_DIR/license-docs"
     log_warn "repair未完成，正在恢复repair前的面板程序和数据库"
-    # 新二进制可能已经升级SQLite结构。必须先停服并恢复同一时间点的数据库，
-    # 不能让恢复后的旧二进制继续读取新结构。
+    # A new binary may have migrated SQLite. Stop the service and restore the
+    # matching database snapshot before starting the old binary.
     if ! systemctl stop ols-wpanel 2>/dev/null; then
         if systemctl is-active --quiet ols-wpanel 2>/dev/null; then
             log_warn "严重：无法停止ols-wpanel，未恢复面板数据库，保持服务停止后请联系开发者处理"
@@ -2283,7 +2283,7 @@ restore_managed_apt_sources() {
 }
 
 # ============================================================
-# 卸载函数（定义在前，兼容管道执行）
+# Define uninstall first so piped execution can invoke it.
 # ============================================================
 
 is_uninstall_confirmation() {
@@ -2422,9 +2422,9 @@ do_uninstall() {
     log_info "  - 系统软件包（openlitespeed/lsphp/mariadb/redis/fail2ban）"
 }
 
-# 完全卸载会删除网站文件、网站数据库和 OLS 面板。
-# 仅在专用于本面板的服务器上使用；备份默认转移保存，删除备份需单独确认。
-# 不执行来自第三方的一键卸载或删除不属于面板的数据库。
+# Full uninstall removes websites, site databases and the panel.
+# Use only on a dedicated host; retain backups unless deletion is confirmed.
+# Never run third-party uninstallers or remove unmanaged databases.
 purge_inventory_preflight() {
     python3 - "$CONFIG_FILE" "$INSTALL_WORKDIR" <<'PYPURGEPREFLIGHT'
 import json,os,pathlib,re,sqlite3,subprocess,sys
@@ -2523,7 +2523,7 @@ do_purge() {
     purge_client=$(cat "$INSTALL_WORKDIR/purge-client")
     "$purge_client" --defaults-file="$INSTALL_WORKDIR/purge-mariadb.cnf" --protocol=socket < "$INSTALL_WORKDIR/purge-databases.sql" || log_error "数据库删除失败，停止后续卸载"
     systemctl stop mariadb 2>/dev/null || true
-    # Redis 和 Fail2ban 可能被共享工作负载使用，保留其服务与软件包。
+    # Preserve Redis and Fail2ban because other workloads may share them.
     echo -e "  ${GREEN}✓${NC} 服务已停止"
 
     echo -e "  → 清理 OLS 定时任务、systemd、Fail2ban 和 logrotate 集成..."
@@ -2539,7 +2539,7 @@ do_purge() {
     echo -e "  → 卸载软件包（可能需要 1-2 分钟）..."
     UNINSTALL_STAGE="卸载 OpenLiteSpeed、LSPHP 与 MariaDB 软件包"
     DEBIAN_FRONTEND=noninteractive apt-get purge -y openlitespeed 'lsphp83*' 'lsphp84*' 'lsphp85*' mariadb-server mariadb-common < /dev/null || log_error "软件包卸载失败，请检查上方 APT/dpkg 输出"
-    # 不自动 autoremove，避免连带移除其他应用的依赖。
+    # Avoid autoremove: it may remove dependencies used by other applications.
     echo -e "  ${GREEN}✓${NC} 软件包已卸载"
 
     echo -e "  → 移除 OLS 系统调优配置..."
@@ -2582,7 +2582,7 @@ do_purge() {
 }
 
 # ============================================================
-# 权限、平台与发布包安全预检
+# Check privileges, platform and signed release inputs.
 # ============================================================
 if [[ $EUID -ne 0 ]]; then
     log_error "请使用 root 权限运行此脚本"
@@ -2917,7 +2917,7 @@ installed_maintenance_menu() {
 }
 
 # ============================================================
-# 重复安装/残留安装检测
+# Detect existing or incomplete installations.
 # ============================================================
 INSTALL_COMPLETE=false
 INSTALL_TRACES=false
@@ -3035,7 +3035,7 @@ else
 fi
 
 # ============================================================
-# 系统检测与Swap配置
+# Check the host and configure Swap.
 # ============================================================
 log_install_stage "系统准备"
 TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -3101,27 +3101,27 @@ SWAPSYSCTLEOF
 fi
 
 # ============================================================
-# APT 源配置
+# APT repositories.
 # ============================================================
 log_install_stage "软件源与依赖预检"
 export DEBIAN_FRONTEND=noninteractive
 log_info "检测到平台: ${PLATFORM_ID} ${PLATFORM_VERSION} (${PLATFORM_CODENAME}) ${PLATFORM_ARCH}"
 
-# 国内模式会优先选择对应发行版镜像，并同时覆盖 updates / security。
+# China mode selects release-specific mirrors, including updates and security.
 if ! $REPAIR_MODE; then
 select_platform_source
 
-# 安装基础依赖
+# Install base dependencies.
 apt-get install -y --no-install-recommends curl wget unzip ca-certificates gpg
 
-# OpenLiteSpeed 与 LSPHP 均只从 LiteSpeed 官方仓库安装；仓库公钥通过
-# HTTPS 下载并使用本发布内固定的 SHA-256 校验。
+# Install OpenLiteSpeed/LSPHP only from LiteSpeed's official repository.
+# Download its key over HTTPS and verify the release-pinned SHA-256 digest.
 configure_litespeed_repository
 configure_mariadb_repository
 configure_redis_repository
 
 # ============================================================
-# 安装基础组件
+# Install core services.
 # ============================================================
 log_install_stage "下载并安装系统组件"
 
@@ -3190,7 +3190,7 @@ if ! $REPAIR_MODE; then
 fi
 
 # ============================================================
-# systemd 进程守护配置
+# Configure systemd supervision.
 # ============================================================
 log_install_stage "配置服务和运行环境"
 log_info "配置 systemd 进程守护..."
@@ -3243,7 +3243,7 @@ else
 fi
 
 # ============================================================
-# OpenLiteSpeed 基础配置
+# Configure OpenLiteSpeed.
 # ============================================================
 log_info "配置 OpenLiteSpeed 基础..."
 
@@ -3509,13 +3509,13 @@ else
 fi
 
 # ============================================================
-# 本机防火墙安全基线
+# Apply the local firewall baseline.
 # ============================================================
 log_info "配置本机防火墙安全基线..."
 configure_fresh_firewall
 
 # ============================================================
-# MariaDB 安全加固
+# Harden MariaDB.
 # ============================================================
 log_info "配置 MariaDB..."
 
@@ -3578,7 +3578,7 @@ MARIADBEOF
 fi
 
 # ============================================================
-# 目录结构创建
+# Create runtime directories.
 # ============================================================
 log_install_stage "准备网站程序与面板配置"
 log_info "创建目录结构..."
@@ -3590,7 +3590,7 @@ mkdir -p /www/server/certificates
 chmod 700 "$INSTALL_DIR"
 
 # ============================================================
-# 生成自签名 SSL 证书（有效期 10 年）
+# Generate the initial self-signed TLS certificate (valid for ten years).
 # ============================================================
 log_info "检查面板 TLS 证书..."
 
@@ -3621,7 +3621,7 @@ else
 fi
 
 # ============================================================
-# 下载 WordPress 备用包
+# Download the fallback WordPress package.
 # ============================================================
 log_info "检查 WordPress 备用包..."
 WP_ZIP="$INSTALL_DIR/packages/wordpress.zip"
@@ -3655,7 +3655,7 @@ else
 fi
 
 # ============================================================
-# 生成面板安全凭证
+# Generate panel credentials.
 # ============================================================
 log_info "检查安全凭证..."
 
@@ -3700,7 +3700,7 @@ else
 fi
 
 # ============================================================
-# 写入 config.json
+# Write config.json.
 # ============================================================
 log_info "检查配置文件..."
 
@@ -3776,7 +3776,7 @@ else
 fi
 
 # ============================================================
-# 部署 Go 二进制
+# Deploy the Go binary.
 # ============================================================
 log_install_stage "部署并验证面板"
 log_info "部署面板二进制..."
@@ -3793,7 +3793,7 @@ install_release_license_documentation || \
 log_info "许可文档已安装到 $LICENSE_DOC_DIR"
 
 # ============================================================
-# 创建 systemd 服务
+# Create the systemd service.
 # ============================================================
 log_info "检查 systemd 服务..."
 
@@ -3825,7 +3825,7 @@ else
 fi
 
 # ============================================================
-# 运行时健康、版本与监听归属检测
+# Verify runtime health, version and listener ownership.
 # ============================================================
 PORT_OK=false
 if $REPAIR_MODE && ! $REPAIR_SERVICE_WAS_ACTIVE; then
@@ -3854,7 +3854,7 @@ else
 fi
 
 # ============================================================
-# 最终输出
+# Print installation details.
 # ============================================================
 if systemctl is-active --quiet ols-wpanel; then
     STATUS="运行中"
@@ -3970,4 +3970,4 @@ print_install_summary() {
     printf '%s\n\n' "$rule"
 }
 print_install_summary
-# 可选运行统计 / Optional Runtime Telemetry 默认关闭，详情见项目文档。
+# Optional telemetry is disabled by default; see the project documentation.

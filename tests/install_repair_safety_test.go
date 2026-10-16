@@ -229,7 +229,7 @@ func TestInstallFreshValidatesCronParentBeforeAPT(t *testing.T) {
 		`[[ -d "$cron_parent" ]] && [[ ! -L "$cron_parent" ]]`,
 		`[[ "$parent_owner" == "0" ]]`,
 		`(8#$parent_mode & 0022) == 0`,
-		`可选运行统计 / Optional Runtime Telemetry`,
+		`# Optional telemetry is disabled by default; see the project documentation.`,
 	} {
 		requiredIndex(t, script, required)
 	}
@@ -604,7 +604,7 @@ func TestInstallAndRepairRequireExactRuntimeHealthBeforeCommit(t *testing.T) {
 		}
 	}
 
-	runtimeChecks := script[requiredIndex(t, script, "# 运行时健康、版本与监听归属检测"):]
+	runtimeChecks := script[requiredIndex(t, script, "# Verify runtime health, version and listener ownership."):]
 	healthCall := requiredIndex(t, runtimeChecks, `validate_running_panel_health "$INSTALLER_RELEASE_VERSION"`)
 	if got := strings.Count(runtimeChecks, `validate_running_panel_health "$INSTALLER_RELEASE_VERSION"`); got != 2 {
 		t.Fatalf("runtime health gate calls=%d, want 2 (inactive repair and active/fresh)", got)

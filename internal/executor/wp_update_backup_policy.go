@@ -250,11 +250,10 @@ func (s *wpUpdateArtifactService) deferArtifactCleanup(ctx context.Context, task
 	return err
 }
 
-// cleanupExpiredUpdateLogs 按 7 天窗口分批清理更新任务事件（不区分成功/失败/需人工介入）。
-// 每次最多 wpUpdateLogCleanupBatchSize 行；较大的积压由后续维护周期继续处理。
-// 与 cleanupExpiredArtifacts 不同，本方法只删事件、不删任务行，避免级联删除
-// wp_update_task_backups 行导致备份文件孤儿；任务行仍由其原有逻辑保留。
-// 仅依赖 s.store.db，不依赖 s.root，便于独立单测。
+// cleanupExpiredUpdateLogs deletes events older than seven days regardless of task outcome,
+// up to wpUpdateLogCleanupBatchSize per cycle. Later maintenance handles any backlog.
+// Keep task rows to avoid cascading backup-row deletion and orphaning backup files;
+// cleanupExpiredArtifacts retains ownership of task retention. Only s.store.db is required.
 func (s *wpUpdateArtifactService) cleanupExpiredUpdateLogs(ctx context.Context, now time.Time) error {
 	if s == nil || s.store == nil {
 		return errors.New("update log cleanup unavailable")

@@ -1,9 +1,7 @@
 <?php
 /**
- * OLS WPanel Optimizer — 设置页与开关模块
- *
- * 插件设置页渲染、禁止检测更新/禁止文件编辑等开关的挂载逻辑、
- * 文件锁定后台提示、插件列表页的设置链接。
+ * OLS WPanel Optimizer settings and feature switches.
+ * Renders settings, hooks feature controls, shows lock notices, and adds the settings link.
  */
 
 if (!defined('ABSPATH')) exit;
@@ -155,7 +153,7 @@ trait OLSW_Optimizer_Settings_Trait {
         $isPost = isset($_POST['olsw_save']);
         $notice = '';
 
-        // 面板同步：GET 时从面板拉取最新状态，POST 时不拉（避免用旧值覆盖表单新值）
+        // Refresh panel state on GET only; fetching on POST could overwrite submitted values.
         $companionLatestVersion = '';
         if (!$isPost) {
             $panelState = self::fetch_panel_state();
@@ -178,12 +176,9 @@ trait OLSW_Optimizer_Settings_Trait {
 
         if ($isPost) {
             check_admin_referer('olsw_optimizer_settings');
-            // File protection is not a blanket switch for this settings page.
-            // Before disabling a current or future feature, determine its real
-            // write targets. Keep database, cache, uploads, and panel-managed
-            // operations available when the active lock rules allow them; make
-            // only controls that write protected paths (currently wp-config.php)
-            // read-only. 面向 AI/开发者：禁止因文件保护而整页禁用，必须按实际写入范围判断。
+            // Apply file protection to each control's write targets. Only controls writing
+            // protected paths (currently wp-config.php) become read-only; keep database,
+            // cache, uploads, and panel-managed operations available when lock rules allow.
             $fileLockSafeOnly = self::sync_file_lock_state(true);
             $lscacheEnabled  = !empty($_POST['litespeed_cache_enabled'])  ? true : false;
             $lscacheTTL      = isset($_POST['litespeed_cache_ttl']) ? intval($_POST['litespeed_cache_ttl']) : 300;
@@ -296,7 +291,6 @@ trait OLSW_Optimizer_Settings_Trait {
                 ? __('Environment not ready', 'ols-wpanel-optimizer')
                 : ($imageMode === self::IMAGE_MODE_WEBP ? __('WebP conversion', 'ols-wpanel-optimizer') : ($imageMode === self::IMAGE_MODE_OPTIMIZE ? __('Compression', 'ols-wpanel-optimizer') : __('Off', 'ols-wpanel-optimizer')));
 
-            // 预加载状态派生：仅用于展示，不改变任何业务逻辑。
             $preloadRunning = !empty($preloadStatus['running']);
             $preloadQueued  = intval($preloadStatus['queued']);
             $preloadDone    = intval($preloadStatus['done']);

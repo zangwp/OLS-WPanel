@@ -14,8 +14,8 @@ import (
 
 type WPUpdateLogHandler struct{}
 
-// List 返回某站点近 7 天内（或尚未结束）的更新任务及其完整事件时间线。
-// 用于「更新日志」卡片，用户更新失败时可一键复制结构化日志反馈，免去 SSH 排查。
+// List returns a site's unfinished tasks and tasks from the last seven days
+// with event timelines for the copyable update log.
 func (h *WPUpdateLogHandler) List(c *gin.Context) {
 	siteID, ok := wpUpdateBackupSiteID(c)
 	if !ok {
@@ -110,7 +110,7 @@ func nullTimeToPointer(v sql.NullTime) *time.Time {
 	return &t
 }
 
-// wpUpdateLogPlaceholders 生成 n 个问号占位符，用于事件查询的 IN (...) 子句。
+// wpUpdateLogPlaceholders creates n placeholders for the event query's IN clause.
 func wpUpdateLogPlaceholders(n int) string {
 	if n <= 0 {
 		return ""

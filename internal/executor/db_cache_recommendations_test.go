@@ -26,7 +26,7 @@ func TestRecommendInnoDBBufferPoolSizeMB(t *testing.T) {
 }
 
 func TestRecommendInnoDBBufferPoolSizeNeverExceeds30PercentOfRAM(t *testing.T) {
-	// 一个刻意设计得比硬上限还大的极端场景，用来验证 hardCap 生效。
+	// Exceed the hard cap deliberately to verify that it takes precedence.
 	facts := SystemFacts{TotalMemoryBytes: 600 * 1024 * 1024}
 	got := RecommendInnoDBBufferPoolSizeMB(facts)
 	hardCap := 600 * 3 / 10

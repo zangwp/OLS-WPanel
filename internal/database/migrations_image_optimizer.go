@@ -1,12 +1,10 @@
 package database
 
-// imageOptimizerSchemaStatements 同时供全新安装和 1.0.49 增量升级使用，避免两条
-// 路径的表结构、约束或索引随维护产生漂移（参照 wpInventorySchemaStatements 的做法）。
+// imageOptimizerSchemaStatements is shared by fresh installs and the 1.0.49 upgrade
+// to keep their tables, constraints, and indexes in sync.
 //
-// site_image_optimization_jobs 记录历史图库批量优化的任务级进度；
-// site_image_optimization_files 记录已处理过的文件（按站点+相对路径+文件大小做
-// 幂等指纹），重复运行批量任务时跳过没有变化的文件，参照 AutoDeployPluginUpdates
-// 的内容比对思路，但用文件大小+修改时间做轻量指纹，不对每个文件做全量内容比对。
+// Jobs track batch progress; file records skip unchanged images on later runs.
+// Fingerprints use the site, relative path, size, and modification time instead of full content comparisons.
 var imageOptimizerSchemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS site_image_optimization_jobs (
 		id              INTEGER PRIMARY KEY AUTOINCREMENT,

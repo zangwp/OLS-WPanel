@@ -84,8 +84,9 @@ func syncRemoteMaintenanceBackup(row remoteMaintenanceRow, localPath string, sle
 	return false
 }
 
-// MaintainRemoteBackups 核对当前远端、补传仍有本地副本的缺失文件，并判断文件增量链是否需要
-// 重建全量基线。allowRebuild 只供低峰后台任务使用；HTTP 手动核对不会执行大型全量压缩。
+// MaintainRemoteBackups reconciles the remote, uploads missing local copies,
+// and checks whether incremental chains need a full baseline. allowRebuild is
+// for off-peak jobs; manual HTTP checks avoid large full-backup compression.
 func MaintainRemoteBackups(allowRebuild bool) (int, error) {
 	if !remoteMaintenanceMu.TryLock() {
 		return 0, fmt.Errorf("远程备份维护任务正在运行")
@@ -335,8 +336,9 @@ func setRemoteBackupSiteState(siteID int, status, message string) {
 		siteID, status, rebuildValue, strings.TrimSpace(message))
 }
 
-// StartRemoteBackupMaintenanceScheduler 启动后做一次延迟轻量维护；每天凌晨按稳定 server_id
-// 计算 0-59 分钟错峰，并允许在确认链不可修复时串行重建一次全量基线。
+// StartRemoteBackupMaintenanceScheduler runs a delayed lightweight check at startup,
+// then daily maintenance staggered by server_id over 0-59 minutes. It may
+// serially rebuild one full baseline when a chain cannot be repaired.
 func StartRemoteBackupMaintenanceScheduler() {
 	go func() {
 		time.Sleep(10 * time.Minute)

@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// WPUpdateLogEvent 是更新任务事件时间线中的一条记录，对应 wp_update_task_events 表。
+// WPUpdateLogEvent is a task timeline entry from wp_update_task_events.
 type WPUpdateLogEvent struct {
 	Stage     string    `json:"stage"`
 	Result    string    `json:"result"`
@@ -10,8 +10,8 @@ type WPUpdateLogEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// WPUpdateLogTask 是「更新日志」卡片中展示的一条更新任务，聚合其事件时间线。
-// 仅返回未结束（finished_at IS NULL）或近 24 小时内结束的任务，超期事件由清理逻辑删除。
+// WPUpdateLogTask groups a task and its event timeline for the update log.
+// Return unfinished tasks or those finished within 24 hours; cleanup removes older events.
 type WPUpdateLogTask struct {
 	TaskID            string             `json:"task_id"`
 	ComponentType     string             `json:"component_type"`

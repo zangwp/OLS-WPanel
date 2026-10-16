@@ -10,21 +10,19 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/config"
 )
 
-// imageBatchCandidate 是一个待处理的历史图片文件。
+// imageBatchCandidate is an image awaiting batch optimization.
 type imageBatchCandidate struct {
-	RelativePath string // 相对 wp-content/uploads/ 的路径，用 / 分隔
+	RelativePath string // Slash-separated path relative to wp-content/uploads/.
 	AbsPath      string
 	Mime         string
 	Size         int64
 	ModUnix      int64
 }
 
-// scanSiteUploadsForImages 扫描站点 wp-content/uploads/ 目录，只返回真正的
-// JPEG/PNG 普通文件。用 Lstat 识别并拒绝符号链接，参照
-// wp_inventory_runner.go 里 validateInventorySitePath 的做法——降权执行已经把
-// 影响限制在该站点系统用户可写的范围内，但如果站点被入侵、uploads 目录下被人
-// 放了指向 wp-config.php 等敏感文件的符号链接，不做这层校验的话批量任务可能被
-// 诱导对着这些文件原地"重编码"。
+// scanSiteUploadsForImages returns regular JPEG/PNG uploads and rejects symlinks via Lstat.
+// Privilege dropping limits writes to the site user, but a compromised site could link uploads
+// to sensitive files such as wp-config.php and trick the optimizer into rewriting them.
+// See validateInventorySitePath in wp_inventory_runner.go.
 func scanSiteUploadsForImages(webRoot string) ([]imageBatchCandidate, error) {
 	wwwRoot := config.AppConfig.Paths.WWWRoot
 	siteRoot, err := validateInventorySitePath(wwwRoot, webRoot)
@@ -46,10 +44,10 @@ func scanSiteUploadsForImages(webRoot string) ([]imageBatchCandidate, error) {
 	var candidates []imageBatchCandidate
 	err = filepath.WalkDir(realUploadsRoot, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // 单个条目读取失败就跳过，不中断整棵树的扫描
+			return nil // Skip unreadable entries without aborting the scan.
 		}
 		if d.IsDir() {
-			// 目录本身如果是符号链接，不进去遍历（避免逃出 uploads 树）。
+			// Do not traverse symlinked directories outside the uploads tree.
 			if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 				return filepath.SkipDir
 			}
@@ -77,9 +75,8 @@ func scanSiteUploadsForImages(webRoot string) ([]imageBatchCandidate, error) {
 			return nil
 		}
 
-		// 扩展名只是路由到 jpegoptim/optipng 的依据，不是"这是合法图片"的证明——
-		// 伪装成 .jpg 的任意文件会被交给二进制反复尝试、计为 failed。读文件头
-		// 校验 magic bytes，不合法的直接跳过，不进入候选清单。
+		// Extensions select the optimizer; magic bytes establish whether the file is an image.
+		// Skip invalid headers so disguised files are not repeatedly attempted and counted as failures.
 		if !hasImageMagicBytes(real, mime) {
 			return nil
 		}

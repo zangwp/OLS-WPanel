@@ -44,7 +44,7 @@ func TestIngestWPSecurityEventsOnlyProcessesNewLines(t *testing.T) {
 		t.Fatalf("first ingest count = %d, want 1", n)
 	}
 
-	// 再跑一遍，不应该重复入库同一行
+	// A second cycle must not ingest the same line again.
 	n, err = IngestWPSecurityEvents()
 	if err != nil {
 		t.Fatalf("IngestWPSecurityEvents() second run error = %v", err)
@@ -61,10 +61,9 @@ func TestIngestWPSecurityEventsOnlyProcessesNewLines(t *testing.T) {
 		t.Fatalf("wp_security_events row count = %d, want 1", total)
 	}
 
-	// 追加新的一行，应该只入库新增的这一条（用敏感文件扫描而不是伪装爬虫，
-	// 因为伪装爬虫的判定依赖官方 IP 段缓存，这里没有 seed 缓存数据，不应该
-	// 依赖那条修复前的错误行为——官方 IP 段缓存为空时不应该把所有 Googlebot
-	// UA 都当成伪装，见 TestIsFakeSearchBotDoesNotFlagWhenOfficialRangesUncached）
+	// Append a sensitive-file scan to test incremental ingestion without seeding bot IP ranges.
+	// An empty official range cache must not classify every Googlebot UA as fake;
+	// see TestIsFakeSearchBotDoesNotFlagWhenOfficialRangesUncached.
 	line2 := `1.2.3.4 - - [15/Jan/2026:10:01:00 +0800] "GET /.env HTTP/1.1" 404 300 "-" "curl/8.0"` + "\n"
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
@@ -207,7 +206,7 @@ func TestIngestWPSecurityEventsSkipsUnclassifiedEvents(t *testing.T) {
 	seedWPSecurityEventSite(t, logDir)
 
 	logPath := filepath.Join(logDir, "wp-security.log")
-	// 普通的 WordPress 异常路径访问（没有命中 4 类明确分类），不应入库
+	// Unclassified unusual WordPress paths must not be stored as security events.
 	line := `203.0.113.9 - - [15/Jan/2026:10:00:00 +0800] "GET /wp-content/some-plugin/readme.txt HTTP/1.1" 404 0 "-" "curl/8.0"` + "\n"
 	if err := os.WriteFile(logPath, []byte(line), 0644); err != nil {
 		t.Fatal(err)
@@ -271,7 +270,7 @@ func TestIngestWPSecurityEventsHandlesPartialTrailingLine(t *testing.T) {
 		t.Fatalf("ingest count = %d, want 1 (partial trailing line must not be consumed)", n)
 	}
 
-	// 补全那半行并加上换行符，模拟 openlitespeed 写完了这一行
+	// Complete the partial line with a newline to simulate an OpenLiteSpeed write.
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +311,7 @@ func TestIngestWPSecurityEventsHandlesLogRotation(t *testing.T) {
 		t.Fatalf("IngestWPSecurityEvents() error = %v", err)
 	}
 
-	// 模拟 copytruncate：文件被截断为一段更短的新内容
+	// Simulate copytruncate replacing the file with shorter content.
 	after := `5.6.7.8 - - [16/Jan/2026:00:00:00 +0800] "GET /.env HTTP/1.1" 404 150 "-" "curl/7.68.0"` + "\n"
 	if err := os.WriteFile(logPath, []byte(after), 0644); err != nil {
 		t.Fatal(err)
@@ -357,8 +356,8 @@ func TestIngestWPSecurityEventsHandlesCopytruncateAfterFastGrowth(t *testing.T) 
 		t.Fatalf("IngestWPSecurityEvents() error = %v", err)
 	}
 
-	// copytruncate 后如果攻击流量很快把新 wp-security.log 写到超过旧 offset，
-	// 不能只依赖 size < offset；首行指纹变化时仍应从头读取。
+	// After copytruncate, traffic may grow the log past the old offset.
+	// A changed first-line fingerprint must still restart ingestion from the beginning.
 	after := `5.6.7.8 - - [16/Jan/2026:00:00:00 +0800] "GET /.env HTTP/1.1" 404 150 "-" "curl/7.68.0"` + "\n" +
 		strings.Repeat(`9.9.9.9 - - [16/Jan/2026:00:00:01 +0800] "GET /wp-content/readme.txt HTTP/1.1" 404 150 "-" "curl/7.68.0"`+"\n", 5)
 	if len(after) <= len(before) {
@@ -493,7 +492,7 @@ func TestTruncateRunes(t *testing.T) {
 	if got := truncateRunes("hello world", 5); got != "hello" {
 		t.Fatalf("truncateRunes long string = %q, want %q", got, "hello")
 	}
-	// 多字节字符（中文）不能被从中间切断，必须按 rune 而不是按字节截断
+	// Truncate by rune to avoid splitting multibyte characters.
 	if got := truncateRunes("你好世界hello", 4); got != "你好世界" {
 		t.Fatalf("truncateRunes multibyte = %q, want %q", got, "你好世界")
 	}
@@ -517,18 +516,18 @@ func TestTopWPSecurityOffendersFiltersByThresholdAndReturnsTopPaths(t *testing.T
 	recent := now.Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
 	old := now.Add(-48 * time.Hour).Format("2006-01-02 15:04:05")
 
-	// 1.1.1.1: 3 次，低于阈值 5，不应出现在结果里
+	// 1.1.1.1: three events fall below the threshold of five.
 	for i := 0; i < 3; i++ {
 		insertWPSecurityEvent(t, "1.1.1.1", SecurityEventSQLiProbe, "/a", recent)
 	}
-	// 2.2.2.2: 6 次达到阈值，其中 /x 命中 4 次、/y 命中 2 次
+	// 2.2.2.2: six events meet the threshold; /x has four and /y has two.
 	for i := 0; i < 4; i++ {
 		insertWPSecurityEvent(t, "2.2.2.2", SecurityEventSQLiProbe, "/x", recent)
 	}
 	for i := 0; i < 2; i++ {
 		insertWPSecurityEvent(t, "2.2.2.2", SecurityEventSQLiProbe, "/y", recent)
 	}
-	// 3.3.3.3: 时间窗口外的历史事件，即使次数够也不该计入
+	// 3.3.3.3: exclude events outside the time window even when their count is high enough.
 	for i := 0; i < 10; i++ {
 		insertWPSecurityEvent(t, "3.3.3.3", SecurityEventSQLiProbe, "/z", old)
 	}
@@ -578,7 +577,7 @@ func TestCheckWPSecurityEventThresholdFiresAndIncludesIPAndPaths(t *testing.T) {
 		t.Fatalf("alert message = %q, want it to mention the offending path", msg)
 	}
 
-	// 伪装爬虫规则应该是独立统计的，不应该被 SQLi 事件触发
+	// Fake-bot alerts must count independently of SQL injection events.
 	firing, _ = checkWPFakeSearchBotThreshold()
 	if firing {
 		t.Fatal("checkWPFakeSearchBotThreshold() firing = true, want false (only sqli events were inserted)")
@@ -590,7 +589,7 @@ func TestCheckWPSecurityEventThresholdTruncatesLargeOffenderList(t *testing.T) {
 	seedWPSecurityEventSite(t, t.TempDir())
 
 	recent := time.Now().UTC().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
-	// 分布式扫描：15 个不同 IP 都达到阈值，超过 wpSecurityAlertMaxOffenders（10）。
+	// Distributed scan: 15 qualifying IPs exceed wpSecurityAlertMaxOffenders (10).
 	const offenderCount = 15
 	for i := 0; i < offenderCount; i++ {
 		ip := fmt.Sprintf("10.0.0.%d", i+1)
@@ -614,8 +613,8 @@ func TestCheckWPSecurityEventThresholdTruncatesLargeOffenderList(t *testing.T) {
 
 func TestGetWPSecurityAlertConfigReturnsDefaults(t *testing.T) {
 	openTestDB(t)
-	// openTestDB 跑过 migrations，security_settings 中已有默认值 '10' / '24'。
-	// 这里验证读取流程端到端正确。
+	// openTestDB applies migrations with security_settings defaults of 10 and 24.
+	// Verify they are read correctly end to end.
 	cfg := getWPSecurityAlertConfig()
 	if cfg.threshold != defaultWPSecurityAlertThreshold {
 		t.Fatalf("cfg.threshold = %d, want default %d", cfg.threshold, defaultWPSecurityAlertThreshold)
@@ -653,7 +652,7 @@ func TestGetWPSecurityAlertConfigReadsDBValues(t *testing.T) {
 func TestGetWPSecurityAlertConfigClampsInvalidValuesToDefaults(t *testing.T) {
 	openTestDB(t)
 
-	// 低于下限：阈值 0、窗口 0 小时
+	// Below minimum: zero threshold and zero-hour window.
 	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = '0' WHERE skey = 'alert_wp_security_threshold'`); err != nil {
 		t.Fatalf("update threshold: %v", err)
 	}
@@ -668,7 +667,7 @@ func TestGetWPSecurityAlertConfigClampsInvalidValuesToDefaults(t *testing.T) {
 		t.Fatalf("cfg.window with 0 = %v, want default %v (clamped)", cfg.window, defaultWPSecurityAlertWindow)
 	}
 
-	// 超过上限：阈值 99999、窗口 999 小时
+	// Above maximum: threshold 99999 and window 999 hours.
 	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = '99999' WHERE skey = 'alert_wp_security_threshold'`); err != nil {
 		t.Fatalf("update threshold: %v", err)
 	}
@@ -683,7 +682,7 @@ func TestGetWPSecurityAlertConfigClampsInvalidValuesToDefaults(t *testing.T) {
 		t.Fatalf("cfg.window with 999 = %v, want default %v (clamped)", cfg.window, defaultWPSecurityAlertWindow)
 	}
 
-	// 非数字字符串
+	// Nonnumeric strings.
 	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = 'abc' WHERE skey = 'alert_wp_security_threshold'`); err != nil {
 		t.Fatalf("update threshold: %v", err)
 	}
@@ -697,13 +696,13 @@ func TestCheckWPSecurityEventThresholdUsesConfiguredThreshold(t *testing.T) {
 	openTestDB(t)
 	seedWPSecurityEventSite(t, t.TempDir())
 
-	// 把阈值改为 3，少于默认 10
+	// Lower the threshold from the default of 10 to 3.
 	if _, err := database.GetDB().Exec(`UPDATE security_settings SET svalue = '3' WHERE skey = 'alert_wp_security_threshold'`); err != nil {
 		t.Fatalf("update threshold: %v", err)
 	}
 
 	recent := time.Now().UTC().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
-	// 插入 3 条（达到新阈值，但低于默认 10）
+	// Three events meet the configured threshold but fall below the default.
 	for i := 0; i < 3; i++ {
 		insertWPSecurityEvent(t, "217.216.37.82", SecurityEventSQLiProbe, "/index.php", recent)
 	}
@@ -716,7 +715,7 @@ func TestCheckWPSecurityEventThresholdUsesConfiguredThreshold(t *testing.T) {
 		t.Fatalf("alert message = %q, want it to mention configured threshold 3", msg)
 	}
 
-	// 伪装爬虫规则不应被触发（事件类型独立统计）
+	// The fake-bot rule counts events independently and must not fire.
 	firing, _ = checkWPFakeSearchBotThreshold()
 	if firing {
 		t.Fatal("checkWPFakeSearchBotThreshold() firing = true, want false (only sqli events were inserted)")
@@ -735,7 +734,7 @@ func TestStopWPSecurityEventIngestorExitsCleanly(t *testing.T) {
 	done := wpSecurityIngestorDone
 	wpSecurityIngestorMu.Unlock()
 
-	// 等待初始 cycle 完成（openTestDB 没有 websites，IngestWPSecurityEvents 立即返回）
+	// Wait for the initial cycle; no websites exist, so ingestion returns immediately.
 	time.Sleep(50 * time.Millisecond)
 
 	StopWPSecurityEventIngestor()
@@ -746,6 +745,6 @@ func TestStopWPSecurityEventIngestorExitsCleanly(t *testing.T) {
 		t.Fatal("ingestor did not exit within 2s after Stop")
 	}
 
-	// 二次 Stop 应幂等，不 panic
+	// A second Stop must be safe and idempotent.
 	StopWPSecurityEventIngestor()
 }

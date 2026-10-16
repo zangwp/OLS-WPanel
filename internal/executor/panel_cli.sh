@@ -101,7 +101,7 @@ release_is_newer() {
 diag() {
     local issues=0 db="" endpoint="" port="" config_ready=0
 
-    # 1. 二进制
+    # Binary.
     if [ -x "$BIN" ]; then
         green "✓ 二进制: $BIN"
     elif [ -f "$BIN" ]; then
@@ -115,7 +115,7 @@ diag() {
         return $issues
     fi
 
-    # 2. 配置文件
+    # Configuration.
     if ! command -v python3 >/dev/null 2>&1; then
         red "✗ 缺少 python3，无法解析配置或显示维护页面"
         issues=$((issues+1))
@@ -139,7 +139,7 @@ PYDIAG
         return $issues
     fi
 
-    # 3. 数据库
+    # Database.
     if [ "$config_ready" -eq 1 ]; then
         db=$(python3 - "$CFG" <<'PYDB' 2>/dev/null
 import json,sys
@@ -158,7 +158,7 @@ PYDB
     fi
     fi
 
-    # 4. systemd 服务文件
+    # systemd unit.
     if [ -f "/etc/systemd/system/${SVC}.service" ]; then
         green "✓ systemd 服务文件: /etc/systemd/system/${SVC}.service"
     else
@@ -167,7 +167,7 @@ PYDB
         issues=$((issues+1))
     fi
 
-    # 5. 端口
+    # Port.
     if [ "$config_ready" -eq 1 ]; then
         endpoint=$(python3 - "$CFG" <<'PYPORT' 2>/dev/null
 import json,sys
@@ -189,7 +189,7 @@ PYPORT
         fi
     fi
 
-    # 6. systemd 状态
+    # systemd state.
     if systemctl is-active --quiet "$SVC"; then
         green "✓ 服务状态: 运行中"
     else
@@ -1615,7 +1615,7 @@ case "${1:-}" in
         ;;
     uninstall)
         if [ "${2:-}" = "--all" ]; then
-            # 完全卸载将删除网站文件、网站数据库与 OLS 面板；备份另行选择。
+            # Full uninstall removes websites, databases and the panel; backups are a separate choice.
             red "完全卸载：删除网站、数据库与面板，并移除运行环境。"
             uninstall_panel --purge
         elif [ -z "${2:-}" ]; then

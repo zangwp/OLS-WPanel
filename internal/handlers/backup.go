@@ -203,7 +203,6 @@ func (h *BackupHandler) Restore(c *gin.Context) {
 		return
 	}
 
-	// 检查本地文件是否存在
 	filePath, ok := siteDBBackupPath(site, filename)
 	if !ok {
 		c.JSON(http.StatusForbidden, models.ErrorResponse("备份路径越权"))

@@ -346,8 +346,8 @@ func executeCreateSite(task *Task) TaskResult {
 
 	allServerNames := buildServerNames(domain, payload.Aliases)
 
-	// LSPHP 子进程上限按建站当时的服务器内存/CPU 计算一次并持久化，
-	// 此后固定不变，不随服务器后续新增/删除站点而改变。
+	// Persist the RAM/CPU-based PHP child limit at site creation; later site
+	// additions or removals do not change it.
 	maxChildren := RecommendLSPHPMaxChildren(CollectSystemFacts())
 
 	olsVHostData := &OLSVHostData{
@@ -716,9 +716,9 @@ func terminalSourceMigrationMaintenancePaths(db *sql.DB, siteID int, olsVHostRoo
 	return paths, rows.Err()
 }
 
-// deleteSiteAndAssociatedCronJobs 原子删除网站记录和所有仍关联该网站的计划任务。
-// cron_jobs.site_id 的外键是 ON DELETE SET NULL；这里必须先显式删除关联任务，
-// 避免 wp_cron/file_backup 等任务在网站删除后变成继续执行的孤儿任务。
+// deleteSiteAndAssociatedCronJobs atomically deletes the site and its cron jobs.
+// Delete jobs first because ON DELETE SET NULL would leave wp_cron and
+// file_backup jobs orphaned and still running.
 func deleteSiteAndAssociatedCronJobs(db *sql.DB, siteID int) (bool, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -1104,7 +1104,7 @@ func executeUpdateDomains(task *Task) TaskResult {
 			return TaskResult{Success: false, Message: err.Error()}
 		}
 
-		// 预检查：所有目标和两份新配置都在触碰现有站点前确认可用。
+		// Validate targets and both new configs before changing the existing site.
 		if info, err := os.Stat(oldWebRoot); err != nil || !info.IsDir() {
 			return TaskResult{Success: false, Message: "原网站目录不可用"}
 		}
@@ -1172,7 +1172,7 @@ func executeUpdateDomains(task *Task) TaskResult {
 			return taskFailure("渲染 OpenLiteSpeed 配置失败", err)
 		}
 
-		// 切换：每完成一步才登记对应恢复动作。
+		// Register each recovery action only after its step succeeds.
 		if err := os.Rename(oldWebRoot, newWebRoot); err != nil {
 			return taskFailure("重命名网站目录失败", err)
 		}
@@ -1197,9 +1197,9 @@ func executeUpdateDomains(task *Task) TaskResult {
 			}
 		}
 
-		// 插件身份目录仍随面板主域名管理，但插件通过 OpenLiteSpeed LSPHP
-		// 外部应用注入的明确路径读取，
-		// 不再依赖 WordPress home URL。目标目录存在时拒绝覆盖，避免误删其他身份。
+		// Identity directories follow the panel's main domain. The plugin reads an
+		// explicit LSPHP-injected path rather than the WordPress home URL. Reject
+		// existing target directories to avoid overwriting another identity.
 		identityMoved, err := moveSitePluginIdentity(oldDomain, newDomain)
 		if err != nil {
 			return domainUpdateFailure("重命名插件密钥目录失败", err, rollbacks)
@@ -1269,7 +1269,7 @@ func executeUpdateDomains(task *Task) TaskResult {
 			return changeWebsitePrimaryDomain(site.ID, newDomain, site)
 		}})
 
-		// 验证：数据库、关键目录和启用链接必须共同指向新状态。
+		// Verify the database, key directories, and enable link all reflect the new state.
 		var savedDomain, savedWebRoot, savedLogDir string
 		if err := database.GetDB().QueryRow("SELECT domain, web_root, log_dir FROM websites WHERE id = ?", site.ID).
 			Scan(&savedDomain, &savedWebRoot, &savedLogDir); err != nil || savedDomain != newDomain || savedWebRoot != newWebRoot || savedLogDir != newLogDir {

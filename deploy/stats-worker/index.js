@@ -1,7 +1,7 @@
-// OLS WPanel 可选运行统计 Worker
-// POST /api/heartbeat — 面板伪匿名心跳上报
-// GET  /api/stats     — 公开统计（total + 精确 active_24h 滚动窗口）
-// GET  /api/ip-ranges/googlebot — Google 官方爬虫 IP 的最后有效缓存
+// Optional OLS WPanel telemetry Worker.
+// POST /api/heartbeat: pseudonymous panel heartbeat.
+// GET /api/stats: totals and an exact rolling active_24h window.
+// GET /api/ip-ranges/googlebot: last valid official Googlebot ranges.
 
 const GOOGLEBOT_UPSTREAM = 'https://developers.google.com/crawling/ipranges/common-crawlers.json';
 const GOOGLEBOT_CACHE_KEY = 'ip-ranges:googlebot:v1';
@@ -19,7 +19,7 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // 公开统计 — 按 id:* 的 last 时间精确计算最近 24 小时活跃数
+    // Count active instances from id:* last-seen timestamps in the past 24 hours.
     if (request.method === 'GET' && url.pathname === '/api/stats') {
       const stats = await getStats(env);
       return new Response(JSON.stringify(stats), {
@@ -50,7 +50,7 @@ export default {
       });
     }
 
-    // 伪匿名心跳 — 面板定时上报
+    // Periodic pseudonymous panel heartbeat.
     if (request.method === 'POST' && url.pathname === '/api/heartbeat') {
       try {
         const body = await request.json();
@@ -73,7 +73,7 @@ export default {
       }
     }
 
-    // 兼容旧部署：重建 total 快照。/api/stats 不再依赖该计数器。
+    // Rebuild the legacy total snapshot; /api/stats no longer uses this counter.
     if (request.method === 'POST' && url.pathname === '/api/migrate') {
       const stats = await getStats(env);
       await env.STATS_KV.put('meta:total', String(stats.total));
@@ -179,7 +179,7 @@ async function getStats(env) {
   };
 }
 
-// 写入心跳：每个伪匿名实例保留首次和最近一次上报时间。
+// Preserve each pseudonymous instance's first and latest heartbeat.
 async function saveHeartbeat(env, anonymousId, version) {
   const now = new Date().toISOString();
   const idKey = `id:${anonymousId}`;
@@ -198,7 +198,7 @@ async function saveHeartbeat(env, anonymousId, version) {
     { metadata: { last: now } }
   ));
 
-  // 新安装 → 总数 +1
+  // Increment the total for a newly seen instance.
   if (!existing) {
     const total = parseInt(await env.STATS_KV.get('meta:total')) || 0;
     writes.push(env.STATS_KV.put('meta:total', String(total + 1)));

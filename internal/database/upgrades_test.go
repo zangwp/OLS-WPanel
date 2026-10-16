@@ -579,9 +579,8 @@ func TestUpgrade1041BackfillsInventoryJobPriorities(t *testing.T) {
 	}
 }
 
-// revertWPUpdateTasksToPre1036Schema 把 wp_update_tasks 还原成 1.0.36（批量插件更新）
-// 之前的旧表结构（不含 auto_rollback/batch_id）。auto_rollback/batch_id 是表级 CHECK
-// 约束涉及的列，SQLite 的 DROP COLUMN 不支持这种情况，因此用整表重建的方式还原。
+// revertWPUpdateTasksToPre1036Schema removes auto_rollback and batch_id.
+// Rebuild the table because SQLite cannot drop columns used in table CHECK constraints.
 func revertWPUpdateTasksToPre1036Schema(t *testing.T) {
 	t.Helper()
 	for _, table := range []string{"wp_update_batches", "wp_update_batch_items"} {
@@ -708,13 +707,9 @@ func TestUpgradeAddsWPUpdateBatchSchemaFrom1035(t *testing.T) {
 	assertWPUpdateBatchSchemaComplete(t)
 }
 
-// TestRunMigrationsAloneDoesNotCrashOnPre1036WPUpdateTasksSchema 复现了一次真实的线上
-// 事故：面板升级到新二进制后，进程启动时 RunMigrations() 先于 RunUpgrades() 执行；如果
-// wp_update_tasks 表是旧版本建的（没有 auto_rollback/batch_id 列），而新增的索引/触发器
-// 又被错放进 RunMigrations() 无条件执行的语句列表里，会在字段还没被 RunUpgrades() 的
-// ALTER TABLE 补上之前就报 "no such column" 直接崩溃退出，导致面板服务起不来。
-// 这里只调用 RunMigrations()，完全不调用 RunUpgrades()，验证它自己就能把
-// auto_rollback/batch_id 字段和相关索引/触发器补齐，不会因为顺序问题崩溃。
+// TestRunMigrationsAloneDoesNotCrashOnPre1036WPUpdateTasksSchema covers a startup regression:
+// indexes and triggers referenced batch_id and auto_rollback before upgrades added them.
+// RunMigrations must add the columns and dependent objects without RunUpgrades.
 func TestRunMigrationsAloneDoesNotCrashOnPre1036WPUpdateTasksSchema(t *testing.T) {
 	openTempDB(t)
 	if err := RunMigrations(); err != nil {
@@ -725,7 +720,7 @@ func TestRunMigrationsAloneDoesNotCrashOnPre1036WPUpdateTasksSchema(t *testing.T
 	if err := RunMigrations(); err != nil {
 		t.Fatalf("RunMigrations() must not fail when wp_update_tasks predates auto_rollback/batch_id: %v", err)
 	}
-	// 幂等性：再跑一次也不能出错（模拟进程反复重启）。
+	// Repeated startup migrations must remain safe.
 	if err := RunMigrations(); err != nil {
 		t.Fatalf("second RunMigrations() error = %v", err)
 	}
@@ -808,12 +803,9 @@ func TestUpgradeAddsWPUpdateBatchRetrySchemaFrom1036(t *testing.T) {
 	assertWPUpdateBatchRetrySchemaComplete(t)
 }
 
-// TestRunMigrationsAloneDoesNotCrashOnPre1037WPUpdateBatchItemsSchema 验证若
-// wp_update_batch_items 表是升级到 1.0.37 之前建的（没有 retry_count/next_retry_at
-// 列），单独调用 RunMigrations()（不调用 RunUpgrades()）也不会因为字段缺失而崩溃——
-// migrations.go 里的 CREATE TABLE IF NOT EXISTS 对已存在的旧表是空操作，缺失的列
-// 需要等 RunUpgrades() 的版本化 ALTER TABLE 补上，这里只确认 RunMigrations() 本身
-// 在这种过渡状态下依然能正常启动、不报错。
+// TestRunMigrationsAloneDoesNotCrashOnPre1037WPUpdateBatchItemsSchema covers older tables
+// without retry_count and next_retry_at. CREATE TABLE IF NOT EXISTS leaves them unchanged;
+// RunMigrations must succeed while those columns await the versioned upgrade.
 func TestRunMigrationsAloneDoesNotCrashOnPre1037WPUpdateBatchItemsSchema(t *testing.T) {
 	openTempDB(t)
 	if err := RunMigrations(); err != nil {
@@ -862,7 +854,7 @@ func TestUpgradeAddsPasswordResetModeColumnFrom1033(t *testing.T) {
 		t.Fatalf("password_reset_mode exists = %d, want 1 after upgrade from 1.0.33", exists)
 	}
 
-	// 旧站点默认值必须与新装迁移一致，否则既有站点升级后行为漂移。
+	// Existing sites must retain the same default as fresh installs.
 	var def string
 	if err := DB.QueryRow("SELECT COALESCE(dflt_value, '') FROM pragma_table_info('websites') WHERE name = 'password_reset_mode'").Scan(&def); err != nil {
 		t.Fatalf("query password_reset_mode default: %v", err)
@@ -1403,8 +1395,7 @@ func TestUpgradeChainReachesFileBackupsBackfillFromExistingSchema(t *testing.T) 
 	}
 	insertMinimalWebsiteForBackfill(t, 1, "chain.example.com")
 
-	// 走真实入口 RunUpgrades()，而不是直接调用 backfillFileBackupsFromRoot，
-	// 确保 1.0.25 这一步真的会被执行到（生产环境正是通过这条链路触发回填）。
+	// Use the production upgrade entry point to verify that the 1.0.25 backfill is reachable.
 	if err := RunUpgrades(); err != nil {
 		t.Fatalf("RunUpgrades() from 1.0.24 error = %v", err)
 	}
@@ -1417,8 +1408,7 @@ func TestUpgradeChainReachesFileBackupsBackfillFromExistingSchema(t *testing.T) 
 		t.Fatalf("schema_version = %q, want %q (RunUpgrades must execute through the latest step)", version, LatestVersion())
 	}
 
-	// 生产环境的 backfillFileBackupsFromDisk 固定读取 config.DefaultBackupDir，测试环境里这个
-	// 目录不存在，所以升级步骤应该安全跳过（不报错、不插入任何记录），而不是失败。
+	// The fixed production backup root is absent here; backfilling must safely skip it.
 	var count int
 	if err := DB.QueryRow(`SELECT COUNT(*) FROM file_backups`).Scan(&count); err != nil {
 		t.Fatalf("count file_backups: %v", err)
@@ -1473,7 +1463,7 @@ func TestBackfillFileBackupsFromRootInsertsUntrackedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filesDir, inc), []byte("inc"), 0644); err != nil {
 		t.Fatalf("write incremental backup fixture: %v", err)
 	}
-	// 不相关的文件（命名不匹配）应该被忽略
+	// Ignore unrelated filenames.
 	if err := os.WriteFile(filepath.Join(filesDir, "notes.txt"), []byte("irrelevant"), 0644); err != nil {
 		t.Fatalf("write unrelated fixture: %v", err)
 	}
@@ -1573,8 +1563,8 @@ func TestBackfillFileBackupsFromRootSkipsSitesWithoutBackupDir(t *testing.T) {
 
 func TestBackfillFileBackupsFromRootToleratesMissingTables(t *testing.T) {
 	openTempDB(t)
-	// 不建 websites / file_backups 表，模拟老得多的 schema_version 起点跑升级链的场景
-	// （真实场景见 TestUpgradeAddsBotRateLimitSettingsToExistingSchema，从 1.0.12 开始跑）。
+	// Omit websites and file_backups to simulate an older schema_version starting point
+	// like the 1.0.12 fixture in TestUpgradeAddsBotRateLimitSettingsToExistingSchema.
 	if err := backfillFileBackupsFromRoot(t.TempDir()); err != nil {
 		t.Fatalf("backfillFileBackupsFromRoot() error = %v, want nil when websites/file_backups tables don't exist yet", err)
 	}
@@ -1883,11 +1873,9 @@ func TestUpgradeAddsCDNRealIPColumnToOldSchema(t *testing.T) {
 func TestUpgradeAddsBotRateLimitSettingsToExistingSchema(t *testing.T) {
 	openTempDB(t)
 
-	// 真实安装在 RunUpgrades() 之前一定先跑过 RunMigrations()，websites/security_settings
-	// 等表（含 security_settings 的 INSERT OR IGNORE 基线种子数据）已经存在；后续版本
-	// （如 1.0.52）会对 websites 表做 ALTER TABLE ADD COLUMN，需要这个前提才不会报错。
-	// security_settings 的基线种子已经包含本测试断言的 bot_limit_* 键值，之后 1.0.13
-	// 升级步骤里的 INSERT OR IGNORE 会是正常的幂等空操作，不影响本测试的断言语义。
+	// Production runs RunMigrations first, creating websites and security_settings
+	// before later ALTER TABLE steps. Baseline bot_limit_* seeds already exist here,
+	// so the 1.0.13 INSERT OR IGNORE step is an expected no-op.
 	if err := RunMigrations(); err != nil {
 		t.Fatalf("RunMigrations() error = %v", err)
 	}

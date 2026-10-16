@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// BackupDatabase 使用 VACUUM INTO 对在线数据库做一致性热备
+// BackupDatabase creates a consistent online backup with VACUUM INTO.
 func BackupDatabase(backupDir string) (string, error) {
 	return backupDatabaseAt(backupDir, time.Now())
 }
@@ -58,7 +58,7 @@ func backupDatabaseAt(backupDir string, now time.Time) (string, error) {
 	return backupPath, nil
 }
 
-// DBBackupInfo 备份文件信息
+// DBBackupInfo describes a panel database backup file.
 type DBBackupInfo struct {
 	Filename  string `json:"filename"`
 	Size      int64  `json:"size"`
@@ -66,7 +66,7 @@ type DBBackupInfo struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// ListDBBackups 列出所有面板数据库备份
+// ListDBBackups lists panel database backups from newest to oldest.
 func ListDBBackups(backupDir string) ([]DBBackupInfo, error) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -85,7 +85,7 @@ func ListDBBackups(backupDir string) ([]DBBackupInfo, error) {
 		if err != nil {
 			continue
 		}
-		// 同秒备份可带序号: panel_20260107_023000_000000001.db。
+		// Backups created in the same second may include a suffix: panel_20260107_023000_000000001.db.
 		name := strings.TrimPrefix(e.Name(), "panel_")
 		name = strings.TrimSuffix(name, ".db")
 		displayTime := name
@@ -105,7 +105,6 @@ func ListDBBackups(backupDir string) ([]DBBackupInfo, error) {
 		})
 	}
 
-	// 按时间降序
 	sort.Slice(backups, func(i, j int) bool {
 		return backups[i].Filename > backups[j].Filename
 	})
@@ -116,7 +115,7 @@ func ListDBBackups(backupDir string) ([]DBBackupInfo, error) {
 	return backups, nil
 }
 
-// CleanupOldDBBackups 保留最近的 keepCount 份备份，删除其余
+// CleanupOldDBBackups retains the newest keepCount backups.
 func CleanupOldDBBackups(backupDir string, keepCount int) int {
 	backups, err := ListDBBackups(backupDir)
 	if err != nil || len(backups) <= keepCount {
@@ -133,9 +132,9 @@ func CleanupOldDBBackups(backupDir string, keepCount int) int {
 	return removed
 }
 
-// RestoreDBBackupPath 返回指定备份文件的完整路径，校验文件存在
+// RestoreDBBackupPath returns the full path of an existing backup.
 func RestoreDBBackupPath(backupDir, filename string) (string, error) {
-	// 安全校验：防止路径遍历
+	// Reject path traversal.
 	clean := filepath.Clean(filename)
 	if clean != filename || strings.Contains(clean, "/") || strings.Contains(clean, "\\") {
 		return "", fmt.Errorf("非法文件名")
@@ -151,7 +150,7 @@ func RestoreDBBackupPath(backupDir, filename string) (string, error) {
 	return fullPath, nil
 }
 
-// VerifyDBBackup 打开备份文件执行 PRAGMA integrity_check，校验备份完整性
+// VerifyDBBackup checks backup integrity with PRAGMA integrity_check.
 func VerifyDBBackup(backupPath string) error {
 	db, err := sql.Open("sqlite", backupPath)
 	if err != nil {

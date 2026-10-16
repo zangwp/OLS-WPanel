@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// validMemoryLimit 匹配合法的 PHP 内存限制值，如 128M、256M、1G、512K 或纯数字字节数。
+// validMemoryLimit accepts PHP memory limits such as 128M, 1G, 512K, or a byte count.
 var validMemoryLimit = regexp.MustCompile(`^\d+[KMG]?$`)
 
 var errWPConfigChanged = errors.New("wp-config.php changed after optimization update")
@@ -21,8 +21,8 @@ type WPOptimizations struct {
 	DisableFileEditing          bool
 	WPDebug                     bool
 	WPDebugDisplay              bool
-	WPPostRevisions             int    // -1 = 不设置, >=0 = define 的值
-	WPMemoryLimit               string // 空 = 不设置, 如 "128M"
+	WPPostRevisions             int    // -1 removes the definition; >=0 defines the value.
+	WPMemoryLimit               string // Empty removes the definition; otherwise e.g. "128M".
 }
 
 func ApplyWPOptimizations(webRoot string, opts WPOptimizations) error {
@@ -34,11 +34,11 @@ func ApplyWPOptimizations(webRoot string, opts WPOptimizations) error {
 
 func renderWPOptimizations(content string, opts WPOptimizations) string {
 
-	// 布尔常量：开启时插入，关闭时移除
+	// Insert enabled boolean constants; remove disabled ones.
 	content = applyBoolConstant(content, "AUTOMATIC_UPDATER_DISABLED", opts.DisableUpdates)
 	content = applyBoolConstant(content, "DISALLOW_FILE_EDIT", opts.DisableFileEditing)
 
-	// WP_DEBUG: 开启时写入 debug 三件套，关闭时移除 WP_DEBUG 及其关联常量（移除后 WordPress 默认 false）
+	// WP_DEBUG manages all three debug constants; removing them restores the WordPress false default.
 	content = applyBoolConstant(content, "WP_DEBUG", opts.WPDebug)
 	if opts.WPDebug {
 		content = applyBoolConstant(content, "WP_DEBUG_LOG", true)
@@ -48,14 +48,13 @@ func renderWPOptimizations(content string, opts WPOptimizations) string {
 		content = removeConstant(content, "WP_DEBUG_DISPLAY")
 	}
 
-	// WP_POST_REVISIONS: -1 不处理，>=0 写入数值
 	if opts.WPPostRevisions >= 0 {
 		content = applyIntConstant(content, "WP_POST_REVISIONS", opts.WPPostRevisions)
 	} else {
 		content = removeConstant(content, "WP_POST_REVISIONS")
 	}
 
-	// WP_MEMORY_LIMIT: 空字符串移除；非法格式拒绝写入（防止单引号等字符破坏 php 文件）
+	// WP_MEMORY_LIMIT: empty removes it; reject invalid syntax that could corrupt the PHP file.
 	if opts.WPMemoryLimit != "" {
 		if validMemoryLimit.MatchString(strings.ToUpper(opts.WPMemoryLimit)) {
 			content = applyStringConstant(content, "WP_MEMORY_LIMIT", strings.ToUpper(opts.WPMemoryLimit))

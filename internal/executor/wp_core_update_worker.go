@@ -376,11 +376,11 @@ func (w *WPCoreUpdateWorker) run(ctx context.Context, done chan struct{}) {
 		}
 		if w.processOne(ctx) {
 			idle.reset()
-			// task 刚完成（站点名额释放），立即推进批量派发下一项，不必等 30s sweep。
+			// Dispatch the next batch item as soon as a task frees the site slot.
 			w.tickBatchOrchestrator()
 			continue
 		}
-		// 入队会唤醒 worker；限时空闲轮询和 30s sweep 兜底外部进程提交。
+		// Enqueue wakes the worker; bounded idle polling and the 30s sweep catch external submissions.
 		w.tickBatchOrchestrator()
 		if !idle.wait(ctx) {
 			return
@@ -429,8 +429,8 @@ func (w *WPCoreUpdateWorker) cleanupRetainedArtifacts(ctx context.Context, now t
 	}
 }
 
-// tickBatchOrchestrator 推进批量派发。入队唤醒和 task 完成触发，
-// 空闲轮询及 sweep 作为 30s 兜底；Tick 内部有互斥锁防并发。
+// tickBatchOrchestrator dispatches on enqueue and task completion, with idle polling
+// and a 30s sweep as fallbacks. Tick serializes access internally.
 func (w *WPCoreUpdateWorker) tickBatchOrchestrator() {
 	if w.batchOrchestrator != nil {
 		w.batchOrchestrator.Tick(context.Background())

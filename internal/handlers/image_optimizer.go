@@ -8,14 +8,10 @@ import (
 	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
-// ImageOptimizerHandler 是配套插件设置页"历史图库批量优化"小节对应的接口：
-// 启动任务 / 查询进度 / 停止任务。真正的扫描、降权执行、进度记录都在
-// executor 的 image_batch_* 里，这里只做参数校验和状态转译。
-//
-// 插件不持有面板管理员会话，走的是跟 CacheHelperHandler 其他接口一样的
-// "仅本机回环 + 站点 API Key"认证（pluginSiteByDomain），不是 protected
-// 分组的 SessionRequired()——面板后台本身不提供这个入口（用户反馈这个功能
-// 更适合在 WordPress 后台操作，面板侧看不到实时进度同步，已移除面板入口）。
+// ImageOptimizerHandler validates and exposes batch image optimization jobs
+// managed by executor/image_batch_*. The WordPress plugin authenticates through
+// pluginSiteByDomain using loopback access and the site API key. The panel has no
+// equivalent entry point; progress is shown in WordPress.
 type ImageOptimizerHandler struct{}
 
 func (h *ImageOptimizerHandler) PluginStart(c *gin.Context) {
@@ -40,8 +36,8 @@ func (h *ImageOptimizerHandler) PluginStart(c *gin.Context) {
 		}
 		if status, statusErr := executor.GetImageOptimizationJobStatus(site.ID); statusErr == nil && status != nil &&
 			(status.Status == "queued" || status.Status == "running") {
-			// key 大小写要跟 PluginStatus 返回的 ImageOptimizationJobStatus 结构（无 json
-			// tag，字段名原样输出）一致，插件侧 JS 统一按大写字段名（data.data.Status）读取。
+			// Match the untagged ImageOptimizationJobStatus field names returned by PluginStatus;
+			// plugin JavaScript reads capitalized keys such as data.data.Status.
 			c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"ID": status.ID, "Status": status.Status}))
 			return
 		}
@@ -63,7 +59,7 @@ func (h *ImageOptimizerHandler) PluginStatus(c *gin.Context) {
 		return
 	}
 
-	// 历史累计节省量跟当前任务是否存在无关，两个查询都要走，任一失败不影响另一个。
+	// Lifetime savings and the current job are independent; query both even if one fails.
 	lifetimeSaved, err := executor.GetImageOptimizationLifetimeSavedBytes(site.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("查询失败"))

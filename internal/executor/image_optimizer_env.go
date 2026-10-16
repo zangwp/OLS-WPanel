@@ -12,16 +12,14 @@ func primaryPHPExifPackage() string {
 	return "lsphp" + strings.ReplaceAll(PrimaryLSPHPVersion(), ".", "") + "-common"
 }
 
-// jpegoptimPackage/optipngPackage 是历史图库批量优化依赖的无损压缩二进制，
-// 只影响那一个功能，跟 LSPHP 的 EXIF 支持（影响新上传处理）互不混淆。
+// jpegoptimPackage/optipngPackage support existing-image optimization.
+// LSPHP EXIF support separately handles new uploads.
 const jpegoptimPackage = "jpegoptim"
 const optipngPackage = "optipng"
 
-// EnsurePHPExifExtension 保证 LSPHP common 扩展包已安装，供配套插件的新上传图片处理
-// （EXIF 方向修正）使用。新装机通过 install.sh 已经装了这个包；这个函数是给已经
-// 装机的老服务器做补装，异步执行、不阻塞面板启动，装完重启 lshttpd 让扩展
-// 生效。插件侧不查询这个函数的状态——它直接在 PHP 运行时用
-// is_callable('exif_read_data') 判断，装好之后下次页面加载自然可用。
+// EnsurePHPExifExtension installs LSPHP common for EXIF orientation correction on new uploads.
+// install.sh handles new servers; this asynchronous backfill restarts lshttpd on existing servers.
+// The plugin checks is_callable('exif_read_data') at runtime, so the next page load detects installation.
 func EnsurePHPExifExtension() {
 	phpExifPackage := primaryPHPExifPackage()
 	ensureAptPackage(phpExifPackage, func() {
@@ -33,16 +31,14 @@ func EnsurePHPExifExtension() {
 	})
 }
 
-// EnsureImageBatchBinaries 保证历史图库批量优化依赖的 jpegoptim/optipng 已安装。
-// 这两个是独立二进制，装完不需要重载任何服务，装好之后下次批量任务扫描时
-// ImageBatchBinariesReady() 直接能感知到。
+// EnsureImageBatchBinaries installs jpegoptim/optipng for batch image optimization.
+// No service reload is needed; ImageBatchBinariesReady detects them on the next scan.
 func EnsureImageBatchBinaries() {
 	ensureAptPackage(jpegoptimPackage, nil)
 	ensureAptPackage(optipngPackage, nil)
 }
 
-// ImageBatchBinariesReady 供面板 API 判断历史图库批量优化当前是否可用
-// （jpegoptim 和 optipng 都已经能找到）。
+// ImageBatchBinariesReady reports whether both batch optimization binaries are available.
 func ImageBatchBinariesReady() bool {
 	return binaryInPath(jpegoptimPackage) && binaryInPath(optipngPackage)
 }

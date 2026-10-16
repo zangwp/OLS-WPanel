@@ -3,10 +3,10 @@ set -e
 set -o pipefail
 
 # ============================================================
-# OLS WPanel 签名引导脚本
-# 主安装逻辑统一维护在 install.sh。
-# install-cn.sh 默认启用国内优先策略；Release 同时从本文件生成
-# bootstrap.sh，并将默认策略切换为全球直连。
+# Signed OLS WPanel bootstrap.
+# Shared installation logic lives in install.sh.
+# This entry prefers China mirrors; the Release-generated bootstrap.sh
+# defaults to direct global downloads.
 # ============================================================
 
 RED='\033[0;31m'

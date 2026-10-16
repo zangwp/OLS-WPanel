@@ -44,11 +44,11 @@ const googlebotOfficialURL = "https://developers.google.com/crawling/ipranges/co
 
 var googlebotHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
-// fail2banFilterConfig 只负责全站洪泛/探测信号（429 限流、敏感文件 404 探测）。
-// 登录/XML-RPC 认证爆破信号已经拆分到 fail2banLoginFilterConfig + olswpanel-login
-// jail，读取的是 WordPress wp_login_failed 写入的 wp-login-security.log，不再
-// 从这里的 access.log 里用响应状态推测登录失败——避免同一次登录失败被两个
-// jail 分别计数、触发两次独立封禁。
+// fail2banFilterConfig handles site-wide flooding and probes: rate-limited 429s
+// and sensitive-file 404s. Login and XML-RPC failures use
+// fail2banLoginFilterConfig and the olswpanel-login jail, reading
+// wp-login-security.log from wp_login_failed. Keeping them out of access.log
+// detection prevents two jails from counting and banning the same failure.
 const fail2banSensitive404Regex = `(?i)^<HOST> - - \[.*\] "(?:GET|POST) .*(?:\.env(?:\.[^/?\s"]+)?|\.git|config\.bak|wp-config\.php|secrets\.(?:json|ya?ml)|settings\.py|application\.properties|config\.toml|\.sql|\.tar|\.gz|\.zip|\.old|\.swp|\.save|\.ds_store)(?:[/?\s"]|$).*" 404 .*$`
 
 const fail2banFilterConfig = `# OLS WPanel Generated — DO NOT EDIT MANUALLY
@@ -1696,7 +1696,7 @@ func fetchGooglebotIPsFromURL(url string) ([]string, error) {
 	return validateOfficialIPRanges(ips)
 }
 
-// NormalizeOfficialIPRanges 接受一行一个 IP/CIDR，返回可安全用于官方爬虫验证的公网网段。
+// NormalizeOfficialIPRanges parses one IP/CIDR per line into public ranges for crawler verification.
 func NormalizeOfficialIPRanges(raw string) ([]string, error) {
 	if strings.HasPrefix(strings.TrimSpace(raw), "{") {
 		var data struct {

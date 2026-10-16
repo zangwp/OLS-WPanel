@@ -67,7 +67,7 @@ func TestApplyWPPasswordResetModeAllFilterSignature(t *testing.T) {
 		t.Fatalf("read mu-plugin: %v", err)
 	}
 	content := string(data)
-	// 全站禁用必须注册 allow_password_reset 过滤器，且返回 __return_false（拒绝所有找回）。
+	// Disabling all resets must register allow_password_reset with __return_false.
 	if !strings.Contains(content, "add_filter('allow_password_reset', '__return_false');") {
 		t.Fatalf("all mode filter signature missing")
 	}
@@ -83,8 +83,8 @@ func TestApplyWPPasswordResetModeAdminFilterSignature(t *testing.T) {
 		t.Fatalf("read mu-plugin: %v", err)
 	}
 	content := string(data)
-	// 仅禁用管理员：过滤器必须接收 2 个参数（$allow, $user_id）并以优先级 10 注册，
-	// 否则 WordPress 不会把 $user_id 传入回调，无法判断是否为管理员。
+	// The admin-only filter needs priority 10 and two arguments so WordPress passes $user_id
+	// to the callback for the administrator check.
 	if !strings.Contains(content, "add_filter('allow_password_reset', function ($allow, $user_id) {") {
 		t.Fatalf("admin filter opening signature missing")
 	}
@@ -95,7 +95,7 @@ func TestApplyWPPasswordResetModeAdminFilterSignature(t *testing.T) {
 
 func TestApplyWPPasswordResetModeMkdirAllFails(t *testing.T) {
 	root := t.TempDir()
-	// 在 mu-plugins 路径上放一个同名普通文件，使 MkdirAll 失败。
+	// A regular file at mu-plugins forces MkdirAll to fail.
 	if err := os.MkdirAll(filepath.Join(root, "wp-content"), 0755); err != nil {
 		t.Fatalf("mkdir wp-content: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestApplyWPPasswordResetModeWriteFails(t *testing.T) {
 	if err := os.MkdirAll(muDir, 0755); err != nil {
 		t.Fatalf("mkdir mu-plugins: %v", err)
 	}
-	// 让目标文件路径本身是一个目录，WriteFile 会失败（is a directory）。
+	// A directory at the target file path forces WriteFile to fail.
 	if err := os.MkdirAll(filepath.Join(muDir, wpPasswordResetPluginFile), 0755); err != nil {
 		t.Fatalf("mkdir plugin path as dir: %v", err)
 	}
@@ -125,8 +125,7 @@ func TestApplyWPPasswordResetModeWriteFails(t *testing.T) {
 
 func TestApplyWPPasswordResetModeChownFails(t *testing.T) {
 	root := t.TempDir()
-	// 传入不存在的系统用户：ChownSitePath 的 user.Lookup 失败应返回错误，
-	// 而不是静默吞掉（审核修复点：mu-plugin 文件 chown 失败必须报错）。
+	// An unknown system user must surface the ChownSitePath lookup error.
 	if err := ApplyWPPasswordResetMode(root, "no-such-system-user-xyz-12345", PasswordResetModeAll); err == nil {
 		t.Fatalf("expected error when system user does not exist")
 	}
@@ -173,7 +172,7 @@ func TestApplyWPPasswordResetModeWritesInsideWebRoot(t *testing.T) {
 	if _, err := os.Stat(want); err != nil {
 		t.Fatalf("mu-plugin not written at expected path %s: %v", want, err)
 	}
-	// 断言不能通过构造派生路径逃出 webRoot：固定子目录拼接 cleaning 后不可能越界。
+	// The fixed subdirectory must remain inside webRoot after path cleaning.
 }
 
 func TestApplyWPPasswordResetModeRejectsSymlinkedMuPlugins(t *testing.T) {
