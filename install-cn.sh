@@ -228,7 +228,7 @@ verify_install_script_bundle() {
     actual_sha=$(sha256sum "$script_file" | awk '{print $1}') || return 1
     [[ "${actual_sha,,}" == "${expected_sha,,}" ]] || return 1
 
-    grep -qF "OLS WPanel 安装脚本" "$script_file" && \
+    [[ "$(head -n 1 "$script_file")" == '#!/bin/bash' ]] && \
         grep -qF "RELEASE_PUBLIC_KEY_HEX=\"${RELEASE_PUBLIC_KEY_HEX}\"" "$script_file" && \
         grep -qFx "INSTALLER_RELEASE_VERSION=\"${BOOTSTRAP_RELEASE_VERSION}\"" "$script_file" && \
         grep -qF "verify_panel_release_bundle" "$script_file"

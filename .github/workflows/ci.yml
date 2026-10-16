@@ -21,6 +21,7 @@ env:
   GOVCS: '*:off'
   GOTOOLCHAIN: local
   OLS_WPANEL_REQUIRE_PHP_TESTS: '1'
+  OLS_WPANEL_REQUIRE_BOOTSTRAP_TESTS: '1'
 
 jobs:
   verify:
