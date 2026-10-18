@@ -200,8 +200,8 @@
                 <p class="text-xs text-gray-500 mt-1" x-show="fileSecuritySummary" x-text="t('firewall.file_security_summary', { sites: fileSecuritySummary?.sites_scanned || 0, files: fileSecuritySummary?.file_events || 0, access: fileSecuritySummary?.access_events || 0 })"></p>
             </div>
                 <div class="flex items-center space-x-2">
-                    <button @click="refreshFileSecurityEvents(false)" :disabled="fileSecurityLoading" class="btn-secondary text-xs py-1.5 px-3" x-text="fileSecurityLoading ? t('firewall.refreshing') : t('firewall.incremental_refresh')"></button>
-                    <button @click="refreshFileSecurityEvents(true)" :disabled="fileSecurityLoading" class="btn-danger text-xs py-1.5 px-3" x-text="fileSecurityLoading ? t('firewall.scanning') : t('firewall.clear_rescan')"></button>
+                    <button @click="refreshFileSecurityEvents(false)" :disabled="fileSecurityLoading" class="btn-secondary text-xs py-1.5 px-3" x-text="fileSecurityAction === 'refresh' ? t('firewall.refreshing') : t('firewall.incremental_refresh')"></button>
+                    <button @click="refreshFileSecurityEvents(true)" :disabled="fileSecurityLoading" class="btn-danger text-xs py-1.5 px-3" x-text="fileSecurityAction === 'rescan' ? t('firewall.scanning') : t('firewall.clear_rescan')"></button>
                 </div>
         </div>
         <div class="overflow-x-auto">

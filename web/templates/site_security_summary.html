@@ -30,7 +30,7 @@
                         </details>
                         <div class="site-security-row-actions" x-show="summaryCheck(key).can_verify || summarySettingsAvailable(key)">
                             <button type="button" class="site-security-action" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" :aria-label="siteSecurityTitle(key) + ': ' + t('site_security.verify')" x-text="verifyingKey === key ? t('site_security.verifying') : t('site_security.verify_short')"></button>
-                            <button type="button" class="site-security-action" x-show="!summaryCheck(key).can_verify && summarySettingsAvailable(key)" :disabled="securityStatusLoading || !!verifyingKey" @click="openSummarySettings(key)" :aria-label="siteSecurityTitle(key) + ': ' + summarySettingsText(key)" x-text="summarySettingsText(key)"></button>
+                            <button type="button" class="site-security-action" x-show="!summaryCheck(key).can_verify && summarySettingsAvailable(key)" @click="openSummarySettings(key)" :aria-label="siteSecurityTitle(key) + ': ' + summarySettingsText(key)" x-text="summarySettingsText(key)"></button>
                         </div>
                     </div>
                 </template>
@@ -84,7 +84,7 @@ function siteSecuritySummary() {
             return t(key === 'uptime_monitor' ? 'site_security.view_alerts' : key === 'anomaly_monitor' ? 'site_security.check_results' : key === 'backup' ? 'site_security.view_backups' : 'site_security.view_settings');
         },
         openSummarySettings(key) {
-            if (this.securityStatusLoading || this.verifyingKey || !this.summarySettingsAvailable(key)) return;
+            if (!this.summarySettingsAvailable(key)) return;
             if (key === 'uptime_monitor' || key === 'backup') { window.location.assign('/{{.RandomSuffix}}/' + (key === 'uptime_monitor' ? 'alert' : 'backups')); return; }
             const anchor = {file_lock:'site-protection',file_editing:'site-file-editing-control',anomaly_monitor:'site-wp-anomaly'}[key];
             if (anchor) { window.location.hash = '#' + anchor; this.scrollDetailAnchor(); }

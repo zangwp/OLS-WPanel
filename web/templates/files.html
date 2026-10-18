@@ -189,7 +189,7 @@
                     <span x-show="loadingFiles">{{t .Lang "files.refreshing"}}</span>
                     <span x-show="!loadingFiles">{{t .Lang "files.refresh"}}</span>
                 </button>
-                <button @click="showMkdir = true" :disabled="!selectedSite || loadingFiles" class="btn-secondary text-sm">{{t .Lang "files.new_directory"}}</button>
+                <button @click="mkdirVersion++; showMkdir = true" :disabled="!selectedSite || loadingFiles" class="btn-secondary text-sm">{{t .Lang "files.new_directory"}}</button>
                 <button @click="fixPermissions()" :disabled="!selectedSite || selectedSite == '0' || fixingPerms" class="btn-secondary text-sm">
                     <span x-show="fixingPerms">{{t .Lang "files.fixing_permissions"}}</span>
                     <span x-show="!fixingPerms">{{t .Lang "files.fix_permissions"}}</span>
@@ -208,14 +208,14 @@
         <div x-show="showMkdir" class="flex items-center space-x-2 mb-4 p-3 bg-gray-700/50 rounded">
             <span class="text-sm text-gray-300">{{t .Lang "files.directory_name"}}</span>
             <input type="text" x-model="mkdirName" @keyup.enter="createDir()" class="input-field w-48 text-sm" placeholder="{{t .Lang "files.new_directory_placeholder"}}">
-            <button @click="createDir()" class="btn-primary text-sm">{{t .Lang "files.create"}}</button>
+            <button @click="createDir()" :disabled="mkdirSubmitting || loadingFiles" class="btn-primary text-sm" x-text="mkdirSubmitting ? t('common.loading') : t('files.create')"></button>
             <button @click="showMkdir = false; mkdirName = ''" class="btn-secondary text-sm">{{t .Lang "files.cancel"}}</button>
         </div>
 
         <div x-show="showRename" class="flex items-center space-x-2 mb-4 p-3 bg-gray-700/50 rounded">
             <span class="text-sm text-gray-300">{{t .Lang "files.rename_prefix"}} <span class="text-white" x-text="renameTarget"></span> {{t .Lang "files.rename_suffix"}}</span>
             <input type="text" x-model="renameName" @keyup.enter="doRename()" class="input-field w-48 text-sm">
-            <button @click="doRename()" class="btn-primary text-sm">{{t .Lang "files.confirm"}}</button>
+            <button @click="doRename()" :disabled="renameSubmitting || loadingFiles" class="btn-primary text-sm" x-text="renameSubmitting ? t('common.loading') : t('files.confirm')"></button>
             <button @click="showRename = false" class="btn-secondary text-sm">{{t .Lang "files.cancel"}}</button>
         </div>
 
@@ -373,10 +373,14 @@ function fileManager() {
         archiveBusyText: '',
         showMkdir: false,
         mkdirName: '',
+        mkdirSubmitting: false,
+        mkdirVersion: 0,
         showRename: false,
         renameTarget: '',
         renameLocation: null,
         renameName: '',
+        renameSubmitting: false,
+        renameVersion: 0,
         clipboard: null,
         showRemoteImport: false,
         remoteImportUrl: '',
@@ -573,8 +577,10 @@ function fileManager() {
             this.selected = [];
             this.loadingFiles = true;
             this.loadError = '';
-            this.showRename = false;
-            this.showMkdir = false;
+            if (String(siteID) !== String(this.selectedSite) || path !== this.currentPath) {
+                this.showRename = false;
+                this.showMkdir = false;
+            }
             try {
                 let url;
                 if (searching) {
@@ -853,8 +859,10 @@ function fileManager() {
             }
         },
         async fixPermissions() {
+            if (this.fixingPerms) return;
             const target = this.locationSnapshot();
             if (!await confirmModal(t('files.confirm_fix_permissions', { domain: this.sites.find(s => s.id == this.selectedSite)?.domain || '' }))) return;
+            if (this.fixingPerms) return;
             this.fixingPerms = true;
             try {
                 const r = await api('/files/fix-permissions?site_id=' + target.siteID, { method: 'POST' });
@@ -873,6 +881,7 @@ function fileManager() {
         },
         startRename(name) {
             if (this.loadingFiles) return;
+            this.renameVersion++;
             this.renameTarget = name;
             this.renameLocation = this.locationSnapshot();
             this.renameName = name;
@@ -883,35 +892,46 @@ function fileManager() {
             });
         },
         async doRename() {
-            if (this.loadingFiles || !this.renameLocation) return;
+            if (this.loadingFiles || this.renameSubmitting || !this.renameLocation) return;
             const target = this.renameLocation;
+            const version = this.renameVersion, draft = this.renameName;
             const name = this.renameName.trim();
             if (!name || name === this.renameTarget) { this.showRename = false; return; }
             const oldPath = this.pathFor(this.renameTarget, target.path);
+            this.renameSubmitting = true;
             try {
                 await api('/files/rename', {
                     method: 'PUT',
                     body: { site_id: parseInt(target.siteID), old_path: oldPath, new_name: name }
                 });
-                this.showRename = false;
+                if (version === this.renameVersion) {
+                    this.renameTarget = name;
+                    if (draft === this.renameName) this.showRename = false;
+                }
                 this.refreshLocation(target);
                 showToast(t('files.rename_success'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
+            finally { this.renameSubmitting = false; }
         },
         async createDir() {
-            if (this.loadingFiles) return;
+            if (this.loadingFiles || this.mkdirSubmitting) return;
             const target = this.locationSnapshot();
+            const version = this.mkdirVersion, draft = this.mkdirName;
             const name = this.mkdirName.trim();
             if (!name) return;
+            this.mkdirSubmitting = true;
             try {
                 await api('/files/mkdir?site_id=' + target.siteID + '&path=' + encodeURIComponent(target.path), {
                     method: 'POST', body: { name }
                 });
-                this.showMkdir = false;
-                this.mkdirName = '';
+                if (version === this.mkdirVersion && draft === this.mkdirName) {
+                    this.showMkdir = false;
+                    this.mkdirName = '';
+                }
                 this.refreshLocation(target);
                 showToast(t('files.mkdir_success'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
+            finally { this.mkdirSubmitting = false; }
         },
         pathFor(name, path = this.currentPath) { return path === '/' ? '/' + name : path + '/' + name; },
         isArchive(name) {

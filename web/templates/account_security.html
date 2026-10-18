@@ -257,11 +257,14 @@ function accountSecurity() {
         },
         async fetchNotifications() {
             if (this.notificationsLoading || this.notificationsSaving) return false;
+            const before = this.notificationDraft, clean = before === this.notifications.enabled;
             this.notificationsLoading = true; this.notificationsLoaded = false; this.notificationsError = '';
             try {
                 const data = this.responseData(await api('/auth/security-notifications', { suppressToast: true }));
                 if (typeof data?.enabled !== 'boolean') throw new Error(t('security_center.request_failed'));
-                this.notifications = data; this.notificationDraft = data.enabled; this.notificationsLoaded = true; return true;
+                this.notifications = data;
+                if (clean && this.notificationDraft === before) this.notificationDraft = data.enabled;
+                this.notificationsLoaded = true; return true;
             } catch(e) { this.notificationsError = e.message; return false; }
             finally { this.notificationsLoading = false; }
         },

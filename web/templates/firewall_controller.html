@@ -30,6 +30,7 @@ function firewallManager(initialTab = 'current') {
         fileSecurityEvents: [],
         fileSecurityLoaded: false,
         fileSecurityLoading: false,
+        fileSecurityAction: '',
         fileSecurityError: '',
         fileSecuritySummary: null,
         searchIP: '',
@@ -548,6 +549,7 @@ function firewallManager(initialTab = 'current') {
         async refreshFileSecurityEvents(clearFirst = false) {
             if (this.fileSecurityLoading) return;
             this.fileSecurityLoading = true; this.fileSecurityError = '';
+            this.fileSecurityAction = clearFirst ? 'rescan' : 'refresh';
             try {
                 if (clearFirst && !(await confirmModal(t('firewall.confirm_clear_history')))) return;
                 const url = '/firewall/file-security-events/refresh' + (clearFirst ? '?clear=1' : '');
@@ -557,7 +559,7 @@ function firewallManager(initialTab = 'current') {
                 this.fileSecuritySummary = r.data?.summary || null;
                 this.fileSecurityLoaded = true;
             } catch(e) { this.fileSecurityError = e.message || t('followup.load_failed'); }
-            finally { this.fileSecurityLoading = false; }
+            finally { this.fileSecurityLoading = false; this.fileSecurityAction = ''; }
         },
         goPage(p) {
             if (p < 1 || p > this.totalPages) return;
@@ -729,12 +731,14 @@ function firewallManager(initialTab = 'current') {
             showToast(t('firewall.ip_filled_notice'), 'success');
         },
         async manualBan() {
+            if (this.banSubmitting) return;
             if (!this.banIP.trim()) { showToast(t('firewall.enter_ip'), 'error'); return; }
+            const submittedIP = this.banIP;
             this.banSubmitting = true;
             try {
-                const r = await api('/firewall/bans', { method: 'POST', body: { ip: this.banIP.trim(), duration: parseInt(this.banDuration) } });
+                const r = await api('/firewall/bans', { method: 'POST', body: { ip: submittedIP.trim(), duration: parseInt(this.banDuration) } });
                 showToast(r.data?.message || t('firewall.ban_success'), 'success');
-                this.banIP = '';
+                if (this.banIP === submittedIP) this.banIP = '';
                 await this.fetchBans();
             } catch(e) { showToast(e.message, 'error'); }
             finally { this.banSubmitting = false; }

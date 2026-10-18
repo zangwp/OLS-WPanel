@@ -62,7 +62,7 @@
                                     <div x-show="site.incremental.conflict" class="mt-2 max-w-xs text-xs">
                                         <p class="text-amber-300" x-text="t('backups.duplicate_mode_tasks', { count: site.incremental.task_count })"></p>
                                         <label class="flex items-start gap-2 text-gray-300 mt-1">
-                                            <input type="checkbox" x-model="site.incremental.rebuild" class="mt-0.5">
+                                            <input type="checkbox" x-model="site.incremental.rebuild" :disabled="policySaving" class="mt-0.5">
                                             <span x-text="site.incremental.enabled ? t('backups.authorize_rebuild_tasks') : t('backups.authorize_delete_tasks')"></span>
                                         </label>
                                     </div>
@@ -82,7 +82,7 @@
                                     <div x-show="site.full.conflict" class="mt-2 max-w-xs text-xs">
                                         <p class="text-amber-300" x-text="t('backups.duplicate_mode_tasks', { count: site.full.task_count })"></p>
                                         <label class="flex items-start gap-2 text-gray-300 mt-1">
-                                            <input type="checkbox" x-model="site.full.rebuild" class="mt-0.5">
+                                            <input type="checkbox" x-model="site.full.rebuild" :disabled="policySaving" class="mt-0.5">
                                             <span x-text="site.full.enabled ? t('backups.authorize_rebuild_tasks') : t('backups.authorize_delete_tasks')"></span>
                                         </label>
                                     </div>
@@ -365,6 +365,7 @@ function backupsOverview() {
         operationChecks: {},
         alive: true,
         policyOpen: false,
+        policyEpoch: 0,
         policyLoading: false,
         policySaving: false,
         policyRemoteEnabled: false,
@@ -656,10 +657,13 @@ function backupsOverview() {
             }
         },
         async openPolicy() {
+            if (this.policySaving) return;
+            const epoch = ++this.policyEpoch;
             this.policyOpen = true;
             this.policyLoading = true;
             try {
                 const r = await api('/backups/policy');
+                if (!this.alive || epoch !== this.policyEpoch || !this.policyOpen) return;
                 this.policyRemoteEnabled = !!r.data?.remote_backup_enabled;
                 this.policySites = (r.data?.sites || []).map(site => ({
                     ...site,
@@ -667,19 +671,26 @@ function backupsOverview() {
                     full: { ...site.full, rebuild: false }
                 }));
             } catch(e) {
+                if (!this.alive || epoch !== this.policyEpoch || !this.policyOpen) return;
                 showToast(e.message, 'error');
                 this.policyOpen = false;
             }
-            this.policyLoading = false;
+            finally { if (epoch === this.policyEpoch) this.policyLoading = false; }
         },
         closePolicy() {
             if (this.policySaving) return;
+            this.policyEpoch++;
+            this.policyLoading = false;
             this.policyOpen = false;
             this.policySites = [];
         },
         async savePolicy() {
+            if (this.policySaving || this.policyLoading) return;
+            const epoch = this.policyEpoch;
+            const submittedPolicy = JSON.stringify(this.policySites);
             const destructive = this.policySites.some(site => site.incremental.rebuild || site.full.rebuild);
             if (destructive && !await confirmModal(t('backups.confirm_rebuild_tasks'))) return;
+            if (this.policySaving || this.policyLoading || epoch !== this.policyEpoch || submittedPolicy !== JSON.stringify(this.policySites)) return;
             this.policySaving = true;
             try {
                 const sites = this.policySites.map(site => ({
@@ -696,13 +707,23 @@ function backupsOverview() {
                 const r = await api('/backups/policy', { method: 'PUT', body: { sites } });
                 const skipped = Number(r.data?.skipped_conflicts || 0);
                 showToast(skipped ? t('backups.batch_saved_with_skips', { count: skipped }) : t('backups.batch_saved'), skipped ? 'warning' : 'success');
-                this.policyOpen = false;
-                this.policySites = [];
+                if (submittedPolicy === JSON.stringify(this.policySites)) {
+                    this.policyOpen = false;
+                    this.policySites = [];
+                } else {
+                    const submittedBySite = new Map(sites.map(site => [site.site_id, site]));
+                    for (const site of this.policySites) {
+                        const submitted = submittedBySite.get(site.site_id);
+                        if (submitted?.incremental_rebuild) site.incremental.rebuild = false;
+                        if (submitted?.full_rebuild) site.full.rebuild = false;
+                    }
+                }
                 await this.fetchOverview();
             } catch(e) { showToast(e.message, 'error'); }
             this.policySaving = false;
         },
         async reconcileRemoteStatus() {
+            if (this.reconciling) return;
             this.reconciling = true;
             try {
                 const r = await api('/backups/reconcile-status', { method: 'POST', suppressToast: true });

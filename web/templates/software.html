@@ -7,7 +7,7 @@
             <p class="text-sm text-gray-500 mt-1">{{t .Lang "software.page_help"}}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-            <button type="button" @click="refreshAll()" :disabled="listLoading || healthLoading" class="btn-secondary text-sm" x-text="listLoading || healthLoading ? t('software.health_checking') : t('common.refresh')"></button>
+            <button type="button" @click="refreshAll()" :disabled="listLoading || healthLoading" class="btn-secondary text-sm" x-text="refreshingAll ? t('software.health_checking') : t('common.refresh')"></button>
             <a href="/{{.RandomSuffix}}/settings#system-updates" class="btn-secondary text-sm">{{t .Lang "software.manage_service_updates"}}</a>
             <button @click="showHelp = true" class="btn-secondary text-sm">{{t .Lang "software.wp_config_advice"}}</button>
         </div>
@@ -467,10 +467,13 @@ function softwareManager() {
         activeSection: 'runtime',
         showHelp: false,
         clearingOpcache: false,
+        refreshingAll: false,
         logModal: { open: false, title: '', content: '', loading: false, clearing: false },
         async refreshAll() {
-            if (this.disposed) return;
-            await Promise.all([this.fetchList(true), this.fetchHealth(true)]);
+            if (this.disposed || this.refreshingAll) return;
+            this.refreshingAll = true;
+            try { await Promise.all([this.fetchList(true), this.fetchHealth(true)]); }
+            finally { this.refreshingAll = false; }
         },
         runtimeHealth(version) {
             const runtime = (Array.isArray(this.health?.php) ? this.health.php : []).find(runtime => runtime.version === version);

@@ -66,3 +66,23 @@ test('email channel is configured only after loading all required sender and rec
  for(const key of ['smtp_host','smtp_user','smtp_pass','admin_email']){const value=m.settings[key];for(const missing of ['', ' ', undefined]){m.settings[key]=missing;assert.equal(m.smtpConfigured(),false,key);}m.settings[key]=value;}
  assert.equal(m.smtpConfigured(),true);
 });
+
+test('alert refresh preserves existing and in-flight drafts while updating untouched settings and logs',async()=>{
+ const pending=defer(),requests=[];let reads=0;const {c}=setup(async(url,opt)=>{requests.push({url,method:opt?.method||'GET'});if(url==='/alert/log')return ok([{message:'fresh log'}]);return ++reads===1?ok(data()):pending.promise;});
+ const m=c.alertManager();await m.fetchAll();m.rules.alert_cpu=false;m.wpSecCfg.threshold=30;m.rulesError='previous save failed';
+ const refresh=m.fetchAll();m.wpSecCfg.windowHours=48;pending.resolve(ok({...data(),alert_memory:'false',alert_wp_security_threshold:'15',alert_wp_security_window_hours:'72',smtp_host:'updated.example.com'}));await refresh;
+ assert.equal(m.rules.alert_cpu,false);assert.equal(m.rules.alert_memory,false);assert.equal(m.wpSecCfg.threshold,30);assert.equal(m.wpSecCfg.windowHours,48);assert.equal(m.rulesError,'previous save failed');assert.equal(m.settings.smtp_host,'updated.example.com');assert.equal(m.logs[0].message,'fresh log');assert.equal(requests.some(r=>r.method!=='GET'),false);
+});
+
+test('saved alert baselines advance from submitted snapshots so later refreshes can update clean fields',async()=>{
+ const pending=defer();let current=data(),writeBody;const {c}=setup(async(url,opt)=>{if(opt?.method){writeBody=opt.body;return pending.promise;}return ok(url==='/alert/log'?[]:current);});const m=c.alertManager();await m.fetchAll();
+ m.wpSecCfg.threshold=20;const saving=m.saveWPSecCfg();m.wpSecCfg.windowHours=36;pending.resolve(ok({}));await saving;assert.equal(writeBody.alert_wp_security_threshold,'20');assert.equal(writeBody.alert_wp_security_window_hours,'24');
+ current={...data(),alert_wp_security_threshold:'40',alert_wp_security_window_hours:'48'};await m.fetchAll();assert.equal(m.wpSecCfg.threshold,40);assert.equal(m.wpSecCfg.windowHours,36);
+});
+
+test('SMTP save feedback stays local while unrelated webhook and rule drafts remain usable',async()=>{
+ const pending=defer(),requests=[];const {c}=setup(async(url,opt)=>{requests.push({url,method:opt?.method||'GET',body:opt?.body});return opt?.method?pending.promise:ok(url==='/alert/log'?[]:data());});
+ const smtp=c.smtpConfig(),webhook=c.webhookConfig(),rules=c.alertManager();await Promise.all([smtp.fetch(),webhook.fetch(),rules.fetchAll()]);webhook.cfg.webhook_url='https://example.com/unsaved';rules.wpSecCfg.threshold=25;
+ const saving=smtp.save();assert.equal(smtp.saving,true);assert.equal(webhook.busy(),false);assert.equal(rules.loading,false);assert.equal(rules.wpSecSaving,false);pending.resolve(ok({}));await saving;
+ assert.equal(webhook.cfg.webhook_url,'https://example.com/unsaved');assert.equal(rules.wpSecCfg.threshold,25);assert.deepEqual(requests.filter(r=>r.method!=='GET').map(r=>[r.url,r.method]),[['/alert/settings','PUT']]);
+});

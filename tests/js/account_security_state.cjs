@@ -110,6 +110,21 @@ test('notification failure preserves the last confirmed setting and permits retr
  const {m}=setup(async()=>{throw Error('offline');});m.notificationsLoaded=true;m.notificationDraft=true;await m.saveNotifications();assert.equal(m.notifications.enabled,false);assert.equal(m.notificationDraft,true);assert.equal(m.notificationsError,'offline');assert.equal(m.notificationsSaving,false);
 });
 
+test('session refresh stays local and never changes an unsaved notification or MFA draft',async()=>{
+ const pending=defer(),calls=[];const {m}=setup(async(url,opt)=>{calls.push({url,method:opt?.method||'GET'});return url==='/auth/sessions'?pending.promise:defaultResponse(url);});
+ m.notificationsLoaded=true;m.notificationDraft=true;m.mfaPassword='new MFA draft';m.mfaCode='123456';
+ const refresh=m.fetchSessions();assert.equal(m.sessionsLoading,true);assert.equal(m.notificationsLoading,false);assert.equal(m.notificationsSaving,false);assert.equal(m.mfaBusy,false);
+ pending.resolve(ok({sessions:[{id:'self',current:true}]}));await refresh;
+ assert.equal(m.notificationDraft,true);assert.equal(m.mfaPassword,'new MFA draft');assert.equal(m.mfaCode,'123456');assert.deepEqual(calls,[{url:'/auth/sessions',method:'GET'}]);
+});
+
+test('retrying a failed notification save refreshes channel state without discarding the unsaved choice',async()=>{
+ const pending=defer(),calls=[];let reads=0;const {m}=setup(async(url,opt)=>{calls.push({url,method:opt?.method||'GET'});if(opt?.method)throw Error('write failed');return ++reads===1?defaultResponse(url):pending.promise;});
+ await m.fetchNotifications();m.notificationDraft=true;await m.saveNotifications();assert.equal(m.notificationsError,'write failed');
+ const retry=m.fetchNotifications();pending.resolve(ok({enabled:false,smtp_configured:true,webhook_configured:false}));await retry;
+ assert.equal(m.notificationDraft,true);assert.equal(m.notifications.enabled,false);assert.equal(m.notifications.smtp_configured,true);assert.equal(m.notificationsLoaded,true);assert.equal(calls.filter(call=>call.method==='PUT').length,1);
+});
+
 
 test('audit and notification enums resolve full translations with safe unknown fallbacks',()=>{
  const {m}=setup();

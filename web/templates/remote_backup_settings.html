@@ -256,8 +256,10 @@ function remoteBackup() {
         helperPass: '',
         helperMode: 'create',
         dirty() { return this.loaded && JSON.stringify(this.cfg) !== this.savedConfig; },
-        async fetchRemote(afterSave = false) {
+        async fetchRemote(afterSave = false, submitted = null) {
             if (this.loading || this.testing || (this.saving && !afterSave)) return false;
+            const before = { ...this.cfg };
+            const baseline = submitted || (this.savedConfig ? JSON.parse(this.savedConfig) : before);
             this.loading = true;
             this.loaded = false;
             this.loadError = '';
@@ -266,12 +268,13 @@ function remoteBackup() {
                 const d = r.data;
                 const required = ['enabled', 'backup_type', 'connection_mode', 'server_id', 'host', 'port', 'username', 'auth_type', 'remote_path', 'remote_base_path', 'isolate_path', 'keep_local', 's3_endpoint', 's3_bucket', 's3_region', 's3_access_key_id', 's3_path_prefix', 's3_base_prefix'];
                 if (!r.success || !d || Array.isArray(d) || required.some(key => d[key] == null) || typeof d.enabled !== 'boolean' || typeof d.keep_local !== 'boolean' || typeof d.isolate_path !== 'boolean') throw new Error(t('followup.invalid_config'));
-                this.cfg = { ...Object.fromEntries(required.map(key => [key, d[key]])), password: d.password || '', s3_secret_key: d.s3_secret_key || '' };
-                this.cfg.backup_type ||= 'rsync';
-                this.cfg.connection_mode ||= 'auto';
-                this.cfg.s3_region ||= 'auto';
+                const saved = { ...Object.fromEntries(required.map(key => [key, d[key]])), password: d.password || '', s3_secret_key: d.s3_secret_key || '' };
+                saved.backup_type ||= 'rsync';
+                saved.connection_mode ||= 'auto';
+                saved.s3_region ||= 'auto';
                 this.publicKey = d.ssh_key || '';
-                this.savedConfig = JSON.stringify(this.cfg);
+                this.savedConfig = JSON.stringify(saved);
+                this.cfg = Object.fromEntries(Object.entries(saved).map(([key, value]) => [key, this.cfg[key] === before[key] && before[key] === baseline[key] ? value : this.cfg[key]]));
                 this.loaded = true;
                 return true;
             } catch(e) { this.loadError = e.message || t('followup.load_failed'); return false; }
@@ -288,7 +291,8 @@ function remoteBackup() {
                 if (!r.success) throw new Error(r.message || t('settings.save_failed'));
                 this.saveOK = true;
                 this.saveMsg = t('settings.saved');
-                if (!await this.fetchRemote(true)) this.saveMsg = t('followup.saved_reload_failed');
+                this.savedConfig = JSON.stringify(body);
+                if (!await this.fetchRemote(true, body)) this.saveMsg = t('followup.saved_reload_failed');
             } catch(e) { this.saveOK = false; this.saveMsg = e.message || t('settings.save_failed'); }
             finally { this.saving = false; }
         },

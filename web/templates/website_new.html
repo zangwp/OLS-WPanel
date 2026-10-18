@@ -4,6 +4,7 @@
     <h1 class="page-title mb-6">{{t .Lang "website.create_title"}}</h1>
     <div class="card max-w-2xl">
         <form @submit.prevent="submit">
+            <fieldset :disabled="loading" class="min-w-0">
             <p class="text-sm text-gray-500 mb-4">{{t .Lang "website.wordpress_defaults_help"}}</p>
             <div class="mb-4">
                 <label for="create-site-domain" class="label">{{t .Lang "website.main_domain"}}</label>
@@ -68,6 +69,7 @@
                 <span x-show="!loading">{{t .Lang "website.create_site"}}</span>
                 <span x-show="loading">{{t .Lang "website.creating_site"}}</span>
             </button>
+            </fieldset>
         </form>
     </div>
 </div>

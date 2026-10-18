@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.1.10 — 2026-10-18
+
+- Isolate IP refresh progress from unrelated security settings and preserve drafts during refresh, failed-read retries and manual Googlebot imports. Keep updates bounded by the existing task polling limits.
+- Correct shared progress labels across database, firewall, SSH, software and WordPress controls while retaining required operation locks. Scope independent website update-check switches to their own rows.
+- Preserve unsaved settings, website, backup, alert, file and AI inputs when asynchronous operations complete. Serialize automatic-update preference saves, keep login credentials consistent across CSRF retries, and prevent duplicate task submissions or reuse of completed backup rebuild authorizations.
+- Add deferred-response regression coverage for request isolation, stale responses, draft preservation, retries and duplicate submissions across the affected pages.
+
+Upgrade notes: frontend interaction fixes only; no new dependency, background worker, endpoint or database migration. Existing protection rules, authentication requirements, task schedules and polling frequencies are retained.
+
 ## v2.1.9 — 2026-10-18
 
 - Fix Cloudflare and Bing official range downloads being rejected by the command allowlist before any network request. Accept only the existing fixed official URLs and exact HTTPS-only, timeout-bounded download arguments; retain the general command restrictions.

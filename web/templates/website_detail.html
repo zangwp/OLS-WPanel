@@ -787,7 +787,11 @@ function websiteDetail() {
             try {
                 const r = await api('/cron');
                 if (!r.success) throw new Error(r.message || t('common.operation_failed'));
-                this.wpCronJobs = (r.data || []).filter(j => j.task_type === 'wp_cron' && Number(j.site_id) === Number(this.site.id)).map(j => ({ ...j, _schedule: j.cron_expression }));
+                this.wpCronJobs = (r.data || []).filter(j => j.task_type === 'wp_cron' && Number(j.site_id) === Number(this.site.id)).map(j => {
+                    const current = this.wpCronJobs.find(job => job.id === j.id);
+                    const schedule = current && current._schedule !== current.cron_expression ? current._schedule : j.cron_expression;
+                    return { ...j, _schedule: schedule };
+                });
                 this.wpCronLoaded = true; this.wpCronError = '';
             } catch(e) { this.wpCronLoaded = false; this.wpCronError = e.message; }
         },
@@ -795,7 +799,10 @@ function websiteDetail() {
             if (this.wpCronBusy) return;
             this.wpCronBusy = true;
             try {
-                await api('/cron/' + job.id, { method: 'PUT', body: { name: job.name, cron_expression: job._schedule, command: this.site.domain, task_type: 'wp_cron', site_id: this.site.id, notify_fail: job.notify_fail, run_as_user: job.run_as_user, enabled } });
+                const schedule = job._schedule;
+                await api('/cron/' + job.id, { method: 'PUT', body: { name: job.name, cron_expression: schedule, command: this.site.domain, task_type: 'wp_cron', site_id: this.site.id, notify_fail: job.notify_fail, run_as_user: job.run_as_user, enabled } });
+                const current = this.wpCronJobs.find(item => item.id === job.id);
+                if (current) { current.cron_expression = schedule; current.enabled = enabled; }
                 showToast(t('settings.saved'), 'success');
             } catch(e) { showToast(e.message, 'error'); }
             finally { await this.loadSiteJobs(); this.wpCronBusy = false; }
@@ -832,6 +839,7 @@ function websiteDetail() {
         detailTab: 'overview',
         site: null,
 		maintenance: { state: 'unknown', window_id: '' },
+		maintenanceFormSaved: null,
 		maintenanceEnabled: false,
 		maintenanceMinutes: 5,
 		maintenanceSaving: false,
@@ -855,7 +863,7 @@ function websiteDetail() {
 			this.maintenancePasswordInput = ''; this.maintenanceSecretError = false;
 			try {
 				const r = await api('/websites/' + siteID + '/maintenance/password', {method:'POST', body:{}, signal:controller.signal});
-				if (!controller.signal.aborted && generation === this.maintenanceReadGeneration && this.site?.id === siteID && this.detailTab === 'security' && !this.detailDestroyed) this.maintenancePasswordInput = r.data.password;
+				if (!controller.signal.aborted && generation === this.maintenanceReadGeneration && this.site?.id === siteID && this.detailTab === 'security' && !this.detailDestroyed && !this.maintenancePasswordInput) this.maintenancePasswordInput = r.data.password;
 			} catch (_) { if (!controller.signal.aborted && generation === this.maintenanceReadGeneration) this.maintenanceSecretError = true; }
 			finally { if (this.maintenancePasswordController === controller) this.maintenancePasswordController = null; }
 		},
@@ -885,6 +893,7 @@ function websiteDetail() {
 			if (!this.site || this.site.site_type !== 'wordpress' || this.detailTab !== 'security' || this.detailDestroyed || this.maintenanceLoading) return;
 			const controller = new AbortController(); this.maintenanceReadController = controller;
 			const generation = this.maintenanceReadGeneration, siteID = this.site.id;
+			const formAtStart = {enabled:this.maintenanceEnabled, minutes:this.maintenanceMinutes};
 			const previous = this.maintenanceSecurityFingerprint();
 			const previousLockFlags = JSON.stringify([this.site.file_lock_enabled, this.site.file_lock_apply_status || '']);
 			this.maintenanceLoading = true;
@@ -902,7 +911,13 @@ function websiteDetail() {
 					const flagsChanged = previousLockFlags !== JSON.stringify([this.site.file_lock_enabled, this.site.file_lock_apply_status || '']);
 					if (previous !== this.maintenanceSecurityFingerprint() && (!initial || flagsChanged || (hadFileEvidence && r.data.state !== 'locked'))) this.refreshSiteSecurityAfterChange();
 				}
-				if (initial) { this.maintenanceEnabled = r.data.enabled; this.maintenanceMinutes = r.data.minutes; await this.loadMaintenancePassword(); }
+				if (initial) {
+					for (const [field, key] of [['maintenanceEnabled','enabled'],['maintenanceMinutes','minutes']]) {
+						if (this[field] === formAtStart[key] && (!this.maintenanceFormSaved || formAtStart[key] === this.maintenanceFormSaved[key])) this[field] = r.data[key];
+					}
+					this.maintenanceFormSaved = {enabled:r.data.enabled, minutes:r.data.minutes};
+					if (!this.maintenancePasswordInput) await this.loadMaintenancePassword();
+				}
 			} catch (_) {
 				if (!controller.signal.aborted && generation === this.maintenanceReadGeneration && this.site?.id === siteID && this.detailTab === 'security' && !this.detailDestroyed) {
 					this.maintenance.state = 'unknown'; this.invalidateMaintenanceSecurityEvidence();
@@ -916,7 +931,7 @@ function websiteDetail() {
 			const body = { enabled: this.maintenanceEnabled, minutes: this.maintenanceMinutes, password: this.maintenancePasswordInput };
 			try {
 				const r = await api('/websites/' + this.site.id + '/maintenance', {method:'PUT', body: JSON.stringify(body)});
-				this.maintenance = r.data; showToast(t('common.saved'), 'success');
+				this.maintenance = r.data; this.maintenanceFormSaved = {enabled:r.data.enabled, minutes:r.data.minutes}; showToast(t('common.saved'), 'success');
 				await this.loadMaintenancePassword();
 			} catch (error) { showToast(t(error.message === 'lock_mode_required' ? 'maintenance.lock_mode_required' : error.message === 'verification_failed' ? 'maintenance.invalid_configuration' : error.message === 'operation_unavailable' ? 'maintenance.operation_unavailable' : 'maintenance.state_unknown'), 'error'); }
 			finally { delete body.password; this.maintenanceSaving = false; }
@@ -1020,7 +1035,8 @@ function websiteDetail() {
         aiDevelopmentModalOpen: false,
         aiCredentialPackage: null,
         aiCredentialDownloaded: false,
-        aiAccess: { loading: true, enabled: false, status: 'disabled', busy: false, stage: '', installWPCLI: true, installNodeJS: false, confirmDomain: '', tools: [] },
+        aiAccessReadPending: false,
+        aiAccess: { loaded: false, loading: true, enabled: false, status: 'disabled', busy: false, stage: '', installWPCLI: true, installNodeJS: false, confirmDomain: '', tools: [] },
         securityStatus: null,
         securityStatusLoading: false,
         securityStatusAttempted: false,
@@ -1222,8 +1238,35 @@ function websiteDetail() {
                 if (!document.hidden && this.detailTab === 'security' && !this.maintenanceSaving) this.loadMaintenance();
             }, 10000);
         },
+        detailFormValues(data) {
+            return {
+                lscacheEnabled: !!data.litespeed_cache_enabled,
+                lscacheTTL: data.litespeed_cache_ttl || 300,
+                disableWPUpdates: data.disable_wp_updates || false,
+                disableFileEditing: data.disable_file_editing || false,
+                passwordResetMode: data.password_reset_mode || 'allow',
+                xmlrpcEnabled: data.xmlrpc_enabled || false,
+                disableApplicationPasswords: data.disable_application_passwords || false,
+                wpDebug: data.wp_debug_enabled || false,
+                wpDebugDisplay: data.wp_debug_display || false,
+                wpPostRevisions: data.wp_post_revisions != null ? data.wp_post_revisions : -1,
+                wpMemoryLimit: data.wp_memory_limit || '',
+                logRetentionDays: data.log_retention_days ?? 14,
+                accessLogMode: data.access_log_mode || 'off',
+                monitoringEnabled: data.monitoring_enabled || false,
+                monitoringInterval: data.monitoring_interval || 5,
+                documentRootSubdir: data.document_root_subdir || '',
+                phpVersion: data.php_version || '8.3',
+                cdnRealIPEnabled: data.cdn_realip_enabled || false,
+                cdnRealIPGroupIDs: (data.cdn_realip_groups || []).map(group => group.id),
+                sslExportEnabled: data.ssl_export_enabled || false,
+                fileLockMode: data.file_lock_mode === 'strict' ? 'strict' : 'standard',
+            };
+        },
         async fetchDetail() {
             if (this.detailLoading || this.detailDestroyed) return;
+            const previousValues = this.site ? this.detailFormValues(this.site) : null;
+            const formAtStart = Object.fromEntries(Object.keys(this.detailFormValues({})).map(key => [key, JSON.stringify(this[key])]));
             this.detailLoading = true; this.siteLoadError = ''; this.loading = !this.site;
             const id = window.location.pathname.split('/').filter(Boolean).pop();
             try {
@@ -1232,29 +1275,13 @@ function websiteDetail() {
                 if (this.detailDestroyed) return;
                 if (this.site?.id !== r.data.id) this.cancelLogReads();
                 this.site = r.data;
-                this.lscacheEnabled = r.data.litespeed_cache_enabled;
-                this.lscacheTTL = r.data.litespeed_cache_ttl || 300;
-                this.disableWPUpdates = r.data.disable_wp_updates || false;
-                this.savedDisableWPUpdates = this.disableWPUpdates;
-                this.disableFileEditing = r.data.disable_file_editing || false;
-                this.savedDisableFileEditing = this.disableFileEditing;
-                this.passwordResetMode = r.data.password_reset_mode || 'allow';
-                this.xmlrpcEnabled = r.data.xmlrpc_enabled || false;
-                this.disableApplicationPasswords = r.data.disable_application_passwords || false;
-                this.wpDebug = r.data.wp_debug_enabled || false;
-                this.wpDebugDisplay = r.data.wp_debug_display || false;
-                this.wpPostRevisions = r.data.wp_post_revisions != null ? r.data.wp_post_revisions : -1;
-                this.wpMemoryLimit = r.data.wp_memory_limit || '';
-                this.logRetentionDays = r.data.log_retention_days ?? 14;
-					this.accessLogMode = r.data.access_log_mode || 'off';
-                this.monitoringEnabled = r.data.monitoring_enabled || false;
-                this.monitoringInterval = r.data.monitoring_interval || 5;
-                this.documentRootSubdir = r.data.document_root_subdir || '';
-                this.phpVersion = r.data.php_version || '8.3';
-                this.cdnRealIPEnabled = r.data.cdn_realip_enabled || false;
-                this.cdnRealIPGroupIDs = (r.data.cdn_realip_groups || []).map(g => g.id);
-                this.sslExportEnabled = r.data.ssl_export_enabled || false;
-                this.fileLockMode = r.data.file_lock_mode === 'strict' ? 'strict' : 'standard';
+                for (const [key, value] of Object.entries(this.detailFormValues(r.data))) {
+                    const unchanged = JSON.stringify(this[key]) === formAtStart[key];
+                    const pristine = previousValues && formAtStart[key] === JSON.stringify(previousValues[key]);
+                    if (!previousValues || (unchanged && pristine)) this[key] = value;
+                }
+                this.savedDisableWPUpdates = r.data.disable_wp_updates || false;
+                this.savedDisableFileEditing = r.data.disable_file_editing || false;
                 this.fileLockPreview = null;
                 for (const [tab, state] of Object.entries(this.tabLoads)) if (tab !== this.detailTab) state.loaded = false;
                 this.loadDetailTab(this.detailTab, true);
@@ -1287,24 +1314,26 @@ function websiteDetail() {
             } finally { this.phpRuntimeSaving = false; }
         },
         async fetchAIDevelopment() {
-            if (!this.site) return;
-            this.aiAccess.loading = true;
+            if (!this.site || this.aiAccessReadPending || this.detailDestroyed) return;
+            const siteID = this.site.id, initial = !this.aiAccess.loaded;
+            this.aiAccessReadPending = true; this.aiAccess.loading = true;
             try {
-                const r = await api('/websites/' + this.site.id + '/ai-development-access');
-                if (r.success) {
+                const r = await api('/websites/' + siteID + '/ai-development-access');
+                if (r.success && this.site?.id === siteID && !this.detailDestroyed) {
                     const tools = Array.isArray(r.data.tools) ? r.data.tools : [];
                     const wpCLIInstalled = tools.some(tool => tool.id === 'wp-cli' && tool.installed);
                     this.aiAccess = {
                         ...this.aiAccess,
                         ...r.data,
                         tools,
-                        loading: false,
-                        busy: false,
-                        installWPCLI: r.data.status === 'disabled' ? !wpCLIInstalled : false,
-                        installNodeJS: false
+                        loaded: true,
+                        busy: this.aiAccess.busy,
+                        installWPCLI: initial ? r.data.status === 'disabled' && !wpCLIInstalled : this.aiAccess.installWPCLI,
+                        installNodeJS: this.aiAccess.installNodeJS
                     };
                 }
-            } catch(e) { this.aiAccess.loading = false; }
+            } catch (_) {}
+            finally { this.aiAccessReadPending = false; this.aiAccess.loading = false; }
         },
         developmentToolInstalled(id) {
             return Array.isArray(this.aiAccess.tools) && this.aiAccess.tools.some(tool => tool.id === id && tool.installed);

@@ -14,7 +14,7 @@
         <p class="text-xs text-gray-400" x-show="!status.available && !status.pending">{{t .Lang "ssh_port.edit_help"}}</p>
         <p class="text-sm text-gray-400">{{t .Lang "ssh_port.scope"}}</p>
         <label class="flex items-start gap-2 text-sm text-gray-300"><input type="checkbox" x-model="cloudReady" :disabled="busy"><span>{{t .Lang "ssh_port.cloud"}}</span></label>
-        <button type="button" class="btn-primary" @click="begin()" :disabled="busy || status.pending || !status.available || !cloudReady || !port || Number(port) === Number(status.port)" x-text="busy ? t('common.loading') : t('ssh_port.apply')"></button>
+        <button type="button" class="btn-primary" @click="begin()" :disabled="busy || status.pending || !status.available || !cloudReady || !port || Number(port) === Number(status.port)" x-text="action === 'begin' ? t('common.loading') : t('ssh_port.apply')"></button>
     </div>
     <div x-show="!!change" class="space-y-4">
         <p class="text-sm text-green-300" x-text="change ? t('ssh_port.transition') + change.old_port + ' → ' + change.new_port : ''"></p>
@@ -29,7 +29,7 @@
             <li>
                 <h4 class="font-semibold text-white mb-2">{{t .Lang "ssh_port.step_confirm"}}</h4>
                 <p class="text-sm text-yellow-300 mb-3" x-text="change ? t('ssh_port.deadline') + new Date(change.deadline).toLocaleString() : ''"></p>
-                <button type="button" class="btn-primary" @click="confirm()" :disabled="busy || statusUnknown || changeExpired()" x-text="busy ? t('common.loading') : t('ssh_port.confirm')"></button>
+                <button type="button" class="btn-primary" @click="confirm()" :disabled="busy || statusUnknown || changeExpired()" x-text="action === 'confirm' ? t('common.loading') : t('ssh_port.confirm')"></button>
             </li>
         </ol>
     </div>
@@ -37,7 +37,7 @@
 <script>
 function sshPortManager() {
     return {
-        status: {}, loaded: false, busy: false, error: '', notice: '', noticeType: 'info', statusUnknown: false, port: '', cloudReady: false, change: null, timer: null, expiryTimer: null,
+        status: {}, loaded: false, busy: false, action: '', error: '', notice: '', noticeType: 'info', statusUnknown: false, port: '', cloudReady: false, change: null, timer: null, expiryTimer: null,
         destroy() { clearTimeout(this.timer); clearTimeout(this.expiryTimer); },
         changeExpired() { const deadline = Date.parse(this.change?.deadline); return !Number.isFinite(deadline) || deadline <= Date.now(); },
         async readStatus({ notify = true } = {}) {
@@ -81,6 +81,7 @@ function sshPortManager() {
         async begin() {
             if (this.busy || this.change || this.status.pending || !this.cloudReady || !this.status.available || !Number.isInteger(Number(this.port)) || Number(this.port)<1 || Number(this.port)>65535 || Number(this.port) === Number(this.status.port)) return;
             const requestedPort = Number(this.port);
+            this.action = 'begin';
             this.busy = true; this.error = ''; this.notice = '';
             try {
                 if (!await confirmModal(t('ssh_port.confirm_begin'))) return;
@@ -93,12 +94,13 @@ function sshPortManager() {
                 if (!this.changeExpired()) this.expiryTimer = setTimeout(()=>{ this.statusUnknown = true; this.error = t('ssh_port.status_unverified'); }, Math.min(Date.parse(this.change.deadline) - Date.now(), 2147483647));
                 clearTimeout(this.timer); this.timer = setTimeout(async()=>{ this.statusUnknown = true; await this.refresh({ notify: false }); },310000);
             } catch(e) { this.error = e.message; }
-            finally { this.busy = false; }
+            finally { this.busy = false; this.action = ''; }
         },
         async confirm() {
             if (this.busy || !this.change?.token) return;
             if (this.changeExpired()) { this.statusUnknown = true; await this.refresh({ notify: false }); return; }
             if (this.statusUnknown) return;
+            this.action = 'confirm';
             this.busy = true; this.error = ''; this.notice = '';
             let failure = null;
             try {
@@ -113,6 +115,7 @@ function sshPortManager() {
                 showToast(this.error, 'error');
             }
             this.busy=false;
+            this.action = '';
         }
     };
 }

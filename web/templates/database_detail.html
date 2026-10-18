@@ -37,13 +37,13 @@
                 <div class="flex flex-wrap items-center gap-2">
                     <input type="text" x-model="editTablePrefix" class="input-field text-sm font-mono py-1 w-32" placeholder="{{t .Lang "website.table_prefix_placeholder"}}">
                     <button @click="detectTablePrefix()" :disabled="detectingPrefix" class="btn-secondary text-xs" x-text="detectingPrefix ? t('website.detecting') : t('website.auto_detect')"></button>
-                    <button @click="fixWPConfig()" :disabled="dbSubmitting" class="btn-secondary text-xs" x-text="dbSubmitting ? t('website.processing') : t('website.sync_db_info')"></button>
+                    <button @click="fixWPConfig()" :disabled="dbSubmitting" class="btn-secondary text-xs" x-text="dbAction === 'sync' ? t('website.processing') : t('website.sync_db_info')"></button>
                 </div>
                 <p class="text-xs text-gray-500 mt-2">{{t .Lang "website.table_prefix_help"}}</p>
             </div>
 
             <div class="flex flex-wrap gap-2 mt-5 pt-5 border-t border-gray-700">
-                <button @click="dbPasswordModal = true" class="btn-primary text-sm">{{t .Lang "website.change_password"}}</button>
+                <button @click="dbPasswordVersion++; dbPasswordModal = true" class="btn-primary text-sm">{{t .Lang "website.change_password"}}</button>
                 <button x-show="site.site_type === 'wordpress'" @click="openSiteURLModal()" class="btn-secondary text-sm">{{t .Lang "website.change_site_url"}}</button>
                 <button x-show="site.site_type === 'wordpress'" @click="openAdminModal()" class="btn-secondary text-sm">{{t .Lang "website.change_wp_admin"}}</button>
             </div>
@@ -81,9 +81,9 @@
                         <span class="text-xs text-gray-500 mt-1 block">{{t .Lang "database.adminer_database_password_help"}}</span>
                     </label>
                     <div class="flex flex-wrap gap-2">
-                        <button @click="enableAdminer()" :disabled="!adminerStatusKnown || adminerLoading || adminerSubmitting" class="btn-primary text-sm" x-text="adminerSubmitting ? t('database.adminer_starting') : t('database.adminer_enable')"></button>
+                        <button @click="enableAdminer()" :disabled="!adminerStatusKnown || adminerLoading || adminerSubmitting" class="btn-primary text-sm" x-text="adminerAction === 'enable' ? t('database.adminer_starting') : t('database.adminer_enable')"></button>
                         <a x-show="adminerStatusKnown && adminerStatus.enabled" :href="panelPrefix() + '/tools/adminer/' + site.id + '/'" target="_blank" rel="noopener" class="btn-secondary text-sm">{{t .Lang "database.adminer_open"}}</a>
-                        <button x-show="adminerStatus.enabled || !!adminerError" @click="disableAdminer()" :disabled="adminerLoading || adminerSubmitting" class="btn-danger text-sm" x-text="adminerSubmitting ? t('database.adminer_stopping') : t('database.adminer_disable')"></button>
+                        <button x-show="adminerStatus.enabled || !!adminerError" @click="disableAdminer()" :disabled="adminerLoading || adminerSubmitting" class="btn-danger text-sm" x-text="adminerAction === 'disable' ? t('database.adminer_stopping') : t('database.adminer_disable')"></button>
                     </div>
                 </div>
             </div>
@@ -179,7 +179,7 @@
         <div class="card border border-red-900/70">
             <h3 class="text-lg font-semibold text-red-300 mb-2">{{t .Lang "database.danger_zone"}}</h3>
             <p class="text-sm text-gray-400 mb-4">{{t .Lang "database.clear_warning"}}</p>
-            <button @click="clearDatabase()" :disabled="dbSubmitting || restoreBusy()" class="btn-danger text-sm" x-text="dbSubmitting ? t('website.clearing') : t('website.clear_database')"></button>
+            <button @click="clearDatabase()" :disabled="dbSubmitting || restoreBusy()" class="btn-danger text-sm" x-text="dbAction === 'clear' ? t('website.clearing') : t('website.clear_database')"></button>
         </div>
     </div>
     </template>
@@ -196,7 +196,7 @@
             <p class="text-gray-500 text-xs mt-2 mb-4" x-text="site?.site_type === 'wordpress' ? t('database.wordpress_password_help') : t('database.php_password_help')"></p>
             <div class="flex justify-end gap-2">
                 <button @click="dbPasswordModal = false" class="btn-secondary">{{t .Lang "common.cancel"}}</button>
-                <button @click="changeDBPassword()" :disabled="dbSubmitting" class="btn-primary" x-text="dbSubmitting ? t('website.processing') : t('website.confirm_change')"></button>
+                <button @click="changeDBPassword()" :disabled="dbSubmitting" class="btn-primary" x-text="dbAction === 'password' ? t('website.processing') : t('website.confirm_change')"></button>
             </div>
         </div>
     </div>
@@ -289,12 +289,16 @@ function databaseDetail() {
         site: null,
         loading: true,
         loadError: '',
+        detailEpoch: 0,
         editTablePrefix: '',
         detectingPrefix: false,
         dbSubmitting: false,
+        dbAction: '',
         dbPasswordModal: false,
+        dbPasswordVersion: 0,
         newDBPassword: '',
         siteURLModal: false,
+        siteURLVersion: 0,
         currentSiteURL: '',
         currentHomeURL: '',
         newSiteURL: '',
@@ -302,6 +306,7 @@ function databaseDetail() {
         syncPanelDomain: false,
         siteURLSubmitting: false,
         adminModal: false,
+        adminVersion: 0,
         adminLoading: false,
         adminSubmitting: false,
         administrators: [],
@@ -332,6 +337,7 @@ function databaseDetail() {
         adminerDuration: 30,
         adminerPassword: '',
         adminerSubmitting: false,
+        adminerAction: '',
         siteID() { return window.location.pathname.split('/').pop(); },
         panelPrefix() { return document.body.dataset.panelPrefix || ''; },
         init() {
@@ -371,17 +377,21 @@ function databaseDetail() {
             if (this.restorePhase === 'waiting') return t('website.restore_waiting');
             return t('website.restore_running_elapsed', { time: this.formatRestoreElapsed() });
         },
-        async fetchDetail() {
-            this.loading = true;
+        async fetchDetail({ refreshSections = true } = {}) {
+            const epoch = ++this.detailEpoch;
+            const prefix = this.editTablePrefix;
+            const prefixDirty = this.site && prefix !== (this.site.table_prefix || '');
+            this.loading = !this.site;
             this.loadError = '';
             try {
                 const r = await api('/websites/' + this.siteID());
                 if (!r.success || !r.data?.id) throw new Error(r.message || t('common.request_failed'));
+                if (epoch !== this.detailEpoch) return;
                 this.site = r.data;
-                this.editTablePrefix = r.data.table_prefix || '';
-                await Promise.all([this.fetchBackups(), this.fetchBackupSettings(), this.fetchAdminerStatus()]);
-            } catch (e) { this.loadError = t('website.load_failed_with_error', { error: e.message }); }
-            finally { this.loading = false; }
+                if (!prefixDirty && this.editTablePrefix === prefix) this.editTablePrefix = r.data.table_prefix || '';
+                if (refreshSections) await Promise.all([this.fetchBackups(), this.fetchBackupSettings(), this.fetchAdminerStatus()]);
+            } catch (e) { if (epoch === this.detailEpoch) this.loadError = t('website.load_failed_with_error', { error: e.message }); }
+            finally { if (epoch === this.detailEpoch) this.loading = false; }
         },
         visibleBackups() { return this.showAllBackups ? this.backups : this.backups.slice(0, 5); },
         formatDateTime(value) {
@@ -406,20 +416,23 @@ function databaseDetail() {
         async enableAdminer() {
             if (!this.site || !this.adminerStatusKnown || this.adminerLoading || this.adminerSubmitting) return;
             this.adminerSubmitting = true;
+            this.adminerAction = 'enable';
             this.adminerError = '';
             try {
                 const body = { duration_minutes: Number(this.adminerDuration), password: this.adminerPassword };
                 const r = await api('/websites/' + this.site.id + '/adminer/enable', { method: 'POST', body });
                 if (!r.success || r.data?.enabled !== true) throw new Error(r.message || t('common.request_failed'));
                 this.adminerStatus = r.data;
-                this.adminerPassword = '';
+                if (this.adminerPassword === body.password) this.adminerPassword = '';
                 showToast(t('database.adminer_enabled'), 'success');
             } catch (e) { this.adminerStatusKnown = false; this.adminerError = e.message; showToast(e.message, 'error'); }
             this.adminerSubmitting = false;
+            this.adminerAction = '';
         },
         async disableAdminer() {
             if (!this.site || this.adminerLoading || this.adminerSubmitting) return;
             this.adminerSubmitting = true;
+            this.adminerAction = 'disable';
             this.adminerError = '';
             try {
                 const r = await api('/websites/' + this.site.id + '/adminer/disable', { method: 'POST' });
@@ -429,43 +442,59 @@ function databaseDetail() {
                 showToast(t('database.adminer_disabled'), 'success');
             } catch (e) { this.adminerStatusKnown = false; this.adminerError = e.message; showToast(e.message, 'error'); }
             this.adminerSubmitting = false;
+            this.adminerAction = '';
         },
         async changeDBPassword() {
+            if (!this.site || this.dbSubmitting) return;
+            const password = this.newDBPassword, version = this.dbPasswordVersion;
             this.dbSubmitting = true;
+            this.dbAction = 'password';
             try {
                 const body = {};
-                if (this.newDBPassword) body.new_password = this.newDBPassword;
+                if (password) body.new_password = password;
                 const r = await api('/websites/' + this.site.id + '/db-password', { method: 'PUT', body });
                 showToast(t('website.password_updated', { password: r.data?.new_password || '****' }), 'success');
-                this.dbPasswordModal = false;
-                this.newDBPassword = '';
+                if (version === this.dbPasswordVersion && password === this.newDBPassword) {
+                    this.dbPasswordModal = false;
+                    this.newDBPassword = '';
+                }
             } catch (e) { showToast(e.message, 'error'); }
             this.dbSubmitting = false;
+            this.dbAction = '';
         },
         async detectTablePrefix() {
+            if (!this.site || this.detectingPrefix) return;
+            const prefix = this.editTablePrefix;
             this.detectingPrefix = true;
             try {
                 const r = await api('/websites/' + this.site.id + '/detect-table-prefix');
-                this.editTablePrefix = r.data?.prefix || this.editTablePrefix;
+                const detectedPrefix = r.data?.prefix || prefix;
+                if (this.editTablePrefix === prefix) this.editTablePrefix = detectedPrefix;
                 const candidates = r.data?.candidates || [];
-                showToast(candidates.length > 1 ? t('website.detect_multiple_prefixes', { candidates: candidates.join('、'), prefix: this.editTablePrefix }) : t('website.detect_prefix_found', { prefix: this.editTablePrefix }), candidates.length > 1 ? 'warning' : 'success');
+                showToast(candidates.length > 1 ? t('website.detect_multiple_prefixes', { candidates: candidates.join('、'), prefix: detectedPrefix }) : t('website.detect_prefix_found', { prefix: detectedPrefix }), candidates.length > 1 ? 'warning' : 'success');
             } catch (e) { showToast(t('website.detect_failed', { error: e.message }), 'error'); }
             this.detectingPrefix = false;
         },
         async fixWPConfig() {
+            if (!this.site || this.dbSubmitting) return;
+            const prefix = this.editTablePrefix;
             const parts = [t('website.sync_wp_config_base')];
-            if (this.editTablePrefix) parts.push(t('website.sync_wp_config_prefix', { prefix: this.editTablePrefix }));
+            if (prefix) parts.push(t('website.sync_wp_config_prefix', { prefix }));
             if (!await confirmModal(parts.join('') + t('website.confirm_continue'))) return;
+            if (this.dbSubmitting || this.editTablePrefix !== prefix) return;
             this.dbSubmitting = true;
+            this.dbAction = 'sync';
             try {
-                const body = this.editTablePrefix ? { table_prefix: this.editTablePrefix } : {};
+                const body = prefix ? { table_prefix: prefix } : {};
                 const r = await api('/websites/' + this.site.id + '/fix-wp-config', { method: 'POST', body });
                 showToast(r.data?.message || t('website.updated'), 'success');
-                await this.fetchDetail();
+                await this.fetchDetail({ refreshSections: false });
             } catch (e) { showToast(e.message, 'error'); }
             this.dbSubmitting = false;
+            this.dbAction = '';
         },
         async openSiteURLModal() {
+            const version = ++this.siteURLVersion;
             this.siteURLModal = true;
             this.currentSiteURL = '';
             this.currentHomeURL = '';
@@ -474,9 +503,10 @@ function databaseDetail() {
             this.syncPanelDomain = false;
             try {
                 const r = await api('/websites/' + this.site.id + '/wp-site-urls');
+                if (version !== this.siteURLVersion || !this.siteURLModal) return;
                 this.currentSiteURL = r.data?.siteurl || '';
                 this.currentHomeURL = r.data?.home || '';
-            } catch (e) { showToast(t('website.load_current_url_failed', { error: e.message }), 'error'); }
+            } catch (e) { if (version === this.siteURLVersion && this.siteURLModal) showToast(t('website.load_current_url_failed', { error: e.message }), 'error'); }
         },
         autoFillSiteURL() {
             const url = (this.site.ssl_enabled ? 'https' : 'http') + '://' + this.site.domain;
@@ -503,8 +533,12 @@ function databaseDetail() {
             return !!siteHost && !!homeHost && siteHost !== homeHost && (siteHost !== this.site.domain.toLowerCase() || homeHost !== this.site.domain.toLowerCase());
         },
         async updateSiteURLs() {
+            if (this.siteURLSubmitting) return;
             if (!this.newSiteURL && !this.newHomeURL) { showToast(t('website.at_least_one_url'), 'error'); return; }
+            const version = this.siteURLVersion;
+            const draft = JSON.stringify([this.newSiteURL, this.newHomeURL, this.syncPanelDomain]);
             if (!await confirmModal(t('website.confirm_update_site_urls', { siteurl: this.newSiteURL || t('website.unchanged'), home: this.newHomeURL || t('website.unchanged') }))) return;
+            if (this.siteURLSubmitting || version !== this.siteURLVersion || draft !== JSON.stringify([this.newSiteURL, this.newHomeURL, this.syncPanelDomain])) return;
             this.siteURLSubmitting = true;
             try {
                 const body = {};
@@ -513,25 +547,31 @@ function databaseDetail() {
                 body.sync_panel_domain = this.syncPanelDomain && !!this.siteURLDomainCandidate();
                 const r = await api('/websites/' + this.site.id + '/wp-site-urls', { method: 'PUT', body });
                 showToast(r.data?.message || t('website.site_urls_updated'), 'success');
-                this.siteURLModal = false;
-                if (body.sync_panel_domain) await this.fetchDetail();
+                if (version === this.siteURLVersion) {
+                    if (body.siteurl) this.currentSiteURL = body.siteurl;
+                    if (body.home) this.currentHomeURL = body.home;
+                    if (draft === JSON.stringify([this.newSiteURL, this.newHomeURL, this.syncPanelDomain])) this.siteURLModal = false;
+                }
+                if (body.sync_panel_domain) await this.fetchDetail({ refreshSections: false });
             } catch (e) { showToast(t('website.update_failed_with_error', { error: e.message }), 'error'); }
             this.siteURLSubmitting = false;
         },
         async openAdminModal() {
+            const version = ++this.adminVersion;
             this.adminModal = true;
             this.adminLoading = true;
             this.administrators = [];
             try {
                 const r = await api('/websites/' + this.site.id + '/wp-administrators');
+                if (version !== this.adminVersion || !this.adminModal) return;
                 this.administrators = r.data?.administrators || [];
                 this.siteAdminEmail = r.data?.site_admin_email || '';
                 if (this.administrators.length) {
                     this.selectedAdminID = this.administrators[0].id;
                     this.selectAdministrator();
                 }
-            } catch (e) { showToast(t('website.wp_admin_load_failed'), 'error'); }
-            this.adminLoading = false;
+            } catch (e) { if (version === this.adminVersion && this.adminModal) showToast(t('website.wp_admin_load_failed'), 'error'); }
+            finally { if (version === this.adminVersion) this.adminLoading = false; }
         },
         selectAdministrator() {
             const admin = this.administrators.find(item => item.id === Number(this.selectedAdminID));
@@ -551,10 +591,14 @@ function databaseDetail() {
             showToast(t('website.wp_admin_password_generated'), 'success');
         },
         async updateAdministrator() {
+            if (this.adminSubmitting || this.adminLoading) return;
             if (!this.adminForm.login || !this.adminForm.email || !this.adminForm.displayName) { showToast(t('website.wp_admin_required'), 'error'); return; }
             if (this.adminForm.password && this.adminForm.password.length < 8) { showToast(t('website.wp_admin_password_short'), 'error'); return; }
             if (this.adminForm.password !== this.adminForm.passwordConfirm) { showToast(t('website.wp_admin_password_mismatch'), 'error'); return; }
+            const version = this.adminVersion;
+            const draft = JSON.stringify([this.selectedAdminID, this.adminForm]);
             if (!await confirmModal(t('website.wp_admin_confirm', { login: this.adminForm.login, email: this.adminForm.email }))) return;
+            if (this.adminSubmitting || this.adminLoading || version !== this.adminVersion || draft !== JSON.stringify([this.selectedAdminID, this.adminForm])) return;
             this.adminSubmitting = true;
             try {
                 const body = {
@@ -564,13 +608,13 @@ function databaseDetail() {
                 if (this.adminForm.password) body.password = this.adminForm.password;
                 const r = await api('/websites/' + this.site.id + '/wp-administrators', { method: 'PUT', body });
                 const updated = r.data?.administrator;
-                if (updated) {
+                if (updated && version === this.adminVersion) {
                     const index = this.administrators.findIndex(item => item.id === updated.id);
                     if (index >= 0) this.administrators[index] = updated;
                 }
                 await this.fetchBackups();
                 showToast(t('website.wp_admin_updated'), 'success');
-                this.adminModal = false;
+                if (version === this.adminVersion && draft === JSON.stringify([this.selectedAdminID, this.adminForm])) this.adminModal = false;
             } catch (e) { showToast(e.message || t('website.wp_admin_update_failed'), 'error'); }
             this.adminSubmitting = false;
         },
@@ -688,13 +732,17 @@ function databaseDetail() {
             if (this.restorePollingActive) throw new Error(t('website.restore_still_running'));
         },
         async clearDatabase() {
+            if (!this.site || this.dbSubmitting || this.restoreBusy()) return;
             if (!await confirmModal(t('website.confirm_clear_database', { db: this.site.db_name }))) return;
+            if (this.dbSubmitting || this.restoreBusy()) return;
             this.dbSubmitting = true;
+            this.dbAction = 'clear';
             try {
                 const r = await api('/websites/' + this.site.id + '/backups/clear-database', { method: 'POST' });
                 showToast(r.data?.message || t('website.database_cleared'), 'success');
             } catch (e) { showToast(e.message, 'error'); }
             this.dbSubmitting = false;
+            this.dbAction = '';
         }
     };
 }

@@ -11,7 +11,7 @@
             <button type="button" class="btn-secondary text-sm" @click="check()" :disabled="busy || !state || !state.enabled">{{t .Lang "anomaly.check"}}</button>
             <a href="/{{.RandomSuffix}}/alert" class="text-blue-400 text-sm">{{t .Lang "anomaly.alerts"}}</a>
         </div>
-        <p x-show="busy" class="text-xs text-gray-400">{{t .Lang "anomaly.checking"}}</p>
+        <p x-show="busy" class="text-xs text-gray-400" x-text="t(action === 'check' ? 'anomaly.checking' : action === 'save' ? 'common.saving' : 'common.loading')"></p>
         <p x-show="error" x-text="error" class="text-xs text-yellow-300 mb-2" role="alert"></p>
         <template x-if="state"><div class="text-xs text-gray-400 space-y-2">
             <p x-text="!state.enabled ? t('anomaly.disabled') : state.last_success ? t('anomaly.last_success', {time:timeText(state.last_success)}) : t('anomaly.pending')"></p>
@@ -30,7 +30,7 @@
 <script>
 function wpAnomalyMonitor(siteID) {
     return {
-        state:null, enabled:false, threshold:5, busy:false, error:'',
+        state:null, enabled:false, threshold:5, busy:false, action:'', error:'',
         timeText(value) { return new Date(value * 1000).toLocaleString(currentLocale()); },
         errorText(code) {
             const keys = {plugin_required:'anomaly.plugin_required', multisite_unsupported:'anomaly.multisite_unsupported', sample_malformed:'anomaly.sample_malformed', sample_too_large:'anomaly.sample_too_large', site_busy:'anomaly.site_busy', site_unavailable:'anomaly.site_unavailable', anomaly_busy:'anomaly.busy', anomaly_invalid:'anomaly.invalid', anomaly_disabled:'anomaly.disabled'};
@@ -38,15 +38,19 @@ function wpAnomalyMonitor(siteID) {
         },
         async request(path, options, saving = false) {
             if (this.busy) return;
-            this.busy = true; this.error = '';
+            const previous = this.state, formAtStart = {enabled:this.enabled, threshold:this.threshold};
+            this.busy = true; this.action = saving ? 'save' : path === '/check' ? 'check' : 'load'; this.error = '';
             try {
                 const r = await api('/websites/' + siteID + '/anomaly-monitor' + path, {...options, suppressToast:true});
-                this.state = r.data; this.enabled = r.data.enabled; this.threshold = r.data.threshold;
+                this.state = r.data;
+                for (const key of ['enabled','threshold']) {
+                    if (!previous || (this[key] === formAtStart[key] && (saving || formAtStart[key] === previous[key]))) this[key] = r.data[key];
+                }
                 if (r.data.last_error) this.error = this.errorText(r.data.last_error);
                 if (saving) showToast(t('common.saved'), 'success');
                 if (saving || path === '/check') this.$dispatch?.('site-anomaly-updated', {site_id:siteID});
             } catch (e) { this.error = this.errorText(e.message); }
-            finally { this.busy = false; }
+            finally { this.busy = false; this.action = ''; }
         },
         load() { return this.request('', {}); },
         save() { return this.request('', {method:'PUT', body:JSON.stringify({enabled:this.enabled,threshold:Number(this.threshold)})}, true); },
