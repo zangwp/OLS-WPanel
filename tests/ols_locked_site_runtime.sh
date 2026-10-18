@@ -12,4 +12,5 @@ export OLS_WPANEL_LOCKED_SITE_RUNTIME_TEST=1
 grep -Fq -- '--- PASS: TestOLSLockedSiteRuntimeLinux ' /tmp/ols-locked-site-runtime.log
 grep -Fq OLS_LOCKED_SITE_LEGACY_REPRODUCED /tmp/ols-locked-site-runtime.log
 grep -Fq OLS_LEGACY_MAINTENANCE_RUNTIME_OK /tmp/ols-locked-site-runtime.log
+grep -Fq OLS_MAINTENANCE_HEADERS_RUNTIME_OK /tmp/ols-locked-site-runtime.log
 grep -Fq OLS_LOCKED_SITE_RUNTIME_OK /tmp/ols-locked-site-runtime.log

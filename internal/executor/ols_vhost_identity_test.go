@@ -125,6 +125,36 @@ END_rules
 }
 `
 
+const olsIdentityContextMaintenanceFixture = `# OLS-WPanel-SystemUser: wp_example
+docRoot /www/maintenance
+vhDomain example.com
+enableGzip 0
+index {
+ useServer 0
+ indexFiles maintenance.html
+}
+context / {
+ type NULL
+ location /www/maintenance/
+ allowBrowse 1
+ extraHeaders <<<END_headers
+set Cache-Control "no-store"
+set X-OLS-WPanel-Backup "31a48bf0-32c7-4a19-9237-27d4738fbdd9"
+END_headers
+ rewrite {
+  enable 1
+  inherit 0
+  rules <<<END_rules
+RewriteRule ^ - [R=503,L]
+END_rules
+ }
+}
+rewrite {
+ enable 1
+ autoLoadHtaccess 0
+}
+`
+
 func TestReadOLSVHostExecutionIdentityKeepsBackupMaintenanceStatic(t *testing.T) {
 	stubOLSVHostExecutionAccounts(t, "33", "33", "33")
 	for _, ssl := range []string{"", "vhssl {\n keyFile /cert/key.pem\n certFile /cert/fullchain.pem\n certChain 1\n sslProtocol 24\n}\n"} {
@@ -138,25 +168,43 @@ func TestReadOLSVHostExecutionIdentityKeepsBackupMaintenanceStatic(t *testing.T)
 				t.Fatalf("static identity = %+v, %v", got, err)
 			}
 		}
+		got, err := readOLSVHostExecutionIdentity(olsIdentityContextMaintenanceFixture + ssl)
+		if err != nil || got != (olsVHostExecutionIdentity{user: "wp_example", group: "wp_example"}) {
+			t.Fatalf("context maintenance identity = %+v, %v", got, err)
+		}
 	}
 }
 
 func TestReadOLSVHostExecutionIdentityRejectsMaintenanceWithExecutableChanges(t *testing.T) {
 	stubOLSVHostExecutionAccounts(t, "33", "33", "33")
+	for shape, fixture := range map[string]string{"legacy": olsIdentityMaintenanceFixture, "context": olsIdentityContextMaintenanceFixture} {
+		for name, content := range map[string]string{
+			"include":          fixture + "include /other.conf\n",
+			"script handler":   fixture + "scripthandler {\n add lsapi:serverphp php\n}\n",
+			"proxy":            strings.Replace(fixture, "type NULL", "type proxy", 1),
+			"htaccess":         strings.Replace(fixture, "autoLoadHtaccess 0", "autoLoadHtaccess 1", 1),
+			"different root":   strings.Replace(fixture, "location /www/maintenance/", "location /www/live/", 1),
+			"invalid marker":   strings.Replace(fixture, "31a48bf0-32c7-4a19-9237-27d4738fbdd9", "invalid", 1),
+			"no deny rule":     strings.Replace(fixture, "RewriteRule ^ - [R=503,L]", "RewriteRule ^ - [L]", 1),
+			"unsafe index":     strings.Replace(fixture, "indexFiles maintenance.html", "indexFiles index.php", 1),
+			"invalid hostname": strings.Replace(fixture, "vhDomain example.com", "vhDomain invalid;host", 1),
+		} {
+			t.Run(shape+"/"+name, func(t *testing.T) {
+				if got, err := readOLSVHostExecutionIdentity(content); err == nil {
+					t.Fatalf("unsafe maintenance accepted: %+v", got)
+				}
+			})
+		}
+	}
 	for name, content := range map[string]string{
-		"include":          olsIdentityMaintenanceFixture + "include /other.conf\n",
-		"script handler":   olsIdentityMaintenanceFixture + "scripthandler {\n add lsapi:serverphp php\n}\n",
-		"proxy":            strings.Replace(olsIdentityMaintenanceFixture, "type NULL", "type proxy", 1),
-		"htaccess":         strings.Replace(olsIdentityMaintenanceFixture, "autoLoadHtaccess 0", "autoLoadHtaccess 1", 1),
-		"different root":   strings.Replace(olsIdentityMaintenanceFixture, "location /www/maintenance/", "location /www/live/", 1),
-		"invalid marker":   strings.Replace(olsIdentityMaintenanceFixture, "31a48bf0-32c7-4a19-9237-27d4738fbdd9", "invalid", 1),
-		"no deny rule":     strings.Replace(olsIdentityMaintenanceFixture, "RewriteRule ^ - [R=503,L]", "RewriteRule ^ - [L]", 1),
-		"unsafe index":     strings.Replace(olsIdentityMaintenanceFixture, "indexFiles maintenance.html", "indexFiles index.php", 1),
-		"invalid hostname": strings.Replace(olsIdentityMaintenanceFixture, "vhDomain example.com", "vhDomain invalid;host", 1),
+		"new shape without metadata": strings.Replace(olsIdentityContextMaintenanceFixture, olsMetadataUserPrefix+"wp_example\n", "", 1),
+		"new shape inherited rules":  strings.Replace(olsIdentityContextMaintenanceFixture, "inherit 0", "inherit 1", 1),
+		"new shape missing headers":  strings.Replace(olsIdentityContextMaintenanceFixture, "set Cache-Control \"no-store\"", "", 1),
+		"new shape added processor":  olsIdentityContextMaintenanceFixture + "extprocessor unexpected {\n}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := readOLSVHostExecutionIdentity(content); err == nil {
-				t.Fatalf("unsafe maintenance accepted: %+v", got)
+				t.Fatalf("unsafe context maintenance accepted: %+v", got)
 			}
 		})
 	}

@@ -177,10 +177,10 @@ func renderSiteBackupMaintenance(site *models.Website, root, marker string) (str
 		fmt.Fprintf(&out, "vhAliases %s\n", strings.Join(domains[1:], ","))
 	}
 	out.WriteString("enableGzip 0\nindex {\n useServer 0\n indexFiles maintenance.html\n}\n")
-	fmt.Fprintf(&out, "context / {\n type NULL\n location %s/\n allowBrowse 1\n extraHeaders <<<END_headers\nCache-Control: no-store\nX-OLS-WPanel-Backup: %s\nEND_headers\n}\n", root, marker)
+	fmt.Fprintf(&out, "context / {\n type NULL\n location %s/\n allowBrowse 1\n extraHeaders <<<END_headers\nset Cache-Control \"no-store\"\nset X-OLS-WPanel-Backup \"%s\"\nEND_headers\n rewrite {\n  enable 1\n  inherit 0\n  rules <<<END_rules\nRewriteRule ^ - [R=503,L]\nEND_rules\n }\n}\n", root, marker)
 	// Only an empty, root-owned static document root is mapped. No PHP handler,
 	// .htaccess loading, proxy context or cache module from the live vhost survives.
-	out.WriteString("rewrite {\n enable 1\n autoLoadHtaccess 0\n rules <<<END_rules\nRewriteRule ^ - [R=503,L]\nEND_rules\n}\n")
+	out.WriteString("rewrite {\n enable 1\n autoLoadHtaccess 0\n}\n")
 	if site.SSLEnabled {
 		cert, err := validateOLSScalar("证书", site.SSLCertPath, true)
 		if err != nil {

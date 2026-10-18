@@ -17,9 +17,10 @@ type olsVHostExecutionIdentity struct {
 }
 
 var (
-	lookupOLSVHostExecutionUser  = user.Lookup
-	lookupOLSVHostExecutionGroup = user.LookupGroup
-	olsStaticMaintenancePattern  = regexp.MustCompile(`(?s)^docRoot ([^\s{}]+)\nvhDomain ([^\s{}]+)\n(?:vhAliases ([^\n]+)\n)?enableGzip 0\nindex \{\nuseServer 0\nindexFiles maintenance\.html\n\}\ncontext / \{\ntype NULL\nlocation ([^\s{}]+)\nallowBrowse 1\nextraHeaders <<<END_headers\nCache-Control: no-store\nX-OLS-WPanel-Backup: ([^\s{}]+)\nEND_headers\n\}\nrewrite \{\nenable 1\nautoLoadHtaccess 0\nrules <<<END_rules\nRewriteRule \^ - \[R=503,L\]\nEND_rules\n\}(?:\nvhssl \{\nkeyFile [^\s{}]+\ncertFile [^\s{}]+\ncertChain 1\nsslProtocol [0-9]+\n\})?$`)
+	lookupOLSVHostExecutionUser       = user.Lookup
+	lookupOLSVHostExecutionGroup      = user.LookupGroup
+	olsLegacyStaticMaintenancePattern = regexp.MustCompile(`(?s)^docRoot ([^\s{}]+)\nvhDomain ([^\s{}]+)\n(?:vhAliases ([^\n]+)\n)?enableGzip 0\nindex \{\nuseServer 0\nindexFiles maintenance\.html\n\}\ncontext / \{\ntype NULL\nlocation ([^\s{}]+)\nallowBrowse 1\nextraHeaders <<<END_headers\nCache-Control: no-store\nX-OLS-WPanel-Backup: ([^\s{}]+)\nEND_headers\n\}\nrewrite \{\nenable 1\nautoLoadHtaccess 0\nrules <<<END_rules\nRewriteRule \^ - \[R=503,L\]\nEND_rules\n\}(?:\nvhssl \{\nkeyFile [^\s{}]+\ncertFile [^\s{}]+\ncertChain 1\nsslProtocol [0-9]+\n\})?$`)
+	olsStaticMaintenancePattern       = regexp.MustCompile(`(?s)^docRoot ([^\s{}]+)\nvhDomain ([^\s{}]+)\n(?:vhAliases ([^\n]+)\n)?enableGzip 0\nindex \{\nuseServer 0\nindexFiles maintenance\.html\n\}\ncontext / \{\ntype NULL\nlocation ([^\s{}]+)\nallowBrowse 1\nextraHeaders <<<END_headers\nset Cache-Control "no-store"\nset X-OLS-WPanel-Backup "([^\s{}"]+)"\nEND_headers\nrewrite \{\nenable 1\ninherit 0\nrules <<<END_rules\nRewriteRule \^ - \[R=503,L\]\nEND_rules\n\}\n\}\nrewrite \{\nenable 1\nautoLoadHtaccess 0\n\}(?:\nvhssl \{\nkeyFile [^\s{}]+\ncertFile [^\s{}]+\ncertChain 1\nsslProtocol [0-9]+\n\})?$`)
 )
 
 func readOLSVHostExecutionIdentity(content string) (olsVHostExecutionIdentity, error) {
@@ -81,7 +82,7 @@ func readOLSVHostExecutionIdentity(content string) (olsVHostExecutionIdentity, e
 			return identity, fmt.Errorf("inconsistent OpenLiteSpeed execution identity")
 		}
 		identity = olsVHostExecutionIdentity{user: extUser, group: extGroup, scripts: true}
-	} else if isOLSStaticBackupMaintenance(strings.Join(body, "\n")) {
+	} else if isOLSStaticBackupMaintenance(strings.Join(body, "\n"), userCount == 1) {
 		identity = olsVHostExecutionIdentity{user: "www-data", group: "www-data"}
 		if userCount == 1 {
 			identity.user, identity.group = metadataUser, metadataUser
@@ -95,8 +96,11 @@ func readOLSVHostExecutionIdentity(content string) (olsVHostExecutionIdentity, e
 	return identity, nil
 }
 
-func isOLSStaticBackupMaintenance(content string) bool {
-	match := olsStaticMaintenancePattern.FindStringSubmatch(content)
+func isOLSStaticBackupMaintenance(content string, hasMetadata bool) bool {
+	match := olsLegacyStaticMaintenancePattern.FindStringSubmatch(content)
+	if match == nil && hasMetadata {
+		match = olsStaticMaintenancePattern.FindStringSubmatch(content)
+	}
 	if match == nil || !validSiteBackupID(match[5]) || filepath.Clean(match[1]) != filepath.Clean(match[4]) {
 		return false
 	}

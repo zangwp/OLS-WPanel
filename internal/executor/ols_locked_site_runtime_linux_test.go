@@ -202,7 +202,12 @@ echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 
 			}
 		}
 	}
-	olsAssertLegacyMaintenanceRuntime(t, client, sites[2], root, available, enabled)
+	olsAssertMaintenanceRuntime(t, client, sites[2], root, available, enabled, func() {
+		for _, site := range locked {
+			olsAssertSiteProcessIdentity(t, client, site, true)
+			olsAssertLockedSiteRuntime(t, site, protected[site.ID])
+		}
+	})
 	for _, site := range sites {
 		olsAssertSiteProcessIdentity(t, client, site, site.ID < 3)
 	}
@@ -319,7 +324,7 @@ func olsLockedRuntimeSnapshot(t *testing.T, site *models.Website, running bool) 
 	return entries
 }
 
-func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *models.Website, root, available, enabled string) {
+func olsAssertMaintenanceRuntime(t *testing.T, client *http.Client, site *models.Website, root, available, enabled string, assertOtherSites func()) {
 	t.Helper()
 	target, link := filepath.Join(available, site.Domain+".conf"), filepath.Join(enabled, site.Domain+".conf")
 	original, err := os.ReadFile(target)
@@ -334,18 +339,77 @@ func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *
 	if err := os.WriteFile(filepath.Join(maintenanceRoot, "maintenance.html"), []byte("Website backup maintenance. "+marker), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// Preserve the historical bytes independently of the current renderer:
+	// older backup journals authenticate this exact format by its hash.
+	legacy := fmt.Sprintf(`# OLS-WPanel-Format: 1
+# OLS-WPanel-VHost: olsw_%s
+# OLS-WPanel-Domains: %s
+# OLS-WPanel-VHRoot: %s
+docRoot %s
+vhDomain %s
+enableGzip 0
+index {
+ useServer 0
+ indexFiles maintenance.html
+}
+context / {
+ type NULL
+ location %s/
+ allowBrowse 1
+ extraHeaders <<<END_headers
+Cache-Control: no-store
+X-OLS-WPanel-Backup: %s
+END_headers
+}
+rewrite {
+ enable 1
+ autoLoadHtaccess 0
+ rules <<<END_rules
+RewriteRule ^ - [R=503,L]
+END_rules
+}
+`, buildSiteName(site.Domain), site.Domain, maintenanceRoot, maintenanceRoot, site.Domain, maintenanceRoot, marker)
+	if err := applyOLSVHostConfig(nil, legacy, target, link); err != nil {
+		t.Fatalf("apply legacy root-owned static maintenance: %v", err)
+	}
+	olsAssertMaintenanceRegistry(t, site, "www-data")
+	olsAssertLegacyMaintenanceResponses(t, site)
+	appliedLegacy, err := os.ReadFile(target)
+	if err != nil || string(appliedLegacy) != legacy {
+		t.Fatalf("legacy maintenance bytes changed during identity registration: %v", err)
+	}
+	assertOtherSites()
+	t.Log("OLS_LEGACY_MAINTENANCE_RUNTIME_OK: unchanged historical template returns 503 for POST/GET/HEAD, disables PHP, and preserves the live website; historical response headers are not assumed")
 	maintenance, err := renderSiteBackupMaintenance(site, maintenanceRoot, marker)
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata := olsMetadataUserPrefix + site.SystemUser + "\n"
-	if strings.Count(maintenance, metadata) != 1 {
-		t.Fatal("maintenance fixture must have exactly one explicit execution user before downgrade")
+	if strings.Count(maintenance, olsMetadataUserPrefix+site.SystemUser+"\n") != 1 {
+		t.Fatal("current maintenance renderer lost its explicit site identity")
 	}
-	legacy := strings.Replace(maintenance, metadata, "", 1)
-	if err := applyOLSVHostConfig(nil, legacy, target, link); err != nil {
-		t.Fatalf("apply legacy root-owned static maintenance: %v", err)
+	if err := applyOLSVHostConfig(nil, maintenance, target, link); err != nil {
+		t.Fatalf("apply current static maintenance: %v", err)
 	}
+	olsAssertMaintenanceRegistry(t, site, site.SystemUser)
+	olsAssertCurrentMaintenanceResponses(t, site, marker)
+	assertOtherSites()
+	t.Log("OLS_MAINTENANCE_HEADERS_RUNTIME_OK: current renderer passes production POST verification with real 503, backup marker, and no-store")
+	info, err := os.Stat(maintenanceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, gid, err := fileOwnerIDs(info)
+	if err != nil || uid != 0 || gid != 0 || info.Mode().Perm() != 0555 {
+		t.Fatalf("maintenance root permissions changed: uid=%d gid=%d mode=%v err=%v", uid, gid, info.Mode(), err)
+	}
+	if err := applyOLSVHostConfig(nil, string(original), target, link); err != nil {
+		t.Fatalf("restore PHP site after static maintenance: %v", err)
+	}
+	olsAssertSiteProcessIdentity(t, client, site, false)
+}
+
+func olsAssertMaintenanceRegistry(t *testing.T, site *models.Website, executionUser string) {
+	t.Helper()
 	registry, err := os.ReadFile(currentOLSRuntimePaths().managed)
 	if err != nil {
 		t.Fatal(err)
@@ -362,14 +426,92 @@ func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *
 			fields[parts[0]] = parts[1]
 		}
 	}
-	if fields["user"] != "www-data" || fields["group"] != "www-data" || fields["enableScript"] != "0" || fields["setUIDMode"] != "2" {
-		t.Fatalf("legacy maintenance enabled scripts or lost its isolated fallback identity: %s", block)
+	if fields["user"] != executionUser || fields["group"] != executionUser || fields["enableScript"] != "0" || fields["setUIDMode"] != "2" {
+		t.Fatalf("maintenance enabled scripts or lost its intended execution identity: %s", block)
 	}
+}
+
+func olsAssertLegacyMaintenanceResponses(t *testing.T, site *models.Website) {
+	t.Helper()
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, Timeout: 3 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	defer client.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	lastReadiness := "no response"
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = site.Domain
+		response, err := client.Do(request)
+		if err == nil {
+			_, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, 8192))
+			response.Body.Close()
+			lastReadiness = fmt.Sprintf("HTTP %d read=%v", response.StatusCode, readErr)
+			if response.StatusCode == http.StatusServiceUnavailable && readErr == nil {
+				break
+			}
+		} else if ctx.Err() == nil {
+			lastReadiness = err.Error()
+		}
+		timer := time.NewTimer(200 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			t.Fatalf("legacy maintenance never became ready: %s; %v", lastReadiness, ctx.Err())
+		case <-timer.C:
+		}
+	}
+	proofPath := filepath.Join(site.WebRoot, "wp-content", "uploads", "process-owner.txt")
+	proof, err := os.ReadFile(proofPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(proofPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodHead} {
+		for _, path := range []string{"/", "/wp-login.php", "/wp-cron.php", "/wp-json/", "/index.php"} {
+			request, err := http.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader("backup_probe=1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Host = site.Domain
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("legacy maintenance %s %s: %v", method, path, err)
+			}
+			body, readErr := io.ReadAll(io.LimitReader(response.Body, 8192))
+			response.Body.Close()
+			if readErr != nil || response.StatusCode != http.StatusServiceUnavailable || strings.Contains(string(body), `"site":"`+site.Domain+`"`) {
+				t.Fatalf("legacy maintenance did not stop the PHP endpoint: %s %s status=%d body=%q err=%v", method, path, response.StatusCode, body, readErr)
+			}
+			t.Logf("OLS_LEGACY_MAINTENANCE_HTTP: %s %s status=%d cache-control=%q backup-marker=%q", method, path,
+				response.StatusCode, response.Header.Values("Cache-Control"), response.Header.Values("X-OLS-WPanel-Backup"))
+		}
+	}
+	after, err := os.Stat(proofPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(proofPath)
+	if err != nil || string(contents) != string(proof) || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("legacy maintenance allowed the original PHP probe to write its uploads file: %v", err)
+	}
+}
+
+func olsAssertCurrentMaintenanceResponses(t *testing.T, site *models.Website, marker string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var firstFailure, lastFailure error
 	for {
-		err = verifySiteBackupMaintenance(ctx, site, marker, true)
+		err := verifySiteBackupMaintenance(ctx, site, marker, true)
 		if err == nil {
 			break
 		}
@@ -382,23 +524,10 @@ func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *
 			lastFailure = err
 		}
 		if ctx.Err() != nil {
-			t.Fatalf("legacy maintenance failed real HTTP 503 verification: first=%v; last before deadline=%v; final=%v", firstFailure, lastFailure, err)
+			t.Fatalf("current maintenance failed real HTTP 503 verification: first=%v; last before deadline=%v; final=%v", firstFailure, lastFailure, err)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	info, err := os.Stat(maintenanceRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	uid, gid, err := fileOwnerIDs(info)
-	if err != nil || uid != 0 || gid != 0 || info.Mode().Perm() != 0555 {
-		t.Fatalf("legacy maintenance root permissions changed: uid=%d gid=%d mode=%v err=%v", uid, gid, info.Mode(), err)
-	}
-	if err := applyOLSVHostConfig(nil, string(original), target, link); err != nil {
-		t.Fatalf("restore PHP site after legacy static maintenance: %v", err)
-	}
-	olsAssertSiteProcessIdentity(t, client, site, false)
-	t.Log("OLS_LEGACY_MAINTENANCE_RUNTIME_OK: root-owned static fallback returns 503 with scripts disabled and restores PHP isolation")
 }
 
 func olsMaintenanceHTTPDiagnostics(t *testing.T, domain string) {
