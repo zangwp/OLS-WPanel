@@ -362,7 +362,7 @@ func TestOLSTrustedProxyACLRejectsForeignAndNonRegularFilesBeforeCommands(t *tes
 func openOLSTrustedProxySelectionDB(t *testing.T) {
 	t.Helper()
 	previous := database.DB
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "selected-cdn.db"))
+	db, err := sql.Open("sqlite", filepath.Join(privateSecurityTestDirectory(t), "selected-cdn.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

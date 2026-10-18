@@ -16,7 +16,7 @@ import (
 
 func securitySettingsLockTestDB(t *testing.T) (*sql.DB, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "security.db")
+	path := filepath.Join(privateSecurityTestDirectory(t), "security.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +99,12 @@ func TestSecuritySettingsLockIsReleasedWhenProcessDies(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := securityLockProcess(ctx, path, "hold")
+	output, err := os.CreateTemp(t.TempDir(), "child-output-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	cmd.Stdout, cmd.Stderr = output, output
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -107,16 +113,26 @@ func TestSecuritySettingsLockIsReleasedWhenProcessDies(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	processDone := make(chan error, 1)
+	go func() { processDone <- cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill() }()
+	childOutput := func() string {
+		data, _ := os.ReadFile(output.Name())
+		return string(data)
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := os.Stat(path + ".ready"); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("child process never acquired the lock")
+			t.Fatalf("child process never acquired the lock: %s", childOutput())
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case err := <-processDone:
+			t.Fatalf("child process exited before acquiring the lock: %v %s", err, childOutput())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	if release, err := acquireSecuritySettingsProcessLock(db); !errors.Is(err, ErrSecuritySettingsBusy) {
 		if release != nil {
@@ -127,7 +143,7 @@ func TestSecuritySettingsLockIsReleasedWhenProcessDies(t *testing.T) {
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	_ = cmd.Wait()
+	<-processDone
 	release, err := acquireSecuritySettingsProcessLock(db)
 	if err != nil {
 		t.Fatal("dead process left a stale lock", err)
@@ -143,7 +159,7 @@ func TestSecuritySettingsLockRejectsUnsafeFilesystem(t *testing.T) {
 	}
 	for _, state := range []string{"symlink-file", "hardlink", "public-file", "public-directory", "symlink-directory"} {
 		t.Run(state, func(t *testing.T) {
-			directory := t.TempDir()
+			directory := privateSecurityTestDirectory(t)
 			path := filepath.Join(directory, ".ols-wpanel-security-settings.lock")
 			other := filepath.Join(directory, "other")
 			if err := os.WriteFile(other, []byte("unchanged"), 0600); err != nil {

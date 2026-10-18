@@ -30,6 +30,8 @@ func TestFail2banSettingsLockSerializesSnapshotThroughDeployment(t *testing.T) {
 	}()
 	select {
 	case <-firstEntered:
+	case err := <-firstDone:
+		t.Fatalf("first Fail2ban settings operation failed before entering: %v", err)
 	case <-time.After(time.Second):
 		t.Fatal("first Fail2ban settings operation did not acquire the lock")
 	}
@@ -1483,6 +1485,17 @@ func TestFail2banWhitelistScopesKeepSSHIndependent(t *testing.T) {
 	}
 }
 
+func privateSecurityTestDirectory(t *testing.T) string {
+	t.Helper()
+	// testing.TempDir may inherit a public umask. Match the installer's private
+	// panel directory explicitly instead of relaxing production lock checks.
+	directory := filepath.Join(t.TempDir(), "panel")
+	if err := os.Mkdir(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
 func openTestDB(t *testing.T) {
 	t.Helper()
 
@@ -1490,7 +1503,7 @@ func openTestDB(t *testing.T) {
 		_ = database.Close()
 		database.DB = nil
 	}
-	dbPath := filepath.Join(t.TempDir(), "ols-wpanel-test.db")
+	dbPath := filepath.Join(privateSecurityTestDirectory(t), "ols-wpanel-test.db")
 	if err := database.Open(dbPath); err != nil {
 		t.Fatalf("open db: %v", err)
 	}
