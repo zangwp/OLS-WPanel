@@ -729,11 +729,11 @@ func testAndRestartOpenLiteSpeed() ([]byte, error) {
 	paths := currentOLSRuntimePaths()
 	testOut, err := runOLSCommand(paths.binary, "-t")
 	if err != nil {
-		return testOut, fmt.Errorf("OpenLiteSpeed 配置检查失败: %s", strings.TrimSpace(string(testOut)))
+		return testOut, fmt.Errorf("OpenLiteSpeed 配置检查失败: %w: %s", err, strings.TrimSpace(string(testOut)))
 	}
 	restartOut, err := runOLSCommand("systemctl", "restart", "lshttpd")
 	if err != nil {
-		return restartOut, fmt.Errorf("OpenLiteSpeed 重启失败: %s", strings.TrimSpace(string(restartOut)))
+		return restartOut, fmt.Errorf("OpenLiteSpeed 重启失败: %w: %s", err, strings.TrimSpace(string(restartOut)))
 	}
 	return append(testOut, restartOut...), nil
 }

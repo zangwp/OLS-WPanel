@@ -15,17 +15,21 @@ func TestOLSConfigFailedRecoveryReportsActualStagesAndKeepsOldFiles(t *testing.T
 		t.Fatal(err)
 	}
 	var validations int
+	validationErr := errors.New("exit status 1")
 	runOLSCommand = func(name string, args ...string) ([]byte, error) {
 		if name != fixture.paths.binary || strings.Join(args, " ") != "-t" {
 			t.Fatalf("failed validation must never restart the service: %s %v", name, args)
 		}
 		validations++
-		return []byte("[WARN] existing locked site has invalid execution identity"), errors.New("exit status 1")
+		return []byte("[WARN] existing locked site has invalid execution identity"), validationErr
 	}
 	link := filepath.Join(fixture.enabled, "example.com.conf")
 	err := applyOLSVHostConfig(nil, fixture.content+"# pending change\n", fixture.site, link)
 	if err == nil || validations < 2 {
 		t.Fatalf("failed validation or recovery was ignored: validations=%d err=%v", validations, err)
+	}
+	if !errors.Is(err, validationErr) {
+		t.Fatalf("application and recovery lost the command failure cause: %v", err)
 	}
 	message := taskFailure("应用 OpenLiteSpeed 配置失败", err).Message
 	for _, expected := range []string{"[WARN] existing locked site", "IPv4 配置回退也未通过", "恢复后重载失败", "自动恢复不完整"} {

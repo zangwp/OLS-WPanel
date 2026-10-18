@@ -3,11 +3,14 @@
 package executor
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -53,8 +56,12 @@ func TestOLSLockedSiteRuntimeLinux(t *testing.T) {
 	if err := os.Chmod(root, 0755); err != nil {
 		t.Fatal(err)
 	}
+	controlLog := filepath.Join(root, "lswsctrl.log")
 	t.Cleanup(func() {
-		_, _ = runOLSCommandBounded(20*time.Second, control, "stop")
+		if t.Failed() {
+			olsDumpRuntimeLogs(t, controlLog)
+		}
+		_, _ = olsRunRuntimeControl(control, "stop", controlLog)
 		_ = os.RemoveAll(root)
 	})
 	oldConfig, oldCommand := config.AppConfig, runOLSCommand
@@ -85,8 +92,26 @@ func TestOLSLockedSiteRuntimeLinux(t *testing.T) {
 		OLSManagedConfig: filepath.Join(managed, "sites.conf"), OLSVHostsAvailable: available, OLSVHostsEnabled: enabled,
 		OLSBinary: binary, LSPHPBinary: "/usr/local/lsws/lsphp85/bin/lsphp", OLSListenerCert: cert, OLSListenerKey: key,
 	}}
-	main := "serverName OLS-WPanel-Locked-Site-CI\nuser nobody\ngroup nogroup\npriority 0\nautoFix503 1\ngracefulRestartTimeout 10\nmime conf/mime.properties\nshowVersionNumber 0\nadminEmails root@localhost\nindexFiles index.php,index.html\ndisableWebAdmin 1\nerrorlog logs/error.log {\n logLevel WARN\n rollingSize 20M\n}\naccessControl {\n allow ALL\n}\nmodule cache {\n ls_enabled 1\n checkPrivateCache 1\n checkPublicCache 1\n enableCache 0\n}\ninclude " + config.AppConfig.Paths.OLSManagedConfig + "\n"
+	main := olsRuntimeMainConfigFromInstaller(t, "/src/install.sh", config.AppConfig.Paths.OLSManagedConfig)
 	if err := os.WriteFile(config.AppConfig.Paths.OLSMainConfig, []byte(main), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("/tmp/lshttpd/swap", 0755); err != nil {
+		t.Fatal(err)
+	}
+	nobody, err := user.Lookup("nobody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nobodyUID, uidErr := strconv.Atoi(nobody.Uid)
+	nobodyGID, gidErr := strconv.Atoi(nobody.Gid)
+	if uidErr != nil || gidErr != nil {
+		t.Fatal("invalid nobody account in runtime container")
+	}
+	if err := os.Chown("/tmp/lshttpd", nobodyUID, nobodyGID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown("/tmp/lshttpd/swap", nobodyUID, nobodyGID); err != nil {
 		t.Fatal(err)
 	}
 	runOLSCommand = func(name string, args ...string) ([]byte, error) {
@@ -94,7 +119,7 @@ func TestOLSLockedSiteRuntimeLinux(t *testing.T) {
 			if len(args) != 2 || args[0] != "restart" || args[1] != "lshttpd" {
 				return nil, fmt.Errorf("unexpected runtime service operation: %v", args)
 			}
-			return runOLSCommandBounded(60*time.Second, control, "restart")
+			return olsRunRuntimeControl(control, "restart", controlLog)
 		}
 		return runOLSCommandBounded(60*time.Second, name, args...)
 	}
@@ -174,12 +199,149 @@ echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 
 			}
 		}
 	}
+	olsAssertLegacyMaintenanceRuntime(t, client, sites[2], root, available, enabled)
+	for _, site := range sites {
+		olsAssertSiteProcessIdentity(t, client, site, site.ID < 3)
+	}
 	for _, site := range locked {
 		if err := VerifySiteFileLockMode(site, FileLockModeStandard); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Log("OLS_LOCKED_SITE_RUNTIME_OK: three registered sites, two root-owned locked roots, independent PHP process UID/GID")
+}
+
+func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *models.Website, root, available, enabled string) {
+	t.Helper()
+	target, link := filepath.Join(available, site.Domain+".conf"), filepath.Join(enabled, site.Domain+".conf")
+	original, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maintenanceRoot := filepath.Join(root, "maintenance")
+	if err := os.Mkdir(maintenanceRoot, 0555); err != nil {
+		t.Fatal(err)
+	}
+	const marker = "a31a9b36-2d77-4d82-8f55-b64fe66f4474"
+	maintenance, err := renderSiteBackupMaintenance(site, maintenanceRoot, marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := olsMetadataUserPrefix + site.SystemUser + "\n"
+	if strings.Count(maintenance, metadata) != 1 {
+		t.Fatal("maintenance fixture must have exactly one explicit execution user before downgrade")
+	}
+	legacy := strings.Replace(maintenance, metadata, "", 1)
+	if err := applyOLSVHostConfig(nil, legacy, target, link); err != nil {
+		t.Fatalf("apply legacy root-owned static maintenance: %v", err)
+	}
+	registry, err := os.ReadFile(currentOLSRuntimePaths().managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, block, found := strings.Cut(string(registry), "virtualHost olsw_"+buildSiteName(site.Domain)+" {\n")
+	if !found {
+		t.Fatal("maintenance vhost is absent from registry")
+	}
+	block, _, _ = strings.Cut(block, "\n}")
+	fields := map[string]string{}
+	for _, line := range strings.Split(block, "\n") {
+		parts := strings.Fields(line)
+		if len(parts) == 2 {
+			fields[parts[0]] = parts[1]
+		}
+	}
+	if fields["user"] != "www-data" || fields["group"] != "www-data" || fields["enableScript"] != "0" || fields["setUIDMode"] != "2" {
+		t.Fatalf("legacy maintenance enabled scripts or lost its isolated fallback identity: %s", block)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for {
+		err = verifySiteBackupMaintenance(ctx, site, marker, true)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("legacy maintenance failed real HTTP 503 verification: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	info, err := os.Stat(maintenanceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, gid, err := fileOwnerIDs(info)
+	if err != nil || uid != 0 || gid != 0 || info.Mode().Perm() != 0555 {
+		t.Fatalf("legacy maintenance root permissions changed: uid=%d gid=%d mode=%v err=%v", uid, gid, info.Mode(), err)
+	}
+	if err := applyOLSVHostConfig(nil, string(original), target, link); err != nil {
+		t.Fatalf("restore PHP site after legacy static maintenance: %v", err)
+	}
+	olsAssertSiteProcessIdentity(t, client, site, false)
+	t.Log("OLS_LEGACY_MAINTENANCE_RUNTIME_OK: root-owned static fallback returns 503 with scripts disabled and restores PHP isolation")
+}
+
+func olsRuntimeMainConfigFromInstaller(t *testing.T, path, managed string) string {
+	t.Helper()
+	script, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const start = "cat > \"$OLS_MAIN_CONF\" << 'OLSHTTPEOF'\n"
+	const end = "\nOLSHTTPEOF\n"
+	text := strings.ReplaceAll(string(script), "\r\n", "\n")
+	if strings.Count(text, start) != 1 {
+		t.Fatal("installer must have one production OpenLiteSpeed main configuration")
+	}
+	_, remainder, _ := strings.Cut(text, start)
+	main, _, found := strings.Cut(remainder, end)
+	if !found {
+		t.Fatal("unterminated installer OpenLiteSpeed main configuration")
+	}
+	const include = "include /usr/local/lsws/conf/ols-wpanel/sites.conf"
+	if strings.Count(main, include) != 1 {
+		t.Fatal("installer main configuration must include the managed registry exactly once")
+	}
+	return strings.Replace(main, include, "include "+managed, 1) + "\n"
+}
+
+// A daemon can inherit lswsctrl's output descriptors. Use a regular file so
+// checking the controller's real exit status never waits for the daemon's EOF.
+func olsRunRuntimeControl(control, action, logPath string) ([]byte, error) {
+	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fmt.Fprintf(log, "\n$ lswsctrl %s\n", action); err != nil {
+		log.Close()
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, control, action)
+	command.Stdout, command.Stderr = log, log
+	runErr := command.Run()
+	closeErr := log.Close()
+	output, readErr := os.ReadFile(logPath)
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("lswsctrl %s timed out: %w", action, ctx.Err())
+	}
+	return output, errors.Join(runErr, closeErr, readErr)
+}
+
+func olsDumpRuntimeLogs(t *testing.T, controlLog string) {
+	t.Helper()
+	for _, path := range []string{controlLog, "/usr/local/lsws/logs/error.log", "/usr/local/lsws/logs/lsrestart.log", "/usr/local/lsws/logs/stderr.log"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Logf("runtime diagnostic %s: %v", path, err)
+			continue
+		}
+		if len(data) > 32<<10 {
+			data = data[len(data)-(32<<10):]
+		}
+		t.Logf("runtime diagnostic %s:\n%s", path, data)
+	}
 }
 
 func olsAssertLegacyLockedRegistryFails(t *testing.T, binary, path string) {
