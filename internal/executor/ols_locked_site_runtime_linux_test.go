@@ -380,7 +380,11 @@ END_rules
 	}
 	assertOtherSites()
 	t.Log("OLS_LEGACY_MAINTENANCE_RUNTIME_OK: unchanged historical template returns 503 for POST/GET/HEAD, disables PHP, and preserves the live website; historical response headers are not assumed")
-	maintenance, err := renderSiteBackupMaintenance(site, maintenanceRoot, marker)
+	tlsSite := *site
+	tlsSite.SSLEnabled = true
+	tlsSite.SSLCertPath = currentOLSRuntimePaths().listenerCert
+	tlsSite.SSLKeyPath = currentOLSRuntimePaths().listenerKey
+	maintenance, err := renderSiteBackupMaintenance(&tlsSite, maintenanceRoot, marker)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,9 +395,9 @@ END_rules
 		t.Fatalf("apply current static maintenance: %v", err)
 	}
 	olsAssertMaintenanceRegistry(t, site, site.SystemUser)
-	olsAssertCurrentMaintenanceResponses(t, site, marker)
+	olsAssertCurrentMaintenanceResponses(t, &tlsSite, marker)
 	assertOtherSites()
-	t.Log("OLS_MAINTENANCE_HEADERS_RUNTIME_OK: current renderer passes production POST verification with real 503, backup marker, and no-store")
+	t.Log("OLS_MAINTENANCE_HEADERS_RUNTIME_OK: current renderer passes production HTTP/HTTPS POST verification with real 503, backup marker, and no-store")
 	info, err := os.Stat(maintenanceRoot)
 	if err != nil {
 		t.Fatal(err)

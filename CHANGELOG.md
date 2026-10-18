@@ -4,7 +4,7 @@
 
 - Pin each managed OpenLiteSpeed virtual host to its site's explicitly validated user and primary group. File-locked WordPress roots remain root-owned and read-only while other sites can still be created or reloaded.
 - Read older generated PHP identities during registry rebuilds and retain script-free backup maintenance pages. Reject missing, inconsistent or privileged execution identities instead of inferring them from directory ownership.
-- Return new backup-maintenance responses from their static context so real HTTP 503 responses include the required backup marker and `Cache-Control: no-store`. Preserve existing maintenance configuration bytes and journal fingerprints during identity registration.
+- Return new backup-maintenance responses from their static context so real HTTP 503 responses include the required backup marker and `Cache-Control: no-store`. Preserve existing maintenance configuration bytes and journal fingerprints during identity registration and failed recovery retries.
 - Report only actual configuration recovery failures, retain the underlying errors, and remove misleading `<nil>` failures and repeated application-error prefixes.
 - Add native AMD64 and ARM64 OpenLiteSpeed/LSPHP runtime checks for three sites, earlier locked roots, separate PHP process identities, permitted uploads and rejected writes to protected roots. Keep configuration validation and rollback mandatory.
 

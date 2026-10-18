@@ -195,6 +195,34 @@ func renderSiteBackupMaintenance(site *models.Website, root, marker string) (str
 	return out.String(), nil
 }
 
+func siteBackupMaintenanceRecoveryConfig(site *models.Website, manifest *models.SiteBackupManifest, current []byte) (string, error) {
+	matches := func(content string) bool {
+		hash := sha256.Sum256([]byte(content))
+		return hex.EncodeToString(hash[:]) == manifest.MaintenanceVHostSHA256
+	}
+	if matches(string(current)) {
+		return string(current), nil
+	}
+	if string(current) != manifest.OriginalVHost {
+		return "", errors.New("维护 OLS 配置被外部修改，拒绝覆盖")
+	}
+	content, err := renderSiteBackupMaintenance(site, manifest.MaintenanceRoot, manifest.Marker)
+	if err != nil {
+		return "", err
+	}
+	// A retry can start after the original vhost was already restored. Rebuild
+	// only known templates and require the journal's exact, unchanged digest.
+	legacy := strings.Replace(content, fmt.Sprintf("set Cache-Control \"no-store\"\nset X-OLS-WPanel-Backup \"%s\"", manifest.Marker), fmt.Sprintf("Cache-Control: no-store\nX-OLS-WPanel-Backup: %s", manifest.Marker), 1)
+	legacy = strings.Replace(legacy, "END_headers\n rewrite {\n  enable 1\n  inherit 0\n  rules <<<END_rules\nRewriteRule ^ - [R=503,L]\nEND_rules\n }\n}\nrewrite {\n enable 1\n autoLoadHtaccess 0\n}\n", "END_headers\n}\nrewrite {\n enable 1\n autoLoadHtaccess 0\n rules <<<END_rules\nRewriteRule ^ - [R=503,L]\nEND_rules\n}\n", 1)
+	withoutIdentity := strings.Replace(legacy, olsMetadataUserPrefix+site.SystemUser+"\n", "", 1)
+	for _, candidate := range []string{content, legacy, withoutIdentity} {
+		if matches(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("无法按维护日志指纹重建已知 OLS 维护配置，拒绝解除维护")
+}
+
 func verifySiteBackupMaintenance(ctx context.Context, site *models.Website, marker string, maintenance bool) error {
 	domains, err := normalizeOLSDomains(site.Domain, splitAliases(site.Aliases))
 	if err != nil {
@@ -574,9 +602,9 @@ func (f *siteBackupFreeze) thaw(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hash := sha256.Sum256(content)
-	if hex.EncodeToString(hash[:]) != f.manifest.MaintenanceVHostSHA256 && string(content) != f.manifest.OriginalVHost {
-		return errors.New("维护 OLS 配置被外部修改，拒绝覆盖")
+	maintenance, err := siteBackupMaintenanceRecoveryConfig(f.site, f.manifest, content)
+	if err != nil {
+		return err
 	}
 	if f.manifest.DBAccountLocked {
 		if _, err = siteBackupSQL(ctx, f.password, fmt.Sprintf("ALTER USER '%s'@'localhost' ACCOUNT UNLOCK", f.site.DBUser)); err != nil {
@@ -620,11 +648,7 @@ func (f *siteBackupFreeze) thaw(ctx context.Context) error {
 				lockErr = siteBackupStopUser(cleanup, f.site)
 			}
 		}
-		maintenance, renderErr := renderSiteBackupMaintenance(f.site, f.manifest.MaintenanceRoot, f.manifest.Marker)
-		writeErr := renderErr
-		if writeErr == nil {
-			writeErr = siteBackupWriteVHost(f.manifest.VHostPath, []byte(maintenance), 0640)
-		}
+		writeErr := siteBackupWriteVHost(f.manifest.VHostPath, []byte(maintenance), 0640)
 		if writeErr == nil {
 			_, writeErr = siteBackupRestartOLS()
 		}

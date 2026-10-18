@@ -30,7 +30,34 @@ func seedRegenerationBackupMaintenance(t *testing.T, domain string, legacy bool)
 		t.Fatal(err)
 	}
 	if legacy {
-		content = strings.Replace(content, olsMetadataUserPrefix+"wp_fixture\n", "", 1)
+		content = fmt.Sprintf(`# OLS-WPanel-Format: 1
+# OLS-WPanel-VHost: olsw_%s
+# OLS-WPanel-Domains: %s
+# OLS-WPanel-VHRoot: %s
+docRoot %s
+vhDomain %s
+enableGzip 0
+index {
+ useServer 0
+ indexFiles maintenance.html
+}
+context / {
+ type NULL
+ location %s/
+ allowBrowse 1
+ extraHeaders <<<END_headers
+Cache-Control: no-store
+X-OLS-WPanel-Backup: 31a48bf0-32c7-4a19-9237-27d4738fbdd9
+END_headers
+}
+rewrite {
+ enable 1
+ autoLoadHtaccess 0
+ rules <<<END_rules
+RewriteRule ^ - [R=503,L]
+END_rules
+}
+`, buildSiteName(domain), domain, maintenanceRoot, maintenanceRoot, domain, maintenanceRoot)
 	}
 	if err := os.WriteFile(path, []byte(content), 0640); err != nil {
 		t.Fatal(err)
