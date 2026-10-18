@@ -106,12 +106,13 @@ func TestSiteBackupDatabaseFreezeRejectsSharedAndUnsupportedObjects(t *testing.T
 }
 
 func TestSiteBackupStaticMaintenanceHasAllRegisteredHostsAndNoLivePHP(t *testing.T) {
+	stubOLSVHostExecutionAccounts(t, "998", "997", "997")
 	root := filepath.Join(t.TempDir(), "maintenance")
-	text, err := renderSiteBackupMaintenance(&models.Website{Domain: "example.com", Aliases: "www.example.com\nshop.example.com"}, root, "a31a9b36-2d77-4d82-8f55-b64fe66f4474")
+	text, err := renderSiteBackupMaintenance(&models.Website{Domain: "example.com", Aliases: "www.example.com\nshop.example.com", SystemUser: "wp_example"}, root, "a31a9b36-2d77-4d82-8f55-b64fe66f4474")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"example.com,www.example.com,shop.example.com", "type NULL", "Cache-Control: no-store", "X-OLS-WPanel-Backup:", "[R=503,L]", "autoLoadHtaccess 0"} {
+	for _, want := range []string{"example.com,www.example.com,shop.example.com", "type NULL", "set Cache-Control \"no-store\"", "set X-OLS-WPanel-Backup \"a31a9b36-2d77-4d82-8f55-b64fe66f4474\"", " rewrite {\n  enable 1\n  inherit 0\n  rules <<<END_rules\nRewriteRule ^ - [R=503,L]\nEND_rules\n }\n}\nrewrite {\n enable 1\n autoLoadHtaccess 0\n}\n"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q", want)
 		}
@@ -120,6 +121,10 @@ func TestSiteBackupStaticMaintenanceHasAllRegisteredHostsAndNoLivePHP(t *testing
 		if strings.Contains(text, bad) {
 			t.Fatalf("unsafe inherited setting %q", bad)
 		}
+	}
+	identity, err := readOLSVHostExecutionIdentity(text)
+	if err != nil || identity != (olsVHostExecutionIdentity{user: "wp_example", group: "wp_example"}) {
+		t.Fatalf("maintenance must keep scripts disabled: %+v, %v", identity, err)
 	}
 }
 

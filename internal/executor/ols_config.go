@@ -71,6 +71,7 @@ type olsVHostMetadata struct {
 	domains    []string
 	vhRoot     string
 	configFile string
+	identity   olsVHostExecutionIdentity
 }
 
 func currentOLSRuntimePaths() olsRuntimePaths {
@@ -258,6 +259,7 @@ func renderOLSVHostConfig(data *OLSVHostData) (string, error) {
 	fmt.Fprintf(&out, "%s%s\n", olsMetadataVHostPrefix, vhostName)
 	fmt.Fprintf(&out, "%s%s\n", olsMetadataDomainsPrefix, strings.Join(domains, ","))
 	fmt.Fprintf(&out, "%s%s\n", olsMetadataRootPrefix, docRoot)
+	fmt.Fprintf(&out, "%s%s\n", olsMetadataUserPrefix, data.SystemUser)
 	fmt.Fprintf(&out, "# OLS WPanel Generated — %s\n", data.TemplateVer)
 	fmt.Fprintf(&out, "# Site: %s\n\n", domains[0])
 	fmt.Fprintf(&out, "docRoot                 %s\n", docRoot)
@@ -538,6 +540,10 @@ func renderOLSManagedRegistryWithIPv6(enabledDir string, ipv6 bool) (string, err
 		if parseErr != nil {
 			return "", fmt.Errorf("站点配置元数据无效 %s: %w", enabledPath, parseErr)
 		}
+		meta.identity, parseErr = readOLSVHostExecutionIdentity(string(content))
+		if parseErr != nil {
+			return "", fmt.Errorf("站点运行身份无效 %s: %w", enabledPath, parseErr)
+		}
 		if seenNames[meta.name] {
 			return "", fmt.Errorf("OpenLiteSpeed 虚拟主机名重复: %s", meta.name)
 		}
@@ -566,9 +572,17 @@ func renderOLSManagedRegistryWithIPv6(enabledDir string, ipv6 bool) (string, err
 	out.WriteString("}\n\n")
 	for _, meta := range metas {
 		fmt.Fprintf(&out, "virtualHost %s {\n", meta.name)
+		// File locks deliberately make the document root root-owned. Pin the
+		// site's unprivileged identity instead of deriving it from that owner.
+		fmt.Fprintf(&out, "  user                   %s\n", meta.identity.user)
+		fmt.Fprintf(&out, "  group                  %s\n", meta.identity.group)
 		fmt.Fprintf(&out, "  vhRoot                 %s/\n", strings.TrimSuffix(meta.vhRoot, "/"))
 		out.WriteString("  allowSymbolLink        1\n")
-		out.WriteString("  enableScript           1\n")
+		scripts := 0
+		if meta.identity.scripts {
+			scripts = 1
+		}
+		fmt.Fprintf(&out, "  enableScript           %d\n", scripts)
 		out.WriteString("  restrained             1\n")
 		out.WriteString("  setUIDMode             2\n")
 		fmt.Fprintf(&out, "  configFile             %s\n", filepath.ToSlash(meta.configFile))
@@ -715,11 +729,11 @@ func testAndRestartOpenLiteSpeed() ([]byte, error) {
 	paths := currentOLSRuntimePaths()
 	testOut, err := runOLSCommand(paths.binary, "-t")
 	if err != nil {
-		return testOut, fmt.Errorf("OpenLiteSpeed 配置检查失败: %s", strings.TrimSpace(string(testOut)))
+		return testOut, fmt.Errorf("OpenLiteSpeed 配置检查失败: %w: %s", err, strings.TrimSpace(string(testOut)))
 	}
 	restartOut, err := runOLSCommand("systemctl", "restart", "lshttpd")
 	if err != nil {
-		return restartOut, fmt.Errorf("OpenLiteSpeed 重启失败: %s", strings.TrimSpace(string(restartOut)))
+		return restartOut, fmt.Errorf("OpenLiteSpeed 重启失败: %w: %s", err, strings.TrimSpace(string(restartOut)))
 	}
 	return append(testOut, restartOut...), nil
 }
@@ -771,14 +785,13 @@ func reloadOLSManagedRegistryWithIPv6(enabledDir string, ipv6 bool) ([]byte, err
 			log.Printf("[OpenLiteSpeed] IPv6 监听暂不可用，已保留 IPv4 配置: %v", applyErr)
 			return out, nil
 		}
-		applyErr = fmt.Errorf("%v；IPv4 配置回退也未通过: %v", applyErr, fallbackErr)
+		applyErr = olsConfigRecoveryError(applyErr, "", olsConfigStageError("IPv4 配置回退也未通过", fallbackErr))
 	}
 	restoreErr := restoreOLSFile(paths.managed, old, existed, 0640)
 	_, restartErr := testAndRestartOpenLiteSpeed()
-	if restoreErr != nil || restartErr != nil {
-		return out, fmt.Errorf("%v；恢复旧注册表失败: %v；恢复后重载失败: %v", applyErr, restoreErr, restartErr)
-	}
-	return out, fmt.Errorf("%v；旧 OpenLiteSpeed 注册表已恢复", applyErr)
+	return out, olsConfigRecoveryError(applyErr, "旧 OpenLiteSpeed 注册表已恢复",
+		olsConfigStageError("恢复旧注册表失败", restoreErr),
+		olsConfigStageError("恢复后重载失败", restartErr))
 }
 
 func applyOLSVHostConfig(engine *TemplateEngine, content, targetPath, enabledPath string) error {
@@ -802,25 +815,22 @@ func applyOLSVHostConfig(engine *TemplateEngine, content, targetPath, enabledPat
 		return oldEnabledErr
 	}
 	restore := func() error {
-		var failures []string
+		var failures []error
 		if err := restoreOLSFile(targetPath, oldConfig, hadOldConfig, 0640); err != nil {
-			failures = append(failures, err.Error())
+			failures = append(failures, olsConfigStageError("恢复原虚拟主机配置失败", err))
 		}
 		if err := os.Remove(enabledPath); err != nil && !os.IsNotExist(err) {
-			failures = append(failures, err.Error())
+			failures = append(failures, olsConfigStageError("移除新启用链接失败", err))
 		}
 		if hadOldEnabledLink {
 			if err := os.Symlink(oldEnabledTarget, enabledPath); err != nil {
-				failures = append(failures, err.Error())
+				failures = append(failures, olsConfigStageError("恢复原启用链接失败", err))
 			}
 		}
 		if _, err := reloadOLSManagedRegistry(filepath.Dir(enabledPath)); err != nil {
-			failures = append(failures, err.Error())
+			failures = append(failures, olsConfigStageError("恢复后重载配置失败", err))
 		}
-		if len(failures) > 0 {
-			return errors.New(strings.Join(failures, "; "))
-		}
-		return nil
+		return errors.Join(failures...)
 	}
 
 	if err := writeOLSFileAtomic(targetPath, []byte(content), 0640); err != nil {
@@ -831,10 +841,7 @@ func applyOLSVHostConfig(engine *TemplateEngine, content, targetPath, enabledPat
 		return fmt.Errorf("启用 OpenLiteSpeed 虚拟主机失败: %w", err)
 	}
 	if _, err := reloadOLSManagedRegistry(filepath.Dir(enabledPath)); err != nil {
-		if restoreErr := restore(); restoreErr != nil {
-			return fmt.Errorf("应用 OpenLiteSpeed 配置失败: %v；自动恢复不完整: %w", err, restoreErr)
-		}
-		return fmt.Errorf("应用 OpenLiteSpeed 配置失败，旧状态已恢复: %w", err)
+		return olsConfigRecoveryError(err, "旧状态已恢复", olsConfigStageError("自动恢复不完整", restore()))
 	}
 	if engine != nil && engine.BackupDir != "" && hadOldConfig && !bytes.Equal(oldConfig, []byte(content)) {
 		backupDir := filepath.Join(engine.BackupDir, "openlitespeed")

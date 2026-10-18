@@ -19,5 +19,11 @@ func TestMain(m *testing.M) {
 		return &user.User{Username: name, Uid: "33", Gid: "33"}, nil
 	}
 	chownOLSDefaultVHostRoot = func(string, int, int) error { return nil }
+	lookupOLSVHostExecutionUser = func(name string) (*user.User, error) {
+		return &user.User{Username: name, Uid: "2000", Gid: "2000"}, nil
+	}
+	lookupOLSVHostExecutionGroup = func(name string) (*user.Group, error) {
+		return &user.Group{Name: name, Gid: "2000"}, nil
+	}
 	os.Exit(m.Run())
 }

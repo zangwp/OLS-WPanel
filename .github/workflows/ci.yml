@@ -85,35 +85,6 @@ jobs:
           docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/install.sh --check-platform
           docker run --rm -i ubuntu:26.04 bash -s -- --check-platform < "$RUNNER_TEMP/bootstrap.sh"
 
-      - name: Verify OpenLiteSpeed, LSPHP, and Redis packages on Ubuntu 24.04
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 bash /src/install.sh --check-ols-packages
-
-      - name: Verify OpenLiteSpeed, LSPHP, and Redis packages on Ubuntu 26.04
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/install.sh --check-ols-packages
-
-      - name: Verify OpenLiteSpeed, LSPHP, and Redis packages on Debian 13
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm -v "$PWD:/src:ro" debian:13 bash /src/install.sh --check-ols-packages
-
-      - name: Verify default MariaDB repository
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
-            bash /src/install.sh --check-mariadb-packages
-          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 \
-            bash /src/install.sh --check-mariadb-packages
-          docker run --rm -v "$PWD:/src:ro" debian:13 \
-            bash /src/install.sh --check-mariadb-packages
-
       - name: Download and verify Go modules
         shell: bash
         run: |
@@ -182,6 +153,43 @@ jobs:
           grep -Fq SYSTEMD_FIREWALL_ROLLBACK_OK "$test_log"
           sudo "$test_binary" -test.run '^TestOLSWebAdminReadAccessLinux$' -test.count=1 -test.v | tee "$RUNNER_TEMP/ols-webadmin-read.log"
           grep -Fq -- '--- PASS: TestOLSWebAdminReadAccessLinux ' "$RUNNER_TEMP/ols-webadmin-read.log"
+
+      - name: Verify locked-site OpenLiteSpeed runtime on Debian 13
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/ols-firewall-systemd.test:/runtime.test:ro" \
+            debian:13 bash /src/tests/ols_locked_site_runtime.sh /runtime.test
+
+      - name: Verify OpenLiteSpeed, LSPHP, and Redis packages on Ubuntu 24.04
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 bash /src/install.sh --check-ols-packages
+
+      - name: Verify OpenLiteSpeed, LSPHP, and Redis packages on Ubuntu 26.04
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/install.sh --check-ols-packages
+
+      - name: Verify OpenLiteSpeed, LSPHP, and Redis packages on Debian 13
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" debian:13 bash /src/install.sh --check-ols-packages
+
+      - name: Verify default MariaDB repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 \
+            bash /src/install.sh --check-mariadb-packages
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 \
+            bash /src/install.sh --check-mariadb-packages
+          docker run --rm -v "$PWD:/src:ro" debian:13 \
+            bash /src/install.sh --check-mariadb-packages
 
       - name: Vet
         shell: bash
