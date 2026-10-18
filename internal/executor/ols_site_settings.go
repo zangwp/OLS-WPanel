@@ -23,8 +23,9 @@ var (
 		return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 	}
 	applyCDNRealIPTrustedProxies = ApplyOLSTrustedProxyList
-	applyCDNRealIPFail2ban       = ApplyFail2banSettings
-	applyCDNRealIPOLSVHost       = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
+	// The entire CDN task holds the shared settings lock, including rollback.
+	applyCDNRealIPFail2ban = applyFail2banSettingsLocked
+	applyCDNRealIPOLSVHost = func(engine *TemplateEngine, content, targetPath, enabledPath string) error {
 		return engine.ApplyOLSVHostConfig(content, targetPath, enabledPath)
 	}
 )
@@ -107,16 +108,40 @@ func executeSetCDNRealIP(task *Task) TaskResult {
 	if !ok {
 		return TaskResult{Success: false, Message: "任务参数类型错误"}
 	}
-	site := payload.Site
-	if site == nil {
+	if payload.Site == nil {
 		return TaskResult{Success: false, Message: "网站不存在"}
 	}
+	var result TaskResult
+	err := WithFail2banSettingsLock(func(func() error) error {
+		result = executeSetCDNRealIPLocked(payload, applyCDNRealIPFail2ban)
+		return nil
+	})
+	if err != nil {
+		return taskFailure("CDN 真实 IP 设置执行失败", err)
+	}
+	return result
+}
+
+func executeSetCDNRealIPLocked(payload *SetCDNRealIPPayload, applyFail2ban func() error) TaskResult {
+	site := payload.Site
 	if blocked := rejectPausedSiteConfiguration(site.ID); blocked != nil {
 		return *blocked
 	}
+	// The queued payload can predate another completed settings operation.
+	// Read the rollback snapshot only after acquiring both settings locks.
+	var oldEnabled bool
+	if err := database.GetDB().QueryRow(`SELECT cdn_realip_enabled FROM websites WHERE id=?`, site.ID).Scan(&oldEnabled); err != nil {
+		return taskFailure("读取网站 CDN 真实 IP 设置失败", err)
+	}
+	oldGroups, err := GetWebsiteCDNRealIPGroups(site.ID)
+	if err != nil {
+		return taskFailure("读取网站 CDN 配置组失败", err)
+	}
+	currentSite := *site
+	currentSite.CDNRealIPEnabled, currentSite.CDNRealIPGroups = oldEnabled, oldGroups
+	site = &currentSite
 
 	var groups []models.CDNRealIPGroup
-	var err error
 	if payload.Enabled {
 		groups, err = GetEnabledCDNRealIPGroupsByIDs(payload.GroupIDs)
 		if err != nil {
@@ -146,7 +171,6 @@ func executeSetCDNRealIP(task *Task) TaskResult {
 		return taskFailure("渲染 OpenLiteSpeed 虚拟主机配置失败", err)
 	}
 
-	oldEnabled := site.CDNRealIPEnabled
 	oldGroupIDs := cdnRealIPGroupIDs(site.CDNRealIPGroups)
 	oldVHostData, oldDataErr := olsVHostDataFromSiteChecked(site)
 	var oldVHostConfig string
@@ -187,7 +211,7 @@ func executeSetCDNRealIP(task *Task) TaskResult {
 		log.Printf("应用 OpenLiteSpeed 虚拟主机配置失败: %v", err)
 		return restore("应用 OpenLiteSpeed 虚拟主机配置失败", err, false)
 	}
-	if err := applyCDNRealIPFail2ban(); err != nil {
+	if err := applyFail2ban(); err != nil {
 		return restore("Fail2ban 白名单应用失败", err, true)
 	}
 
