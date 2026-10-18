@@ -331,6 +331,9 @@ func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *
 		t.Fatal(err)
 	}
 	const marker = "a31a9b36-2d77-4d82-8f55-b64fe66f4474"
+	if err := os.WriteFile(filepath.Join(maintenanceRoot, "maintenance.html"), []byte("Website backup maintenance. "+marker), 0644); err != nil {
+		t.Fatal(err)
+	}
 	maintenance, err := renderSiteBackupMaintenance(site, maintenanceRoot, marker)
 	if err != nil {
 		t.Fatal(err)
@@ -364,13 +367,22 @@ func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	var firstFailure, lastFailure error
 	for {
 		err = verifySiteBackupMaintenance(ctx, site, marker, true)
 		if err == nil {
 			break
 		}
+		if firstFailure == nil {
+			firstFailure = err
+			t.Logf("OLS_MAINTENANCE_FIRST_FAILURE: %v", err)
+			olsMaintenanceHTTPDiagnostics(t, site.Domain)
+		}
+		if ctx.Err() == nil {
+			lastFailure = err
+		}
 		if ctx.Err() != nil {
-			t.Fatalf("legacy maintenance failed real HTTP 503 verification: %v", err)
+			t.Fatalf("legacy maintenance failed real HTTP 503 verification: first=%v; last before deadline=%v; final=%v", firstFailure, lastFailure, err)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -387,6 +399,35 @@ func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *
 	}
 	olsAssertSiteProcessIdentity(t, client, site, false)
 	t.Log("OLS_LEGACY_MAINTENANCE_RUNTIME_OK: root-owned static fallback returns 503 with scripts disabled and restores PHP isolation")
+}
+
+func olsMaintenanceHTTPDiagnostics(t *testing.T, domain string) {
+	t.Helper()
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, Timeout: 3 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	defer client.CloseIdleConnections()
+	for _, probe := range []struct{ method, path string }{
+		{http.MethodPost, "/"}, {http.MethodPost, "/wp-login.php"}, {http.MethodPost, "/wp-cron.php"},
+		{http.MethodPost, "/wp-json/"}, {http.MethodGet, "/"}, {http.MethodHead, "/"},
+	} {
+		request, err := http.NewRequest(probe.method, "http://127.0.0.1"+probe.path, strings.NewReader("backup_probe=1"))
+		if err != nil {
+			t.Logf("OLS_MAINTENANCE_HTTP: request %s %s: %v", probe.method, probe.path, err)
+			continue
+		}
+		request.Host = domain
+		response, err := client.Do(request)
+		if err != nil {
+			t.Logf("OLS_MAINTENANCE_HTTP: %s %s: %v", probe.method, probe.path, err)
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 512))
+		response.Body.Close()
+		t.Logf("OLS_MAINTENANCE_HTTP: %s %s status=%d cache-control=%q backup-marker=%q content-type=%q read=%v body=%q", probe.method, probe.path,
+			response.StatusCode, response.Header.Values("Cache-Control"), response.Header.Values("X-OLS-WPanel-Backup"), response.Header.Get("Content-Type"), readErr, body)
+	}
 }
 
 func olsRuntimeMainConfigFromInstaller(t *testing.T, path, managed string) string {
