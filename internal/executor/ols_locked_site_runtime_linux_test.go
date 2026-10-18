@@ -4,10 +4,12 @@ package executor
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -129,6 +131,7 @@ func TestOLSLockedSiteRuntimeLinux(t *testing.T) {
 	seenIDs := map[int]bool{}
 	var sites []*models.Website
 	var locked []*models.Website
+	protected := map[int]map[string]olsLockedRuntimeEntry{}
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 3 * time.Second}
 	t.Cleanup(client.CloseIdleConnections)
 	for i := 1; i <= 3; i++ {
@@ -153,7 +156,8 @@ header('Content-Type: application/json');
 $proof = __DIR__ . '/wp-content/uploads/process-owner.txt';
 $written = file_put_contents($proof, (string) getmypid());
 $root_write = @file_put_contents(__DIR__ . '/protected-write.txt', 'must be blocked on locked sites');
-echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 'written' => $written !== false, 'root_write' => $root_write !== false]);
+$cache_write = @file_put_contents(__DIR__ . '/.lscache/php-write.txt', 'must be blocked for PHP');
+echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 'written' => $written !== false, 'root_write' => $root_write !== false, 'cache_readable' => is_readable(__DIR__ . '/.lscache'), 'cache_write' => $cache_write !== false]);
 `
 		for path, contents := range map[string]string{filepath.Join(webRoot, "index.php"): probe, filepath.Join(webRoot, "wp-config.php"): "<?php\n// Runtime fixture, not a WordPress installation.\n"} {
 			if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
@@ -174,13 +178,11 @@ echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 
 			t.Fatalf("adding site %d while earlier sites are locked: %v", i, err)
 		}
 		sites = append(sites, site)
-		for _, lockedSite := range locked {
-			if err := VerifySiteFileLockMode(lockedSite, FileLockModeStandard); err != nil {
-				t.Fatalf("adding site %d changed an earlier site's lock: %v", i, err)
-			}
-		}
 		for _, current := range sites {
 			olsAssertSiteProcessIdentity(t, client, current, current.ID < i)
+		}
+		for _, lockedSite := range locked {
+			olsAssertLockedSiteRuntime(t, lockedSite, protected[lockedSite.ID])
 		}
 		if i < 3 {
 			if err := ApplySiteFileLockMode(site, FileLockModeStandard); err != nil {
@@ -189,6 +191,7 @@ echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 
 			if err := VerifySiteFileLockMode(site, FileLockModeStandard); err != nil {
 				t.Fatal(err)
 			}
+			protected[site.ID] = olsLockedRuntimeSnapshot(t, site, false)
 			locked = append(locked, site)
 			out := run(binary, "-t")
 			if strings.Contains(string(out), "smaller than minimum requirement") {
@@ -204,11 +207,116 @@ echo json_encode(['site' => ` + strconv.Quote(domain) + `, 'pid' => getmypid(), 
 		olsAssertSiteProcessIdentity(t, client, site, site.ID < 3)
 	}
 	for _, site := range locked {
-		if err := VerifySiteFileLockMode(site, FileLockModeStandard); err != nil {
-			t.Fatal(err)
-		}
+		olsAssertLockedSiteRuntime(t, site, protected[site.ID])
 	}
 	t.Log("OLS_LOCKED_SITE_RUNTIME_OK: three registered sites, two root-owned locked roots, independent PHP process UID/GID")
+}
+
+type olsLockedRuntimeEntry struct {
+	directory bool
+	digest    [sha256.Size]byte
+}
+
+func olsAssertLockedSiteRuntime(t *testing.T, site *models.Website, baseline map[string]olsLockedRuntimeEntry) {
+	t.Helper()
+	current := olsLockedRuntimeSnapshot(t, site, true)
+	for path, before := range baseline {
+		if after, exists := current[path]; !exists || after != before {
+			t.Fatalf("protected website content changed after reload: %s/%s", site.Domain, path)
+		}
+	}
+	for path := range current {
+		if _, exists := baseline[path]; !exists {
+			t.Fatalf("unexpected protected website content after reload: %s/%s", site.Domain, path)
+		}
+	}
+}
+
+// VerifySiteFileLockMode checks the immediate lock transition. The running OLS
+// cache module owns .lscache as nobody:nogroup 02770; all website code retains
+// the lock's strict owner/mode policy and the original content hashes.
+func olsLockedRuntimeSnapshot(t *testing.T, site *models.Website, running bool) map[string]olsLockedRuntimeEntry {
+	t.Helper()
+	if err := rejectWPFileLockSymlinks(site.WebRoot); err != nil {
+		t.Fatal(err)
+	}
+	if !wpConfigFileModsLocked(site.WebRoot) {
+		t.Fatal("locked website lost DISALLOW_FILE_MODS")
+	}
+	uid, gid, err := siteUserIDs(site.SystemUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nobody, err := user.Lookup("nobody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]olsLockedRuntimeEntry{}
+	err = filepath.WalkDir(site.WebRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("unexpected symlink in runtime website fixture: %s", path)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		owner, group, err := fileOwnerIDs(info)
+		if err != nil {
+			return err
+		}
+		if path == filepath.Join(site.WebRoot, ".lscache") {
+			if !info.IsDir() {
+				return fmt.Errorf("OLS runtime cache is not a directory: %s", path)
+			}
+			if running {
+				mode := info.Mode().Perm()
+				if info.Mode()&os.ModeSetgid != 0 {
+					mode |= 02000
+				}
+				t.Logf("OLS_RUNTIME_CACHE_METADATA: %s uid=%d gid=%d mode=%04o", path, owner, group, mode)
+				if strconv.Itoa(owner) != nobody.Uid || strconv.Itoa(group) != nobody.Gid || info.Mode().Perm() != 0770 || info.Mode()&os.ModeSetgid == 0 || info.Mode()&(os.ModeSetuid|os.ModeSticky) != 0 {
+					return fmt.Errorf("OLS runtime cache must remain nobody:nogroup 02770: %s", path)
+				}
+			}
+			return filepath.SkipDir
+		}
+		writable := wpFileLockPermissionWritablePath(FileLockModeStandard, site.WebRoot, path, info.IsDir())
+		wantOwner, wantMode := 0, os.FileMode(0444)
+		if writable {
+			wantOwner, wantMode = uid, modeForWritablePath(entry)
+		} else if info.IsDir() {
+			wantMode = 0555
+		} else if path == filepath.Join(site.WebRoot, "wp-config.php") {
+			wantMode = 0440
+		}
+		if owner != wantOwner || group != gid || info.Mode().Perm() != wantMode {
+			return fmt.Errorf("runtime file lock metadata changed: %s uid=%d gid=%d mode=%v", path, owner, group, info.Mode())
+		}
+		if writable {
+			return nil
+		}
+		relative, err := filepath.Rel(site.WebRoot, path)
+		if err != nil {
+			return err
+		}
+		snapshot := olsLockedRuntimeEntry{directory: info.IsDir()}
+		if !info.IsDir() {
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			snapshot.digest = sha256.Sum256(contents)
+		}
+		entries[relative] = snapshot
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
 }
 
 func olsAssertLegacyMaintenanceRuntime(t *testing.T, client *http.Client, site *models.Website, root, available, enabled string) {
@@ -378,10 +486,12 @@ func olsAssertSiteProcessIdentity(t *testing.T, client *http.Client, site *model
 		t.Fatal(err)
 	}
 	var result struct {
-		Site      string `json:"site"`
-		PID       int    `json:"pid"`
-		Written   bool   `json:"written"`
-		RootWrite bool   `json:"root_write"`
+		Site       string `json:"site"`
+		PID        int    `json:"pid"`
+		Written    bool   `json:"written"`
+		RootWrite  bool   `json:"root_write"`
+		CacheRead  bool   `json:"cache_readable"`
+		CacheWrite bool   `json:"cache_write"`
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	var last string
@@ -404,7 +514,7 @@ func olsAssertSiteProcessIdentity(t *testing.T, client *http.Client, site *model
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if result.Site != site.Domain || result.PID <= 1 || !result.Written || (locked && result.RootWrite) {
+	if result.Site != site.Domain || result.PID <= 1 || !result.Written || (locked && result.RootWrite) || result.CacheRead || result.CacheWrite {
 		t.Fatalf("PHP request did not preserve the site's lock and writable uploads: site=%s locked=%t result=%+v last=%s", site.Domain, locked, result, last)
 	}
 	status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", result.PID))
