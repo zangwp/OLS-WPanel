@@ -7,7 +7,13 @@ const source = fs.readFileSync(path.join(__dirname, '../../web/templates/securit
 const defer = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return { promise, resolve, reject }; };
 const required = { fail2ban_maxretry: '5', fail2ban_findtime: '60', auto_whitelist_enabled: 'true', wp_sqli_block_enabled: 'true', wp_sqli_autoban_enabled: 'true', wp_sqli_ban_threshold: '5', wp_sqli_ban_window_seconds: '600', whitelist_ips: '', ssh_whitelist_ips: '', wp_security_log_whitelist: '', telemetry_enabled: 'false', telemetry_url: '' };
 const rows = values => Object.entries({ ...required, ...values }).map(([skey,svalue]) => ({ skey,svalue }));
-function setup(api, extra={}) { const c = { api, t: key => key, showToast() {}, confirmModal: async()=>true, location:{hash:'#account'}, ...extra }; vm.createContext(c); vm.runInContext(source,c); return { m: c.securitySettings(), c }; }
+function setup(api, extra={}) {
+ const timers=new Map();let timerID=0;
+ const c = { api, t: key => key, showToast() {}, confirmModal: async()=>true, location:{hash:'#account'}, AbortController,
+  setTimeout(fn,ms){const id=++timerID;timers.set(id,{fn,ms});return id;},clearTimeout(id){timers.delete(id);},...extra };
+ vm.createContext(c);vm.runInContext(source,c);
+ return {m:c.securitySettings(),c,timers,async runTimer(){const [id,timer]=timers.entries().next().value;timers.delete(id);await timer.fn();}};
+}
 const ok = data => ({ success:true, data });
 
 test('all settings writes and whitelist refresh stay blocked before loading', async()=>{
@@ -74,7 +80,9 @@ test('CDN deletion snapshots target and locks before confirmation',async()=>{
 });
 
 test('queued whitelist refresh is never reported as a completed list update',async()=>{
- const {m}=setup(async()=>ok({}));m.settingsLoaded=true;await m.refreshWhitelist();assert.equal(m.mutationNotice,'security_center.refresh_queued');
+ const {m,timers}=setup(async()=>ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'waiting'}));m.settingsLoaded=true;
+ await m.refreshWhitelist();assert.equal(m.whitelistNotice,'security_center.refresh_queued');assert.equal(m.mutationNotice,'');
+ assert.equal(m.whitelistRefreshing,true);assert.equal(timers.size,1);assert.equal(m.settingsSaving,false);
 });
 
 test('editing another CDN opens its form while built-in Cloudflare remains automatic',async()=>{
@@ -93,10 +101,80 @@ test('failed CDN save keeps the expanded draft and successful retry closes it',a
  fail=false;await m.saveCDNGroup();assert.equal(m.cdnFormExpanded,false);assert.equal(m.cdnGroupForm.id,null);assert.equal(m.cdnError,'');
 });
 
-test('Cloudflare built-in status reports cache availability without inventing runtime verification',()=>{
- const {m}=setup(async()=>ok({}),{t:(key,params)=>key+(params?.count?':'+params.count:'')});
+test('Cloudflare status never promotes cache presence or zero bindings to verified configuration',()=>{
+ const {m}=setup(async()=>ok({}));
  m.settings={cloudflare_realip_ips:'192.0.2.0/24\n\n2001:db8::/32'};assert.equal(m.cdnBuiltinStatus(),'security.status_unknown');
- m.settingsLoaded=true;assert.equal(m.cdnBuiltinStatus(),'security.cdn_builtin_cache_ready:2');
- m.settings.cloudflare_realip_ips='';assert.equal(m.cdnBuiltinStatus(),'security.cdn_builtin_cache_missing');
+ m.settingsLoaded=true;m.securityStatus={cdn_invalid_bindings:0};assert.equal(m.cdnBuiltinStatus(),'security.status_unknown');assert.equal(m.cdnTrustClass(),'text-gray-500');
+ for(const state of ['missing','pending','disabled','configured']) {
+  m.securityStatus.cloudflare_trust=state;assert.equal(m.cdnBuiltinStatus(),'security.cdn_trust_'+state);
+  assert.equal(m.cdnTrustClass()==='text-green-400',state==='configured');
+ }
+ m.securityStatus.cdn_invalid_bindings=1;assert.equal(m.cdnTrustLabel(),'security.status_attention');assert.equal(m.cdnTrustClass(),'text-yellow-400');
  m.settingsError='cache unreadable';assert.equal(m.cdnBuiltinStatus(),'security.status_unknown');
+});
+
+test('refresh completion reloads cache data and status while preserving unsaved configuration',async()=>{
+ let status='waiting';const calls=[];
+ const {m,timers,runTimer}=setup(async(url,opt)=>{
+  calls.push({url,opt});
+  if(url==='/security/settings')return ok(rows({cloudflare_realip_ips:'173.245.48.0/20',whitelist_ips:'server copy'}));
+  if(url==='/security/status')return ok({cloudflare_trust:'configured'});
+  return ok({task_id:'refresh-1',kind:'refresh_whitelist',status,result_code:status==='success'?'refresh_completed':''});
+ });
+ m.settingsLoaded=true;m.settings={...required,whitelist_ips:'unsaved draft',googlebot_ips:'old'};m.whitelistScheduleEnabled=false;
+ await m.refreshWhitelist();await m.refreshWhitelist();assert.equal(calls.filter(c=>c.opt?.method==='POST').length,1);
+ status='running';await runTimer();assert.equal(m.whitelistNotice,'security.refresh_running');assert.equal(m.whitelistRefreshing,true);
+ status='success';await runTimer();assert.equal(m.whitelistNotice,'security.refresh_completed');assert.equal(m.whitelistRefreshing,false);assert.equal(timers.size,0);
+ assert.equal(m.settings.cloudflare_realip_ips,'173.245.48.0/20');assert.equal(m.settings.whitelist_ips,'unsaved draft');assert.equal(m.whitelistScheduleEnabled,false);assert.equal(m.securityStatus.cloudflare_trust,'configured');
+});
+
+test('failed refresh is terminal, refreshes current data, and never reports success',async()=>{
+ const {m,timers}=setup(async(url,opt)=>{
+  if(url==='/security/settings')return ok(rows());if(url==='/security/status')return ok({cloudflare_trust:'missing'});
+  return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:opt?.method?'waiting':'failed',result_code:opt?.method?'':'refresh_failed'});
+ });
+ m.settingsLoaded=true;await m.refreshWhitelist();assert.equal(m.whitelistNotice,'');assert.equal(m.whitelistError,'security.refresh_failed');assert.equal(m.whitelistTaskID,'');assert.equal(timers.size,0);
+});
+
+test('successful task with unreadable status remains distinguishable from verified configuration',async()=>{
+ const {m}=setup(async(url,opt)=>{
+  if(url==='/security/settings')return ok(rows());if(url==='/security/status')throw Error('offline');
+  return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:opt?.method?'waiting':'success',result_code:'refresh_completed'});
+ });
+ m.settingsLoaded=true;await m.refreshWhitelist();assert.equal(m.whitelistNotice,'security.refresh_completed_status_unavailable');assert.equal(m.cdnTrustClass(),'text-gray-500');
+});
+
+test('polling errors stop after three failures and retry checks the same task without another write',async()=>{
+ let unavailable=true,posts=0;
+ const {m,timers,runTimer}=setup(async(url,opt)=>{
+  if(opt?.method){posts++;return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'waiting'});}
+  if(unavailable)throw Error('offline');return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'running'});
+ });
+ m.settingsLoaded=true;await m.refreshWhitelist();await runTimer();await runTimer();
+ assert.equal(m.whitelistRefreshing,false);assert.equal(m.whitelistTaskID,'refresh-1');assert.equal(timers.size,0);assert.equal(m.whitelistError,'security.refresh_status_unavailable');
+ unavailable=false;await m.refreshWhitelist();assert.equal(posts,1);assert.equal(m.whitelistRefreshing,true);assert.equal(m.whitelistNotice,'security.refresh_running');m.destroy();
+});
+
+test('polling has a five-minute bound and expired records do not trap the update button',async()=>{
+ let expired=false;
+ const {m,timers,runTimer}=setup(async()=>{if(expired)throw Object.assign(Error('gone'),{status:404});return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'waiting'});});
+ m.settingsLoaded=true;await m.refreshWhitelist();m.whitelistPollDeadline=Date.now()-1;await runTimer();assert.equal(timers.size,0);assert.equal(m.whitelistRefreshing,false);assert.equal(m.whitelistTaskID,'refresh-1');
+ expired=true;await m.refreshWhitelist();assert.equal(m.whitelistTaskID,'');assert.equal(m.whitelistRefreshing,false);assert.equal(timers.size,0);assert.equal(m.whitelistError,'security.refresh_status_unavailable');
+});
+
+test('destroy cancels refresh polling and ignores an in-flight result',async()=>{
+ const pending=defer(),started=defer();let signal;
+ const {m,timers}=setup(async(url,opt)=>{if(opt?.method)return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'waiting'});signal=opt.signal;started.resolve();return pending.promise;});
+ m.settingsLoaded=true;const work=m.refreshWhitelist();await started.promise;m.destroy();
+ assert.equal(signal.aborted,true);pending.resolve(ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'success',result_code:'refresh_completed'}));await work;
+ assert.equal(timers.size,0);assert.equal(m.whitelistRefreshing,false);assert.notEqual(m.whitelistNotice,'security.refresh_completed');
+});
+
+test('destroy clears an idle poll timer',async()=>{
+ const {m,timers}=setup(async()=>ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'waiting'}));m.settingsLoaded=true;await m.refreshWhitelist();assert.equal(timers.size,1);m.destroy();assert.equal(timers.size,0);
+});
+
+test('foreign or inconsistent task results cannot produce a completed message',async()=>{
+ const {m,timers,runTimer}=setup(async(url,opt)=>ok({task_id:'refresh-1',kind:'refresh_whitelist',status:opt?.method?'waiting':'success',result_code:'refresh_failed'}));
+ m.settingsLoaded=true;await m.refreshWhitelist();await runTimer();await runTimer();assert.equal(m.whitelistRefreshing,false);assert.equal(timers.size,0);assert.equal(m.whitelistError,'security.refresh_status_unavailable');assert.notEqual(m.whitelistNotice,'security.refresh_completed');
 });

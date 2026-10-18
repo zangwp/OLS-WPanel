@@ -180,6 +180,8 @@ jobs:
           sudo env OLS_WPANEL_SYSTEMD_TEST=1 "$test_binary" -test.run '^TestFirewallRollbackSystemd$' -test.count=1 -test.v | tee "$test_log"
           grep -Fq -- '--- PASS: TestFirewallRollbackSystemd ' "$test_log"
           grep -Fq SYSTEMD_FIREWALL_ROLLBACK_OK "$test_log"
+          sudo "$test_binary" -test.run '^TestOLSWebAdminReadAccessLinux$' -test.count=1 -test.v | tee "$RUNNER_TEMP/ols-webadmin-read.log"
+          grep -Fq -- '--- PASS: TestOLSWebAdminReadAccessLinux ' "$RUNNER_TEMP/ols-webadmin-read.log"
 
       - name: Static check
         shell: bash
@@ -491,6 +493,8 @@ jobs:
           sudo env OLS_WPANEL_SYSTEMD_TEST=1 "$test_binary" -test.run '^TestFirewallRollbackSystemd$' -test.count=1 -test.v | tee "$test_log"
           grep -Fq -- '--- PASS: TestFirewallRollbackSystemd ' "$test_log"
           grep -Fq SYSTEMD_FIREWALL_ROLLBACK_OK "$test_log"
+          sudo "$test_binary" -test.run '^TestOLSWebAdminReadAccessLinux$' -test.count=1 -test.v | tee "$RUNNER_TEMP/ols-webadmin-read.log"
+          grep -Fq -- '--- PASS: TestOLSWebAdminReadAccessLinux ' "$RUNNER_TEMP/ols-webadmin-read.log"
 
   sign:
     name: Sign release assets

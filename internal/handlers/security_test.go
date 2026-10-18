@@ -21,8 +21,8 @@ import (
 
 func TestRefreshWhitelistReportsQueuePressure(t *testing.T) {
 	previousEnqueue := enqueueOfficialWhitelistRefresh
-	enqueueOfficialWhitelistRefresh = func(context.Context) error {
-		return executor.ErrTaskQueueFull
+	enqueueOfficialWhitelistRefresh = func(context.Context) (*executor.Task, error) {
+		return nil, executor.ErrTaskQueueFull
 	}
 	t.Cleanup(func() { enqueueOfficialWhitelistRefresh = previousEnqueue })
 
@@ -34,6 +34,57 @@ func TestRefreshWhitelistReportsQueuePressure(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "任务队列繁忙") {
 		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+}
+
+func TestRefreshWhitelistReturnsPollableTaskWithoutWorkerData(t *testing.T) {
+	previous := enqueueOfficialWhitelistRefresh
+	enqueueOfficialWhitelistRefresh = func(context.Context) (*executor.Task, error) {
+		return &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusWaiting, Payload: "secret-payload"}, nil
+	}
+	t.Cleanup(func() { enqueueOfficialWhitelistRefresh = previous })
+	rec := performSecurityRequest(http.MethodPost, "/refresh", "", func(router *gin.Engine, h *SecurityHandler) { router.POST("/refresh", h.RefreshWhitelist) })
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"task_id":"refresh-1"`) ||
+		!strings.Contains(rec.Body.String(), `"status":"waiting"`) || strings.Contains(rec.Body.String(), "secret-payload") {
+		t.Fatalf("unexpected admission response: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWhitelistRefreshStatusIsScopedAndSanitized(t *testing.T) {
+	previous := lookupOfficialWhitelistRefresh
+	t.Cleanup(func() { lookupOfficialWhitelistRefresh = previous })
+	for _, tc := range []struct {
+		name   string
+		task   *executor.Task
+		code   int
+		result string
+	}{
+		{"missing", nil, http.StatusNotFound, ""},
+		{"foreign kind", &executor.Task{ID: "refresh-1", Type: executor.TaskCreateSite, Status: executor.TaskStatusRunning}, http.StatusNotFound, ""},
+		{"wrong ID", &executor.Task{ID: "other", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusRunning}, http.StatusNotFound, ""},
+		{"waiting", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusWaiting}, http.StatusOK, ""},
+		{"running", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusRunning}, http.StatusOK, ""},
+		{"success", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusSuccess, Result: &executor.TaskResult{Success: true, Message: "secret-message", Data: "secret-result"}, Payload: "secret-payload"}, http.StatusOK, "refresh_completed"},
+		{"failed", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusFailed, Result: &executor.TaskResult{Message: "secret-message", Data: "secret-result"}}, http.StatusOK, "refresh_failed"},
+		{"missing result", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusSuccess}, http.StatusInternalServerError, ""},
+		{"conflicting result", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: executor.TaskStatusSuccess, Result: &executor.TaskResult{Success: false}}, http.StatusInternalServerError, ""},
+		{"unknown status", &executor.Task{ID: "refresh-1", Type: executor.TaskRefreshWhitelist, Status: "cancelled"}, http.StatusInternalServerError, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lookupOfficialWhitelistRefresh = func(id string) (*executor.Task, bool) {
+				if id != "refresh-1" {
+					t.Fatalf("lookup ID = %q", id)
+				}
+				return tc.task, tc.task != nil
+			}
+			rec := performSecurityRequest(http.MethodGet, "/tasks/refresh-1", "", func(router *gin.Engine, h *SecurityHandler) { router.GET("/tasks/:task_id", h.WhitelistRefreshStatus) })
+			if rec.Code != tc.code || rec.Header().Get("Cache-Control") != "no-store" || strings.Contains(rec.Body.String(), "secret-") {
+				t.Fatalf("unexpected status response: %d %s", rec.Code, rec.Body.String())
+			}
+			if tc.code == http.StatusOK && !strings.Contains(rec.Body.String(), `"result_code":"`+tc.result+`"`) {
+				t.Fatalf("result code missing: %s", rec.Body.String())
+			}
+		})
 	}
 }
 

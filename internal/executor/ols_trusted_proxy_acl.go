@@ -121,6 +121,9 @@ func writeOLSTrustedProxyConfigAtomic(path string, data []byte, metadata os.File
 	if err := tmp.Chmod(metadata.Mode().Perm()); err != nil {
 		return err
 	}
+	if err := prepareOLSWebAdminReplacement(path, tmp, data); err != nil {
+		return err
+	}
 	if err := tmp.Sync(); err != nil {
 		return err
 	}

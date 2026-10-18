@@ -27,6 +27,10 @@ var i18nKeys = []string{
 	"security.cdn_builtin_managed",
 	"security.cdn_builtin_cache_ready",
 	"security.cdn_builtin_cache_missing",
+	"security.cdn_trust_configured",
+	"security.cdn_trust_missing",
+	"security.cdn_trust_pending",
+	"security.cdn_trust_disabled",
 	"security.cdn_add_other",
 	"security.cdn_edit_other",
 	"security.ip_schedule_on",
@@ -34,6 +38,13 @@ var i18nKeys = []string{
 	"security.cf_data_updated",
 	"security.ip_update_now",
 	"security.ip_update_submitting",
+	"security.ip_update_running",
+	"security.refresh_check_result",
+	"security.refresh_running",
+	"security.refresh_completed",
+	"security.refresh_completed_status_unavailable",
+	"security.refresh_failed",
+	"security.refresh_status_unavailable",
 	"security.reload_ip_data",
 	"security.save_ip_schedule",
 	"security.ip_data_update_help",
@@ -2688,6 +2699,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 	protected.GET("/api/security/status", securityHandler.GetStatus)
 	protected.PUT("/api/security/settings", securityHandler.UpdateSettings)
 	protected.POST("/api/security/whitelist/refresh", securityHandler.RefreshWhitelist)
+	protected.GET("/api/security/whitelist/tasks/:task_id", securityHandler.WhitelistRefreshStatus)
 	protected.PUT("/api/security/whitelist/googlebot", securityHandler.ImportGooglebotRanges)
 	protected.GET("/api/security/cdn-realip-groups", securityHandler.ListCDNRealIPGroups)
 	protected.POST("/api/security/cdn-realip-groups", securityHandler.CreateCDNRealIPGroup)

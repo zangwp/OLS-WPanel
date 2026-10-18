@@ -68,6 +68,102 @@ func runCDNRealIPTask(site *models.Website) TaskResult {
 	return executeSetCDNRealIP(&Task{Payload: &SetCDNRealIPPayload{Site: site, Enabled: true, GroupIDs: []int{202}}})
 }
 
+func TestCDNRealIPTaskBusyDoesNotChangeDatabaseOrConfiguration(t *testing.T) {
+	for _, scope := range []string{"process", "kernel"} {
+		t.Run(scope, func(t *testing.T) {
+			site, calls := setupCDNRealIPTask(t)
+			if err := os.MkdirAll(filepath.Dir(site.OLSVHostConfigPath), 0750); err != nil {
+				t.Fatal(err)
+			}
+			const original = "existing configuration fixture\n"
+			if err := os.WriteFile(site.OLSVHostConfigPath, []byte(original), 0640); err != nil {
+				t.Fatal(err)
+			}
+			var result TaskResult
+			if scope == "process" {
+				if err := WithFail2banSettingsLock(func(func() error) error {
+					result = runCDNRealIPTask(site)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				release, err := acquireSecuritySettingsProcessLock(database.GetDB())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+				result = runCDNRealIPTask(site)
+				if err := release(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if result.Success || !strings.Contains(result.Message, ErrSecuritySettingsBusy.Error()) || len(*calls) != 0 {
+				t.Fatalf("busy task mutated runtime or hid contention: %+v %v", result, *calls)
+			}
+			assertCDNRealIPTaskDatabase(t, site.ID, false, 201)
+			data, err := os.ReadFile(site.OLSVHostConfigPath)
+			if err != nil || string(data) != original {
+				t.Fatal("busy task changed the previous configuration", err)
+			}
+		})
+	}
+}
+
+func TestCDNRealIPTaskHoldsSharedLockThroughRuntimeAndRollback(t *testing.T) {
+	site, calls := setupCDNRealIPTask(t)
+	assertHeld := func() {
+		t.Helper()
+		release, err := acquireSecuritySettingsProcessLock(database.GetDB())
+		if release != nil {
+			release()
+		}
+		if !errors.Is(err, ErrSecuritySettingsBusy) {
+			t.Fatalf("runtime operation escaped the shared kernel lock: %v", err)
+		}
+	}
+	trusted, vhost := applyCDNRealIPTrustedProxies, applyCDNRealIPOLSVHost
+	applyCDNRealIPTrustedProxies = func() error { assertHeld(); return trusted() }
+	applyCDNRealIPOLSVHost = func(engine *TemplateEngine, content, target, enabled string) error {
+		assertHeld()
+		return vhost(engine, content, target, enabled)
+	}
+	applyCDNRealIPFail2ban = func() error {
+		assertHeld()
+		*calls = append(*calls, "Fail2ban")
+		return errors.New("Fail2ban failed under the shared lock")
+	}
+	result := runCDNRealIPTask(site)
+	if result.Success || !strings.Contains(result.Message, "已恢复") || strings.Join(*calls, ",") != "ACL,vhost,Fail2ban,ACL,vhost" {
+		t.Fatalf("locked rollback failed: %+v %v", result, *calls)
+	}
+	assertCDNRealIPTaskDatabase(t, site.ID, false, 201)
+	release, err := acquireSecuritySettingsProcessLock(database.GetDB())
+	if err != nil {
+		t.Fatal("finished rollback retained its lock", err)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCDNRealIPTaskSnapshotsLatestCommittedSettingsInsideLock(t *testing.T) {
+	site, calls := setupCDNRealIPTask(t)
+	// Another operation completed after this task's website payload was queued.
+	if err := SaveWebsiteCDNRealIPSettings(site.ID, true, []int{201}); err != nil {
+		t.Fatal(err)
+	}
+	applyCDNRealIPFail2ban = func() error {
+		*calls = append(*calls, "Fail2ban")
+		return errors.New("Fail2ban failed after the queued snapshot")
+	}
+	result := runCDNRealIPTask(site)
+	if result.Success || !strings.Contains(result.Message, "已恢复") {
+		t.Fatalf("latest committed state was not restored: %+v", result)
+	}
+	assertCDNRealIPTaskDatabase(t, site.ID, true, 201)
+}
+
 func TestCDNRealIPTaskSuccessPersistsBeforeApplyingRuntime(t *testing.T) {
 	site, calls := setupCDNRealIPTask(t)
 	applyCDNRealIPTrustedProxies = func() error {

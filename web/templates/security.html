@@ -82,7 +82,7 @@
                 <p class="text-xs text-gray-500 mt-3 break-all" x-text="securityStatus?.whitelist_timer?.next_run ? t('security.next_run', { time: securityStatus.whitelist_timer.next_run }) : t('security.next_run_unknown')"></p>
             </div>
             <div class="runtime-detail rounded border border-gray-700 p-4">
-                <div class="flex items-center justify-between gap-3"><span class="text-sm font-medium text-white">{{t .Lang "security.cdn_trust_status"}}</span><span class="text-xs" :class="(securityStatus?.cdn_invalid_bindings || 0) === 0 ? 'text-green-400' : 'text-yellow-400'" x-text="(securityStatus?.cdn_invalid_bindings || 0) === 0 ? t('security.status_normal') : t('security.status_attention')"></span></div>
+                <div class="flex items-center justify-between gap-3"><span class="text-sm font-medium text-white">{{t .Lang "security.cdn_trust_status"}}</span><span class="text-xs" :class="cdnTrustClass()" x-text="cdnTrustLabel()"></span></div>
                 <p class="text-xs text-gray-500 mt-3" x-text="t('security.cdn_status_summary', { sites: securityStatus?.cdn_protected_sites || 0, invalid: securityStatus?.cdn_invalid_bindings || 0 })"></p>
             </div>
         </div>
@@ -128,7 +128,7 @@
                 <p>{{t .Lang "security.cdn_ranges_help"}}</p>
                 <div class="security-ip-data-meta"><span>{{t .Lang "security.cf_data_updated"}}</span><time :datetime="cfRangesUpdatedAt || null" x-text="cfRangesUpdatedLabel()"></time></div>
                 <div class="security-ip-data-actions">
-                    <button type="button" class="btn-primary text-sm" @click="refreshWhitelist()" :disabled="settingsDisabled()" x-text="whitelistRefreshing ? t('security.ip_update_submitting') : t('security.ip_update_now')"></button>
+                    <button type="button" class="btn-primary text-sm" @click="refreshWhitelist()" :disabled="settingsDisabled() || whitelistRefreshing" x-text="whitelistUpdateLabel()"></button>
                     <button type="button" class="btn-secondary text-sm" @click="reloadWhitelistData()" :disabled="settingsDisabled()" x-text="settingsLoading ? t('common.loading') : t('security.reload_ip_data')"></button>
                 </div>
                 <p class="security-ip-data-help">{{t .Lang "security.ip_data_update_help"}}</p>
@@ -226,9 +226,18 @@ function securitySettings() {
         activeTab: 'protection', showHelp: false, cdnGroups: [], cdnLoaded: false, cdnLoading: false, cdnError: '',
         cdnGroupSaving: false, cdnFormExpanded: false, sqliSaving: false, telemetrySaving: false, telemetryOriginalEnabled: false,
         whitelistScheduleEnabled: false, whitelistScheduleSaving: false, whitelistRefreshing: false,
-        whitelistNotice: '', whitelistError: '', cfRangesUpdatedAt: '',
+        whitelistNotice: '', whitelistError: '', cfRangesUpdatedAt: '', whitelistTaskID: '', whitelistTaskStatus: '',
+        whitelistPollTimer: null, whitelistPollAttempts: 0, whitelistPollErrors: 0, whitelistPollDeadline: 0,
+        whitelistRequestController: null, destroyed: false,
         cdnGroupForm: { id: null, name: '', header_name: 'X-Forwarded-For', ip_ranges: '', enabled: true, description: '' },
         async init() { await Promise.all([this.fetchSettings(), this.fetchCDNGroups(), this.fetchStatus()]); },
+        destroy() { this.destroyed = true; this.statusRequest++; this.stopWhitelistPolling(); },
+        stopWhitelistPolling() {
+            if (this.whitelistPollTimer !== null) clearTimeout(this.whitelistPollTimer);
+            this.whitelistPollTimer = null;
+            this.whitelistRequestController?.abort(); this.whitelistRequestController = null;
+            this.whitelistRefreshing = false;
+        },
         settingsDisabled() { return !this.settingsLoaded || this.settingsLoading || this.settingsSaving; },
         ipDataCount(value) { return String(value || '').split(/\r?\n/).filter(line => line.trim()).length; },
         whitelistScheduleDirty() { return this.settingsLoaded && this.whitelistScheduleEnabled !== !!this.settings.auto_whitelist_enabled; },
@@ -279,11 +288,11 @@ function securitySettings() {
             } catch(e) { this.settingsError = t('security_center.settings_load_failed') + ' ' + e.message; return false; }
             finally { this.settingsLoading = false; }
         },
-        async fetchStatus() {
+        async fetchStatus(options = {}) {
             const request = ++this.statusRequest;
             this.statusLoading = true; this.statusError = '';
             try {
-                const data = this.responseData(await api('/security/status', { suppressToast: true }));
+                const data = this.responseData(await api('/security/status', { suppressToast: true, timeout: 10000, signal: options.signal }));
                 if (request !== this.statusRequest) return false;
                 if (!data) throw new Error(t('security_center.request_failed'));
                 this.securityStatus = data; return true;
@@ -306,9 +315,19 @@ function securitySettings() {
         },
         cdnOtherGroups() { return this.cdnGroups.filter(group => group.provider !== 'cloudflare'); },
         cdnBuiltinStatus() {
-            if (!this.settingsLoaded || this.settingsLoading || this.settingsError) return t('security.status_unknown');
-            const count = this.ipDataCount(this.settings.cloudflare_realip_ips);
-            return count ? t('security.cdn_builtin_cache_ready', {count}) : t('security.cdn_builtin_cache_missing');
+            if (!this.settingsLoaded || this.settingsLoading || this.settingsError || this.statusLoading || this.statusError) return t('security.status_unknown');
+            const state = this.securityStatus?.cloudflare_trust;
+            return t(['configured','missing','pending','disabled'].includes(state) ? 'security.cdn_trust_' + state : 'security.status_unknown');
+        },
+        cdnTrustLabel() {
+            if ((this.securityStatus?.cdn_invalid_bindings || 0) > 0) return t('security.status_attention');
+            return this.cdnBuiltinStatus();
+        },
+        cdnTrustClass() {
+            if (this.statusError || this.statusLoading || !this.settingsLoaded || this.settingsLoading || this.settingsError) return 'text-gray-500';
+            if ((this.securityStatus?.cdn_invalid_bindings || 0) > 0) return 'text-yellow-400';
+            const state = this.securityStatus?.cloudflare_trust;
+            return state === 'configured' ? 'text-green-400' : ['missing','pending'].includes(state) ? 'text-yellow-400' : 'text-gray-500';
         },
         cdnGroupModeLabel(group) { if (group.provider === 'cloudflare') return t('security.cdn_mode_cloudflare_auto'); if ((group.ip_ranges || '').trim()) return t('security.cdn_mode_strict_trusted_ips'); return t('security.cdn_mode_disabled_missing_origin_ips'); },
         resetCDNGroupForm() { this.cdnGroupForm = { id: null, name: '', header_name: 'X-Forwarded-For', ip_ranges: '', enabled: true, description: '' }; this.cdnFormExpanded = false; },
@@ -368,15 +387,19 @@ function securitySettings() {
                 this.whitelistNotice = this.mutationNotice; this.whitelistError = this.mutationError || this.settingsError;
             } finally { this.whitelistScheduleSaving = false; }
         },
-        async reloadWhitelistData() {
-            if (this.settingsDisabled()) return;
-            this.settingsLoading = true; this.whitelistNotice = ''; this.whitelistError = '';
+        async reloadWhitelistData(options = {}) {
+            if (this.settingsDisabled() || this.destroyed) return false;
+            this.settingsLoading = true;
+            if (!options.quiet) { this.whitelistNotice = ''; this.whitelistError = ''; }
             try {
-                const rows = this.responseData(await api('/security/settings', {suppressToast: true})), latest = this.parseSettings(rows);
+                const rows = this.responseData(await api('/security/settings', {suppressToast: true, timeout: 10000, signal: options.signal})), latest = this.parseSettings(rows);
+                if (this.destroyed) return false;
                 for (const key of ['cloudflare_realip_ips','googlebot_ips','googlebot_ips_source','googlebot_ips_last_success_at','googlebot_ips_last_error','bingbot_ips','last_whitelist_update']) if (Object.prototype.hasOwnProperty.call(latest, key)) this.settings[key] = latest[key];
                 this.cfRangesUpdatedAt = this.cfRangesMetadata(rows, latest);
-                await this.fetchStatus(); this.whitelistNotice = t('security.ip_data_loaded');
-            } catch(error) { this.whitelistError = error.message || t('security_center.request_failed'); }
+                const statusOK = await this.fetchStatus({signal: options.signal});
+                if (!options.quiet && !this.destroyed) this.whitelistNotice = t('security.ip_data_loaded');
+                return statusOK;
+            } catch(error) { if (!this.destroyed) this.whitelistError = error.message || t('security_center.request_failed'); return false; }
             finally { this.settingsLoading = false; }
         },
         async saveSQLi() { if (this.settingsDisabled()) return; this.sqliSaving = true; return this.changeSettings({ wp_sqli_block_enabled: this.settings.wp_sqli_block_enabled ? 'true' : 'false', wp_sqli_autoban_enabled: this.settings.wp_sqli_autoban_enabled ? 'true' : 'false', wp_sqli_ban_threshold: String(this.settings.wp_sqli_ban_threshold ?? 5), wp_sqli_ban_window_seconds: String(this.settings.wp_sqli_ban_window_seconds ?? 600) }); },
@@ -392,10 +415,62 @@ function securitySettings() {
         async saveGooglebotRanges() { return this.changeSettings({ ip_ranges: this.settings.googlebot_ips || '' }, { path: '/security/whitelist/googlebot', refreshKeys: ['googlebot_ips','googlebot_ips_source','googlebot_ips_last_success_at','googlebot_ips_last_error'] }); },
         async saveWPSecurityLogWhitelist() { return this.changeSettings({ wp_security_log_whitelist: this.settings.wp_security_log_whitelist || '' }); },
         async refreshWhitelist() {
-            if (this.settingsDisabled()) return;
+            if (this.settingsDisabled() || this.whitelistRefreshing || this.destroyed) return;
             this.whitelistRefreshing = true; this.whitelistNotice = ''; this.whitelistError = '';
-            try { await this.changeSettings({}, {path: '/security/whitelist/refresh', method: 'POST', queued: true}); this.whitelistNotice = this.mutationNotice; this.whitelistError = this.mutationError; }
-            finally { this.whitelistRefreshing = false; }
+            if (!this.whitelistTaskID) {
+                this.settingsSaving = true;
+                const controller = new AbortController(); this.whitelistRequestController = controller;
+                try {
+                    const task = this.responseData(await api('/security/whitelist/refresh', {method: 'POST', body: {}, suppressToast: true, timeout: 10000, signal: controller.signal}));
+                    if (this.destroyed) return;
+                    if (typeof task?.task_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(task.task_id) || task.kind !== 'refresh_whitelist') throw new Error(t('security.refresh_status_unavailable'));
+                    this.whitelistTaskID = task.task_id; this.whitelistTaskStatus = 'waiting';
+                } catch(error) {
+                    this.whitelistRefreshing = false;
+                    if (!this.destroyed) this.whitelistError = error.message || t('security_center.request_failed');
+                    return;
+                } finally { this.settingsSaving = false; if (this.whitelistRequestController === controller) this.whitelistRequestController = null; }
+            }
+            this.whitelistPollAttempts = 0; this.whitelistPollErrors = 0; this.whitelistPollDeadline = Date.now() + 300000;
+            this.whitelistNotice = t('security_center.refresh_queued');
+            await this.pollWhitelistRefresh();
+        },
+        whitelistUpdateLabel() {
+            if (this.whitelistRefreshing) return t(this.whitelistTaskID ? 'security.ip_update_running' : 'security.ip_update_submitting');
+            return t(this.whitelistTaskID ? 'security.refresh_check_result' : 'security.ip_update_now');
+        },
+        async pollWhitelistRefresh() {
+            const id = this.whitelistTaskID;
+            if (!id || !this.whitelistRefreshing || this.destroyed) return;
+            if (Date.now() >= this.whitelistPollDeadline || this.whitelistPollAttempts >= 90) {
+                this.stopWhitelistPolling(); this.whitelistNotice = ''; this.whitelistError = t('security.refresh_status_unavailable'); return;
+            }
+            this.whitelistPollAttempts++;
+            const controller = new AbortController(); this.whitelistRequestController = controller;
+            try {
+                const task = this.responseData(await api('/security/whitelist/tasks/' + encodeURIComponent(id), {suppressToast: true, timeout: 10000, signal: controller.signal}));
+                if (this.destroyed || id !== this.whitelistTaskID) return;
+                if (task?.task_id !== id || task.kind !== 'refresh_whitelist' || !['waiting','running','success','failed'].includes(task.status)) throw new Error(t('security.refresh_status_unavailable'));
+                this.whitelistTaskStatus = task.status; this.whitelistError = '';
+                if (task.status === 'success' || task.status === 'failed') {
+                    if (task.result_code !== (task.status === 'success' ? 'refresh_completed' : 'refresh_failed')) throw new Error(t('security.refresh_status_unavailable'));
+                    this.whitelistRefreshing = false; this.whitelistTaskID = '';
+                    const loaded = await this.reloadWhitelistData({quiet: true, signal: controller.signal});
+                    if (this.destroyed) return;
+                    this.whitelistNotice = task.status === 'success' ? t(loaded ? 'security.refresh_completed' : 'security.refresh_completed_status_unavailable') : '';
+                    if (task.status === 'failed') this.whitelistError = t('security.refresh_failed');
+                    return;
+                }
+                this.whitelistPollErrors = 0;
+                this.whitelistNotice = t(task.status === 'waiting' ? 'security_center.refresh_queued' : 'security.refresh_running');
+            } catch(error) {
+                if (this.destroyed || id !== this.whitelistTaskID) return;
+                if (error.status === 404) this.whitelistTaskID = '';
+                if (!this.whitelistTaskID || ++this.whitelistPollErrors >= 3) {
+                    this.whitelistRefreshing = false; this.whitelistNotice = ''; this.whitelistError = t('security.refresh_status_unavailable'); return;
+                }
+            } finally { if (this.whitelistRequestController === controller) this.whitelistRequestController = null; }
+            if (this.whitelistRefreshing && !this.destroyed) this.whitelistPollTimer = setTimeout(() => { this.whitelistPollTimer = null; return this.pollWhitelistRefresh(); }, this.whitelistPollAttempts < 5 ? 2000 : 5000);
         }
     };
 }

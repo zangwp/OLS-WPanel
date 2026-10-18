@@ -14,7 +14,7 @@ import (
 
 func withPausedConfigurationTestDB(t *testing.T) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite", filepath.Join(privateSecurityTestDirectory(t), "paused-sites.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
