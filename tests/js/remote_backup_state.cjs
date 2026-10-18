@@ -14,7 +14,15 @@ test('failed or malformed remote configuration never permits save, test or comma
 });
 
 test('remote save locks duplicate operations and sends an immutable snapshot',async()=>{
- const pending=defer(),writes=[];let gets=0;const {m}=setup(async(url,opt)=>{if(opt?.method){writes.push(opt.body);return pending.promise;}gets++;return ok(config());});await m.fetchRemote();m.cfg.host='submitted.example.com';const saving=m.saveRemote();m.cfg.host='changed.example.com';await m.saveRemote();await m.testConnection();await m.fetchRemote();assert.equal(writes.length,1);assert.equal(writes[0].host,'submitted.example.com');assert.equal(gets,1);pending.resolve(ok({}));await saving;assert.equal(m.saving,false);assert.equal(m.loaded,true);assert.equal(m.dirty(),false);assert.equal(gets,2);
+ const pending=defer(),writes=[];let gets=0;const {m}=setup(async(url,opt)=>{if(opt?.method){writes.push(opt.body);return pending.promise;}gets++;return ok(config());});await m.fetchRemote();m.cfg.host='submitted.example.com';const saving=m.saveRemote();m.cfg.host='changed.example.com';await m.saveRemote();await m.testConnection();await m.fetchRemote();assert.equal(writes.length,1);assert.equal(writes[0].host,'submitted.example.com');assert.equal(gets,1);pending.resolve(ok({}));await saving;assert.equal(m.saving,false);assert.equal(m.loaded,true);assert.equal(m.cfg.host,'changed.example.com');assert.equal(m.dirty(),true);assert.equal(m.canCopyCmd(),false);assert.equal(gets,2);
+});
+
+test('remote post-save reload adopts normalized saved fields without replacing edits made during the read',async()=>{
+ const reload=defer(),requests=[];let reads=0;const {m}=setup(async(url,opt)=>{requests.push({url,method:opt?.method||'GET',body:opt?.body});if(opt?.method)return ok({});return ++reads===1?ok(config()):reload.promise;});
+ await m.fetchRemote();m.cfg.host='submitted.example.com';m.cfg.remote_base_path='/mnt/new';const saving=m.saveRemote();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(m.loading,true);m.cfg.host='newer.example.com';m.cfg.s3_region='draft-region';reload.resolve(ok({...config(),host:'submitted.example.com',remote_base_path:'/mnt/new',remote_path:'/mnt/new/ols-wpanel/test'}));await saving;
+ assert.equal(m.cfg.host,'newer.example.com');assert.equal(m.cfg.s3_region,'draft-region');assert.equal(m.cfg.remote_path,'/mnt/new/ols-wpanel/test');assert.equal(JSON.parse(m.savedConfig).host,'submitted.example.com');assert.equal(m.dirty(),true);
+ await m.testConnection();assert.deepEqual(requests.map(r=>[r.url,r.method]),[['/settings/remote-backup','GET'],['/settings/remote-backup','PUT'],['/settings/remote-backup','GET']]);assert.equal(requests[1].body.host,'submitted.example.com');
 });
 
 test('successful remote save with failed reload remains saved but blocks further edits',async()=>{
@@ -26,7 +34,13 @@ test('save failure preserves user edits and never reports saved',async()=>{
 });
 
 test('connection tests and setup or deletion commands require the saved configuration',async()=>{
- let writes=0;const {m}=setup(async(url,opt)=>{if(opt?.method)writes++;return ok(config());});await m.fetchRemote();m.cfg.host='unsaved.example.com';await m.testConnection();assert.equal(writes,0);assert.equal(m.canCopyCmd(),false);m.helperMode='delete';assert.equal(m.canCopyCmd(),false);await m.fetchRemote();await m.testConnection();assert.equal(writes,1);assert.equal(m.testOK,true);
+ let writes=0;const {m}=setup(async(url,opt)=>{if(opt?.method)writes++;return ok(config());});await m.fetchRemote();m.cfg.host='unsaved.example.com';await m.testConnection();assert.equal(writes,0);assert.equal(m.canCopyCmd(),false);m.helperMode='delete';assert.equal(m.canCopyCmd(),false);await m.fetchRemote();assert.equal(m.cfg.host,'unsaved.example.com');await m.testConnection();assert.equal(writes,0);m.cfg.host=config().host;await m.testConnection();assert.equal(writes,1);assert.equal(m.testOK,true);
+});
+
+test('retry after a saved configuration reload fails retains newer drafts and verifies normalized paths',async()=>{
+ let reads=0;const pending=defer();const {m}=setup(async(url,opt)=>{if(opt?.method)return pending.promise;if(++reads===2)throw Error('offline');return ok({...config(),host:reads===1?'backup.example.com':'submitted.example.com',remote_path:'/mnt/normalized/test'});});
+ await m.fetchRemote();m.cfg.host='submitted.example.com';const saving=m.saveRemote();m.cfg.host='newer.example.com';pending.resolve(ok({}));await saving;
+ assert.equal(m.loaded,false);assert.equal(m.cfg.host,'newer.example.com');await m.fetchRemote();assert.equal(m.loaded,true);assert.equal(m.cfg.host,'newer.example.com');assert.equal(JSON.parse(m.savedConfig).host,'submitted.example.com');assert.equal(m.dirty(),true);assert.equal(m.canCopyCmd(),false);
 });
 
 test('setup commands quote saved path and SSH public key and group fallback operations',async()=>{

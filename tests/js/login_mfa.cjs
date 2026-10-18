@@ -28,5 +28,13 @@ form.$nextTick = fn => fn(); form.$refs = {codeInput: {focus() {focus++;}}};
   form.resetMFA(); assert(!form.mfaRequired); assert(!form.recoveryMode); assert.equal(form.password, '');
   const ordinary = context.loginForm(); ordinary.username = 'admin'; ordinary.password = 'synthetic-password';
   await ordinary.login(); assert.equal(redirects, 2); assert.equal(context.window.location.href, '/test/'); assert.equal(ordinary.password, ''); assert.equal(ordinary.code, '');
+  const pending = context.loginForm(); pending.username = 'submitted-user'; pending.password = 'submitted-password'; pending.code = ' 123456 ';
+  let finishCSRF, csrfReads = 0; const attempts = [];
+  pending.refreshCSRFToken = () => ++csrfReads === 1 ? new Promise(resolve => {finishCSRF = resolve;}) : Promise.resolve();
+  context.api = async (url, opts) => {attempts.push({url,body:{...opts.body}});if(attempts.length===1){const e=Error('expired csrf');e.status=403;throw e;}return {success:false,message:'invalid credentials'};};
+  const signingIn = pending.login(); pending.username = 'new-draft'; pending.password = 'new-password'; pending.code = '654321'; await pending.login();
+  assert.equal(attempts.length,0);finishCSRF();await signingIn;assert.equal(csrfReads,2);assert.equal(attempts.length,2);
+  for(const attempt of attempts){assert.equal(attempt.url,'/auth/login');assert.deepEqual(attempt.body,{username:'submitted-user',password:'submitted-password',code:'123456'});}
+  assert.equal(pending.username,'new-draft');assert.equal(pending.password,'new-password');assert.equal(pending.code,'654321');assert.equal(pending.loading,false);
   console.log('PASS login: no premature MFA redirect, empty and invalid proof, duplicate guard, immediate normal/recovery redirect and secret cleanup');
 })().catch(error => {console.error(error); process.exit(1);});

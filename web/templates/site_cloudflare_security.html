@@ -166,6 +166,7 @@ function siteCloudflareSecurity() {
         async cloudflareRequest(action, method, body) {
             if (!this.site?.id || this.cfBusy || this.cfDestroyed) return false;
             const siteID = this.site.id, generation = ++this.cfGeneration, controller = new AbortController();
+            const previousConfig = this.cfLoaded ? this.cfConfig : null, formAtStart = {...this.cfForm};
             this.cfController = controller; this.cfBusy = action; this.cfError = ''; this.cfNotice = ''; this.cfNoticeType = 'info'; this.cfShowAccount = false; this.cfShowToken = false; this.cfShowTechnical = false;
             if (action === 'test') this.cfTestInfo = null;
             try {
@@ -180,7 +181,13 @@ function siteCloudflareSecurity() {
                     this.cfNoticeType = 'success';
                 }
                 else {
+                    const currentForm = {...this.cfForm};
                     this.applyCloudflareConfig(response.data, siteID);
+                    if (action === 'load' && previousConfig) {
+                        for (const key of ['enabled','account_id']) {
+                            if (currentForm[key] !== formAtStart[key] || formAtStart[key] !== previousConfig[key]) this.cfForm[key] = currentForm[key];
+                        }
+                    }
                     if (action === 'save') { this.cfToken = ''; this.cfNotice = t('cloudflare_security.saved'); this.cfNoticeType = 'success'; }
                     if (action === 'sync') {
                         if (this.cloudflareStatus() === 'error') throw new Error(this.cfConfig.last_error || this.cfConfig.coverage_error || t('cloudflare_security.request_failed'));

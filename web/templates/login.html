@@ -116,6 +116,7 @@
                 }
                 this.loading = true;
                 this.error = '';
+                const body = { username: this.username, password: this.password, code: this.code.trim() };
                 try {
                     let resp;
                     for (let attempt = 0; attempt < 2; attempt++) {
@@ -123,7 +124,7 @@
                         try {
                             resp = await api('/auth/login', {
                                 method: 'POST',
-                                body: { username: this.username, password: this.password, code: this.code.trim() },
+                                body,
                                 silent: true
                             });
                             break;

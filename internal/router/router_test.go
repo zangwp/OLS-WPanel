@@ -926,12 +926,12 @@ const data = (nextSites = sites, nextCounts = counts) => ({ generated_at: '2026-
         throw new Error('unexpected toggle path ' + path);
     };
     await panel.toggleUpdateChecks(restricted);
-    assert(panel.overview.sites[0].update_checks_disabled === false && panel.overview.sites[0].health.level === 'warning' && panel.updateCheckSavingSiteID === null, 'quick toggle reloads authoritative row health and clears saving state');
+    assert(panel.overview.sites[0].update_checks_disabled === false && panel.overview.sites[0].health.level === 'warning' && Object.keys(panel.updateCheckSavingSiteIDs).length === 0, 'quick toggle reloads authoritative row health and clears saving state');
 
     const failedToggle = panel.overview.sites[0];
     global.api = async () => { throw new Error('toggle failed'); };
     await panel.toggleUpdateChecks(failedToggle);
-    assert(failedToggle.update_checks_disabled === false && panel.updateCheckSavingSiteID === null, 'failed toggle preserves row state');
+    assert(failedToggle.update_checks_disabled === false && Object.keys(panel.updateCheckSavingSiteIDs).length === 0, 'failed toggle preserves row state');
 
     restricted.update_checks_disabled = true;
     const restrictedBulk = wpFleetOverview();

@@ -111,7 +111,7 @@ test('monitoring and protection actions lead to the real result or settings area
         page.securityStatus.checks=[check('configured',{key,can_verify:false})];page.openSummarySettings(key);
         assert.equal(navigation.pop(),target);
     }
-    page.securityStatusLoading=true;page.openSummarySettings('uptime_monitor');assert.equal(navigation.length,0);
+    page.securityStatusLoading=true;page.verifyingKey='xmlrpc';page.openSummarySettings('uptime_monitor');assert.equal(navigation.pop(),'/panel/alert');
     page.securityStatusLoading=false;page.securityStatus.checks=[check('unsupported',{key:'anomaly_monitor',can_verify:false})];
     page.openSummarySettings('anomaly_monitor');assert.equal(navigation.length,0);assert.equal(calls.length,0);
 });

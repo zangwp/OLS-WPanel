@@ -229,13 +229,13 @@
                 </div>
                 <div class="rounded border border-yellow-800 bg-yellow-950/30 p-3 text-sm text-yellow-200" x-text="pluginUpdate.preview?.current_theme ? t('wp_theme_update.current_theme_warning') : componentUpdateText('wp_plugin_update.confirm_warning', 'wp_theme_update.confirm_warning')"></div>
                 <label x-show="pluginUpdate.preview?.current_theme" class="flex items-start gap-3 rounded border border-red-800 bg-red-950/30 p-3 text-sm text-red-100">
-                    <input type="checkbox" x-model="pluginUpdate.riskAccepted" class="mt-1">
+                    <input type="checkbox" x-model="pluginUpdate.riskAccepted" :disabled="pluginUpdate.submitting" class="mt-1">
                     <span>{{t .Lang "wp_theme_update.current_theme_confirm"}}</span>
                 </label>
                 <div x-show="pluginUpdate.preview?.recent_database_backup" class="space-y-2 rounded border border-yellow-800 bg-yellow-950/30 p-3 text-sm">
                     <div class="font-medium text-yellow-100" x-text="t('wp_plugin_update.recent_backup_found', { time: fmtTime(pluginUpdate.preview?.recent_database_backup?.created_at) })"></div>
-                    <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="fresh" x-model="pluginUpdate.databaseBackupMode" class="mt-1"><span>{{t .Lang "wp_plugin_update.backup_fresh"}}</span></label>
-                    <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="reuse" x-model="pluginUpdate.databaseBackupMode" class="mt-1"><span>{{t .Lang "wp_plugin_update.backup_reuse"}}</span></label>
+                    <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="fresh" x-model="pluginUpdate.databaseBackupMode" :disabled="pluginUpdate.submitting" class="mt-1"><span>{{t .Lang "wp_plugin_update.backup_fresh"}}</span></label>
+                    <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="reuse" x-model="pluginUpdate.databaseBackupMode" :disabled="pluginUpdate.submitting" class="mt-1"><span>{{t .Lang "wp_plugin_update.backup_reuse"}}</span></label>
                     <p x-show="pluginUpdate.databaseBackupMode === 'reuse'" class="text-red-200">{{t .Lang "wp_plugin_update.backup_reuse_warning"}}</p>
                 </div>
                 <div class="flex justify-end gap-3">
@@ -274,15 +274,15 @@
                     <div class="flex items-center justify-between text-xs text-gray-400">
                         <span x-text="t('wp_plugin_batch.selected_count', { count: pluginBatch.selected.size })"></span>
                         <span class="space-x-3">
-                            <button @click="pluginBatchSelectAll()" class="underline hover:text-white">{{t .Lang "wp_plugin_batch.select_all"}}</button>
-                            <button @click="pluginBatchSelectClear()" class="underline hover:text-white">{{t .Lang "wp_plugin_batch.select_clear"}}</button>
+                            <button @click="pluginBatchSelectAll()" :disabled="pluginBatch.submitting" class="underline hover:text-white">{{t .Lang "wp_plugin_batch.select_all"}}</button>
+                            <button @click="pluginBatchSelectClear()" :disabled="pluginBatch.submitting" class="underline hover:text-white">{{t .Lang "wp_plugin_batch.select_clear"}}</button>
                         </span>
                     </div>
                     <ul class="mt-2 max-h-72 space-y-1 overflow-y-auto rounded border border-gray-700 bg-gray-950/40 p-2">
                         <template x-for="item in pluginBatchSelectableItems()" :key="item.key">
                             <li>
                                 <label class="flex items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-800/60">
-                                    <input type="checkbox" class="mt-1" :checked="pluginBatch.selected.has(item.key)" @change="togglePluginBatchItem(item.key)">
+                                    <input type="checkbox" class="mt-1" :checked="pluginBatch.selected.has(item.key)" :disabled="pluginBatch.submitting" @change="togglePluginBatchItem(item.key)">
                                     <span class="min-w-0">
                                         <span class="block truncate text-white" x-text="item.name || item.key"></span>
                                         <span class="block break-all font-mono text-xs text-gray-500" x-text="item.key + ': ' + (item.current_version || '?') + ' → ' + item.target_version"></span>
@@ -1114,13 +1114,16 @@ function wpInventoryPanel() {
             this.pluginBatch.mode = 'select';
         },
         togglePluginBatchItem(key) {
+            if (this.pluginBatch.submitting) return;
             if (this.pluginBatch.selected.has(key)) this.pluginBatch.selected.delete(key);
             else this.pluginBatch.selected.add(key);
         },
         pluginBatchSelectAll() {
+            if (this.pluginBatch.submitting) return;
             this.pluginBatch.selected = new Set(this.pluginBatchSelectableItems().map(item => item.key));
         },
         pluginBatchSelectClear() {
+            if (this.pluginBatch.submitting) return;
             this.pluginBatch.selected = new Set();
         },
         closePluginBatch() {

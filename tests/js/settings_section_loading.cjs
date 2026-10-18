@@ -7,6 +7,7 @@ const {test} = require('node:test');
 const html = fs.readFileSync(path.join(__dirname, '../../web/templates/settings.html'), 'utf8');
 const source = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1].replace(/{{[\s\S]*?}}/g, 'translated')).join('\n');
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
+const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 function setup(section = 'general') {
     const calls = [], listeners = new Set(), timers = new Map(), storage = new Map();
     const context = {
@@ -97,6 +98,90 @@ test('a system update response arriving after page destruction cannot restart po
     const read = page.resume(); page.destroy();
     pending({success:true, data:{status:'running', message:'running'}}); await read;
     assert.equal(page.pollTimer, null); assert.equal(page.updating, false);
+});
+
+test('panel settings reads preserve draft fields through failure and retry and reject stale responses', async () => {
+    const {context} = setup(), pending = [];
+    context.api = (url, options) => { const request = deferred(); pending.push({url, options, ...request}); return request.promise; };
+    const page = context.panelSettings(), first = page.fetchSettings();
+    page.panelTitle = 'Unsaved title'; page.username = 'draft-user'; page.autoUpdate.window = '08:00-09:00';
+    pending[0].reject(Error('offline')); await first; assert.equal(page.accountLoaded, false);
+    const retry = page.fetchSettings(), newer = page.fetchSettings();
+    pending[2].resolve({success:true,data:{username:'actual-user',basic_auth_user:'gateway',panel_title:'Saved title',hostname:'new-host',panel_auto_update:{panel_auto_update_enabled:'true'}}}); await newer;
+    pending[1].resolve({success:true,data:{username:'old-user',basic_auth_user:'old-gateway',hostname:'old-host'}}); await retry;
+    assert.equal(page.panelTitle, 'Unsaved title'); assert.equal(page.username, 'draft-user'); assert.equal(page.originalUsername, 'actual-user');
+    assert.equal(page.basicAuthUser, 'gateway'); assert.equal(page.hostname, 'new-host'); assert.equal(page.autoUpdate.enabled, true); assert.equal(page.autoUpdate.window, '08:00-09:00');
+    assert.equal(page.accountLoaded, true); assert.equal(page.accountLoadError, ''); assert(pending.every(request => request.url === '/settings' && !request.options.method)); page.destroy();
+});
+
+test('a saved settings snapshot advances its baseline without consuming newer edits', async () => {
+    const {context} = setup(), pending = deferred(), calls = [];
+    let data = {username:'admin',basic_auth_user:'gateway',panel_title:'Original',hostname:'old-host'};
+    context.api = async (url, options) => { calls.push({url, options}); return options?.method ? pending.promise : {success:true,data}; };
+    const page = context.panelSettings(); await page.fetchSettings(); page.panelTitle = 'Submitted';
+    const saving = page.saveBasic(); page.panelTitle = 'Newer draft'; pending.resolve({success:true}); await saving;
+    data = {...data,panel_title:'Submitted',hostname:'current-host'}; await page.fetchSettings();
+    assert.equal(page.panelTitle, 'Newer draft'); assert.equal(page.hostname, 'current-host');
+    assert.equal(calls.filter(call => call.options?.method).length, 1); assert.equal(calls[1].options.method, 'PUT'); assert.equal(calls[1].options.body.panel_title, 'Submitted');
+    page.panelTitle = 'Submitted'; data = {...data,panel_title:'External update'}; await page.fetchSettings(); assert.equal(page.panelTitle, 'External update'); page.destroy();
+});
+
+test('Basic Auth completion clears only unchanged submitted secrets and leaves other form feedback idle', async () => {
+    const {context} = setup(), pending = deferred(), calls = [];
+    context.api = (url, options) => { calls.push({url, options}); return pending.promise; };
+    const page = context.panelSettings(); page.accountLoaded = true; page.basicAuthUser = 'gateway';
+    page.pw.basic = 'submitted-password'; page.pw.basicCurrent = 'current-password'; page.pw.basicCode = ' 123456 ';
+    const saving = page.saveBasicAuth(); page.pw.basic = 'newer-password'; page.pw.basicCode = '654321'; page.pw.new1 = 'other-form-draft';
+    assert.equal(page.accountSaving, 'basic'); assert.equal(page.ntpSyncing, false); assert.equal(page.proxyTesting, false);
+    pending.resolve({success:true}); await saving;
+    assert.equal(page.pw.basic, 'newer-password'); assert.equal(page.pw.basicCurrent, ''); assert.equal(page.pw.basicCode, '654321'); assert.equal(page.pw.new1, 'other-form-draft');
+    assert.equal(calls.length, 1); assert.equal(calls[0].url, '/settings'); assert.equal(calls[0].options.body.basic_auth_password, 'submitted-password'); assert.equal(calls[0].options.body.code, '123456');
+});
+
+test('WordPress package refresh cannot replace a newer auto-check choice, including after a failed save', async () => {
+    const {context, pages} = setup(), page = pages[0], read = deferred(), write = deferred(), calls = [];
+    await page.fetchStatus();
+    context.api = (url, options) => { calls.push({url, options}); return options?.method ? write.promise : read.promise; };
+    const refresh = page.fetchStatus(); page.autoCheck.enabled = false; const saving = page.saveAutoCheck();
+    read.resolve({success:true,data:{available:true,version:'new-package',auto_check:{wp_package_auto_check_enabled:'true'}}}); await refresh;
+    assert.equal(page.pkg.version, 'new-package'); assert.equal(page.autoCheck.enabled, false);
+    write.resolve({success:false,message:'not saved'}); await saving; assert.equal(page.autoCheckSaving, false);
+    await page.fetchStatus(); assert.equal(page.autoCheck.enabled, false);
+    assert.equal(calls.filter(call => call.options?.method).length, 1); assert.equal(calls[1].url, '/settings'); assert.equal(calls[1].options.body.wp_package_auto_check_enabled, 'false');
+});
+
+test('rapid WordPress auto-check edits serialize immutable requests and persist the latest choice', async () => {
+    const {context, pages} = setup(), page = pages[0], writes = [];
+    await page.fetchStatus();
+    context.api = (url, options) => { const pending = deferred(); writes.push({url, options, ...pending}); return pending.promise; };
+    page.autoCheck.enabled = false; const first = page.saveAutoCheck(); page.autoCheck.enabled = true; await page.saveAutoCheck();
+    assert.equal(writes.length, 1); assert.equal(writes[0].options.body.wp_package_auto_check_enabled, 'false');
+    writes[0].resolve({success:true}); await settle(); assert.equal(writes.length, 2); assert.equal(writes[1].options.body.wp_package_auto_check_enabled, 'true');
+    writes[1].resolve({success:true}); await first; assert.equal(page.autoCheckSaving, false); assert.equal(page.savedAutoCheckEnabled, true);
+    assert(writes.every(request => request.url === '/settings' && request.options.method === 'PUT'));
+});
+
+test('automatic panel update edits serialize the latest full snapshot without locking unrelated controls', async () => {
+    const {context} = setup(), page = context.panelSettings(), writes = [];
+    page.accountLoaded = true;
+    context.api = (url, options) => { const pending = deferred(); writes.push({url, options, ...pending}); return pending.promise; };
+    page.autoUpdate.enabled = true; const saving = page.saveAutoUpdate();
+    page.autoUpdate.mode = 'all_stable'; await page.saveAutoUpdate(); page.autoUpdate.window = '08:00-09:00'; page.autoUpdate.delay = 30; await page.saveAutoUpdate();
+    assert.equal(writes.length, 1); assert.equal(writes[0].options.body.panel_auto_update_mode, 'patch_only'); assert.equal(writes[0].options.body.panel_auto_update_window, '03:00-05:00');
+    assert.equal(page.accountSaving, ''); assert.equal(page.ntpSyncing, false); assert.equal(page.proxyTesting, false); assert.equal(page.accountLoaded, true);
+    writes[0].resolve({success:true}); await settle(); assert.equal(writes.length, 2);
+    assert.deepEqual(JSON.parse(JSON.stringify(writes[1].options.body)), {panel_auto_update_enabled:'true',panel_auto_update_mode:'all_stable',panel_auto_update_window:'08:00-09:00',panel_auto_update_release_delay_minutes:'30',panel_auto_update_signature_timeout_minutes:'120'});
+    writes[1].resolve({success:true}); await saving; assert.equal(page.autoUpdateSaving, false); assert.equal(page.autoUpdatePending, false); assert.equal(page.autoUpdateBaseline.window, '08:00-09:00');
+    assert(writes.every(request => request.url === '/settings' && request.options.method === 'PUT'));
+});
+
+test('failed automatic update save retains newer edits, releases the queue, and waits for explicit retry', async () => {
+    const {context} = setup(), page = context.panelSettings(), writes = [];
+    page.accountLoaded = true;
+    context.api = (url, options) => { const pending = deferred(); writes.push({url, options, ...pending}); return pending.promise; };
+    const saving = page.saveAutoUpdate(); page.autoUpdate.window = '10:00-11:00'; await page.saveAutoUpdate();
+    writes[0].resolve({success:false,message:'write failed'}); await saving; assert.equal(writes.length, 1); assert.equal(page.autoUpdateSaving, false); assert.equal(page.autoUpdatePending, false); assert.equal(page.autoUpdate.window, '10:00-11:00'); assert.equal(page.autoUpdateBaseline, null);
+    const retry = page.saveAutoUpdate(); assert.equal(writes[1].options.body.panel_auto_update_window, '10:00-11:00'); writes[1].resolve({success:true}); await retry; assert.equal(page.autoUpdateBaseline.window, '10:00-11:00');
 });
 
 test('unknown restore status retains the job ID and blocks a second restore or backup', async () => {

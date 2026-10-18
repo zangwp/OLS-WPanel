@@ -21,6 +21,26 @@ function setup() {
     return { page, calls, timers, context };
 }
 
+for (const result of ['failed-request', 'running']) for (const draft of ['', 'next question']) {
+    test(`followup ${result} preserves a newer draft and restores only an empty input: ${draft}`, async () => {
+        const { page, context, calls } = setup();
+        let resolve, reject;
+        const pending = new Promise((a, b) => { resolve = a; reject = b; });
+        context.api = (url, options) => { calls.push({ url, options }); return pending; };
+        page.currentSessionID = 11; page.followupText = 'submitted question';
+        const sending = page.sendFollowup();
+        page.followupText = draft;
+        await page.sendFollowup();
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].options.body.content, 'submitted question');
+        if (result === 'failed-request') reject(Error('offline'));
+        else resolve({ success: true, data: { status: 'running' } });
+        await sending;
+        assert.equal(page.followupText, draft || 'submitted question');
+        assert.equal(page.sendingFollowup, false);
+    });
+}
+
 test('custom diagnosis validates an empty or oversized question before an API call', async () => {
     const { page, calls, timers } = setup();
     page.symptom = 'custom';

@@ -16,6 +16,83 @@ function setup(api, extra={}) {
 }
 const ok = data => ({ success:true, data });
 
+test('IP update admission and completion reads never lock unrelated save controls or submit settings', async()=>{
+ const admission=defer(), reload=defer(), calls=[];
+ const {m}=setup(async(url,opt)=>{
+  calls.push({url,opt});
+  if(opt?.method==='POST')return admission.promise;
+  if(url==='/security/settings')return reload.promise;
+  if(url==='/security/status')return ok({cloudflare_trust:'configured'});
+  return ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'success',result_code:'refresh_completed'});
+ });
+ m.settingsLoaded=true;m.settings=m.parseSettings(rows());
+ const pending=m.refreshWhitelist();
+ assert.equal(m.settingsDisabled(),false);assert.equal(m.whitelistRefreshing,true);
+ await m.refreshWhitelist();await m.reloadWhitelistData();assert.equal(calls.length,1);
+ admission.resolve(ok({task_id:'refresh-1',kind:'refresh_whitelist',status:'waiting'}));
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(m.whitelistDataLoading,true);assert.equal(m.whitelistRefreshing,true);assert.equal(m.settingsDisabled(),false);
+ m.settings.whitelist_ips='203.0.113.20';m.settings.ssh_whitelist_ips='203.0.113.21';m.whitelistScheduleEnabled=false;
+ reload.resolve(ok(rows({cloudflare_realip_ips:'173.245.48.0/20'})));await pending;
+ assert.equal(m.whitelistDataLoading,false);assert.equal(m.whitelistRefreshing,false);assert.equal(m.settingsDisabled(),false);
+ assert.equal(m.settings.whitelist_ips,'203.0.113.20');assert.equal(m.settings.ssh_whitelist_ips,'203.0.113.21');assert.equal(m.whitelistScheduleEnabled,false);
+ assert.deepEqual(calls.filter(c=>c.opt?.method).map(c=>[c.url,c.opt.method]),[['/security/whitelist/refresh','POST']]);
+});
+
+for(const editing of ['before','during','none'])test('IP data reload preserves Googlebot drafts: '+editing,async()=>{
+ const response=defer();const {m}=setup(async url=>url==='/security/settings'?response.promise:ok({}));
+ m.settingsLoaded=true;m.settings=m.parseSettings(rows({googlebot_ips:'66.249.64.0/19'}));m.googlebotRangesOriginal=m.settings.googlebot_ips;
+ if(editing==='before')m.settings.googlebot_ips='192.0.2.0/24';
+ const pending=m.reloadWhitelistData();
+ if(editing==='during')m.settings.googlebot_ips='192.0.2.0/24';
+ assert.equal(m.settingsDisabled(),false);await m.reloadWhitelistData();
+ response.resolve(ok(rows({googlebot_ips:'198.51.100.0/24',googlebot_ips_source:'official'})));await pending;
+ assert.equal(m.settings.googlebot_ips,editing==='none'?'198.51.100.0/24':'192.0.2.0/24');
+ assert.equal(m.googlebotRangesOriginal,'198.51.100.0/24');assert.equal(m.whitelistDataLoading,false);
+});
+
+test('an older IP read cannot overwrite a newer manual Googlebot import',async()=>{
+ const old=defer();let reads=0;const {m}=setup(async(url,opt)=>{
+  if(url==='/security/settings')return ++reads===1?old.promise:ok(rows({googlebot_ips:'192.0.2.0/24',googlebot_ips_source:'manual'}));
+  return ok({});
+ });
+ m.settingsLoaded=true;m.settings=m.parseSettings(rows());const pending=m.reloadWhitelistData();
+ m.settings.googlebot_ips='192.0.2.0/24';await m.saveGooglebotRanges();
+ old.resolve(ok(rows({googlebot_ips:'198.51.100.0/24',googlebot_ips_source:'official'})));await pending;
+ assert.equal(m.settings.googlebot_ips,'192.0.2.0/24');assert.equal(m.settings.googlebot_ips_source,'manual');assert.equal(m.googlebotRangesOriginal,'192.0.2.0/24');
+});
+
+test('failed IP data reload resets only its own loading state and keeps drafts',async()=>{
+ const {m}=setup(async()=>{throw Error('offline');});m.settingsLoaded=true;m.settings.googlebot_ips='192.0.2.0/24';
+ await m.reloadWhitelistData();assert.equal(m.whitelistDataLoading,false);assert.equal(m.settingsDisabled(),false);assert.equal(m.settings.googlebot_ips,'192.0.2.0/24');assert.equal(m.whitelistError,'offline');
+});
+
+test('retry after a successful Googlebot import and failed read preserves unrelated security drafts',async()=>{
+ let reads=0;const calls=[];const {m}=setup(async(url,opt)=>{
+  calls.push({url,method:opt?.method||'GET'});
+  if(url==='/security/settings'){if(++reads===2)throw Error('reload offline');return ok(rows({googlebot_ips:reads===1?'old-google':'saved-google',googlebot_ips_source:'manual',cloudflare_realip_ips:reads===1?'old-cf':'fresh-cf'}));}
+  return ok({});
+ });
+ await m.fetchSettings();m.settings.whitelist_ips='unsaved-web';m.settings.ssh_whitelist_ips='unsaved-ssh';m.settings.wp_security_log_whitelist='/unsaved-path';m.settings.telemetry_url='https://example.com/unsaved';m.settings.fail2ban_maxretry='8';m.whitelistScheduleEnabled=false;m.settings.googlebot_ips='submitted-google';
+ await m.saveGooglebotRanges();assert.equal(m.settingsLoaded,false);assert.equal(m.settingsDisabled(),true);await m.fetchSettings();
+ assert.equal(m.settings.whitelist_ips,'unsaved-web');assert.equal(m.settings.ssh_whitelist_ips,'unsaved-ssh');assert.equal(m.settings.wp_security_log_whitelist,'/unsaved-path');assert.equal(m.settings.telemetry_url,'https://example.com/unsaved');assert.equal(m.settings.fail2ban_maxretry,'8');assert.equal(m.whitelistScheduleEnabled,false);
+ assert.equal(m.settings.googlebot_ips,'saved-google');assert.equal(m.googlebotRangesOriginal,'saved-google');assert.equal(m.settings.cloudflare_realip_ips,'fresh-cf');assert.equal(m.settingsLoaded,true);assert.equal(m.settingsError,'');
+ assert.deepEqual(calls.filter(call=>call.method!=='GET'),[{url:'/security/whitelist/googlebot',method:'PUT'}]);
+});
+
+test('full security refresh preserves edits made during the read and can update clean saved fields',async()=>{
+ const refresh=defer();let current=rows({whitelist_ips:'old'}),reads=0;const {m}=setup(async(url,opt)=>url==='/security/settings'&&!opt?.method?(++reads===2?refresh.promise:ok(current)):ok({}));
+ await m.fetchSettings();const loading=m.fetchSettings();m.settings.whitelist_ips='during-read';m.settings.googlebot_ips='new-google-draft';m.whitelistScheduleEnabled=false;
+ refresh.resolve(ok(rows({whitelist_ips:'external',googlebot_ips:'official',fail2ban_maxretry:'9'})));await loading;
+ assert.equal(m.settings.whitelist_ips,'during-read');assert.equal(m.settings.googlebot_ips,'new-google-draft');assert.equal(m.whitelistScheduleEnabled,false);assert.equal(m.settings.fail2ban_maxretry,9);
+ await m.saveWebWhitelist();current=rows({whitelist_ips:'later-external',googlebot_ips:'official',fail2ban_maxretry:'9'});await m.fetchSettings();assert.equal(m.settings.whitelist_ips,'later-external');assert.equal(m.settings.googlebot_ips,'new-google-draft');
+});
+
+test('destroy prevents an in-flight full settings read from replacing drafts or unlocking controls',async()=>{
+ const response=defer();const {m}=setup(()=>response.promise);const pending=m.fetchSettings();m.settings.whitelist_ips='draft';m.destroy();response.resolve(ok(rows()));await pending;
+ assert.equal(m.settings.whitelist_ips,'draft');assert.equal(m.settingsLoaded,false);assert.equal(m.settingsLoading,false);
+});
+
 test('all settings writes and whitelist refresh stay blocked before loading', async()=>{
  let calls=0; const {m}=setup(async()=>{calls++;return ok({});});
  for(const method of ['saveFail2ban','saveSQLi','saveTelemetry','saveWebWhitelist','saveSSHWhitelist','saveGooglebotRanges','saveWPSecurityLogWhitelist','refreshWhitelist']) await m[method]();

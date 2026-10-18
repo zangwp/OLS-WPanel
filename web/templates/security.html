@@ -128,8 +128,8 @@
                 <p>{{t .Lang "security.cdn_ranges_help"}}</p>
                 <div class="security-ip-data-meta"><span>{{t .Lang "security.cf_data_updated"}}</span><time :datetime="cfRangesUpdatedAt || null" x-text="cfRangesUpdatedLabel()"></time></div>
                 <div class="security-ip-data-actions">
-                    <button type="button" class="btn-primary text-sm" @click="refreshWhitelist()" :disabled="settingsDisabled() || whitelistRefreshing" x-text="whitelistUpdateLabel()"></button>
-                    <button type="button" class="btn-secondary text-sm" @click="reloadWhitelistData()" :disabled="settingsDisabled()" x-text="settingsLoading ? t('common.loading') : t('security.reload_ip_data')"></button>
+                    <button type="button" class="btn-primary text-sm" @click="refreshWhitelist()" :disabled="settingsDisabled() || whitelistRefreshing || whitelistDataLoading" x-text="whitelistUpdateLabel()"></button>
+                    <button type="button" class="btn-secondary text-sm" @click="reloadWhitelistData()" :disabled="settingsDisabled() || whitelistRefreshing || whitelistDataLoading" x-text="whitelistDataLoading && !whitelistRefreshing ? t('common.loading') : t('security.reload_ip_data')"></button>
                 </div>
                 <p class="security-ip-data-help">{{t .Lang "security.ip_data_update_help"}}</p>
                 <div class="security-ip-data-schedule">
@@ -221,11 +221,12 @@ function securityCenter() {
 }
 function securitySettings() {
     return {
-        settings: {}, settingsLoaded: false, settingsLoading: false, settingsError: '', settingsSaving: false,
+        settings: {}, settingsBaseline: {}, settingsLoaded: false, settingsLoading: false, settingsError: '', settingsSaving: false,
         mutationError: '', mutationNotice: '', securityStatus: null, statusLoading: false, statusError: '', statusRequest: 0,
         activeTab: 'protection', showHelp: false, cdnGroups: [], cdnLoaded: false, cdnLoading: false, cdnError: '',
         cdnGroupSaving: false, cdnFormExpanded: false, sqliSaving: false, telemetrySaving: false, telemetryOriginalEnabled: false,
-        whitelistScheduleEnabled: false, whitelistScheduleSaving: false, whitelistRefreshing: false,
+        whitelistScheduleEnabled: false, whitelistScheduleSaving: false, whitelistRefreshing: false, whitelistDataLoading: false,
+        googlebotRangesOriginal: '', googlebotRevision: 0, googlebotSaving: false,
         whitelistNotice: '', whitelistError: '', cfRangesUpdatedAt: '', whitelistTaskID: '', whitelistTaskStatus: '',
         whitelistPollTimer: null, whitelistPollAttempts: 0, whitelistPollErrors: 0, whitelistPollDeadline: 0,
         whitelistRequestController: null, destroyed: false,
@@ -276,14 +277,26 @@ function securitySettings() {
             return map;
         },
         async fetchSettings() {
-            if (this.settingsLoading || this.settingsSaving) return false;
+            if (this.settingsLoading || this.settingsSaving || this.destroyed) return false;
+            const before = { ...this.settings }, baseline = { ...this.settingsBaseline };
+            const schedule = this.whitelistScheduleEnabled, scheduleClean = schedule === !!baseline.auto_whitelist_enabled;
+            this.googlebotRevision++;
             this.settingsLoading = true; this.settingsLoaded = false; this.settingsError = '';
             try {
                 const rows = this.responseData(await api('/security/settings', { suppressToast: true }));
-                this.settings = this.parseSettings(rows);
-                this.cfRangesUpdatedAt = this.cfRangesMetadata(rows, this.settings);
-                this.whitelistScheduleEnabled = !!this.settings.auto_whitelist_enabled;
-                this.telemetryOriginalEnabled = !!this.settings.telemetry_enabled;
+                if (this.destroyed) return false;
+                const latest = this.parseSettings(rows), merged = { ...latest };
+                const editable = ['fail2ban_maxretry','fail2ban_findtime','wp_sqli_block_enabled','wp_sqli_autoban_enabled','wp_sqli_ban_threshold','wp_sqli_ban_window_seconds','whitelist_ips','ssh_whitelist_ips','wp_security_log_whitelist','telemetry_enabled','telemetry_url','googlebot_ips'];
+                const same = (value, saved) => value === saved || (typeof saved === 'number' && String(value).trim() !== '' && Number(value) === saved);
+                for (const key of editable) {
+                    if (key in this.settings && (!same(this.settings[key], before[key]) || (key in baseline && !same(before[key], baseline[key])))) merged[key] = this.settings[key];
+                }
+                this.settings = merged;
+                this.settingsBaseline = { ...latest, googlebot_ips: latest.googlebot_ips || '' };
+                this.googlebotRangesOriginal = latest.googlebot_ips || '';
+                this.cfRangesUpdatedAt = this.cfRangesMetadata(rows, latest);
+                if (scheduleClean && this.whitelistScheduleEnabled === schedule) this.whitelistScheduleEnabled = !!latest.auto_whitelist_enabled;
+                this.telemetryOriginalEnabled = !!latest.telemetry_enabled;
                 this.settingsLoaded = true; return true;
             } catch(e) { this.settingsError = t('security_center.settings_load_failed') + ' ' + e.message; return false; }
             finally { this.settingsLoading = false; }
@@ -363,14 +376,24 @@ function securitySettings() {
             if (this.settingsDisabled()) return;
             this.settingsSaving = true; this.mutationError = ''; this.mutationNotice = '';
             const snapshot = { ...body };
+            const refreshDrafts = Object.fromEntries((options.refreshKeys || []).map(key => [key, this.settings[key]]));
             try {
                 if (options.confirm && !await confirmModal(options.confirm)) return;
                 this.responseData(await api(options.path || '/security/settings', { method: options.method || 'PUT', body: snapshot, suppressToast: true }));
+                for (const [key, value] of Object.entries(snapshot)) {
+                    if (key in this.settings) this.settingsBaseline[key] = typeof this.settings[key] === 'boolean' ? value === 'true' : typeof this.settings[key] === 'number' ? Number(value) : value;
+                }
+                if (options.refreshKeys?.includes('googlebot_ips')) this.settingsBaseline.googlebot_ips = snapshot.ip_ranges;
                 if (Object.prototype.hasOwnProperty.call(snapshot, 'telemetry_enabled')) this.telemetryOriginalEnabled = snapshot.telemetry_enabled === 'true';
                 if (options.refreshKeys) {
                     try {
                         const latest = this.parseSettings(this.responseData(await api('/security/settings', { suppressToast: true })));
-                        options.refreshKeys.forEach(key => { if (Object.prototype.hasOwnProperty.call(latest, key)) this.settings[key] = latest[key]; });
+                        options.refreshKeys.forEach(key => {
+                            if (!Object.prototype.hasOwnProperty.call(latest, key)) return;
+                            this.settingsBaseline[key] = latest[key];
+                            if (this.settings[key] === refreshDrafts[key]) this.settings[key] = latest[key];
+                        });
+                        if (options.refreshKeys.includes('googlebot_ips')) this.googlebotRangesOriginal = latest.googlebot_ips || '';
                     } catch(e) { this.settingsLoaded = false; this.settingsError = t('security_center.settings_load_failed') + ' ' + e.message; }
                 }
                 const statusOK = await this.fetchStatus();
@@ -388,19 +411,29 @@ function securitySettings() {
             } finally { this.whitelistScheduleSaving = false; }
         },
         async reloadWhitelistData(options = {}) {
-            if (this.settingsDisabled() || this.destroyed) return false;
-            this.settingsLoading = true;
+            if (!this.settingsLoaded || this.settingsLoading || this.whitelistDataLoading || (this.whitelistRefreshing && !options.quiet) || this.destroyed) return false;
+            this.whitelistDataLoading = true;
+            const googleDraft = this.settings.googlebot_ips || '', googleRevision = this.googlebotRevision;
+            const googleClean = googleDraft === this.googlebotRangesOriginal, googleSaving = this.googlebotSaving;
             if (!options.quiet) { this.whitelistNotice = ''; this.whitelistError = ''; }
             try {
                 const rows = this.responseData(await api('/security/settings', {suppressToast: true, timeout: 10000, signal: options.signal})), latest = this.parseSettings(rows);
                 if (this.destroyed) return false;
-                for (const key of ['cloudflare_realip_ips','googlebot_ips','googlebot_ips_source','googlebot_ips_last_success_at','googlebot_ips_last_error','bingbot_ips','last_whitelist_update']) if (Object.prototype.hasOwnProperty.call(latest, key)) this.settings[key] = latest[key];
+                for (const key of ['cloudflare_realip_ips','bingbot_ips','last_whitelist_update']) if (Object.prototype.hasOwnProperty.call(latest, key)) this.settings[key] = latest[key];
+                if (googleRevision === this.googlebotRevision && !googleSaving && !this.googlebotSaving) {
+                    for (const key of ['googlebot_ips_source','googlebot_ips_last_success_at','googlebot_ips_last_error']) if (Object.prototype.hasOwnProperty.call(latest, key)) this.settings[key] = latest[key];
+                    if (Object.prototype.hasOwnProperty.call(latest, 'googlebot_ips')) {
+                        if (googleClean && (this.settings.googlebot_ips || '') === googleDraft) this.settings.googlebot_ips = latest.googlebot_ips;
+                        this.googlebotRangesOriginal = latest.googlebot_ips;
+                        this.settingsBaseline.googlebot_ips = latest.googlebot_ips;
+                    }
+                }
                 this.cfRangesUpdatedAt = this.cfRangesMetadata(rows, latest);
                 const statusOK = await this.fetchStatus({signal: options.signal});
                 if (!options.quiet && !this.destroyed) this.whitelistNotice = t('security.ip_data_loaded');
                 return statusOK;
             } catch(error) { if (!this.destroyed) this.whitelistError = error.message || t('security_center.request_failed'); return false; }
-            finally { this.settingsLoading = false; }
+            finally { this.whitelistDataLoading = false; }
         },
         async saveSQLi() { if (this.settingsDisabled()) return; this.sqliSaving = true; return this.changeSettings({ wp_sqli_block_enabled: this.settings.wp_sqli_block_enabled ? 'true' : 'false', wp_sqli_autoban_enabled: this.settings.wp_sqli_autoban_enabled ? 'true' : 'false', wp_sqli_ban_threshold: String(this.settings.wp_sqli_ban_threshold ?? 5), wp_sqli_ban_window_seconds: String(this.settings.wp_sqli_ban_window_seconds ?? 600) }); },
         async saveTelemetry() {
@@ -412,13 +445,17 @@ function securitySettings() {
         async saveWebWhitelist() { return this.changeSettings({ whitelist_ips: this.settings.whitelist_ips || '' }); },
         async saveSSHWhitelist() { return this.changeSettings({ ssh_whitelist_ips: this.settings.ssh_whitelist_ips || '' }); },
         googlebotSourceLabel() { const source = this.settings.googlebot_ips_source || ''; return t(['official','relay','manual'].includes(source) ? 'security.googlebot_source_' + source : 'security.googlebot_source_unknown'); },
-        async saveGooglebotRanges() { return this.changeSettings({ ip_ranges: this.settings.googlebot_ips || '' }, { path: '/security/whitelist/googlebot', refreshKeys: ['googlebot_ips','googlebot_ips_source','googlebot_ips_last_success_at','googlebot_ips_last_error'] }); },
+        async saveGooglebotRanges() {
+            if (this.settingsDisabled()) return;
+            this.googlebotRevision++; this.googlebotSaving = true;
+            try { return await this.changeSettings({ ip_ranges: this.settings.googlebot_ips || '' }, { path: '/security/whitelist/googlebot', refreshKeys: ['googlebot_ips','googlebot_ips_source','googlebot_ips_last_success_at','googlebot_ips_last_error'] }); }
+            finally { this.googlebotRevision++; this.googlebotSaving = false; }
+        },
         async saveWPSecurityLogWhitelist() { return this.changeSettings({ wp_security_log_whitelist: this.settings.wp_security_log_whitelist || '' }); },
         async refreshWhitelist() {
-            if (this.settingsDisabled() || this.whitelistRefreshing || this.destroyed) return;
+            if (this.settingsDisabled() || this.whitelistRefreshing || this.whitelistDataLoading || this.destroyed) return;
             this.whitelistRefreshing = true; this.whitelistNotice = ''; this.whitelistError = '';
             if (!this.whitelistTaskID) {
-                this.settingsSaving = true;
                 const controller = new AbortController(); this.whitelistRequestController = controller;
                 try {
                     const task = this.responseData(await api('/security/whitelist/refresh', {method: 'POST', body: {}, suppressToast: true, timeout: 10000, signal: controller.signal}));
@@ -429,7 +466,7 @@ function securitySettings() {
                     this.whitelistRefreshing = false;
                     if (!this.destroyed) this.whitelistError = error.message || t('security_center.request_failed');
                     return;
-                } finally { this.settingsSaving = false; if (this.whitelistRequestController === controller) this.whitelistRequestController = null; }
+                } finally { if (this.whitelistRequestController === controller) this.whitelistRequestController = null; }
             }
             this.whitelistPollAttempts = 0; this.whitelistPollErrors = 0; this.whitelistPollDeadline = Date.now() + 300000;
             this.whitelistNotice = t('security_center.refresh_queued');
@@ -454,8 +491,9 @@ function securitySettings() {
                 this.whitelistTaskStatus = task.status; this.whitelistError = '';
                 if (task.status === 'success' || task.status === 'failed') {
                     if (task.result_code !== (task.status === 'success' ? 'refresh_completed' : 'refresh_failed')) throw new Error(t('security.refresh_status_unavailable'));
-                    this.whitelistRefreshing = false; this.whitelistTaskID = '';
+                    this.whitelistTaskID = '';
                     const loaded = await this.reloadWhitelistData({quiet: true, signal: controller.signal});
+                    this.whitelistRefreshing = false;
                     if (this.destroyed) return;
                     this.whitelistNotice = task.status === 'success' ? t(loaded ? 'security.refresh_completed' : 'security.refresh_completed_status_unavailable') : '';
                     if (task.status === 'failed') this.whitelistError = t('security.refresh_failed');

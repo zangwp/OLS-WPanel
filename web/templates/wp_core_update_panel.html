@@ -24,8 +24,8 @@
             <p class="mt-4 text-sm text-yellow-200">{{t .Lang "wp_core_update.confirm_warning"}}</p>
             <div x-show="preview?.recent_database_backup" class="mt-4 space-y-2 rounded border border-yellow-800 bg-yellow-950/30 p-3 text-sm">
                 <div class="font-medium text-yellow-100" x-text="t('wp_core_update.recent_backup_found', { time: fmtTime(preview?.recent_database_backup?.created_at) })"></div>
-                <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="fresh" x-model="databaseBackupMode" class="mt-1"><span>{{t .Lang "wp_core_update.backup_fresh"}}</span></label>
-                <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="reuse" x-model="databaseBackupMode" class="mt-1"><span>{{t .Lang "wp_core_update.backup_reuse"}}</span></label>
+                <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="fresh" x-model="databaseBackupMode" :disabled="confirming" class="mt-1"><span>{{t .Lang "wp_core_update.backup_fresh"}}</span></label>
+                <label class="flex items-start gap-2 text-gray-200"><input type="radio" value="reuse" x-model="databaseBackupMode" :disabled="confirming" class="mt-1"><span>{{t .Lang "wp_core_update.backup_reuse"}}</span></label>
                 <p x-show="databaseBackupMode === 'reuse'" class="text-red-200">{{t .Lang "wp_core_update.backup_reuse_warning"}}</p>
             </div>
             <div class="mt-4 flex justify-end gap-2">

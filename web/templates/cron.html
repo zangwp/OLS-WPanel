@@ -113,6 +113,7 @@
                 <span x-show="!editingId">{{t .Lang "cron.create_job"}}</span>
             </h3>
             <form @submit.prevent="saveJob">
+                <fieldset :disabled="saving" class="border-0 p-0 m-0 min-w-0">
                 <div class="mb-3">
                     <label class="label">{{t .Lang "cron.job_name"}}</label>
                     <input type="text" x-model="form.name" class="input-field" required>
@@ -189,6 +190,7 @@
                     <label class="label">{{t .Lang "cron.run_command"}}</label>
                     <textarea x-model="form.command" class="input-field" rows="3" placeholder="{{t .Lang "cron.command_placeholder"}}"></textarea>
                 </div>
+                </fieldset>
                 <div class="flex justify-end space-x-3">
                     <button type="button" @click="showModal = false" class="btn-secondary">{{t .Lang "cron.cancel"}}</button>
                     <button type="submit" :disabled="saving" class="btn-primary">
@@ -301,6 +303,7 @@ function cronManager() {
             this.saving = true;
             const editingId = this.editingId;
             const formVersion = this.formVersion;
+            const submittedForm = JSON.stringify(this.form);
             try {
                 const body = { ...this.form };
                 if (body.site_id === "") body.site_id = null; else body.site_id = parseInt(body.site_id);
@@ -318,7 +321,7 @@ function cronManager() {
                 }
                 if (!r.success) throw new Error(r.message || t('common.request_failed'));
                 if (r.success) {
-                    if (formVersion === this.formVersion) {
+                    if (formVersion === this.formVersion && submittedForm === JSON.stringify(this.form)) {
                         this.showModal = false;
                         this.form = { name: '', cron_expression: '', command: '', task_type: 'command', backup_mode: 'incremental', keep_count: 3, site_id: '', notify_fail: false };
                     }

@@ -658,7 +658,7 @@ function aiDiagnosticsPage() {
                 } else if (d.status === 'running') {
                     this.error = d.message || t('ai_diagnostics.followup_running');
                     showToast(this.error, 'info');
-                    this.followupText = content;
+                    if (!this.followupText) this.followupText = content;
                 } else {
                     this.messages = d.messages || [];
                     if (this.messages.length > 0) this.diagnosisCollapsed = true;
@@ -668,7 +668,7 @@ function aiDiagnosticsPage() {
                     showToast(t('ai_diagnostics.reply_ready'), 'success');
                 }
             } catch(e) {
-                if (current()) { this.error = e.message; this.followupText = content; showToast(e.message, 'error'); }
+                if (current()) { this.error = e.message; if (!this.followupText) this.followupText = content; showToast(e.message, 'error'); }
             } finally { if (current()) this.sendingFollowup = false; }
         }
     }
