@@ -21,8 +21,9 @@ type FirewallAccessRule struct {
 }
 
 type FirewallAccessRequest struct {
-	Rules       []FirewallAccessRule `json:"rules"`
-	Fingerprint string               `json:"fingerprint"`
+	Rules         []FirewallAccessRule `json:"rules"`
+	Fingerprint   string               `json:"fingerprint"`
+	ConfirmPublic bool                 `json:"confirm_public"`
 }
 
 func normalizeAccessRules(rules []FirewallAccessRule, managementIP string, sshPort, panelPort int) ([]FirewallAccessRule, error) {
@@ -62,9 +63,6 @@ func normalizeAccessRules(rules []FirewallAccessRule, managementIP string, sshPo
 			r.Source = network.String()
 			contains = network.Contains(ip)
 		}
-		if r.Source == "" && (r.Port == 7080 || r.Port == 3306 || r.Port == 6379) {
-			return nil, fmt.Errorf("WebAdmin 和数据服务端口必须指定来源 IP/CIDR")
-		}
 		if r.Protocol == "tcp" && contains {
 			if r.Port == sshPort {
 				sshOK = true
@@ -93,6 +91,27 @@ func normalizeAccessRules(rules []FirewallAccessRule, managementIP string, sshPo
 		return a.Source < b.Source
 	})
 	return result, nil
+}
+
+func accessPublicExposure(previous, next []FirewallAccessRule, previousManaged bool) []FirewallAccessRule {
+	previousPublic := make(map[FirewallAccessRule]bool)
+	if previousManaged {
+		for _, rule := range previous {
+			if rule.Source == "" {
+				previousPublic[rule] = true
+			}
+		}
+	}
+	exposure := []FirewallAccessRule{}
+	seen := make(map[FirewallAccessRule]bool)
+	for _, rule := range next {
+		if rule.Source != "" || (rule.Port != 7080 && rule.Port != 3306 && rule.Port != 6379) || previousPublic[rule] || seen[rule] {
+			continue
+		}
+		exposure = append(exposure, rule)
+		seen[rule] = true
+	}
+	return exposure
 }
 
 func accessRulesScript(rules []FirewallAccessRule, replace bool) string {

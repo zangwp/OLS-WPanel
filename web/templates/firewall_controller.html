@@ -141,6 +141,12 @@ function firewallManager(initialTab = 'current') {
             this.accessRows = [...rows.values()]; this.invalidateAccessPreview(); this.accessDirty = false; this.accessSSHStale = false; this.accessDraftSSHPort = Number(s.ssh_port); this.accessError = '';
         },
         accessSensitive(row) { return [7080, 3306, 6379].includes(Number(row.port)); },
+        accessPublicExposure(preview = this.accessPreview) {
+            const exposure = preview?.public_exposure;
+            if (exposure == null) return [];
+            if (!Array.isArray(exposure) || exposure.some(rule => !rule || !['tcp', 'udp'].includes(rule.protocol) || !Number.isInteger(rule.port) || !this.accessSensitive(rule) || rule.source !== '' || !preview.rules?.some(candidate => candidate.protocol === rule.protocol && candidate.port === rule.port && candidate.source === ''))) throw Error(t('common.operation_failed'));
+            return exposure;
+        },
         accessPayload() {
             return this.accessRows.flatMap(r => r.scope === 'closed' ? [] : r.scope === 'public' ? [{ protocol: r.protocol, port: Number(r.port), source: '' }] : String(r.sources).split(/[,\s]+/).filter(Boolean).map(source => ({ protocol: r.protocol, port: Number(r.port), source })));
         },
@@ -230,9 +236,11 @@ function firewallManager(initialTab = 'current') {
             const preview = this.accessPreview, requiresConfirmation = this.accessNeedsConfirmation(preview), draftVersion = this.accessDraftVersion;
             this.accessBusy = true;
             try {
-                if (requiresConfirmation && !await confirmModal(t('firewall.access_apply_confirm'))) return;
+                const publicExposure = this.accessPublicExposure(preview);
+                const confirmation = [publicExposure.length ? t('firewall.access_public_sensitive_confirm', { ports: [...new Set(publicExposure.map(rule => rule.port + '/' + rule.protocol.toUpperCase()))].join(', ') }) : '', requiresConfirmation ? t('firewall.access_apply_confirm') : ''].filter(Boolean).join('\n\n');
+                if (confirmation && !await confirmModal(confirmation)) return;
                 if (this.accessRecoveryLocked() || this.portSubmitting || this.accessSSHStale || this.portStatus.access_available === false || draftVersion !== this.accessDraftVersion || this.accessPreview !== preview) return;
-                const r = await api('/firewall/ports/access/apply', { method: 'POST', body: { rules: preview.rules, fingerprint: preview.fingerprint }, timeout: 30000, suppressToast: true });
+                const r = await api('/firewall/ports/access/apply', { method: 'POST', body: { rules: preview.rules, fingerprint: preview.fingerprint, confirm_public: publicExposure.length > 0 }, timeout: 30000, suppressToast: true });
                 if (!r.success) { const failure = Error(r.message || t('common.operation_failed')); failure.code = r.error_code; throw failure; }
                 if (r.data?.saved === true && r.data.requires_confirmation === false && r.data.requires_ssh_validation !== true && !r.data.confirmation_token) {
                     this.clearAccessTimers(); this.accessPreview = null; this.accessDirty = false; this.accessError = '';

@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.1.7 — 2026-10-18
+
+- Allows explicitly selecting public access for WebAdmin, MariaDB and Redis ports. Their default closed or local-only access is retained; newly public management or data-service ports require confirmation that lists the affected ports before saving.
+- Recomputes public exposure on the server, rejects unconfirmed changes before applying rules, and keeps existing management-connection verification and rollback. Unchanged verified public rules do not repeat the prompt, and closing access needs no public-exposure confirmation.
+- Preserves draft edits when the confirmation is canceled and rejects stale previews. The legacy port-rule API retains explicit public-access confirmation, including canonicalized IPv4 and IPv6 zero-prefix networks.
+
+Upgrade notes: no new dependency, background worker or database migration. Existing firewall settings and service listening addresses are preserved. Allowing a port does not start its service or bypass independent firewall rules or provider security groups.
+
 ## v2.1.6 — 2026-10-16
 
 - Fixes the signed bootstrap rejecting valid installers after the descriptive header was translated. Installer identity now checks the first-line Bash interpreter directive while retaining Ed25519 signature, checksum, pinned key and exact release-version verification.
