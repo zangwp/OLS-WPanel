@@ -611,13 +611,14 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 		return TaskResult{Success: false, Message: fmt.Sprintf("保存官方白名单缓存失败: %v", err)}
 	}
 
+	var restoreProxy func() error
 	rollback := func(cause error, restoreACL, restoreFail2ban bool) TaskResult {
 		var recovery []error
 		if err := restoreRefreshSecuritySettings(db, previous); err != nil {
 			recovery = append(recovery, fmt.Errorf("恢复官方缓存失败: %w", err))
 		} else {
-			if restoreACL {
-				if err := ApplyOLSTrustedProxyList(); err != nil {
+			if restoreACL && restoreProxy != nil {
+				if err := restoreProxy(); err != nil {
 					recovery = append(recovery, fmt.Errorf("恢复 OpenLiteSpeed 可信代理 ACL 失败: %w", err))
 				}
 			}
@@ -633,6 +634,10 @@ func executeRefreshWhitelistLocked(task *Task, apply func() error) TaskResult {
 		return TaskResult{Success: false, Message: fmt.Sprintf("官方网段刷新未生效，原缓存与已修改配置已恢复: %v", cause)}
 	}
 	if selectedCloudflare {
+		restoreProxy, err = snapshotOLSTrustedProxyRestore()
+		if err != nil {
+			return rollback(fmt.Errorf("读取 OpenLiteSpeed 可信代理 ACL 快照失败: %w", err), false, false)
+		}
 		if err := ApplyOLSTrustedProxyList(); err != nil {
 			return rollback(fmt.Errorf("应用 OpenLiteSpeed 可信代理 ACL 失败: %w", err), true, false)
 		}
@@ -717,12 +722,19 @@ func readCachedSecurityIPRanges(db *sql.DB, key string) ([]string, error) {
 // deployment, and rollback. The callback receives the lock-aware internal
 // apply function so callers can keep their database mutation and compensation
 // in the same critical section without recursively acquiring the mutex.
-func WithFail2banSettingsLock(fn func(apply func() error) error) error {
+func WithFail2banSettingsLock(fn func(apply func() error) error) (resultErr error) {
 	if fn == nil {
 		return errors.New("fail2ban settings callback is nil")
 	}
-	fail2banSettingsApplyMu.Lock()
+	if !fail2banSettingsApplyMu.TryLock() {
+		return ErrSecuritySettingsBusy
+	}
 	defer fail2banSettingsApplyMu.Unlock()
+	release, err := acquireSecuritySettingsProcessLock(database.GetDB())
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, release()) }()
 	return fn(applyFail2banSettingsLocked)
 }
 

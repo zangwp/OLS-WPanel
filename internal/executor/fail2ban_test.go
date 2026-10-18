@@ -17,6 +17,7 @@ import (
 )
 
 func TestFail2banSettingsLockSerializesSnapshotThroughDeployment(t *testing.T) {
+	openTestDB(t)
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	firstDone := make(chan error, 1)
@@ -33,29 +34,17 @@ func TestFail2banSettingsLockSerializesSnapshotThroughDeployment(t *testing.T) {
 		t.Fatal("first Fail2ban settings operation did not acquire the lock")
 	}
 
-	secondEntered := make(chan struct{})
-	secondDone := make(chan error, 1)
-	go func() {
-		secondDone <- WithFail2banSettingsLock(func(func() error) error {
-			close(secondEntered)
-			return nil
-		})
-	}()
-	select {
-	case <-secondEntered:
+	if err := WithFail2banSettingsLock(func(func() error) error {
 		t.Fatal("second Fail2ban settings operation entered before the first completed")
-	case <-time.After(100 * time.Millisecond):
+		return nil
+	}); !errors.Is(err, ErrSecuritySettingsBusy) {
+		t.Fatalf("concurrent operation should report busy immediately, got %v", err)
 	}
 	close(releaseFirst)
 	if err := <-firstDone; err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-secondEntered:
-	case <-time.After(time.Second):
-		t.Fatal("second Fail2ban settings operation did not acquire the released lock")
-	}
-	if err := <-secondDone; err != nil {
+	if err := WithFail2banSettingsLock(func(func() error) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1468,8 +1457,8 @@ func TestFail2banWhitelistScopesKeepSSHIndependent(t *testing.T) {
 	settings := map[string]string{
 		"official_whitelist_ips": "173.245.48.0/20\n66.249.64.0/19",
 		"cloudflare_realip_ips":  "173.245.48.0/20\n2400:cb00::/32",
-		"googlebot_ips":         "66.249.64.0/19",
-		"bingbot_ips":           "157.55.39.0/24",
+		"googlebot_ips":          "66.249.64.0/19",
+		"bingbot_ips":            "157.55.39.0/24",
 		"whitelist_ips":          "203.0.113.10",
 		"ssh_whitelist_ips":      "198.51.100.7",
 	}

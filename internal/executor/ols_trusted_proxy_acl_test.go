@@ -223,9 +223,12 @@ func newOLSTrustedProxyFixture(t *testing.T) (main, managed, base string) {
 			t.Fatal(err)
 		}
 	}
-	previousConfig, previousCommand := config.AppConfig, runOLSCommand
+	previousConfig, previousCommand, previousReady := config.AppConfig, runOLSCommand, refreshTrustedProxyReady
 	config.AppConfig = &config.Config{Paths: config.PathsConfig{OLSMainConfig: main, OLSManagedConfig: managed, OLSBinary: filepath.Join(root, "openlitespeed")}}
-	t.Cleanup(func() { config.AppConfig, runOLSCommand = previousConfig, previousCommand })
+	refreshTrustedProxyReady = func() error { return nil }
+	t.Cleanup(func() {
+		config.AppConfig, runOLSCommand, refreshTrustedProxyReady = previousConfig, previousCommand, previousReady
+	})
 	return
 }
 
@@ -367,11 +370,11 @@ func openOLSTrustedProxySelectionDB(t *testing.T) {
 	t.Cleanup(func() { db.Close(); database.DB = previous })
 	for _, statement := range []string{
 		`CREATE TABLE websites (id INTEGER PRIMARY KEY, cdn_realip_enabled INTEGER)`,
-		`CREATE TABLE cdn_realip_groups (id INTEGER PRIMARY KEY, provider TEXT, ip_ranges TEXT, enabled INTEGER)`,
+		`CREATE TABLE cdn_realip_groups (id INTEGER PRIMARY KEY, provider TEXT, ip_ranges TEXT, enabled INTEGER, builtin INTEGER DEFAULT 0)`,
 		`CREATE TABLE website_cdn_realip_groups (website_id INTEGER, group_id INTEGER)`,
 		`CREATE TABLE security_settings (skey TEXT, svalue TEXT)`,
 		`INSERT INTO websites VALUES (1,1),(2,0)`,
-		`INSERT INTO cdn_realip_groups VALUES (1,'custom','192.0.2.0/24'||char(10)||'2001:db8:100::/48',1),(2,'custom','203.0.113.0/24',0),(3,'custom','198.18.0.0/15',1),(4,'custom','198.19.0.0/16',1)`,
+		`INSERT INTO cdn_realip_groups (id,provider,ip_ranges,enabled) VALUES (1,'custom','192.0.2.0/24'||char(10)||'2001:db8:100::/48',1),(2,'custom','203.0.113.0/24',0),(3,'custom','198.18.0.0/15',1),(4,'custom','198.19.0.0/16',1)`,
 		`INSERT INTO website_cdn_realip_groups VALUES (1,1),(1,2),(2,4)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {

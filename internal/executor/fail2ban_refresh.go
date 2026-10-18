@@ -16,19 +16,23 @@ var refreshOfficialGooglebotIPs = fetchGooglebotIPsWithFallback
 var refreshOfficialBingbotIPs = fetchBingbotIPs
 var refreshTrustedProxyReady = func() error {
 	if olsIPv6UpgradePaused() {
-		return errors.New("OpenLiteSpeed 已暂停，未刷新选中 Cloudflare 的缓存与可信代理配置；恢复运行后重试")
+		return errors.New("OpenLiteSpeed 已暂停，未修改可信代理配置；恢复运行后重试")
 	}
 	if !olsTrustedProxyUpgradeActive() {
-		return errors.New("OpenLiteSpeed 未运行，未刷新选中 Cloudflare 的缓存与可信代理配置；启动后重试")
+		return errors.New("OpenLiteSpeed 未运行，未修改可信代理配置；启动后重试")
 	}
 	return nil
 }
 
-// Only a selected, enabled group using the official cache is affected by a
-// cache refresh. An explicitly configured static group has its own ranges.
+// The built-in automatic group does not need website bindings. Explicitly
+// configured static and disabled groups retain their previous scope.
 func selectedCachedCloudflareProxy(db *sql.DB) (bool, error) {
+	automatic, err := automaticCloudflareProxyEnabled(db)
+	if err != nil || automatic {
+		return automatic, err
+	}
 	var selected int
-	err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM cdn_realip_groups g INNER JOIN website_cdn_realip_groups wg ON wg.group_id=g.id INNER JOIN websites w ON w.id=wg.website_id WHERE g.enabled=1 AND w.cdn_realip_enabled=1 AND g.provider=? AND TRIM(COALESCE(g.ip_ranges,''))='')`, CDNProviderCloudflare).Scan(&selected)
+	err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM cdn_realip_groups g INNER JOIN website_cdn_realip_groups wg ON wg.group_id=g.id INNER JOIN websites w ON w.id=wg.website_id WHERE g.enabled=1 AND w.cdn_realip_enabled=1 AND g.provider=? AND TRIM(COALESCE(g.ip_ranges,''))='')`, CDNProviderCloudflare).Scan(&selected)
 	return selected == 1, err
 }
 

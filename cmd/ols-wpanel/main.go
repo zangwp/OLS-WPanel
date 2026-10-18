@@ -324,6 +324,9 @@ func main() {
 	if err := executor.ApplyFail2banSettings(); err != nil {
 		log.Printf("Fail2ban 配置应用失败: %v", err)
 	}
+	if err := executor.EnsureOLSWebAdminConfigReadAccess(); err != nil {
+		log.Printf("OpenLiteSpeed WebAdmin configuration read access: %v", err)
+	}
 	executor.EnsureOperationLogRetention()
 	executor.EnsureAllSiteLogrotateConfigs()
 	// WordPress safety baseline (idempotent, only writes if not present)
@@ -338,6 +341,9 @@ func main() {
 	executor.GoSafe(func() {
 		if err := executor.RegenerateAllSitesOLSConfigs(); err != nil {
 			log.Printf("OpenLiteSpeed 虚拟主机批量重建部分失败: %v", err)
+		}
+		if err := executor.EnqueueInitialCloudflareRefresh(); err != nil {
+			log.Printf("Cloudflare initial refresh not queued: %v", err)
 		}
 	})
 	log.Println("OpenLiteSpeed + LSPHP + LiteSpeed Cache 运行环境已就绪")

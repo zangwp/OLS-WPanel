@@ -33,9 +33,14 @@ var (
 	restoreCDNRealIPGroupWithBindings = executor.RestoreCDNRealIPGroupWithBindings
 	withFail2banSettingsLock          = executor.WithFail2banSettingsLock
 	getSecurityRuntimeStatus          = executor.GetSecurityRuntimeStatus
-	enqueueOfficialWhitelistRefresh   = func(ctx context.Context) error {
-		_, err := executor.GlobalQueue.EnqueueContext(ctx, executor.TaskRefreshWhitelist, nil)
-		return err
+	enqueueOfficialWhitelistRefresh   = func(ctx context.Context) (*executor.Task, error) {
+		return executor.GlobalQueue.EnqueueContext(ctx, executor.TaskRefreshWhitelist, nil)
+	}
+	lookupOfficialWhitelistRefresh = func(id string) (*executor.Task, bool) {
+		if executor.GlobalQueue == nil {
+			return nil, false
+		}
+		return executor.GlobalQueue.GetTask(id)
 	}
 )
 
@@ -281,12 +286,52 @@ func needsRateLimitApply(settings map[string]string) bool {
 }
 
 func (h *SecurityHandler) RefreshWhitelist(c *gin.Context) {
-	if err := enqueueOfficialWhitelistRefresh(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponse("任务队列繁忙，请稍后重试"))
+	task, err := enqueueOfficialWhitelistRefresh(c.Request.Context())
+	if err != nil {
+		writeTaskAdmissionError(c, err)
 		return
 	}
+	if task == nil || task.ID == "" || task.Type != executor.TaskRefreshWhitelist {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("无法确认 IP 数据更新任务，请重新读取数据核对"))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"task_id": task.ID, "kind": executor.TaskRefreshWhitelist, "status": task.Status}))
+}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": "白名单刷新任务已提交"}))
+func (h *SecurityHandler) WhitelistRefreshStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	id := strings.TrimSpace(c.Param("task_id"))
+	if id == "" || len(id) > 128 {
+		c.JSON(http.StatusNotFound, models.ErrorResponse("IP 数据更新任务不存在，请重新读取当前数据核对"))
+		return
+	}
+	task, exists := lookupOfficialWhitelistRefresh(id)
+	if !exists || task == nil || task.ID != id || task.Type != executor.TaskRefreshWhitelist {
+		c.JSON(http.StatusNotFound, models.ErrorResponse("IP 数据更新任务不存在，请重新读取当前数据核对"))
+		return
+	}
+	resultCode := ""
+	switch task.Status {
+	case executor.TaskStatusWaiting, executor.TaskStatusRunning:
+	case executor.TaskStatusSuccess, executor.TaskStatusFailed:
+		if task.Result == nil || task.Result.Success != (task.Status == executor.TaskStatusSuccess) {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse("IP 数据更新结果尚未确认，请稍后重新核对"))
+			return
+		}
+		resultCode = "refresh_completed"
+		if !task.Result.Success {
+			resultCode = "refresh_failed"
+		}
+	default:
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse("IP 数据更新状态尚未确认，请稍后重新核对"))
+		return
+	}
+	// Worker messages may contain command output. Expose only this operation's
+	// fixed result codes, never arbitrary task payloads or raw result data.
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"task_id": task.ID, "kind": executor.TaskRefreshWhitelist, "status": task.Status, "result_code": resultCode,
+	}))
 }
 
 func (h *SecurityHandler) ImportGooglebotRanges(c *gin.Context) {

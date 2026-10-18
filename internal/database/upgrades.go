@@ -26,7 +26,7 @@ import (
 // Upgrade defines the changes for a target version. SQL must be safe to repeat.
 // Func runs after SQL and can handle filesystem or other non-database changes.
 type Upgrade struct {
-	Version     string       // Target version, such as "1.0.0".
+	Version     string // Target version, such as "1.0.0".
 	Description string
 	SQL         []string
 	Func        func() error
@@ -777,6 +777,7 @@ var upgrades = []Upgrade{
 	{Version: "1.0.77", Description: "网站独立 Cloudflare API 凭据与受管 WAF 规则同步状态", SQL: []string{cloudflareSecuritySchema}},
 	{Version: "1.0.78", Description: "自动识别网站 Cloudflare Zone 并记录已配置域名的 WAF 覆盖范围", Func: ensureCloudflareSecurityCoverageSchema},
 	{Version: "1.0.79", Description: "记录自动备份启用宽限期与更新产物清理完成状态", Func: ensureMaintenanceTrackingSchema},
+	{Version: "1.0.80", Description: "自动配置内置 Cloudflare 官方回源网段的可信代理 ACL"},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

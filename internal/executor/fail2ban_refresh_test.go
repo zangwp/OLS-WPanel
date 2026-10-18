@@ -158,6 +158,8 @@ func TestOfficialRefreshBingValidationKeepsGoodCacheAndMetadata(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			newOfficialRefreshDB(t)
+			newOLSTrustedProxyFixture(t)
+			runOLSCommand = func(string, ...string) ([]byte, error) { return []byte("ok"), nil }
 			if _, err := database.GetDB().Exec(`DELETE FROM website_cdn_realip_groups`); err != nil {
 				t.Fatal(err)
 			}
@@ -222,10 +224,10 @@ func newOfficialRefreshDB(t *testing.T) {
 	for _, stmt := range []string{
 		`CREATE TABLE security_settings(skey TEXT PRIMARY KEY,svalue TEXT NOT NULL,description TEXT DEFAULT '',updated_at DATETIME NOT NULL)`,
 		`CREATE TABLE websites(id INTEGER PRIMARY KEY,cdn_realip_enabled INTEGER)`,
-		`CREATE TABLE cdn_realip_groups(id INTEGER PRIMARY KEY,provider TEXT,ip_ranges TEXT,enabled INTEGER)`,
+		`CREATE TABLE cdn_realip_groups(id INTEGER PRIMARY KEY,provider TEXT,ip_ranges TEXT,enabled INTEGER,builtin INTEGER DEFAULT 0)`,
 		`CREATE TABLE website_cdn_realip_groups(website_id INTEGER,group_id INTEGER)`,
 		`INSERT INTO websites VALUES(1,1),(2,0)`,
-		`INSERT INTO cdn_realip_groups VALUES(1,'cloudflare','',1),(2,'custom','203.0.113.0/24',1)`,
+		`INSERT INTO cdn_realip_groups VALUES(1,'cloudflare','',1,1),(2,'custom','203.0.113.0/24',1,0)`,
 		`INSERT INTO website_cdn_realip_groups VALUES(1,1),(1,2)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
@@ -348,15 +350,11 @@ func TestOfficialRefreshPartialCFDownloadKeepsGoodCacheAndOriginalTimestamp(t *t
 	}
 }
 
-func TestOfficialRefreshUnselectedDisabledStaticOrStoppedCFNeverStartsOLS(t *testing.T) {
-	for _, state := range []string{"unbound", "website-disabled", "group-disabled", "static-group", "stopped", "paused"} {
+func TestOfficialRefreshDisabledStaticOrStoppedCFNeverStartsOLS(t *testing.T) {
+	for _, state := range []string{"group-disabled", "static-group", "stopped", "paused"} {
 		t.Run(state, func(t *testing.T) {
 			newOfficialRefreshDB(t)
 			switch state {
-			case "unbound":
-				database.GetDB().Exec(`DELETE FROM website_cdn_realip_groups WHERE group_id=1`)
-			case "website-disabled":
-				database.GetDB().Exec(`UPDATE websites SET cdn_realip_enabled=0`)
 			case "group-disabled":
 				database.GetDB().Exec(`UPDATE cdn_realip_groups SET enabled=0 WHERE id=1`)
 			case "static-group":

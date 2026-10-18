@@ -20,24 +20,33 @@ var olsTrustedProxyUpgradeActive = func() bool {
 
 func init() {
 	database.RegisterUpgrade("1.0.76", ensureManagedOLSTrustedProxyACL)
+	database.RegisterUpgrade("1.0.80", ensureManagedOLSTrustedProxyACL)
 }
 
-// Reconcile only an explicitly selected CDN on a running, panel-managed OLS.
+// Reconcile automatic Cloudflare and selected CDNs on a running managed OLS.
 // A paused/stopped service stays stopped; failures are logged without blocking
 // panel startup. Normal settings saves still return a failure to their caller.
 func ensureManagedOLSTrustedProxyACL() error {
 	if olsIPv6UpgradePaused() || database.GetDB() == nil {
 		return nil
 	}
+	if err := WithFail2banSettingsLock(func(func() error) error {
+		return reconcileManagedOLSTrustedProxyACL()
+	}); err != nil {
+		log.Printf("[升级] OpenLiteSpeed 可信代理配置未更新，延后重试: %v", err)
+	}
+	return nil
+}
+
+func reconcileManagedOLSTrustedProxyACL() error {
 	olsTrustedProxyConfigMu.Lock()
 	defer olsTrustedProxyConfigMu.Unlock()
-	raw, err := combinedCDNRealIPRangesForFail2ban(database.GetDB())
+	ranges, err := combinedOLSTrustedProxyRanges(database.GetDB())
 	if err != nil {
 		log.Printf("[升级] OpenLiteSpeed 可信代理配置未更新: %v", err)
 		return nil
 	}
-	ranges, err := NormalizeCDNRealIPRanges(raw)
-	if err != nil || len(ranges) == 0 {
+	if len(ranges) == 0 {
 		return nil
 	}
 	paths := currentOLSRuntimePaths()

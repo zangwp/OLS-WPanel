@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -19,8 +20,9 @@ func GetSecurityRuntimeStatus() (models.SecurityRuntimeStatus, error) {
 	}
 
 	status := models.SecurityRuntimeStatus{
-		Fail2ban: serviceSecurityStatus("fail2ban.service"),
-		Nftables: serviceSecurityStatus("nftables.service"),
+		Fail2ban:        serviceSecurityStatus("fail2ban.service"),
+		Nftables:        serviceSecurityStatus("nftables.service"),
+		CloudflareTrust: cloudflareTrustConfigStatus(db),
 	}
 	status.WhitelistTimer.Active = systemdUnitState("is-active", "olswpanel-whitelist.timer")
 	status.WhitelistTimer.Enabled = systemdUnitState("is-enabled", "olswpanel-whitelist.timer")
@@ -64,6 +66,42 @@ func GetSecurityRuntimeStatus() (models.SecurityRuntimeStatus, error) {
 	}
 
 	return status, nil
+}
+
+// This inspects the configuration on disk, not the running server or request path.
+func cloudflareTrustConfigStatus(db *sql.DB) string {
+	automatic, err := automaticCloudflareProxyEnabled(db)
+	if err != nil {
+		return "unknown"
+	}
+	if !automatic {
+		return "disabled"
+	}
+	cache, err := readCachedSecurityIPRanges(db, "cloudflare_realip_ips")
+	if err != nil || len(cache) == 0 {
+		return "missing"
+	}
+	ranges, err := combinedOLSTrustedProxyRanges(db)
+	if err != nil {
+		return "unknown"
+	}
+	paths := currentOLSRuntimePaths()
+	registry, _, err := readOLSTrustedProxyConfig(paths.managed)
+	if err != nil || !bytes.HasPrefix(registry, []byte("# OLS WPanel managed OpenLiteSpeed registry. DO NOT EDIT.\n")) {
+		return "unknown"
+	}
+	current, _, err := readOLSTrustedProxyConfig(paths.mainConfig)
+	if err != nil {
+		return "unknown"
+	}
+	desired, err := renderOLSTrustedProxyMainConfig(current, paths.managed, ranges)
+	if err != nil {
+		return "unknown"
+	}
+	if !bytes.Equal(current, desired) {
+		return "pending"
+	}
+	return "configured"
 }
 
 func serviceSecurityStatus(unit string) models.SecurityServiceStatus {

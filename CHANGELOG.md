@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.8 — 2026-10-18
+
+- Fix automatic Cloudflare trusted proxies: the enabled built-in group now uses validated official ranges in the managed OpenLiteSpeed server ACL without a website binding. Fresh installations with automatic IP maintenance enabled queue an initial refresh when the cache is empty. Existing cached ranges are reconciled during upgrade.
+- Report the actual Cloudflare configuration state and the completion of manual IP refresh tasks. Refreshing cached data preserves unsaved settings; missing data and incomplete configuration no longer appear healthy.
+- Preserve scoped WebAdmin configuration read permissions across atomic config replacements, and repair existing managed configuration access at startup. Only the dedicated `lsadm` user receives access to required configuration files; private keys and website PHP users are excluded.
+- Retain previous caches and exact trusted-proxy configuration on failed refreshes. No extra resident worker, package dependency, or high-frequency maintenance timer is added.
+
 ## v2.1.7 — 2026-10-18
 
 - Allows explicitly selecting public access for WebAdmin, MariaDB and Redis ports. Their default closed or local-only access is retained; newly public management or data-service ports require confirmation that lists the affected ports before saving.

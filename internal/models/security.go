@@ -42,6 +42,7 @@ type SecurityRuntimeStatus struct {
 	CDNEnabledGroups    int                   `json:"cdn_enabled_groups"`
 	CDNProtectedSites   int                   `json:"cdn_protected_sites"`
 	CDNInvalidBindings  int                   `json:"cdn_invalid_bindings"`
+	CloudflareTrust     string                `json:"cloudflare_trust"`
 }
 
 type CDNRealIPGroup struct {
