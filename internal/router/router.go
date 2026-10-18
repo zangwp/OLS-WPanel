@@ -455,6 +455,7 @@ var i18nKeys = []string{
 	"firewall.access_everyone",
 	"firewall.access_local",
 	"firewall.access_public",
+	"firewall.access_public_sensitive_confirm",
 	"firewall.access_loopback",
 	"firewall.scope_any",
 	"firewall.access_title",

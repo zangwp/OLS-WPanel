@@ -25,7 +25,16 @@ func TestNormalizeFirewallPortRule(t *testing.T) {
 		{name: "bad protocol", req: FirewallPortRuleRequest{Protocol: "sctp", Port: 80}, wantErr: "协议"},
 		{name: "bad port", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 0}, wantErr: "端口"},
 		{name: "bad source", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 80, Source: "not-an-ip"}, wantErr: "来源"},
-		{name: "public webadmin", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080}, wantErr: "7080"},
+		{name: "public webadmin unconfirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080}, wantErr: "确认"},
+		{name: "public webadmin confirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "any", ConfirmPublic: true}, source: ""},
+		{name: "webadmin ipv4 zero prefix unconfirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "specific", Source: "0.0.0.0/0"}, wantErr: "确认"},
+		{name: "webadmin ipv4 zero prefix confirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "specific", Source: "0.0.0.0/0", ConfirmPublic: true}, source: ""},
+		{name: "webadmin ipv6 zero prefix unconfirmed", req: FirewallPortRuleRequest{Protocol: "udp", Port: 7080, SourceMode: "specific", Source: "::/0"}, wantErr: "确认"},
+		{name: "webadmin ipv6 zero prefix confirmed", req: FirewallPortRuleRequest{Protocol: "udp", Port: 7080, SourceMode: "specific", Source: "::/0", ConfirmPublic: true}, source: ""},
+		{name: "webadmin ipv4 host bits zero prefix unconfirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "specific", Source: "203.0.113.1/0"}, wantErr: "确认"},
+		{name: "webadmin ipv4 host bits zero prefix confirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "specific", Source: "203.0.113.1/0", ConfirmPublic: true}, source: ""},
+		{name: "webadmin ipv6 host bits zero prefix unconfirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "specific", Source: "2001:db8::1/0"}, wantErr: "确认"},
+		{name: "webadmin ipv6 host bits zero prefix confirmed", req: FirewallPortRuleRequest{Protocol: "tcp", Port: 7080, SourceMode: "specific", Source: "2001:db8::1/0", ConfirmPublic: true}, source: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

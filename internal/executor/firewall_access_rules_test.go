@@ -22,7 +22,6 @@ func TestAccessRulesValidateManagementAndSources(t *testing.T) {
 		{"wrong manager", []FirewallAccessRule{{"tcp", 22, "203.0.113.6"}, {"tcp", 8443, "203.0.113.5"}}},
 
 		{"injected source", append(accessTestRules(), FirewallAccessRule{"tcp", 8080, "1.2.3.4; accept"})},
-		{"public database", append(accessTestRules(), FirewallAccessRule{"tcp", 3306, ""})},
 		{"wildcard CIDR", append(accessTestRules(), FirewallAccessRule{"tcp", 8080, "::/0"})},
 		{"bad protocol", append(accessTestRules(), FirewallAccessRule{"tcp;accept", 8080, ""})},
 	} {

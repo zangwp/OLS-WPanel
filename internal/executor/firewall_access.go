@@ -22,6 +22,7 @@ var ErrFirewallAccessPreviewChanged = errors.New("规则或选择已变化，请
 
 type FirewallAccessPreview struct {
 	Rules                 []FirewallAccessRule `json:"rules"`
+	PublicExposure        []FirewallAccessRule `json:"public_exposure"`
 	Fingerprint           string               `json:"fingerprint"`
 	Script                string               `json:"script"`
 	ExistingRules         string               `json:"existing_rules"`
@@ -99,8 +100,9 @@ func previewAccess(ctx context.Context, req FirewallAccessRequest, ip string) (F
 	if err != nil {
 		return FirewallAccessPreview{}, err
 	}
-	requiresConfirmation := !exists || !accessTableMatchesManagedPolicy(previousTable, previousRules) || !accessManagementPreserved(previousRules, rules, ssh, panel)
-	return FirewallAccessPreview{Rules: rules, Fingerprint: accessFingerprint(previousTable, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel, RequiresConfirmation: requiresConfirmation}, nil
+	previousManaged := exists && accessTableMatchesManagedPolicy(previousTable, previousRules)
+	requiresConfirmation := !previousManaged || !accessManagementPreserved(previousRules, rules, ssh, panel)
+	return FirewallAccessPreview{Rules: rules, PublicExposure: accessPublicExposure(previousRules, rules, previousManaged), Fingerprint: accessFingerprint(previousTable, rules, ssh, panel), Script: accessRulesScript(rules, exists), ExistingRules: out, SSHPort: ssh, PanelPort: panel, RequiresConfirmation: requiresConfirmation}, nil
 }
 
 func PreviewFirewallAccess(req FirewallAccessRequest, ip string) (FirewallAccessPreview, error) {
@@ -134,6 +136,9 @@ func ApplyFirewallAccess(req FirewallAccessRequest, ip string) (FirewallProtecti
 	}
 	if req.Fingerprint == "" || req.Fingerprint != preview.Fingerprint {
 		return FirewallProtectionResult{}, ErrFirewallAccessPreviewChanged
+	}
+	if len(preview.PublicExposure) > 0 && !req.ConfirmPublic {
+		return FirewallProtectionResult{}, errors.New("向所有来源开放 WebAdmin 或数据服务端口前必须确认公网访问风险")
 	}
 	if !preview.RequiresConfirmation {
 		return saveFirewallAccessWithoutConfirmation(ctx, preview)
@@ -214,6 +219,7 @@ func saveFirewallAccessWithoutConfirmation(ctx context.Context, preview Firewall
 	// a stale preview even though panel writes are serialized by portRulesMu.
 	exists, previousRules, previous, err := readAccessTableState(ctx)
 	if err != nil || !exists || !accessTableMatchesManagedPolicy(previous, previousRules) ||
+		accessFingerprint(previous, preview.Rules, preview.SSHPort, preview.PanelPort) != preview.Fingerprint ||
 		!accessManagementPreserved(previousRules, preview.Rules, preview.SSHPort, preview.PanelPort) {
 		return FirewallProtectionResult{}, errors.New("访问策略已变化，请重新预览")
 	}
