@@ -59,6 +59,7 @@ func newOLSIPv6RegistryFixture(t *testing.T) olsIPv6RegistryFixture {
 	site := filepath.Join(available, "example.com.conf")
 	content := olsMetadataFormatPrefix + "1\n" + olsMetadataVHostPrefix + "olsw_example\n" +
 		olsMetadataDomainsPrefix + "example.com,www.example.com\n" + olsMetadataRootPrefix + filepath.Join(root, "www", "example.com") + "\n" +
+		"extprocessor lsphp_example {\n  extUser wp_example\n  extGroup wp_example\n}\n" +
 		"vhssl {\n  certFile " + filepath.Join(root, "site.crt") + "\n  keyFile " + filepath.Join(root, "site.key") + "\n}\n"
 	if err := os.WriteFile(site, []byte(content), 0640); err != nil {
 		t.Fatal(err)

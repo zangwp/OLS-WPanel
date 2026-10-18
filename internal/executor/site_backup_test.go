@@ -107,7 +107,7 @@ func TestSiteBackupDatabaseFreezeRejectsSharedAndUnsupportedObjects(t *testing.T
 
 func TestSiteBackupStaticMaintenanceHasAllRegisteredHostsAndNoLivePHP(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "maintenance")
-	text, err := renderSiteBackupMaintenance(&models.Website{Domain: "example.com", Aliases: "www.example.com\nshop.example.com"}, root, "a31a9b36-2d77-4d82-8f55-b64fe66f4474")
+	text, err := renderSiteBackupMaintenance(&models.Website{Domain: "example.com", Aliases: "www.example.com\nshop.example.com", SystemUser: "wp_example"}, root, "a31a9b36-2d77-4d82-8f55-b64fe66f4474")
 	if err != nil {
 		t.Fatal(err)
 	}

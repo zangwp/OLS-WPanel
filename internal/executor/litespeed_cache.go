@@ -669,6 +669,11 @@ func RegenerateSiteOLSConfig(siteID int) error {
 		}
 		return fmt.Errorf("站点域名为空(site %d)", siteID)
 	}
+	// Backup maintenance owns the static 503 configuration until its explicit
+	// recovery completes. Startup and quota refreshes must not restore PHP.
+	if status == string(models.StatusBackupMaintenance) {
+		return nil
+	}
 
 	if templateVer == "" {
 		templateVer = "v1.0"
@@ -782,7 +787,7 @@ func RegenerateSiteOLSConfig(siteID int) error {
 // RegenerateAllSitesOLSConfigs rebuilds every site's OpenLiteSpeed virtual host config.
 func RegenerateAllSitesOLSConfigs() error {
 	db := database.GetDB()
-	rows, err := db.Query("SELECT id FROM websites")
+	rows, err := db.Query("SELECT id, status FROM websites")
 	if err != nil {
 		log.Printf("[OpenLiteSpeed重建] 查询网站列表失败: %v", err)
 		return err
@@ -791,9 +796,11 @@ func RegenerateAllSitesOLSConfigs() error {
 
 	var failures []string
 	regenerated := 0
+	sawBackupMaintenance, hasLiveReload := false, false
 	for rows.Next() {
 		var siteID int
-		if err := rows.Scan(&siteID); err != nil {
+		var status string
+		if err := rows.Scan(&siteID, &status); err != nil {
 			failures = append(failures, err.Error())
 			continue
 		}
@@ -803,6 +810,11 @@ func RegenerateAllSitesOLSConfigs() error {
 			continue
 		}
 		regenerated++
+		if status == string(models.StatusBackupMaintenance) {
+			sawBackupMaintenance = true
+		} else if status != string(models.StatusPaused) && status != string(models.StatusMigrated) {
+			hasLiveReload = true
+		}
 	}
 	if err := rows.Err(); err != nil {
 		failures = append(failures, err.Error())
@@ -810,7 +822,7 @@ func RegenerateAllSitesOLSConfigs() error {
 	if len(failures) > 0 {
 		return fmt.Errorf("部分站点 OpenLiteSpeed 配置更新失败: %s", strings.Join(failures, "; "))
 	}
-	if regenerated == 0 {
+	if regenerated == 0 || sawBackupMaintenance && !hasLiveReload {
 		if config.AppConfig == nil {
 			return errors.New("面板配置尚未初始化")
 		}

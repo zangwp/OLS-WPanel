@@ -2740,6 +2740,8 @@ module cache {
   enableCache            0
 }
 virtualHost olsw_example {
+  user                   nobody
+  group                  nogroup
   vhRoot                 $OLS_CHECK_ROOT/www/
   allowSymbolLink        1
   enableScript           1

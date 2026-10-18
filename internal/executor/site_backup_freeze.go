@@ -168,6 +168,10 @@ func renderSiteBackupMaintenance(site *models.Website, root, marker string) (str
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s1\n%s%s\n%s%s\n%s%s\n", olsMetadataFormatPrefix, olsMetadataVHostPrefix, "olsw_"+buildSiteName(site.Domain), olsMetadataDomainsPrefix, strings.Join(domains, ","), olsMetadataRootPrefix, root)
+	if !olsSafeUserPattern.MatchString(site.SystemUser) || site.SystemUser == "root" {
+		return "", errors.New("维护站点运行用户无效")
+	}
+	fmt.Fprintf(&out, "%s%s\n", olsMetadataUserPrefix, site.SystemUser)
 	fmt.Fprintf(&out, "docRoot %s\nvhDomain %s\n", root, site.Domain)
 	if len(domains) > 1 {
 		fmt.Fprintf(&out, "vhAliases %s\n", strings.Join(domains[1:], ","))
