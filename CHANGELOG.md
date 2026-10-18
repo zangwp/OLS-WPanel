@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.9 — 2026-10-18
+
+- Fix Cloudflare and Bing official range downloads being rejected by the command allowlist before any network request. Accept only the existing fixed official URLs and exact HTTPS-only, timeout-bounded download arguments; retain the general command restrictions.
+- Cover the production fetch arguments against the real command policy and subprocess dispatcher, including rejection of altered protocols, URLs, timeouts and extra options.
+
+Upgrade notes: no new dependency, worker or database migration. Existing range validation, cache rollback, WebAdmin read permissions and refresh schedules are preserved.
+
 ## v2.1.8 — 2026-10-18
 
 - Fix automatic Cloudflare trusted proxies: the enabled built-in group now uses validated official ranges in the managed OpenLiteSpeed server ACL without a website binding. Fresh installations with automatic IP maintenance enabled queue an initial refresh when the cache is empty. Existing cached ranges are reconciled during upgrade.
