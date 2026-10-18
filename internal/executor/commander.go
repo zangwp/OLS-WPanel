@@ -52,6 +52,9 @@ func IsCommandAllowed(binary string, args []string) bool {
 	if hasUnsafeArgs(binary, args) {
 		return false
 	}
+	if binary == "curl" && isOfficialIPRangeCurl(args) {
+		return true
+	}
 	if binary == "fail2ban-client" {
 		for _, arg := range args {
 			if arg == "--restart" {
@@ -77,6 +80,33 @@ func IsCommandAllowed(binary string, args []string) bool {
 			if !allowed {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// Keep HTTPS-only redirects and both timeouts available to the fixed official
+// IP downloads without widening the flags accepted by general curl commands.
+func isOfficialIPRangeCurl(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	endpoint := args[len(args)-1]
+	var expected []string
+	switch endpoint {
+	case "https://www.cloudflare.com/ips-v4/", "https://www.cloudflare.com/ips-v6/":
+		expected = []string{"-fsSL", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "5", "--max-time", "20", endpoint}
+	case "https://www.bing.com/toolbox/bingbot.json":
+		expected = []string{"-s", "-f", "-L", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "5", "--max-time", "20", endpoint}
+	default:
+		return false
+	}
+	if len(args) != len(expected) {
+		return false
+	}
+	for index, value := range expected {
+		if args[index] != value {
+			return false
 		}
 	}
 	return true
