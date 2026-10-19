@@ -778,6 +778,7 @@ var upgrades = []Upgrade{
 	{Version: "1.0.78", Description: "自动识别网站 Cloudflare Zone 并记录已配置域名的 WAF 覆盖范围", Func: ensureCloudflareSecurityCoverageSchema},
 	{Version: "1.0.79", Description: "记录自动备份启用宽限期与更新产物清理完成状态", Func: ensureMaintenanceTrackingSchema},
 	{Version: "1.0.80", Description: "自动配置内置 Cloudflare 官方回源网段的可信代理 ACL"},
+	{Version: "1.0.81", Description: "保留每站各安全检查项最近一次手动验证结果", SQL: []string{siteSecurityVerificationSchema}},
 }
 
 func removeDeprecatedExtensionRecommendation() error {

@@ -5,6 +5,8 @@
         <button type="button" @click="fetchSiteSecurityStatus()" :disabled="securityStatusLoading || !!verifyingKey" class="btn-secondary" x-text="securityStatusLoading ? t('website.security_checking') : t('website.security_refresh')"></button>
     </div>
     <p x-show="securityStatusError || verificationError" x-cloak role="alert" class="site-security-error" x-text="securityStatusError || verificationError"></p>
+    <p x-show="verificationMessage" x-cloak role="status" aria-live="polite" class="site-security-verification-message" x-text="verificationMessage"></p>
+    <p x-show="securityStatus?.verification_unavailable" x-cloak role="status" class="site-security-verification-message" x-text="t('site_security.verification_history_unavailable')"></p>
     <div class="site-security-list">
         <template x-for="group in siteSecurityGroups" :key="group.id">
             <div class="site-security-section" x-show="group.id !== 'wordpress' || site.site_type === 'wordpress'">
@@ -14,13 +16,22 @@
                         <details class="site-security-row-details" name="site-security-evidence">
                             <summary class="site-security-row-summary">
                                 <span class="site-security-row-title" x-text="siteSecurityTitle(key)"></span>
-                                <span class="site-security-row-state" :class="summaryStateClass(key)" x-text="summaryStateText(key)"></span>
+                                <span class="site-security-row-status">
+                                    <span class="site-security-row-state" :class="summaryStateClass(key)" x-text="summaryStateText(key)"></span>
+                                    <span class="site-security-row-history" x-show="summaryHistoryVisible(key)" :class="{'site-security-history-warning': summaryVerification(key)?.status === 'changed'}">
+                                        <span x-text="summaryHistoryText(key)"></span>
+                                        <time x-show="summaryVerification(key)" :datetime="summaryVerification(key)?.checked_at" x-text="summaryTime(summaryVerification(key)?.checked_at)"></time>
+                                    </span>
+                                </span>
                                 <span class="site-security-row-disclosure" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" focusable="false"><path d="m9 5 7 7-7 7"/></svg></span>
                                 <span class="sr-only">{{t .Lang "site_security.details"}}</span>
                             </summary>
                             <div class="site-security-row-evidence">
                                 <p class="site-security-row-reason" x-text="summaryReason(key)"></p>
                                 <dl class="site-security-row-metadata">
+                                    <div x-show="summaryVerification(key)"><dt>{{t .Lang "site_security.last_verification"}}</dt><dd><span x-text="summaryHistoryResult(key)"></span><time :datetime="summaryVerification(key)?.checked_at" x-text="summaryTime(summaryVerification(key)?.checked_at)"></time></dd></div>
+                                    <div x-show="summaryVerification(key) && summaryVerification(key).status !== 'unchanged'"><dt>{{t .Lang "site_security.verification_applicability"}}</dt><dd x-text="summaryHistoryText(key)"></dd></div>
+                                    <div x-show="summaryVerification(key)"><dt>{{t .Lang "site_security.last_verification_evidence"}}</dt><dd><span x-text="summaryHistoryReason(key)"></span><span x-text="summaryHistorySource(key)"></span></dd></div>
                                     <div x-show="summaryCheck(key).evidence_source"><dt>{{t .Lang "site_security.evidence"}}</dt><dd><span x-text="summarySource(key)"></span><time x-show="summaryCheck(key).evidence_at" :datetime="summaryCheck(key).evidence_at" x-text="summaryTime(summaryCheck(key).evidence_at)"></time></dd></div>
                                     <div x-show="summaryCheck(key).recent_event_at"><dt>{{t .Lang "site_security.recent_event"}}</dt><dd><time :datetime="summaryCheck(key).recent_event_at" x-text="summaryTime(summaryCheck(key).recent_event_at)"></time></dd></div>
                                     <div x-show="summaryCheck(key).details?.expires_at"><dt>{{t .Lang "site_security.certificate_expiry"}}</dt><dd><time :datetime="summaryCheck(key).details?.expires_at" x-text="summaryTime(summaryCheck(key).details?.expires_at)"></time></dd></div>
@@ -29,7 +40,7 @@
                             </div>
                         </details>
                         <div class="site-security-row-actions" x-show="summaryCheck(key).can_verify || summarySettingsAvailable(key)">
-                            <button type="button" class="site-security-action" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" :aria-label="siteSecurityTitle(key) + ': ' + t('site_security.verify')" x-text="verifyingKey === key ? t('site_security.verifying') : t('site_security.verify_short')"></button>
+                            <button type="button" class="site-security-action" x-show="summaryCheck(key).can_verify" :disabled="securityStatusLoading || verifyingKey === key || site.status !== 'active'" :aria-disabled="securityStatusLoading || !!verifyingKey || site.status !== 'active'" @click="verifySummaryCheck(key)" :aria-label="siteSecurityTitle(key) + ': ' + t('site_security.verify')" x-text="verifyingKey === key ? t('site_security.verifying') : t(summaryVerification(key) ? 'site_security.recheck_short' : 'site_security.verify_short')"></button>
                             <button type="button" class="site-security-action" x-show="!summaryCheck(key).can_verify && summarySettingsAvailable(key)" @click="openSummarySettings(key)" :aria-label="siteSecurityTitle(key) + ': ' + summarySettingsText(key)" x-text="summarySettingsText(key)"></button>
                         </div>
                     </div>
@@ -47,7 +58,7 @@
 <script>
 function siteSecuritySummary() {
     return {
-        verifyingKey: '', verificationError: '',
+        verifyingKey: '', verificationError: '', verificationMessage: '',
         summaryCheck(key) {
             const value = this.securityStatus?.checks?.find(check => check?.key === key);
             if (!value || !['effective','runtime_verified','ready','configured','disabled','unsupported','error','unknown'].includes(value.state)) return {state:'unknown',reason_code:'not_checked'};
@@ -59,22 +70,50 @@ function siteSecuritySummary() {
             const check = this.summaryCheck(key), state = check.state;
             if (state === 'ready' && ['file_editing_managed_by_file_lock','file_lock_applied','uptime_check_succeeded','anomaly_check_succeeded'].includes(check.reason_code)) return t('site_security.state_' + check.reason_code);
             if (state === 'configured' && check.reason_code === 'file_lock_temporarily_unlocked') return t('site_security.state_file_lock_temporarily_unlocked');
-            if (state === 'configured' && check.can_verify === false) return t(['uptime_check_pending','uptime_check_stale','anomaly_check_pending','anomaly_check_stale'].includes(check.reason_code) ? 'site_security.state_waiting_check' : 'site_security.state_configured');
+            if (state === 'configured') return t(['uptime_check_pending','uptime_check_stale','anomaly_check_pending','anomaly_check_stale'].includes(check.reason_code) ? 'site_security.state_waiting_check' : 'site_security.state_configured');
             return ['ready','runtime_verified'].includes(state) ? t('site_security.state_' + state) : t('website.security_state_' + state);
         },
         summaryStateClass(key) {
             if (this.securityStatusLoading) return 'badge-info';
             const check = this.summaryCheck(key), state = check.state;
-            return state === 'effective' ? 'badge-success' : state === 'error' || (state === 'configured' && check.can_verify !== false) ? 'badge-warning' : 'badge-info';
+            return state === 'effective' ? 'badge-success' : state === 'error' || (state === 'configured' && this.summaryOutcome(check) === 'failed') ? 'badge-warning' : 'badge-info';
+        },
+        summaryVerification(key) {
+            const value = this.summaryCheck(key).verification;
+            if (!value || !['effective','runtime_verified','ready','configured','disabled','unsupported','error','unknown'].includes(value.state) || !['unchanged','changed','unavailable'].includes(value.status) || !value.checked_at || !Number.isFinite(Date.parse(value.checked_at))) return null;
+            return value;
+        },
+        summaryOutcome(check) {
+            if (['effective','runtime_verified'].includes(check?.state)) return 'passed';
+            if (check?.state === 'ready') return 'ready';
+            if (check?.state === 'error' || ['tls_domain_mismatch','tls_untrusted','tls_certificate_invalid','core_policy_not_enforced','configuration_check_failed','login_jail_not_monitoring','ols_rules_not_confirmed','native_policy_not_confirmed','wp_policy_not_confirmed'].includes(check?.reason_code)) return 'failed';
+            return 'incomplete';
+        },
+        summaryHistoryVisible(key) {
+            return !this.securityStatusLoading && (!!this.summaryVerification(key) || (!this.securityStatus?.verification_unavailable && this.summaryCheck(key).state === 'configured' && this.summaryCheck(key).can_verify === true));
+        },
+        summaryHistoryText(key) {
+            const verification = this.summaryVerification(key);
+            if (!verification) return t('site_security.history_never_checked');
+            if (verification.status === 'changed') return t('site_security.history_configuration_changed');
+            if (verification.status === 'unavailable') return t('site_security.history_configuration_unavailable');
+            return this.summaryHistoryResult(key);
+        },
+        summaryHistoryResult(key) { return t('site_security.history_' + this.summaryOutcome(this.summaryVerification(key))); },
+        summaryHistoryReason(key) { return this.summaryReasonCode(this.summaryVerification(key)?.reason_code); },
+        summaryHistorySource(key) { return this.summarySourceName(this.summaryVerification(key)?.source); },
+        summaryReasonCode(code) {
+            const value = t('site_security.reason_' + (code || 'not_checked'));
+            return value === 'site_security.reason_' + (code || 'not_checked') ? t('site_security.reason_not_checked') : value;
         },
         summaryReason(key) {
             const check = this.summaryCheck(key);
             const code = check.state === 'configured' && check.can_verify === false && check.reason_code === 'configured_not_run' ? 'configuration_saved' : check.reason_code || 'not_checked';
-            const value = t('site_security.reason_' + code);
-            return value === 'site_security.reason_' + code ? t('site_security.reason_not_checked') : value;
+            return this.summaryReasonCode(code);
         },
-        summarySource(key) {
-            const source = this.summaryCheck(key).evidence_source || 'saved_configuration';
+        summarySource(key) { return this.summarySourceName(this.summaryCheck(key).evidence_source); },
+        summarySourceName(name) {
+            const source = name || 'saved_configuration';
             const value = t('site_security.source_' + source);
             return value === 'site_security.source_' + source ? t('site_security.source_saved_configuration') : value;
         },
@@ -92,13 +131,19 @@ function siteSecuritySummary() {
         async verifySummaryCheck(key) {
             if (!this.site || this.site.status !== 'active' || this.verifyingKey || this.securityStatusLoading || !this.summaryCheck(key).can_verify) return;
             const siteID = this.site.id, generation = ++this.securityStatusGeneration;
-            this.verifyingKey = key; this.verificationError = '';
+            this.verifyingKey = key; this.verificationError = ''; this.verificationMessage = '';
             try {
                 const response = await api('/websites/' + siteID + '/security-verify', {method:'POST',body:{key},silent:true,cache:'no-store',timeout:20000});
-                if (!response.success || Number(response.data?.site_id) !== Number(siteID) || !Array.isArray(response.data?.checks)) throw new Error(t('site_security.verification_failed'));
-                if (generation === this.securityStatusGeneration && this.site?.id === siteID) this.securityStatus = response.data;
+                if (!response?.success || Number(response.data?.site_id) !== Number(siteID) || !Array.isArray(response.data?.checks)) throw new Error(t(response?.error_code === 'verification_save_failed' ? 'site_security.verification_save_failed' : 'site_security.verification_failed'));
+                if (generation === this.securityStatusGeneration && this.site?.id === siteID) {
+                    this.securityStatus = response.data;
+                    const outcome = this.summaryOutcome(this.summaryCheck(key));
+                    const message = this.siteSecurityTitle(key) + ' · ' + t('site_security.verification_result_' + outcome);
+                    if (['passed','ready'].includes(outcome)) this.verificationMessage = message;
+                    else this.verificationError = message + ' ' + this.summaryReason(key);
+                }
             } catch(error) {
-                if (generation === this.securityStatusGeneration && this.site?.id === siteID) this.verificationError = error.message || t('site_security.verification_failed');
+                if (generation === this.securityStatusGeneration && this.site?.id === siteID) this.verificationError = error.code === 'verification_save_failed' ? t('site_security.verification_save_failed') : error.message || t('site_security.verification_failed');
             } finally { this.verifyingKey = ''; }
         },
         openSummaryLogs() { this.setDetailTab('logs'); this.selectLogType(this.site.site_type === 'wordpress' ? 'security' : 'error'); },

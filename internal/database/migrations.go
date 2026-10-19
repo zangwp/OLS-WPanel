@@ -71,6 +71,7 @@ var migrations = append([]string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_websites_status ON websites(status)`,
 	`CREATE INDEX IF NOT EXISTS idx_websites_domain ON websites(domain)`,
+	siteSecurityVerificationSchema,
 	`CREATE TABLE IF NOT EXISTS website_ai_development_access (
 		site_id          INTEGER PRIMARY KEY,
 		status           TEXT NOT NULL,

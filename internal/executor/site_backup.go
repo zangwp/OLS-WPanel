@@ -544,7 +544,6 @@ func executeRestoreSiteBackup(task *Task) (result TaskResult) {
 	if err == nil {
 		err = f.thaw(ctx)
 	}
-	invalidateFileRestoreSecurityCache(site.ID)
 	if err != nil {
 		manifest.RequiresAttention = f != nil
 		// Before live mutation, or after explicitly verified rollback, failure

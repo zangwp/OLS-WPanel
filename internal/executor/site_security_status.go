@@ -203,7 +203,7 @@ func CollectWebsiteSecurityStatus(ctx context.Context, site *models.Website) mod
 			}
 		}
 	}
-	applyCachedWebsiteSecurityVerification(site, &report)
+	applySavedWebsiteSecurityVerification(ctx, site, &report)
 	return report
 }
 

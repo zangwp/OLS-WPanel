@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.2.1 — 2026-10-19
+
+- Persist the latest manual security verification per website and check. Reopening the page or restarting the panel retains its result and timestamp without adding a background scan or an unbounded history.
+- Display current configuration and runtime evidence separately from historical verification. Show relevant configuration changes, incomplete or failed checks, and unavailable history explicitly; historical success never overrides a current disabled protection, runtime error or file-lock maintenance state.
+- Scope verification fingerprints to the relevant check inputs so unrelated website metadata does not invalidate prior observations. Report storage failures rather than silently losing completed checks.
+
+Upgrade notes: creates a small SQLite table with one latest record per website and check, removed with its website. Earlier memory-only observations cannot be recovered. No new dependency, daemon or timer is added.
+
 ## v2.2.0 — 2026-10-18
 
 - Pin each managed OpenLiteSpeed virtual host to its site's explicitly validated user and primary group. File-locked WordPress roots remain root-owned and read-only while other sites can still be created or reloaded.

@@ -80,6 +80,7 @@
 .site-security-board-header p { max-width: 70ch; margin: 0; color: var(--panel-muted); font-size: 13px; line-height: 1.6; }
 .site-security-board-header > button { flex-shrink: 0; }
 .site-security-board .site-security-error { margin: 0 0 16px; color: var(--panel-danger); font-size: 13px; line-height: 1.6; }
+.site-security-verification-message { margin: 0 0 16px; color: var(--panel-text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .site-security-list { display: grid; gap: 18px; }
 .site-security-section { min-width: 0; }
 .site-security-section h4 { display: flex; align-items: center; gap: 10px; margin: 0; padding: 11px 14px; border: 1px solid var(--panel-border); border-radius: 6px; background: var(--panel-surface-muted); color: var(--panel-heading); font-size: 14px; font-weight: 650; line-height: 1.5; }
@@ -93,6 +94,10 @@
 .site-security-row-summary:focus-visible, .site-security-action:focus-visible, .site-security-log-link:focus-visible, .site-security-status-guide > summary:focus-visible { outline: 2px solid var(--panel-accent); outline-offset: 2px; }
 .site-security-row-title { color: var(--panel-heading); font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .site-security-row-state { justify-self: start; max-width: 100%; font-size: 11px; line-height: 1.5; white-space: normal; }
+.site-security-row-status { display: grid; justify-items: start; min-width: 0; gap: 5px; }
+.site-security-row-history { display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--panel-muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.site-security-row-history.site-security-history-warning { color: var(--panel-warning); }
+.site-security-row-history time { font-variant-numeric: tabular-nums; }
 .site-security-row[data-state="ready"] .site-security-row-state, .site-security-row[data-state="runtime_verified"] .site-security-row-state { color: var(--panel-accent); background: var(--panel-accent-soft); border-color: var(--panel-accent-border); }
 .site-security-row-disclosure { display: inline-flex; color: var(--panel-muted); }
 .site-security-row-details[open] > summary .site-security-row-disclosure { transform: rotate(90deg); }
@@ -122,7 +127,7 @@
     .site-security-section h4 { padding: 10px 12px; }
     .site-security-row-summary { grid-template-columns: minmax(0, 1fr) 18px; gap: 5px 10px; min-height: 74px; padding: 12px 0; }
     .site-security-row-title { grid-column: 1; }
-    .site-security-row-state { grid-column: 1; }
+    .site-security-row-status { grid-column: 1; }
     .site-security-row-disclosure { grid-column: 2; grid-row: 1 / 3; justify-self: end; }
     .site-security-row-actions { min-height: 74px; padding: 0; }
     .site-security-action { padding-right: 0; padding-left: 5px; }
