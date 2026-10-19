@@ -105,6 +105,18 @@ func securityVerificationWebsite(t *testing.T) *models.Website {
 	if err := os.Mkdir(webRoot, 0750); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(webRoot, "wp-includes"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"wp-load.php":             "<?php\n",
+		"wp-settings.php":         "<?php\n",
+		"wp-includes/version.php": "<?php $wp_version = '7.0.0';\n",
+	} {
+		if err := os.WriteFile(filepath.Join(webRoot, filepath.FromSlash(name)), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	config.AppConfig = &config.Config{Paths: config.PathsConfig{WWWRoot: root, OLSVHostsAvailable: root, Certificates: root}}
 	t.Cleanup(func() { config.AppConfig = old })
 	wpConfig := renderWPNativePolicy("<?php\ndefine('DISALLOW_FILE_EDIT', true);\ndefine('WP_DEBUG_DISPLAY', false);\n", false, true)

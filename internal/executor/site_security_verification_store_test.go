@@ -119,7 +119,7 @@ func TestSiteSecurityFingerprintsExcludeUnrelatedMetadataAndScopeRelevantChanges
 	if err := os.MkdirAll(filepath.Join(site.WebRoot, "wp-includes"), 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(site.WebRoot, "wp-includes", "version.php"), []byte("<?php $wp_version = '7.0';"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(site.WebRoot, "wp-includes", "version.php"), []byte("<?php $wp_version = '7.0.1';"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	core := read()
@@ -201,5 +201,30 @@ func TestSiteSecurityFingerprintFailureCannotReuseCollectorSuccessOrClaimSaved(t
 	records, err := database.LoadSiteSecurityVerifications(context.Background(), database.GetDB(), site.ID)
 	if err != nil || len(records) != 0 {
 		t.Fatalf("unsafe check wrote history: %+v %v", records, err)
+	}
+}
+
+func TestSiteSecurityMissingCoreDirectoryMakesHistoricalComparisonUnavailable(t *testing.T) {
+	site := securityVerificationWebsite(t)
+	oldCore := verifyWebsiteSecurityCore
+	t.Cleanup(func() { verifyWebsiteSecurityCore = oldCore })
+	verifyWebsiteSecurityCore = func(context.Context, *models.Website) (map[string]bool, error) {
+		return map[string]bool{"debug_display": true}, nil
+	}
+	if _, err := VerifyWebsiteSecurityStatus(context.Background(), site, "debug_display"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(site.WebRoot, "wp-includes", "version.php")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(site.WebRoot, "wp-includes")); err != nil {
+		t.Fatal(err)
+	}
+	check := securityVerificationCheck(t, CollectWebsiteSecurityStatus(context.Background(), site), "debug_display")
+	if check.State != "configured" || check.RuntimeReady != nil || check.Effective != nil || check.Verification == nil || check.Verification.Status != "unavailable" {
+		t.Fatalf("missing core directory retained current proof or claimed comparable configuration: %+v", check)
+	}
+	if _, err := VerifyWebsiteSecurityStatus(context.Background(), site, "debug_display"); err == nil {
+		t.Fatal("missing core directory accepted a new manual verification")
 	}
 }
