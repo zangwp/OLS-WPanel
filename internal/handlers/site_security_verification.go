@@ -101,6 +101,10 @@ func (h *WebsiteHandler) VerifySecurityStatus(c *gin.Context) {
 	}
 	defer executor.ReleaseSiteOpLock(id)
 	report, err := verifySiteSecurityForHandler(ctx, site, request.Key)
+	if errors.Is(err, executor.ErrWebsiteSecurityVerificationSave) {
+		siteSecurityVerificationError(c, http.StatusServiceUnavailable, "verification_save_failed")
+		return
+	}
 	if err != nil || report.SiteID != site.ID || len(report.Checks) == 0 {
 		siteSecurityVerificationError(c, http.StatusServiceUnavailable, "verification_failed")
 		return

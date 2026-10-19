@@ -165,3 +165,24 @@ func TestSiteVerificationRequiresCSRFBeforeHandler(t *testing.T) {
 		t.Fatalf("CSRF-less POST=%d", response.Code)
 	}
 }
+
+func TestSiteVerificationReportsPersistenceFailureAndReleasesLock(t *testing.T) {
+	setupWebsiteSecurityStatusDatabase(t, "wordpress")
+	resetSiteVerificationLimiter(t)
+	if _, err := database.GetDB().Exec("UPDATE websites SET status='active' WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	old := verifySiteSecurityForHandler
+	verifySiteSecurityForHandler = func(context.Context, *models.Website, string) (models.WebsiteSecurityStatus, error) {
+		return models.WebsiteSecurityStatus{}, errors.Join(executor.ErrWebsiteSecurityVerificationSave, errors.New("private database diagnostic"))
+	}
+	t.Cleanup(func() { verifySiteSecurityForHandler = old })
+	response := requestSiteVerification(t, "1", `{"key":"https"}`)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"error_code":"verification_save_failed"`) || strings.Contains(response.Body.String(), "private database") {
+		t.Fatalf("persistence failure response=%d %s", response.Code, response.Body)
+	}
+	if !executor.TryAcquireSiteOpLock(1, "test-released-after-persistence-failure") {
+		t.Fatal("persistence failure leaked site lock")
+	}
+	executor.ReleaseSiteOpLock(1)
+}

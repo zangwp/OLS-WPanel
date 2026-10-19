@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"errors"
 	"math/big"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/zangwp/OLS-WPanel/internal/config"
+	"github.com/zangwp/OLS-WPanel/internal/database"
 	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
@@ -103,7 +105,7 @@ func securityVerificationWebsite(t *testing.T) *models.Website {
 	if err := os.Mkdir(webRoot, 0750); err != nil {
 		t.Fatal(err)
 	}
-	config.AppConfig = &config.Config{Paths: config.PathsConfig{WWWRoot: root, OLSVHostsAvailable: root}}
+	config.AppConfig = &config.Config{Paths: config.PathsConfig{WWWRoot: root, OLSVHostsAvailable: root, Certificates: root}}
 	t.Cleanup(func() { config.AppConfig = old })
 	wpConfig := renderWPNativePolicy("<?php\ndefine('DISALLOW_FILE_EDIT', true);\ndefine('WP_DEBUG_DISPLAY', false);\n", false, true)
 	if err := os.WriteFile(filepath.Join(webRoot, "wp-config.php"), []byte(wpConfig), 0600); err != nil {
@@ -113,7 +115,26 @@ func securityVerificationWebsite(t *testing.T) *models.Website {
 	if err := os.WriteFile(vhost, []byte("# fixture deliberately has no HTTP probe rules"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return &models.Website{ID: 731, Domain: "site.example.com", SiteType: "wordpress", Status: models.StatusActive, WebRoot: webRoot, OLSVHostConfigPath: vhost, DisableApplicationPasswords: true, DisableFileEditing: true, SSLEnabled: true}
+	certPath, keyPath := filepath.Join(root, "fullchain.pem"), filepath.Join(root, "privkey.pem")
+	for _, path := range []string{certPath, keyPath} {
+		if err := os.WriteFile(path, []byte("fingerprint fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := sql.Open("sqlite", filepath.Join(root, "verification.db")+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { db.Close(); database.DB = previousDB })
+	if _, err := db.Exec(`CREATE TABLE websites(id INTEGER PRIMARY KEY,maintenance_security TEXT NOT NULL DEFAULT '{}'); INSERT INTO websites(id) VALUES(731)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.EnsureSiteSecurityVerificationSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	return &models.Website{ID: 731, Domain: "site.example.com", SiteType: "wordpress", Status: models.StatusActive, WebRoot: webRoot, OLSVHostConfigPath: vhost, DisableApplicationPasswords: true, DisableFileEditing: true, SSLEnabled: true, SSLCertPath: certPath, SSLKeyPath: keyPath}
 }
 
 func securityVerificationCheck(t *testing.T, report models.WebsiteSecurityStatus, key string) models.WebsiteSecurityCheck {
@@ -170,8 +191,8 @@ func TestSiteSecurityUpdateChecksRemainVerifiableWithFileProtection(t *testing.T
 					t.Fatalf("locked site lost core update-discovery verification: calls=%d check=%+v", coreCalls, check)
 				}
 				cached := securityVerificationCheck(t, CollectWebsiteSecurityStatus(context.Background(), site), "wp_updates")
-				if cached.State != "runtime_verified" || cached.ReasonCode != check.ReasonCode {
-					t.Fatalf("file protection discarded valid cached check: %+v", cached)
+				if cached.State != "configured" || cached.Verification == nil || cached.Verification.State != "runtime_verified" || cached.Verification.Status != "unchanged" || cached.Verification.ReasonCode != check.ReasonCode {
+					t.Fatalf("file protection discarded history or replaced current configuration state: %+v", cached)
 				}
 			} else if coreCalls != 0 || check.State != tc.state {
 				t.Fatalf("disabled/mismatched update policy was verified: calls=%d check=%+v", coreCalls, check)
@@ -186,7 +207,7 @@ func TestSiteSecurityUpdateChecksRemainVerifiableWithFileProtection(t *testing.T
 	}
 }
 
-func TestSiteSecurityCoreVerificationIsScopedAndCacheInvalidates(t *testing.T) {
+func TestSiteSecurityCoreVerificationHistoryIsScopedAndDetectsChanges(t *testing.T) {
 	site := securityVerificationWebsite(t)
 	old := verifyWebsiteSecurityCore
 	t.Cleanup(func() { verifyWebsiteSecurityCore = old })
@@ -202,8 +223,8 @@ func TestSiteSecurityCoreVerificationIsScopedAndCacheInvalidates(t *testing.T) {
 		t.Fatalf("core check invented request proof: %+v", check)
 	}
 	cached := CollectWebsiteSecurityStatus(context.Background(), site)
-	if securityVerificationCheck(t, cached, "application_passwords").State != "runtime_verified" {
-		t.Fatal("unchanged configuration lost observation")
+	if check := securityVerificationCheck(t, cached, "application_passwords"); check.State != "configured" || check.RuntimeReady != nil || check.Verification == nil || check.Verification.State != "runtime_verified" || check.Verification.Status != "unchanged" {
+		t.Fatalf("unchanged configuration lost history or historical evidence replaced current state: %+v", check)
 	}
 	if err := os.WriteFile(filepath.Join(site.WebRoot, "wp-config.php"), []byte("<?php\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -211,6 +232,8 @@ func TestSiteSecurityCoreVerificationIsScopedAndCacheInvalidates(t *testing.T) {
 	changed := CollectWebsiteSecurityStatus(context.Background(), site)
 	if got := securityVerificationCheck(t, changed, "application_passwords"); got.State == "runtime_verified" || got.Effective != nil && *got.Effective {
 		t.Fatalf("changed policy retained proof: %+v", got)
+	} else if got.Verification == nil || got.Verification.Status != "changed" {
+		t.Fatalf("changed policy discarded history instead of marking it changed: %+v", got)
 	}
 }
 
@@ -234,6 +257,10 @@ func TestSiteSecurityFailedReverificationClearsPriorCoreProof(t *testing.T) {
 	check := securityVerificationCheck(t, report, "file_editing")
 	if check.State != "configured" || check.RuntimeReady != nil || check.Effective != nil || check.ReasonCode != "core_runtime_unavailable" {
 		t.Fatalf("failed verification retained success: %+v", check)
+	}
+	latest := securityVerificationCheck(t, CollectWebsiteSecurityStatus(context.Background(), site), "file_editing")
+	if latest.Verification == nil || latest.Verification.State != "configured" || latest.Verification.ReasonCode != "core_runtime_unavailable" || latest.Verification.Status != "unchanged" {
+		t.Fatalf("failed recheck did not replace the older successful history: %+v", latest)
 	}
 }
 
@@ -261,9 +288,9 @@ func TestSiteSecurityVerificationRejectsUnsafeInputsAndPausedSites(t *testing.T)
 	}
 }
 
-func TestSiteSecurityFingerprintChangesWhenIdenticalVHostIsRegenerated(t *testing.T) {
+func TestSiteSecurityFingerprintIgnoresIdenticalVHostRegeneration(t *testing.T) {
 	site := securityVerificationWebsite(t)
-	before, ok := websiteSecurityFingerprint(site)
+	before, ok := websiteSecurityFingerprint(site, "https")
 	if !ok {
 		t.Fatal("fingerprint unavailable")
 	}
@@ -271,35 +298,33 @@ func TestSiteSecurityFingerprintChangesWhenIdenticalVHostIsRegenerated(t *testin
 	if err := os.Chtimes(site.OLSVHostConfigPath, future, future); err != nil {
 		t.Fatal(err)
 	}
-	after, ok := websiteSecurityFingerprint(site)
-	if !ok || before == after {
-		t.Fatal("configuration timestamp changed without invalidating evidence")
+	after, ok := websiteSecurityFingerprint(site, "https")
+	if !ok || before != after {
+		t.Fatal("identical configuration timestamp discarded historical observation")
 	}
 }
 
 func TestSiteSecurityTLSObservationCannotOutliveCertificate(t *testing.T) {
 	site := securityVerificationWebsite(t)
-	fingerprint, ok := websiteSecurityFingerprint(site)
+	fingerprint, ok := websiteSecurityFingerprint(site, "https")
 	if !ok {
 		t.Fatal("fingerprint unavailable")
 	}
 	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
 	check := newWebsiteSecurityCheck("https", "effective", securityBool(true), securityBool(true), time.Now().UTC().Format(time.RFC3339))
 	check.Details = map[string]string{"expires_at": expires.Format(time.RFC3339)}
-	rememberWebsiteSecurityVerification(site, check, fingerprint)
-	websiteSecurityVerificationCache.Lock()
-	entry, exists := websiteSecurityVerificationCache.entries["731:https"]
-	delete(websiteSecurityVerificationCache.entries, "731:https")
-	websiteSecurityVerificationCache.Unlock()
-	if !exists || !entry.expires.Equal(expires) {
-		t.Fatalf("cache expiry=%v certificate expiry=%v", entry.expires, expires)
+	if err := rememberWebsiteSecurityVerification(context.Background(), site, &check, fingerprint); err != nil {
+		t.Fatal(err)
 	}
-	check.Details["expires_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
-	rememberWebsiteSecurityVerification(site, check, fingerprint)
-	websiteSecurityVerificationCache.Lock()
-	_, exists = websiteSecurityVerificationCache.entries["731:https"]
-	websiteSecurityVerificationCache.Unlock()
-	if exists {
-		t.Fatal("expired certificate observation cached")
+	records, err := database.LoadSiteSecurityVerifications(context.Background(), database.GetDB(), site.ID)
+	if err != nil || records["https"].ValidUntil != expires.Format(time.RFC3339) {
+		t.Fatalf("certificate expiry was not preserved: records=%+v err=%v", records, err)
+	}
+	if _, err := database.GetDB().Exec(`UPDATE site_security_verifications SET valid_until=? WHERE site_id=?`, time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), site.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := securityVerificationCheck(t, CollectWebsiteSecurityStatus(context.Background(), site), "https")
+	if got.State != "configured" || got.Effective != nil || got.Verification == nil || got.Verification.Status != "changed" {
+		t.Fatalf("expired certificate retained a current verified badge: %+v", got)
 	}
 }

@@ -172,7 +172,6 @@ func executeRestoreFileBackup(task *Task) TaskResult {
 	if _, err = db.ExecContext(ctx, `UPDATE websites SET updated_at=CURRENT_TIMESTAMP WHERE id=?`, site.ID); err != nil {
 		warnings = append(warnings, "网站更新时间未保存")
 	}
-	invalidateFileRestoreSecurityCache(site.ID)
 	if site.FileLockEnabled {
 		if err = writeFileIntegrityBaseline(ctx, site); err != nil {
 			_ = RemoveWPCodeIntegrityBaseline(site.ID)
@@ -885,21 +884,10 @@ func syncFileRestoreTree(ctx context.Context, dir string, syncDir func(string) e
 	})
 }
 
-func invalidateFileRestoreSecurityCache(siteID int) {
-	websiteSecurityVerificationCache.Lock()
-	defer websiteSecurityVerificationCache.Unlock()
-	prefix := fmt.Sprintf("%d:", siteID)
-	for key := range websiteSecurityVerificationCache.entries {
-		if strings.HasPrefix(key, prefix) {
-			delete(websiteSecurityVerificationCache.entries, key)
-		}
-	}
-}
-
 // A failed atomic rollback leaves the installed tree uncertain. Do not retain
-// a ready lock badge or old request/integrity evidence for that tree.
+// a ready lock badge or integrity baseline for that tree. Manual diagnostics
+// remain separate history and cannot override the failed current state.
 func markFileRestoreUnresolved(ctx context.Context, db *sql.DB, site *models.Website, removeBaseline func(int) error) error {
-	invalidateFileRestoreSecurityCache(site.ID)
 	var stateErr error
 	if site.FileLockEnabled {
 		_, stateErr = db.ExecContext(ctx, `UPDATE websites SET file_lock_apply_status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`, site.ID)

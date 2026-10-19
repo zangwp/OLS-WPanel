@@ -2,23 +2,14 @@ package executor
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/zangwp/OLS-WPanel/internal/models"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
-
-	"github.com/zangwp/OLS-WPanel/internal/config"
-	"github.com/zangwp/OLS-WPanel/internal/models"
 )
 
 var websiteSecurityVerifyKeys = map[string]bool{"https": true, "login_protection": true, "sql_injection": true, "sensitive_files": true, "uploads_php": true, "xmlrpc": true, "application_passwords": true, "file_editing": true, "debug_display": true, "wp_updates": true}
@@ -69,122 +60,9 @@ func setWebsiteSecurityEvidence(report *models.WebsiteSecurityStatus, key, reaso
 	}
 }
 
-type websiteSecurityCachedVerification struct {
-	fingerprint string
-	expires     time.Time
-	check       models.WebsiteSecurityCheck
-}
-
-var websiteSecurityVerificationCache = struct {
-	sync.Mutex
-	entries map[string]websiteSecurityCachedVerification
-}{entries: make(map[string]websiteSecurityCachedVerification)}
-
-// Fingerprint all configuration inputs. A policy edit or certificate replacement
-// invalidates an earlier observation rather than retaining a stale green badge.
-func websiteSecurityFingerprint(site *models.Website) (string, bool) {
-	cfg := config.AppConfig
-	if cfg == nil || site == nil {
-		return "", false
-	}
-	vhost, err := readSiteSecurityFile(cfg.Paths.OLSVHostsAvailable, site.OLSVHostConfigPath, 256*1024)
-	if err != nil {
-		return "", false
-	}
-	wpConfig := []byte(nil)
-	if site.SiteType == "wordpress" {
-		wpConfig, err = readSiteSecurityFile(cfg.Paths.WWWRoot, filepath.Join(site.WebRoot, "wp-config.php"), 1024*1024)
-		if err != nil {
-			return "", false
-		}
-	}
-	h := sha256.New()
-	data, _ := json.Marshal(site)
-	h.Write(data)
-	h.Write(vhost)
-	h.Write(wpConfig)
-	for _, path := range []string{site.OLSVHostConfigPath, filepath.Join(site.WebRoot, "wp-config.php")} {
-		if info, err := os.Lstat(path); err == nil {
-			uid, gid, known := wpInventoryFileOwner(info)
-			fmt.Fprintf(h, "|%d|%d|%s|%d|%d|%t", info.Size(), info.ModTime().UnixNano(), info.Mode(), uid, gid, known)
-		}
-	}
-	block, ban := GetSQLiProtectionSettings()
-	fmt.Fprintf(h, "|%t|%t", block, ban)
-	for _, path := range []string{site.SSLCertPath, site.SSLKeyPath} {
-		if info, err := os.Lstat(path); err == nil {
-			fmt.Fprintf(h, "|%s|%d|%d|%s", path, info.Size(), info.ModTime().UnixNano(), info.Mode())
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil)), true
-}
-
-func applyCachedWebsiteSecurityVerification(site *models.Website, report *models.WebsiteSecurityStatus) {
-	fingerprint, ok := websiteSecurityFingerprint(site)
-	if !ok {
-		return
-	}
-	websiteSecurityVerificationCache.Lock()
-	defer websiteSecurityVerificationCache.Unlock()
-	lockLifecycle := site.FileLockEnabled || site.FileLockApplyStatus != ""
-	for _, check := range report.Checks {
-		if check.Key == "file_lock" && (check.ReasonCode == "file_lock_temporarily_unlocked" || check.ReasonCode == "file_lock_state_unknown") {
-			lockLifecycle = true
-		}
-	}
-	for i := range report.Checks {
-		// Maintenance clears the enabled flag before relocking. Cached core-policy
-		// evidence cannot replace an active or uncertain file-lock lifecycle.
-		if report.Checks[i].Key == "file_editing" && lockLifecycle {
-			continue
-		}
-		key := strconv.Itoa(site.ID) + ":" + report.Checks[i].Key
-		cached, exists := websiteSecurityVerificationCache.entries[key]
-		if !exists {
-			continue
-		}
-		if cached.fingerprint != fingerprint || !time.Now().Before(cached.expires) {
-			delete(websiteSecurityVerificationCache.entries, key)
-			continue
-		}
-		// Event-derived observations are newer than a component-only verification.
-		if report.Checks[i].RecentEventAt == "" {
-			report.Checks[i] = cached.check
-		}
-	}
-}
-
-func rememberWebsiteSecurityVerification(site *models.Website, check models.WebsiteSecurityCheck, expected string) {
-	current, ok := websiteSecurityFingerprint(site)
-	if !ok || current != expected {
-		return
-	}
-	websiteSecurityVerificationCache.Lock()
-	defer websiteSecurityVerificationCache.Unlock()
-	now := time.Now()
-	for key, cached := range websiteSecurityVerificationCache.entries {
-		if !now.Before(cached.expires) {
-			delete(websiteSecurityVerificationCache.entries, key)
-		}
-	}
-	if len(websiteSecurityVerificationCache.entries) >= 1024 {
-		return
-	}
-	expires := now.Add(10 * time.Minute)
-	if check.Key == "https" && check.State == "effective" {
-		certificateExpiry, err := time.Parse(time.RFC3339, check.Details["expires_at"])
-		if err != nil || !now.Before(certificateExpiry) {
-			return
-		}
-		if certificateExpiry.Before(expires) {
-			expires = certificateExpiry
-		}
-	}
-	websiteSecurityVerificationCache.entries[strconv.Itoa(site.ID)+":"+check.Key] = websiteSecurityCachedVerification{fingerprint: current, expires: expires, check: check}
-}
-
 var verifyWebsiteSecurityTLS = verifySiteTLS
 var verifyWebsiteSecurityCore = runSiteSecurityCorePolicy
+var collectWebsiteSecurityForVerification = CollectWebsiteSecurityStatus
 
 // Verification never submits credentials, creates an attack request, changes a
 // firewall or follows a redirect. Core checks run separately from request checks.
@@ -192,15 +70,16 @@ func VerifyWebsiteSecurityStatus(ctx context.Context, site *models.Website, key 
 	if site == nil || !WebsiteSecurityCheckVerifiable(key) {
 		return models.WebsiteSecurityStatus{}, errors.New("unsupported verification key")
 	}
-	report := CollectWebsiteSecurityStatus(ctx, site)
+	report := collectWebsiteSecurityForVerification(ctx, site)
 	if site.Status != models.StatusActive {
 		setWebsiteSecurityEvidence(&report, key, "site_not_active", "saved_configuration", report.CheckedAt, nil)
 		return report, nil
 	}
-	fingerprint, safe := websiteSecurityFingerprint(site)
+	fingerprint, safe := websiteSecurityFingerprint(site, key)
 	if !safe {
+		SetWebsiteSecurityCheck(&report, key, "error", nil, nil)
 		setWebsiteSecurityEvidence(&report, key, "configuration_check_failed", "saved_configuration", report.CheckedAt, nil)
-		return report, nil
+		return report, errors.New("security verification configuration unavailable")
 	}
 	for i := range report.Checks {
 		check := &report.Checks[i]
@@ -229,7 +108,10 @@ func VerifyWebsiteSecurityStatus(ctx context.Context, site *models.Website, key 
 				setWebsiteSecurityEvidence(&report, key, "core_policy_not_enforced", "isolated_wp_core", time.Now().UTC().Format(time.RFC3339), nil)
 			}
 		}
-		rememberWebsiteSecurityVerification(site, *check, fingerprint)
+		if err := rememberWebsiteSecurityVerification(ctx, site, check, fingerprint); err != nil {
+			report.VerificationUnavailable = true
+			return report, err
+		}
 		break
 	}
 	return report, nil

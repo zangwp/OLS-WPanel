@@ -9,12 +9,13 @@ const script = html.match(/{{define "site_security_summary_script"}}\s*<script>(
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const check = (state, extra = {}) => ({ key: 'https', state, configured: true, can_verify: true, action: 'ssl', ...extra });
 const response = checks => ({ success: true, data: { site_id: 1, checks } });
+const verification = (extra = {}) => ({ state: 'effective', checked_at: '2026-10-18T10:00:00Z', reason_code: 'tls_verified', source: 'loopback_tls', status: 'unchanged', ...extra });
 
 function setup() {
     const calls = [], navigation = [];
     const context = { t: key => key, currentLocale: () => 'en-US', window: { location: { assign: url => navigation.push(url) } }, document: { getElementById: id => ({ scrollIntoView: () => navigation.push(id) }) }, api: async (url, options) => { calls.push({ url, options }); return response([]); } };
     vm.createContext(context); vm.runInContext(script, context);
-    const page = Object.assign(context.siteSecuritySummary(), { site: { id: 1, status: 'active', site_type: 'wordpress' }, securityStatus: { checks: [check('configured')] }, securityStatusLoading: false, securityStatusGeneration: 0, setDetailTab: tab => navigation.push(tab), selectLogType: type => navigation.push(type), openSiteSSLSettings: () => navigation.push('ssl'), scrollDetailAnchor: () => navigation.push(context.window.location.hash), $nextTick: callback => callback() });
+    const page = Object.assign(context.siteSecuritySummary(), { site: { id: 1, status: 'active', site_type: 'wordpress' }, securityStatus: { checks: [check('configured')] }, securityStatusLoading: false, securityStatusGeneration: 0, siteSecurityTitle: key => key, setDetailTab: tab => navigation.push(tab), selectLogType: type => navigation.push(type), openSiteSSLSettings: () => navigation.push('ssl'), scrollDetailAnchor: () => navigation.push(context.window.location.hash), $nextTick: callback => callback() });
     return { page, context, calls, navigation };
 }
 
@@ -126,4 +127,118 @@ test('a completed anomaly check refreshes the same website summary while failed 
     await monitor.check();assert.deepEqual(events,[{name:'site-anomaly-updated',siteID:1}]);
     events.length=0;context.api=async()=>{throw Error('site_busy');};await monitor.check();
     assert.equal(events.length,0);assert.equal(monitor.error,'anomaly.site_busy');
+});
+
+test('a previous successful verification remains historical without replacing the current configuration state', () => {
+    const { page } = setup();
+    page.securityStatus.checks = [check('configured', { verification: verification() })];
+    assert.equal(page.summaryStateText('https'), 'site_security.state_configured');
+    assert.equal(page.summaryStateClass('https'), 'badge-info');
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_passed');
+    assert.equal(page.summaryVerification('https').checked_at, '2026-10-18T10:00:00Z');
+    assert.equal(page.summaryHistoryVisible('https'), true);
+    page.securityStatus = { checks: [check('configured', { verification: verification() })] };
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_passed');
+});
+
+test('relevant changes request rechecking while unavailable comparisons retain the historical time', () => {
+    const { page } = setup();
+    for (const [status, label] of [['changed', 'history_configuration_changed'], ['unavailable', 'history_configuration_unavailable']]) {
+        page.securityStatus.checks = [check('configured', { verification: verification({ status }) })];
+        assert.equal(page.summaryHistoryText('https'), 'site_security.' + label);
+        assert.equal(page.summaryVerification('https').checked_at, '2026-10-18T10:00:00Z');
+        assert.equal(page.summaryStateClass('https'), 'badge-info');
+        assert.equal(page.summaryHistoryResult('https'), 'site_security.history_passed');
+    }
+});
+
+test('new current errors or disabled protection remain visible despite a previous successful verification', () => {
+    const { page } = setup();
+    for (const state of ['error', 'disabled', 'unknown']) {
+        page.securityStatus.checks = [check(state, { configured: false, verification: verification() })];
+        assert.equal(page.summaryStateText('https'), 'website.security_state_' + state);
+        assert.notEqual(page.summaryStateClass('https'), 'badge-success');
+        assert.equal(page.summaryHistoryText('https'), 'site_security.history_passed');
+    }
+    page.securityStatus.checks = [check('effective', { effective: true, verification: verification({ state: 'error' }) })];
+    assert.equal(page.summaryStateClass('https'), 'badge-success');
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_failed');
+});
+
+test('missing history does not imply disabled protection or demand manual checks for already observed requests', () => {
+    const { page } = setup();
+    assert.equal(page.summaryStateText('https'), 'site_security.state_configured');
+    assert.equal(page.summaryStateClass('https'), 'badge-info');
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_never_checked');
+    assert.equal(page.summaryHistoryVisible('https'), true);
+    page.securityStatus.verification_unavailable = true;
+    assert.equal(page.summaryHistoryVisible('https'), false);
+    page.securityStatus.verification_unavailable = false;
+    for (const observation of [check('effective', { effective: true }), check('ready', { runtime_ready: true }), check('configured', { can_verify: false })]) {
+        page.securityStatus.checks = [observation];
+        assert.equal(page.summaryHistoryVisible('https'), false);
+    }
+});
+
+test('invalid historical records cannot claim a previous successful verification', () => {
+    const { page } = setup();
+    for (const history of [null, verification({ checked_at: '' }), verification({ checked_at: 'invalid' }), verification({ status: 'invented' }), verification({ state: 'invented' })]) {
+        page.securityStatus.checks = [check('configured', { verification: history })];
+        assert.equal(page.summaryVerification('https'), null);
+        assert.equal(page.summaryHistoryText('https'), 'site_security.history_never_checked');
+    }
+});
+
+test('a successful response containing a failed check reports that failure instead of announcing a pass', async () => {
+    const { page, context } = setup();
+    context.api = async () => response([check('configured', { reason_code: 'tls_untrusted', verification: verification({ state: 'configured', reason_code: 'tls_untrusted' }) })]);
+    await page.verifySummaryCheck('https');
+    assert(page.verificationError.includes('site_security.verification_result_failed'));
+    assert.equal(page.verificationMessage, '');
+    assert.equal(page.summaryStateClass('https'), 'badge-warning');
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_failed');
+});
+
+test('unavailable runtime checks report incomplete while readiness never claims tested request blocking', async () => {
+    const { page, context } = setup();
+    context.api = async () => response([check('configured', { reason_code: 'core_runtime_unavailable', verification: verification({ state: 'configured', reason_code: 'core_runtime_unavailable' }) })]);
+    await page.verifySummaryCheck('https');
+    assert(page.verificationError.includes('site_security.verification_result_incomplete'));
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_incomplete');
+    context.api = async () => response([check('ready', { runtime_ready: true, verification: verification({ state: 'ready', reason_code: 'service_ready' }) })]);
+    await page.verifySummaryCheck('https');
+    assert.equal(page.verificationError, '');
+    assert(page.verificationMessage.includes('site_security.verification_result_ready'));
+    assert.equal(page.summaryHistoryText('https'), 'site_security.history_ready');
+    assert.equal(page.summaryStateClass('https'), 'badge-info');
+});
+
+test('saving failures explain that the check ran without claiming durable success', async () => {
+    const { page, context } = setup();
+    context.api = async () => { const error = new Error('server message'); error.code = 'verification_save_failed'; throw error; };
+    const previous = page.securityStatus;
+    await page.verifySummaryCheck('https');
+    assert.equal(page.verificationError, 'site_security.verification_save_failed');
+    assert.equal(page.verificationMessage, '');
+    assert.equal(page.securityStatus, previous);
+    context.api = async () => ({ success: false, error_code: 'verification_save_failed' });
+    await page.verifySummaryCheck('https');
+    assert.equal(page.verificationError, 'site_security.verification_save_failed');
+});
+
+test('only the clicked verification control changes its native disabled and loading appearance', () => {
+    const control = html.match(/<button[^>]+@click="verifySummaryCheck\(key\)"[^>]*>/)[0];
+    assert(control.includes(':disabled="securityStatusLoading || verifyingKey === key || site.status !== \'active\'"'));
+    assert(control.includes(':aria-disabled="securityStatusLoading || !!verifyingKey || site.status !== \'active\'"'));
+    assert(control.includes("verifyingKey === key ? t('site_security.verifying')"));
+    assert(html.includes('aria-live="polite"'));
+    assert(html.includes('securityStatus?.verification_unavailable'));
+});
+
+test('verification history and outcome labels exist in both supported languages', () => {
+    const keys = ['verification_save_failed', 'verification_history_unavailable', 'last_verification', 'last_verification_evidence', 'verification_applicability', 'history_never_checked', 'history_passed', 'history_ready', 'history_failed', 'history_incomplete', 'history_configuration_changed', 'history_configuration_unavailable', 'verification_result_passed', 'verification_result_ready', 'verification_result_failed', 'verification_result_incomplete', 'recheck_short'];
+    for (const locale of ['zh-CN', 'en-US']) {
+        const messages = JSON.parse(fs.readFileSync(path.join(__dirname, '../../internal/i18n/locales/' + locale + '.json'), 'utf8'));
+        for (const key of keys) assert.equal(typeof messages.site_security[key], 'string', locale + ': ' + key);
+    }
 });

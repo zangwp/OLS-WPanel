@@ -75,15 +75,17 @@ func TestWebsiteFileLockCollectorAndVerifierPreserveInheritedEvidence(t *testing
 		t.Fatal("inherited file protection ran the independent core verifier")
 		return nil, nil
 	}
-	// Simulate an older-version core cache with the same lock configuration. It
-	// must not override current lifecycle/application evidence.
-	fingerprint, ok := websiteSecurityFingerprint(site)
+	// A saved manual core observation must not override current lifecycle or
+	// inherited file-protection evidence.
+	fingerprint, ok := websiteSecurityFingerprint(site, "file_editing")
 	if !ok {
 		t.Fatal("fixture fingerprint unavailable")
 	}
 	cached := newWebsiteSecurityCheck("file_editing", "runtime_verified", securityBool(true), nil, time.Now().UTC().Format(time.RFC3339))
 	cached.RuntimeReady, cached.EvidenceSource = securityBool(true), "isolated_wp_core"
-	rememberWebsiteSecurityVerification(site, cached, fingerprint)
+	if err := rememberWebsiteSecurityVerification(context.Background(), site, &cached, fingerprint); err != nil {
+		t.Fatal(err)
+	}
 	for _, lifecycle := range []string{"locked", "unlocked", "relock_failed", "unknown"} {
 		websiteSecurityMaintenanceState = func(context.Context, int) (string, error) { return lifecycle, nil }
 		report := CollectWebsiteSecurityStatus(context.Background(), site)
@@ -124,13 +126,15 @@ func TestWebsiteFileLockCollectorReportsRealMaintenanceFlagTransitions(t *testin
 			site.FileLockApplyStatus = tc.applyStatus
 			websiteSecurityMaintenanceState = func(context.Context, int) (string, error) { return tc.window, nil }
 			if tc.window != "locked" {
-				fingerprint, ok := websiteSecurityFingerprint(site)
+				fingerprint, ok := websiteSecurityFingerprint(site, "file_editing")
 				if !ok {
 					t.Fatal("fixture fingerprint unavailable")
 				}
 				cached := newWebsiteSecurityCheck("file_editing", "runtime_verified", securityBool(true), securityBool(true), time.Now().UTC().Format(time.RFC3339))
 				cached.EvidenceSource = "isolated_wp_core"
-				rememberWebsiteSecurityVerification(site, cached, fingerprint)
+				if err := rememberWebsiteSecurityVerification(context.Background(), site, &cached, fingerprint); err != nil {
+					t.Fatal(err)
+				}
 			}
 			report := CollectWebsiteSecurityStatus(context.Background(), site)
 			lock := securityVerificationCheck(t, report, "file_lock")

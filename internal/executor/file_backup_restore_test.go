@@ -311,24 +311,13 @@ func TestFullFileRestoreRollbackDurabilityFailureRemainsUnresolved(t *testing.T)
 	}
 }
 
-func TestFullFileRestoreUnresolvedLockedTreeClearsReadyStateAndEvidence(t *testing.T) {
+func TestFullFileRestoreUnresolvedLockedTreeClearsReadyState(t *testing.T) {
 	db := newFullRestoreSQLFixture(t)
 	if _, err := db.Exec(`INSERT INTO websites(id,domain,web_root,system_user,site_type,status,file_lock_enabled,file_lock_mode,file_lock_apply_status,document_root_subdir) VALUES(1,'site.example','/www/site','wp_site','wordpress','active',1,'strict','ready','')`); err != nil {
 		t.Fatal(err)
 	}
 	site := fullRestorePolicyFixture()
 	site.FileLockEnabled = true
-	websiteSecurityVerificationCache.Lock()
-	oldEntries := websiteSecurityVerificationCache.entries
-	websiteSecurityVerificationCache.entries = map[string]websiteSecurityCachedVerification{
-		"1:file_editing": {}, "1:wp_updates": {}, "2:file_editing": {},
-	}
-	websiteSecurityVerificationCache.Unlock()
-	t.Cleanup(func() {
-		websiteSecurityVerificationCache.Lock()
-		websiteSecurityVerificationCache.entries = oldEntries
-		websiteSecurityVerificationCache.Unlock()
-	})
 	removed := false
 	if err := markFileRestoreUnresolved(context.Background(), db, site, func(id int) error {
 		if id != 1 {
@@ -342,14 +331,6 @@ func TestFullFileRestoreUnresolvedLockedTreeClearsReadyStateAndEvidence(t *testi
 	var status string
 	if err := db.QueryRow(`SELECT file_lock_apply_status FROM websites WHERE id=1`).Scan(&status); err != nil || status != "failed" || !removed {
 		t.Fatalf("status=%s removed=%v err=%v", status, removed, err)
-	}
-	websiteSecurityVerificationCache.Lock()
-	defer websiteSecurityVerificationCache.Unlock()
-	if len(websiteSecurityVerificationCache.entries) != 1 {
-		t.Fatal("old restored-site runtime evidence retained")
-	}
-	if _, ok := websiteSecurityVerificationCache.entries["2:file_editing"]; !ok {
-		t.Fatal("unrelated site evidence removed")
 	}
 }
 
