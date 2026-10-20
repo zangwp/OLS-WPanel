@@ -7,7 +7,7 @@ const html=fs.readFileSync(path.join(__dirname,'../../web/templates/wordpress_ac
 const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function setup() {
     const calls=[],forms=[],fields=[],watchers=new Map(),popup={opener:{},closed:false,close(){this.closed=true;}};
-    const context={URL,Date,AbortController,crypto:require('node:crypto').webcrypto,t:key=>key,showToast(){},navigator:{clipboard:{async writeText(){}}},window:{open:()=>popup},document:{body:{append:form=>forms.push(form)},createElement:type=>type==='form'?{style:{},append:field=>fields.push(field),submit(){this.submitted=true;},remove(){this.removed=true;}}:{}}};
+    const context={URL,Date,AbortController,crypto:require('node:crypto').webcrypto,t:key=>key,showToast(){},confirmModal:async()=>true,navigator:{clipboard:{async writeText(){}}},window:{open:()=>popup},document:{body:{append:form=>forms.push(form)},createElement:type=>type==='form'?{style:{},append:field=>fields.push(field),submit(){this.submitted=true;},remove(){this.removed=true;}}:{}}};
     popup.document=context.document;popup.document.head={append(){}};
     context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:{}};};
     vm.createContext(context);vm.runInContext(source,context);
@@ -193,15 +193,74 @@ test('SSO can be disabled and tickets revoked while external login or authentica
     }
 });
 
-test('disabling SSO preserves an existing suffix and reports the backend conflict instead of migrating settings',async()=>{
+test('saving a nonempty suffix under external control is rejected without changing saved settings',async()=>{
     const {component,context,calls}=setup();component.status.external_login_control=true;component.status.login_suffix='saved-panel-login';
     component.enableSSO=false;component.suffix='saved-panel-login';component.settingsPassword='secret';
     const conflictMessage=JSON.parse(fs.readFileSync(path.join(__dirname,'../../internal/i18n/locales/en-US.json'),'utf8')).wp_access.error_external_login_control;
     context.t=key=>key==='wp_access.error_external_login_control'?conflictMessage:key;
     context.api=async(url,options)=>{calls.push({url,options});throw Object.assign(new Error('conflict'),{code:'wp_access_external_login_control'});};
     await component.save();
-    assert.equal(calls.length,1);assert.equal(calls[0].options.body.sso_enabled,false);assert.equal(calls[0].options.body.login_suffix,'saved-panel-login');
+    assert.equal(calls.length,0);
     assert.equal(component.suffix,'saved-panel-login');assert.equal(component.status.login_suffix,'saved-panel-login');assert.equal(component.error,conflictMessage);
+});
+
+test('a panel route mismatch offers repair without authorizing a broken route',()=>{
+    const {component,context,calls}=setup();Object.assign(component.status,{sso_available:false,reason_code:'login_route_mismatch',login_source:'native',login_suffix:'zang'});
+    const reason=JSON.parse(fs.readFileSync(path.join(__dirname,'../../internal/i18n/locales/en-US.json'),'utf8')).wp_access.reason_login_route_mismatch;
+    context.t=key=>key==='wp_access.reason_login_route_mismatch'?reason:key;
+    assert.equal(component.canAuthorize(),false);assert.equal(component.canSetupAuthorization(),true);
+    assert.equal(component.reasonText(),reason);
+    component.openAuthorizationSettings();assert.equal(component.settingsOpen,true);assert.equal(calls.length,0);
+    component.status.external_login_control=true;assert.equal(component.canSetupAuthorization(),false);
+});
+
+test('confirmed clear removes panel login settings even when an external plugin owns the login URL',async()=>{
+    const {component,context,calls}=setup();Object.assign(component.status,{external_login_control:true,login_suffix:'zang',manual_login_url:'https://site.example/legacy/',login_url:'https://site.example/plugin-login/'});
+    component.resetSettings();component.settingsOpen=true;component.settingsPassword='panel-password';component.settingsCode='654321';
+    let confirmations=0;context.confirmModal=async message=>{confirmations++;assert.equal(message,'wp_access.clear_panel_settings_confirm');return true;};
+    context.api=async(url,options)=>{calls.push({url,options});return readStatus({sso_enabled:false,sso_available:false,login_suffix:'',manual_login_url:'',external_login_control:true,login_url:'https://site.example/plugin-login/'});};
+    await component.clearPanelSettings();
+    assert.equal(confirmations,1);assert.equal(calls.length,2);
+    assert.deepEqual({...calls[0].options.body},{manual_login_url:'',login_suffix:'',sso_enabled:false,current_password:'panel-password',code:'654321',confirm:true});
+    assert.equal(calls[0].options.method,'PUT');assert.equal(calls[0].url,'/websites/1/wp-panel-access');assert(!calls[1].options.method);
+    assert.equal(component.suffix,'');assert.equal(component.enableSSO,false);assert.equal(component.settingsOpen,false);assert.equal(component.canAuthorize(),false);
+    assert.equal(component.safeAddress(component.status.login_url),'https://site.example/plugin-login/');assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');
+});
+
+test('cancelling clear preserves the draft and sends no settings request',async()=>{
+    const {component,context,calls}=setup();component.status.login_suffix='saved';component.suffix='unsaved';component.enableSSO=true;component.settingsPassword='secret';
+    context.confirmModal=async()=>false;await component.clearPanelSettings();
+    assert.equal(calls.length,0);assert.equal(component.suffix,'unsaved');assert.equal(component.enableSSO,true);assert.equal(component.confirmingClear,false);assert.equal(component.busy,false);
+});
+
+test('failed clear preserves drafts and saved state, reports the error and discards credentials',async()=>{
+    const {component,context,calls}=setup();component.status.login_suffix='saved';component.suffix='draft';component.enableSSO=true;component.settingsOpen=true;component.settingsPassword='secret';component.settingsCode='123456';
+    context.api=async(url,options)=>{calls.push({url,options});throw Object.assign(new Error('wrong password'),{code:'invalid_password'});};
+    await component.clearPanelSettings();assert.equal(calls.length,1);assert.equal(component.suffix,'draft');assert.equal(component.enableSSO,true);assert.equal(component.status.login_suffix,'saved');assert.equal(component.settingsOpen,true);assert(component.error);
+    assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');assert.equal(component.busy,false);assert.equal(component.busyAction,'');
+});
+
+test('clear respects identity, file locks, pending work and page lifecycle before prompting',async()=>{
+    for(const state of [{settingsPassword:''},{site:{id:1,file_lock_enabled:true}},{loading:true},{busy:true},{destroyed:true},{detailTab:'logs'},{status:{installed:true,login_suffix:'',sso_enabled:false}},{status:null}]) {
+        const {component,context,calls}=setup();component.status.login_suffix='saved';component.settingsPassword='secret';Object.assign(component,state);
+        let prompted=0;context.confirmModal=async()=>{prompted++;return true;};await component.clearPanelSettings();assert.equal(prompted,0);assert.equal(calls.length,0);
+    }
+});
+
+test('a pending clear confirmation blocks duplicate mutations and rechecks identity and site on acceptance',async()=>{
+    for(const change of [component=>{component.site.id=2;},component=>{component.settingsPassword='';},component=>{component.site.file_lock_enabled=true;},component=>component.destroy(),component=>{component.detailTab='logs';}]) {
+        const {component,context,calls}=setup();component.status.login_suffix='saved';component.settingsPassword='secret';const confirmation=deferred();let prompted=0;
+        context.confirmModal=()=>{prompted++;return confirmation.promise;};const first=component.clearPanelSettings();await component.clearPanelSettings();await component.save();await component.revoke();
+        assert.equal(prompted,1);assert.equal(calls.length,0);assert.equal(component.confirmingClear,true);
+        change(component);confirmation.resolve(true);await first;assert.equal(calls.length,0);assert.equal(component.confirmingClear,false);
+    }
+});
+
+test('a pending clear sends one request and does not reload another website on late success',async()=>{
+    const {component,context,calls}=setup();component.status.login_suffix='saved';component.settingsPassword='secret';component.suffix='draft';const pending=deferred();
+    context.api=(url,options)=>{calls.push({url,options});return pending.promise;};const first=component.clearPanelSettings();await settle();
+    assert.equal(component.busyAction,'clear');await component.clearPanelSettings();await component.save();assert.equal(calls.length,1);
+    component.site.id=2;pending.resolve({success:true});await first;assert.equal(calls.length,1);assert.equal(component.suffix,'draft');assert.equal(component.busy,false);
 });
 
 test('the suffix field displays only the actual saved value without a misleading login placeholder',()=>{

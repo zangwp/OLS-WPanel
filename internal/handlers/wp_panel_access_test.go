@@ -134,6 +134,7 @@ func TestWPPanelAccessLoginRequiresEnabledAvailableSSOAndKnownAdministrator(t *t
 	}{
 		{"disabled", executor.WPPanelAccessStatus{SSOAvailable: true}, http.StatusConflict, "sso_disabled"},
 		{"unavailable bridge", executor.WPPanelAccessStatus{SSOEnabled: true, ReasonCode: "bridge_unavailable"}, http.StatusConflict, "bridge_unavailable"},
+		{"saved route not effective", executor.WPPanelAccessStatus{SSOEnabled: true, ReasonCode: "login_route_mismatch"}, http.StatusConflict, "login_route_mismatch"},
 		{"HTTPS required", executor.WPPanelAccessStatus{SSOEnabled: true, ReasonCode: "https_required"}, http.StatusConflict, "https_required"},
 		{"unknown administrator", executor.WPPanelAccessStatus{SSOEnabled: true, SSOAvailable: true, Administrators: []executor.WPPanelAccessAdministrator{{ID: 8, Login: "other"}}}, http.StatusBadRequest, "administrator_not_found"},
 	} {
@@ -274,6 +275,147 @@ func TestWPPanelAccessSaveRefusesExternalLoginControlWithoutMutation(t *testing.
 	router.ServeHTTP(response, r)
 	if response.Code != 409 || mutated || !strings.Contains(response.Body.String(), "wp_access_external_login_control") {
 		t.Fatalf("external plugin settings=%d mutation=%t %s", response.Code, mutated, response.Body.String())
+	}
+}
+
+func wpAccessSaveCall(t *testing.T, router http.Handler, session string, csrf bool, body gin.H) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPut, "/api/websites/1/wp-panel-access", bytes.NewReader(raw))
+	r.Header.Set("Content-Type", "application/json")
+	if csrf {
+		r.Header.Set("X-CSRF-Token", "test-csrf")
+		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: "test-csrf"})
+	}
+	if session != "" {
+		r.AddCookie(&http.Cookie{Name: "wp_session", Value: session})
+	}
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, r)
+	return w
+}
+
+func TestWPPanelAccessSaveClearsOwnSettingsUnderExternalControlWithStepUp(t *testing.T) {
+	auth, router := wpAccessHandlerFixture(t)
+	codes := enableHandlerMFA(t, auth)
+	session := middleware.GlobalSessionStore.Create("admin")
+	var stages []string
+	inspectWPPanelAccessForSettings = func(_ context.Context, site *models.Website, suffix string) (executor.WPPanelAccessStatus, error) {
+		stages = append(stages, "inspect")
+		if site.ID != 1 || suffix != "" {
+			t.Fatalf("clear inspected site=%d suffix=%q", site.ID, suffix)
+		}
+		return executor.WPPanelAccessStatus{Installed: true, SiteURL: "https://example.com", LoginSuffix: "zang", SSOEnabled: true, ExternalLoginControl: true, LoginSource: "plugin", ConflictingPlugins: []string{"wps-hide-login"}}, nil
+	}
+	old := applyWPPanelAccessSettings
+	t.Cleanup(func() { applyWPPanelAccessSettings = old })
+	applyWPPanelAccessSettings = func(site *models.Website, settings executor.WPPanelAccessSettings) (func() error, error) {
+		stages = append(stages, "apply")
+		if site.ID != 1 || settings.ManualLoginURL != "" || settings.LoginSuffix != "" || settings.SSOEnabled {
+			t.Fatalf("clear did not remove own settings: site=%d settings=%+v", site.ID, settings)
+		}
+		return func() error { t.Error("successful clear rolled back"); return nil }, nil
+	}
+	inspectWPPanelAccessAfterSettings = func(context.Context, *models.Website) (executor.WPPanelAccessStatus, error) {
+		stages = append(stages, "inspect_after")
+		return executor.WPPanelAccessStatus{Installed: true, LoginURL: "https://example.com/plugin-signin", ExternalLoginControl: true, LoginSource: "plugin", ConflictingPlugins: []string{"wps-hide-login"}, ReasonCode: "external_login_control"}, nil
+	}
+	clear := func(password, code string, confirm bool) gin.H {
+		return gin.H{"manual_login_url": "", "login_suffix": "", "sso_enabled": false, "current_password": password, "code": code, "confirm": confirm}
+	}
+	for _, test := range []struct {
+		name    string
+		session string
+		csrf    bool
+		body    gin.H
+		status  int
+	}{
+		{"session", "", true, clear("correct-password", codes[0], true), http.StatusUnauthorized},
+		{"CSRF", session.Token, false, clear("correct-password", codes[0], true), http.StatusForbidden},
+		{"password required", session.Token, true, clear("", codes[0], true), http.StatusBadRequest},
+		{"password wrong", session.Token, true, clear("wrong-password", codes[0], true), http.StatusUnauthorized},
+		{"MFA required", session.Token, true, clear("correct-password", "", true), http.StatusUnauthorized},
+		{"MFA wrong", session.Token, true, clear("correct-password", "invalid", true), http.StatusUnauthorized},
+		{"confirmation", session.Token, true, clear("correct-password", codes[0], false), http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := wpAccessSaveCall(t, router, test.session, test.csrf, test.body)
+			if response.Code != test.status {
+				t.Fatalf("unverified clear=%d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+	if len(stages) != 0 {
+		t.Fatalf("unverified clear reached WordPress: %v", stages)
+	}
+	body := clear("correct-password", codes[0], true)
+	response := wpAccessSaveCall(t, router, session.Token, true, body)
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("verified clear=%d %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Success bool                         `json:"success"`
+		Data    executor.WPPanelAccessStatus `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Success || result.Data.LoginSuffix != "" || result.Data.ManualLoginURL != "" || result.Data.SSOEnabled || result.Data.SSOAvailable || !result.Data.ExternalLoginControl || result.Data.LoginSource != "plugin" || result.Data.LoginURL != "https://example.com/plugin-signin" {
+		t.Fatalf("clear changed external ownership or retained own settings: %+v", result)
+	}
+	if strings.Join(stages, ",") != "inspect,apply,inspect_after" {
+		t.Fatalf("clear did not inspect and verify the settings change: %v", stages)
+	}
+	if response := wpAccessSaveCall(t, router, session.Token, true, body); response.Code != http.StatusUnauthorized || len(stages) != 3 {
+		t.Fatalf("clear replayed a consumed recovery code=%d stages=%v", response.Code, stages)
+	}
+}
+
+func TestWPPanelAccessSaveClearRespectsFileLock(t *testing.T) {
+	_, router := wpAccessHandlerFixture(t)
+	session := middleware.GlobalSessionStore.Create("admin")
+	if _, err := database.GetDB().Exec("UPDATE websites SET file_lock_enabled=1 WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	inspectWPPanelAccessForSettings = func(context.Context, *models.Website, string) (executor.WPPanelAccessStatus, error) {
+		t.Fatal("locked clear reached WordPress")
+		return executor.WPPanelAccessStatus{}, nil
+	}
+	old := applyWPPanelAccessSettings
+	t.Cleanup(func() { applyWPPanelAccessSettings = old })
+	applyWPPanelAccessSettings = func(*models.Website, executor.WPPanelAccessSettings) (func() error, error) {
+		t.Fatal("locked clear changed panel settings")
+		return nil, nil
+	}
+	response := wpAccessSaveCall(t, router, session.Token, true, gin.H{"login_suffix": "", "sso_enabled": false, "current_password": "correct-password", "confirm": true})
+	if response.Code != http.StatusLocked {
+		t.Fatalf("locked clear=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWPPanelAccessSaveClearRollsBackUnverifiedSettings(t *testing.T) {
+	_, router := wpAccessHandlerFixture(t)
+	session := middleware.GlobalSessionStore.Create("admin")
+	unchanged := executor.WPPanelAccessStatus{Installed: true, SiteURL: "https://example.com", LoginSuffix: "zang", SSOEnabled: true, ExternalLoginControl: true, LoginSource: "plugin"}
+	inspectWPPanelAccessForSettings = func(context.Context, *models.Website, string) (executor.WPPanelAccessStatus, error) {
+		return unchanged, nil
+	}
+	inspectWPPanelAccessAfterSettings = func(context.Context, *models.Website) (executor.WPPanelAccessStatus, error) {
+		return unchanged, nil
+	}
+	old := applyWPPanelAccessSettings
+	t.Cleanup(func() { applyWPPanelAccessSettings = old })
+	applied, rolledBack := false, false
+	applyWPPanelAccessSettings = func(*models.Website, executor.WPPanelAccessSettings) (func() error, error) {
+		applied = true
+		return func() error { rolledBack = true; return nil }, nil
+	}
+	response := wpAccessSaveCall(t, router, session.Token, true, gin.H{"login_suffix": "", "sso_enabled": false, "current_password": "correct-password", "confirm": true})
+	if response.Code != http.StatusUnprocessableEntity || !applied || !rolledBack || !strings.Contains(response.Body.String(), "wp_access_bridge_unavailable") {
+		t.Fatalf("unverified clear=%d applied=%t rolledBack=%t %s", response.Code, applied, rolledBack, response.Body.String())
 	}
 }
 
