@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.2.2 — 2026-10-20
+
+- Distinguish an inactive saved panel login suffix from external plugin ownership when WordPress reports its exact native login URL without plugin or login-hook evidence. Keep passwordless sign-in unavailable until the route is repaired.
+- Add an explicit action to clear the panel's saved login suffix and manual override, disable passwordless sign-in and revoke unused authorizations even when an external plugin owns the entry. Preserve plugin settings and require the current panel password, configured MFA and unlocked website files.
+- Preserve draft settings on canceled or failed recovery, reject duplicate submissions and ignore late responses after leaving the website. Retain post-save inspection, route verification and rollback.
+
+Upgrade notes: reopen Website details → Overview → WordPress access after updating. An inactive panel suffix can be saved again or cleared through access settings. No new dependency, database migration, background worker or automatic login takeover is added.
+
 ## v2.2.1 — 2026-10-19
 
 - Persist the latest manual security verification per website and check. Reopening the page or restarting the panel retains its result and timestamp without adding a background scan or an unbounded history.

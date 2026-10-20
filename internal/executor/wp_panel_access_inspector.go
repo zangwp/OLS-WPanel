@@ -24,6 +24,7 @@ import (
 var wpPanelAccessInspectorSource string
 
 var wpPanelAccessInspectPHP = runWPPanelAccessInspector
+var wpPanelAccessReadSettings = ReadWPPanelAccessSettings
 
 type wpPanelAccessProbe struct {
 	Installed             bool     `json:"installed"`
@@ -70,7 +71,7 @@ func inspectWPPanelAccess(ctx context.Context, site *models.Website, candidateSu
 	if site == nil || site.SiteType != "wordpress" || site.Status != models.StatusActive {
 		return result, wpPanelAccessError("site_unavailable")
 	}
-	settings, err := ReadWPPanelAccessSettings(site)
+	settings, err := wpPanelAccessReadSettings(site)
 	if err != nil {
 		return result, err
 	}
@@ -125,10 +126,24 @@ func inspectWPPanelAccess(ctx context.Context, site *models.Website, candidateSu
 	if result.AuthenticationPlugins == nil {
 		result.AuthenticationPlugins = []string{}
 	}
+	// A saved panel route can outlive its MU bridge. The native core URL is
+	// evidence that the panel route is unavailable, not that a plugin owns it.
+	// Only disregard the path-comparison marker; plugin/hook evidence remains
+	// blocking, and the mismatch below must never make SSO available.
+	login, loginErr := url.Parse(result.DetectedLoginURL)
+	loginRouteMismatch := settings.LoginSuffix != "" && loginErr == nil && login.EscapedPath() == result.InstallationPath+"/wp-login.php" && login.RawQuery == "" && !login.ForceQuery
+	for _, conflict := range result.ConflictingPlugins {
+		if conflict != "filtered_login_url" {
+			loginRouteMismatch = false
+		}
+	}
+	if loginRouteMismatch {
+		result.ConflictingPlugins = []string{}
+	}
 	result.ExternalLoginControl = len(result.ConflictingPlugins) != 0
 	if result.ExternalLoginControl {
 		result.LoginSource = "plugin"
-	} else if settings.LoginSuffix != "" {
+	} else if settings.LoginSuffix != "" && !loginRouteMismatch {
 		result.LoginSource = "panel"
 	}
 	if settings.ManualLoginURL != "" {
@@ -153,6 +168,8 @@ func inspectWPPanelAccess(ctx context.Context, site *models.Website, candidateSu
 		result.ReasonCode = "https_required"
 	case result.ExternalLoginControl:
 		result.ReasonCode = "external_login_control"
+	case loginRouteMismatch:
+		result.ReasonCode = "login_route_mismatch"
 	case len(result.AuthenticationPlugins) != 0:
 		result.ReasonCode = "authentication_plugin"
 	case !probe.CurlUnixAvailable:

@@ -29,6 +29,7 @@ func wpPanelAccessResponseError(c *gin.Context, status int, err error) {
 	code := executor.WPPanelAccessErrorCode(err)
 	known := map[string]bool{"site_unavailable": true, "not_installed": true, "multisite_unsupported": true, "database_mismatch": true, "runtime_unavailable": true, "settings_unavailable": true, "invalid_login_url": true, "invalid_site_url": true, "invalid_suffix": true, "suffix_conflict": true, "unmanaged_bridge": true, "https_required": true, "external_login_control": true, "authentication_plugin": true, "curl_unavailable": true, "broker_unavailable": true, "sso_disabled": true, "bridge_unavailable": true, "administrator_not_found": true, "permalinks_required": true, "confirmation_required": true, "rollback_failed": true, "too_many_administrators": true}
 	known["route_unavailable"] = true
+	known["login_route_mismatch"] = true
 	if !known[code] {
 		code = "operation_failed"
 	}

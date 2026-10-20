@@ -28,7 +28,7 @@
                 <p x-show="status.authentication_plugins?.length" class="text-sm text-yellow-300 mt-2" x-text="t('wp_access.authentication_conflict') + ': ' + (status.authentication_plugins || []).join(', ')"></p>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4"><label><span class="label">{{t .Lang "wp_access.panel_password"}}</span><input type="password" x-model="settingsPassword" required autocomplete="current-password" :disabled="busy" class="input-field"></label><label><span class="label">{{t .Lang "wp_access.panel_code"}}</span><input type="text" x-model="settingsCode" autocomplete="one-time-code" :disabled="busy" class="input-field"></label></div>
                 <p x-show="site.file_lock_enabled" class="text-sm text-yellow-300 mt-3">{{t .Lang "website.file_lock_enabled_notice"}}</p>
-                <div class="flex flex-wrap gap-2 mt-4"><button type="submit" class="btn-primary" :disabled="busy || loading || !settingsPassword || site.file_lock_enabled" x-text="busyAction === 'save' ? t('common.saving') : t('website.save_settings')"></button><button type="button" class="btn-secondary" :disabled="busy" @click="revoke()">{{t .Lang "wp_access.revoke"}}</button></div>
+                <div class="flex flex-wrap gap-2 mt-4"><button type="submit" class="btn-primary" :disabled="!canSaveSettings()" x-text="busyAction === 'save' ? t('common.saving') : t('website.save_settings')"></button><button type="button" class="btn-secondary" x-show="hasPanelSettings()" :disabled="!canSaveSettings()" @click="clearPanelSettings()" x-text="busyAction === 'clear' ? t('wp_access.clearing_panel_settings') : t('wp_access.clear_panel_settings')"></button><button type="button" class="btn-secondary" :disabled="busy || confirmingClear" @click="revoke()">{{t .Lang "wp_access.revoke"}}</button></div>
                 <p x-show="status.recovery_file" class="text-xs text-gray-500 mt-4" x-text="t('wp_access.recovery_help') + ' ' + status.recovery_file"></p>
             </form>
         </details>
@@ -42,7 +42,7 @@ function wordpressPanelAccess() {
     return {
         status: null, loading: false, busy: false, busyAction: '', error: '', generation: 0, readController: null, loginGeneration: 0, loginPopup: null, destroyed: false,
         suffix: '', enableSSO: false, administratorID: '',
-        settingsPassword: '', settingsCode: '', loginOpen: false, settingsOpen: false,
+        settingsPassword: '', settingsCode: '', loginOpen: false, settingsOpen: false, confirmingClear: false,
         init() {
             this.$watch?.('detailTab', tab => {
                 if (tab === 'overview' && !this.status) this.load();
@@ -60,7 +60,9 @@ function wordpressPanelAccess() {
             } catch (_) { return ''; }
         },
         canAuthorize() { return this.status?.installed === true && this.status.sso_enabled === true && this.status.sso_available === true && !this.status.authentication_plugins?.length && !this.status.external_login_control && (this.status.administrators || []).some(admin => Number.isSafeInteger(admin.id) && admin.id > 0); },
-        canSetupAuthorization() { return this.status?.installed === true && ((this.status.sso_enabled === false && this.status.reason_code === 'sso_disabled') || this.status.reason_code === 'bridge_unavailable') && !this.status.authentication_plugins?.length && !this.status.external_login_control; },
+        canSetupAuthorization() { return this.status?.installed === true && ((this.status.sso_enabled === false && this.status.reason_code === 'sso_disabled') || ['bridge_unavailable', 'login_route_mismatch'].includes(this.status.reason_code)) && !this.status.authentication_plugins?.length && !this.status.external_login_control; },
+        hasPanelSettings() { return !!(this.status?.login_suffix || this.status?.sso_enabled || this.status?.manual_login_url); },
+        canSaveSettings() { return this.status?.installed === true && !!this.site?.id && !this.destroyed && this.detailTab === 'overview' && !this.busy && !this.loading && !this.confirmingClear && !!this.settingsPassword && !this.site.file_lock_enabled; },
         authorizationConflict() { return this.status?.external_login_control ? 'external_login_control' : this.status?.authentication_plugins?.length ? 'authentication_plugin' : ''; },
         reasonText() {
             if (this.canAuthorize()) return '';
@@ -101,25 +103,39 @@ function wordpressPanelAccess() {
         resetSettings() { this.suffix = this.status?.login_suffix || ''; this.enableSSO = this.status?.sso_enabled === true; },
         closeLogin() { ++this.loginGeneration; this.loginOpen = false; this.loginPopup?.close(); this.loginPopup = null; },
         async copyAddress() { const url = this.safeAddress(this.status?.installed ? this.status.login_url : this.status?.install_url); if (!url) return; try { await navigator.clipboard.writeText(url); showToast(t('common.copied'), 'success'); } catch (_) { this.error = t('common.operation_failed'); } },
-        async save() {
-            if (this.busy || this.loading || !this.settingsPassword || this.site?.file_lock_enabled) return;
+        async clearPanelSettings() {
+            if (!this.canSaveSettings() || !this.hasPanelSettings()) return;
+            const siteID = this.site.id;
+            this.confirmingClear = true;
+            let confirmed = false;
+            try { confirmed = await confirmModal(t('wp_access.clear_panel_settings_confirm')); }
+            finally { this.confirmingClear = false; }
+            if (!confirmed || this.site?.id !== siteID || !this.canSaveSettings() || !this.hasPanelSettings()) return;
+            await this.save(true);
+        },
+        async save(clear = false) {
+            if (!this.canSaveSettings() || (clear && !this.hasPanelSettings())) return;
+            const suffix = clear ? '' : this.suffix.trim(), enableSSO = clear ? false : this.enableSSO;
             const conflict = this.authorizationConflict();
-            if (this.enableSSO && conflict) {
+            if ((enableSSO && conflict) || (suffix && this.status.external_login_control)) {
                 this.error = t('wp_access.error_' + conflict);
                 this.settingsPassword = ''; this.settingsCode = '';
                 return;
             }
-            this.busy = true; this.busyAction = 'save'; this.error = '';
+            const siteID = this.site.id, current = () => this.site?.id === siteID && this.detailTab === 'overview' && !this.destroyed;
+            let saved = false;
+            this.busy = true; this.busyAction = clear ? 'clear' : 'save'; this.error = '';
             try {
-                const response = await api('/websites/' + this.site.id + '/wp-panel-access', {method:'PUT',body:{manual_login_url:'',login_suffix:this.suffix.trim(),sso_enabled:this.enableSSO,current_password:this.settingsPassword,code:this.settingsCode,confirm:true},silent:true,allowAuthFailure:true,timeout:30000});
+                const response = await api('/websites/' + siteID + '/wp-panel-access', {method:'PUT',body:{manual_login_url:'',login_suffix:suffix,sso_enabled:enableSSO,current_password:this.settingsPassword,code:this.settingsCode,confirm:true},silent:true,allowAuthFailure:true,timeout:30000});
                 if (!response.success) throw new Error(t('common.operation_failed'));
-                this.settingsOpen = false; this.closeLogin(); showToast(t('settings.saved'), 'success');
-            } catch (error) { this.error = this.errorText(error); }
+                if (!current()) return;
+                saved = true; this.settingsOpen = false; this.closeLogin(); showToast(t(clear ? 'wp_access.panel_settings_cleared' : 'settings.saved'), 'success');
+            } catch (error) { if (current()) this.error = this.errorText(error); }
             finally { this.settingsPassword = ''; this.settingsCode = ''; this.busy = false; this.busyAction = ''; }
-            if (!this.error) await this.load();
+            if (saved && current()) await this.load();
         },
         async revoke() {
-            if (this.busy || this.loading) return;
+            if (this.busy || this.loading || this.confirmingClear) return;
             this.busy = true; this.busyAction = 'revoke'; this.error = '';
             try { await api('/websites/' + this.site.id + '/wp-panel-access/revoke', {method:'POST',body:{},silent:true}); this.closeLogin(); showToast(t('wp_access.revoked'), 'success'); }
             catch (error) { this.error = this.errorText(error); }

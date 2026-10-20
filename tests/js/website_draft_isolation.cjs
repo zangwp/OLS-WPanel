@@ -200,9 +200,11 @@ test('plugin batch selection stays fixed while submitting and is retained when t
 test('WordPress authorization saving does not show an unrelated login action as authorizing',async()=>{
     const write=deferred(), f=setup('wordpress_access.html','wordpressPanelAccess',()=>write.promise);
     f.page.site={id:1,site_type:'wordpress',domain:'site.example'};
+    f.page.detailTab='overview';
     f.page.status={installed:true,sso_enabled:false,administrators:[]}; f.page.settingsPassword='secret';
-    const pending=f.page.save(); await f.page.revoke();
+    const pending=f.page.save();
     assert.equal(f.calls.length,1); assert.equal(f.page.busyAction,'save');
+    await f.page.revoke();
     const labels=[...f.html.matchAll(/x-text="([^"]*busyAction[^\"]*)"/g)].map(match=>vm.runInNewContext(match[1],{...f.page,t:key=>key}));
     assert(labels.includes('common.saving')); assert(!labels.includes('wp_access.authorizing'));
     write.reject(Error('offline')); await pending;
