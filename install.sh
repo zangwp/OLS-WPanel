@@ -5,6 +5,7 @@ set -o pipefail
 # ============================================================
 # OLS WPanel installer for clean Debian 13 / Ubuntu 24.04 and 26.04 LTS servers.
 # Select a signed native binary and configure the OpenLiteSpeed/LSPHP repositories.
+# Pin release assets and their checksums to the same version.
 # ============================================================
 
 RED='\033[0;31m'

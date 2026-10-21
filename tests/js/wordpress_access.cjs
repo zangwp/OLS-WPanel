@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const {test} = require('node:test');
 const html=fs.readFileSync(path.join(__dirname,'../../web/templates/wordpress_access.html'),'utf8');
 const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+// Isolate the template component with mocked API, popup and DOM boundaries.
 function setup() {
     const calls=[],forms=[],fields=[],watchers=new Map(),popup={opener:{},closed:false,close(){this.closed=true;}};
     const context={URL,Date,AbortController,crypto:require('node:crypto').webcrypto,t:key=>key,showToast(){},confirmModal:async()=>true,navigator:{clipboard:{async writeText(){}}},window:{open:()=>popup},document:{body:{append:form=>forms.push(form)},createElement:type=>type==='form'?{style:{},append:field=>fields.push(field),submit(){this.submitted=true;},remove(){this.removed=true;}}:{}}};

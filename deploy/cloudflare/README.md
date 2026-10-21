@@ -3,7 +3,8 @@
 `wpanel-entry.js` serves the short installation endpoint at
 `https://ols.zangyubin.top/install`.
 
-The Worker does not serve repository `main`. It downloads the fixed Release's
+The Worker serves assets from one fixed Release, independently of repository
+`main`. It downloads that Release's
 `bootstrap.sh`, SHA-256 manifest, and Ed25519 signature, verifies both the
 signature and content digest with the pinned OLS WPanel public key, checks the
 embedded release identity, and only then returns the bootstrap to the client.

@@ -31,6 +31,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Release builds set Version and BuildTime through linker flags.
 var (
 	Version   = "dev"
 	BuildTime = "unknown"

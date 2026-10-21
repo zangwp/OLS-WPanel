@@ -1,5 +1,8 @@
 # Changelog
 
+Repository maintenance changes are recorded in Git. Documentation, comments and
+repository metadata updates do not require a new application version.
+
 ## v2.2.2 — 2026-10-20
 
 - Distinguish an inactive saved panel login suffix from external plugin ownership when WordPress reports its exact native login URL without plugin or login-hook evidence. Keep passwordless sign-in unavailable until the route is repaired.

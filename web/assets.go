@@ -5,9 +5,13 @@ import (
 	"io/fs"
 )
 
+// TemplatesFS contains page templates separately from public assets.
+//
 //go:embed templates/*
 var TemplatesFS embed.FS
 
+// StaticFS contains the public CSS, JavaScript and logo assets.
+//
 //go:embed css/* js/* logo.png
 var StaticFS embed.FS
 

@@ -1,4 +1,4 @@
-# 编译产物
+# Build outputs
 /ols-wpanel
 /ols-wpanel-*
 /bin/tailwindcss
@@ -11,23 +11,23 @@
 __pycache__/
 *.pyc
 
-# 临时/备份
+# Temporary files and backups
 *~
 *.bak
 *.tmp
 
-# 日志
+# Logs
 *.log
 
-# 环境变量
+# Environment files
 .env
 .env.*
 
-# 测试覆盖率
+# Test coverage
 coverage.*
 *.coverprofile
 
-# 系统
+# Operating system files
 .DS_Store
 Thumbs.db
 
@@ -53,10 +53,10 @@ deploy/cloudflare/.wrangler/
 # Scratch
 scratch/
 
-# 本地发布记录
+# Local release notes
 RELEASE_NOTES.md
 
-# 本地签名脚本（含本机私钥路径）
+# Local signing scripts and private key material
 sign-release.sh
 release-ed25519-private*
 .release-secrets/
