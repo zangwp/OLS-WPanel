@@ -5,6 +5,7 @@ set -o pipefail
 # ============================================================
 # Signed OLS WPanel bootstrap.
 # Shared installation logic lives in install.sh.
+# Download assets only from the fixed, signed Release.
 # This entry prefers China mirrors; the Release-generated bootstrap.sh
 # defaults to direct global downloads.
 # ============================================================

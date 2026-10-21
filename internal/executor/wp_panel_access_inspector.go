@@ -42,9 +42,9 @@ type wpPanelAccessProbe struct {
 	CurlUnixAvailable bool `json:"curl_unix_available"`
 }
 
-// InspectWPPanelAccess deliberately separates a SHORTINIT installation check
-// from the installed-site inspection. WP_INSTALLING skips normal plugins, so
-// it must never be used while inspecting a plugin-filtered wp_login_url().
+// InspectWPPanelAccess separates the SHORTINIT installation check from the
+// normal WordPress bootstrap used to inspect plugin-filtered wp_login_url().
+// WP_INSTALLING skips normal plugins and cannot establish login route ownership.
 func InspectWPPanelAccess(ctx context.Context, site *models.Website) (WPPanelAccessStatus, error) {
 	return inspectWPPanelAccess(ctx, site, "", false)
 }

@@ -1,5 +1,6 @@
 module github.com/zangwp/OLS-WPanel
 
+// Keep the supported language version and release toolchain explicit.
 go 1.26.0
 
 toolchain go1.26.9

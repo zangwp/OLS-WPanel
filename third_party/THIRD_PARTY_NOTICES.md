@@ -45,8 +45,7 @@ OLS WPanel also embeds or statically links these components:
 The release asset `ols-wpanel-third-party-licenses.tar.gz` contains this notice,
 the OLS WPanel Open Source License (`GPL-3.0-only`), the OLS WPanel project notice,
 the Apache-2.0 license and attribution for the embedded Adminer 6.0.1 source,
-the exact
-LICENSE (and PATENTS file when present) from the Go toolchain used for the
+the exact LICENSE (and PATENTS file when present) from the Go toolchain used for the
 release, and the exact top-level license/notice files from every non-standard
 Go module linked into that release. Its root-level `RELEASE_VERSION` binds the
 archive to the exact panel Release. The archive, its SHA-256 manifest, and its
