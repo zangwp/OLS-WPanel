@@ -85,6 +85,7 @@ o uninstall       卸载面板，保留网站、数据库与共享软件
 - [旧 Optimizer 迁移](docs/optimizer-migration.md)：现有网站可显式迁移并移除旧插件。
 - [安装安全](docs/security/ols-wpanel-install-security.md) · [运行时安全](docs/security/ols-wpanel-runtime-security.md)
 - [仓库目录说明](docs/repository-layout.md)
+- [贡献与提交规范](CONTRIBUTING.md)：新提交和 PR 标题使用简短英文，发布说明提供中英文摘要。
 
 ---
 

@@ -85,6 +85,7 @@ Keep your current SSH connection open when changing ports, then connect to the n
 - [Optimizer migration](docs/optimizer-migration.md): existing sites can explicitly migrate and remove the legacy plugin.
 - [Installer security](docs/security/ols-wpanel-install-security.md) · [Runtime security](docs/security/ols-wpanel-runtime-security.md)
 - [Repository layout](docs/repository-layout.md)
+- [Contribution guidelines](CONTRIBUTING.md): concise English commit and PR titles, with English and Chinese release summaries.
 
 ---
 
