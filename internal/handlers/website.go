@@ -2526,7 +2526,7 @@ func (h *WebsiteHandler) ApplyRecommendedLiteSpeedCache(c *gin.Context) {
 		c.JSON(http.StatusLocked, models.ErrorResponse(fileLockBlockedMessage))
 		return
 	}
-	installed, err := ensureLiteSpeedCachePlugin(site.WebRoot, site.SystemUser)
+	installed, err := ensureLiteSpeedCachePlugin(c.Request.Context(), site.WebRoot, site.SystemUser, site.PHPVersion)
 	if err != nil {
 		recordHandlerOperationLog("litespeed_cache_recommended", site.Domain, "failed", err.Error())
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.TE(c.Request, "website.litespeed_recommended_failed")))

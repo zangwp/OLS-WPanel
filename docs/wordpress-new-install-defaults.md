@@ -1,5 +1,11 @@
 # Defaults on a new WordPress installation
 
+When LiteSpeed Cache is missing, the panel queries WordPress.org for its current stable release and checks the minimum WordPress and PHP requirements against the site's actual versions. It validates the package's plugin identity and version and verifies every archive file against WordPress.org's SHA-256 checksums before installation. This selects the current stable release only; it does not search historical releases for the newest compatible version.
+
+If the current release cannot be selected or verified, the panel tries the pinned LiteSpeed Cache 7.9.2 package with its fixed SHA-256 digest. The fallback must also satisfy the site's minimum WordPress and PHP requirements. Both paths require a successful download; there is no offline plugin cache. Installation fails if neither package can be downloaded, verified and used with the site. Existing LiteSpeed Cache files and settings are preserved, and updating the panel does not upgrade plugins across existing websites.
+
+This plugin policy is separate from server package installation. Fresh server installations retain the supported LSPHP 8.5 and MariaDB 11.8 branches; their package sources choose the available versions within those branches. The other server package and explicit update policies remain unchanged.
+
 Fresh WordPress sites created by the panel use a one-time cleanup after the WordPress installation wizard completes. For a recorded official download, this removes the bundled Akismet and Hello Dolly plugins and unused bundled default themes. The current active theme remains; a child theme also keeps its required parent. LiteSpeed Cache, other plugins, custom themes and the panel's other MU plugins remain in place.
 
 The cleanup is prepared only by the new-site creation path. Existing sites, imports, restores and reinstalls do not receive this helper. A normal request or a WordPress update does not trigger cleanup.

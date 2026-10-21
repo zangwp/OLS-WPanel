@@ -452,7 +452,7 @@ func executeCreateSite(task *Task) TaskResult {
 	}
 
 	if payload.SiteType != "php" {
-		if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
+		if err := installLiteSpeedCachePlugin(context.Background(), webRoot, systemUser, phpRuntime.Version); err != nil {
 			rollback()
 			log.Printf("准备 LiteSpeed Cache + Redis Object Cache 失败 site=%s: %v", domain, err)
 			return taskFailure("准备 LiteSpeed Cache + Redis Object Cache 失败", err)
@@ -1379,8 +1379,8 @@ func ReinstallWordPress(ctx context.Context, webRoot, dbName, dbUser, systemUser
 	cleanDefaults, removeThemes, enableRedisCache bool) error {
 	var siteID int64
 	var fileLockEnabled bool
-	var domain, logDir string
-	if err := database.GetDB().QueryRowContext(ctx, `SELECT id,file_lock_enabled,domain,log_dir FROM websites WHERE web_root=? AND system_user=?`, webRoot, systemUser).Scan(&siteID, &fileLockEnabled, &domain, &logDir); err != nil {
+	var domain, logDir, phpVersion string
+	if err := database.GetDB().QueryRowContext(ctx, `SELECT id,file_lock_enabled,domain,log_dir,COALESCE(NULLIF(php_version,''),'8.3') FROM websites WHERE web_root=? AND system_user=?`, webRoot, systemUser).Scan(&siteID, &fileLockEnabled, &domain, &logDir, &phpVersion); err != nil {
 		return fmt.Errorf("检查 AI 开发授权失败: %w", err)
 	}
 	if fileLockEnabled {
@@ -1406,6 +1406,11 @@ func ReinstallWordPress(ctx context.Context, webRoot, dbName, dbUser, systemUser
 	}
 	if err := deployWordPress(ctx, cfg, tmpWebRoot, tmpDir); err != nil {
 		return fmt.Errorf("WordPress 部署失败: %w", err)
+	}
+
+	// Stage the compatible plugin before replacing the site or database.
+	if err := installLiteSpeedCachePlugin(ctx, tmpWebRoot, systemUser, phpVersion); err != nil {
+		return fmt.Errorf("重装前准备 LiteSpeed Cache 失败: %w", err)
 	}
 
 	if err := dropMariaDBDatabase(dbName, dbUser, cfg); err != nil {
@@ -1443,9 +1448,6 @@ func ReinstallWordPress(ctx context.Context, webRoot, dbName, dbUser, systemUser
 	}
 	if removeThemes {
 		removeUnusedThemes(webRoot)
-	}
-	if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
-		return fmt.Errorf("重装后准备 LiteSpeed Cache + Redis Object Cache 失败: %w", err)
 	}
 
 	return nil

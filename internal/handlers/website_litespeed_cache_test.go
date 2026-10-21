@@ -70,7 +70,7 @@ func TestApplyRecommendedLiteSpeedCacheConfiguresOfficialPluginAndBothCaches(t *
 	setupWebsiteOptimizationsTestDB(t)
 	oldEnsure, oldConfigure, oldUpdate := ensureLiteSpeedCachePlugin, configureLiteSpeedObjectCache, updateSiteLiteSpeedCache
 	ensured, configured, updated := false, false, false
-	ensureLiteSpeedCachePlugin = func(_, _ string) (bool, error) { ensured = true; return true, nil }
+	ensureLiteSpeedCachePlugin = func(_ context.Context, _, _, _ string) (bool, error) { ensured = true; return true, nil }
 	configureLiteSpeedObjectCache = func(_, domain string) (func() error, error) {
 		configured = domain == "example.com"
 		return func() error { return nil }, nil

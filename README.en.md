@@ -37,6 +37,8 @@ See the [installation guide](docs/verified-install.md) for manual verification, 
 
 Fresh installations default to **LSPHP 8.5 and MariaDB 11.8**. LSPHP 8.4 / 8.3 can be added per site. Existing databases retain their installed series; routine updates do not automatically upgrade across database series.
 
+New sites and missing LiteSpeed Cache installations use WordPress.org's current stable release after checking the site's actual WordPress / PHP versions and verifying the package. If that release is unavailable or incompatible, the panel tries the pinned, verified 7.9.2 package; either package requires a successful download and compatible site versions. Existing plugins and settings are preserved. See [new WordPress installation defaults](docs/wordpress-new-install-defaults.md).
+
 Use **Websites → Create Website** to choose a domain and PHP version and create a WordPress site. Existing generic PHP sites remain manageable from the website list and details.
 
 The interface combines a light workspace with dark blue navigation, English / Chinese layouts and mobile controls. The dashboard groups resource metrics, and wide website tables scroll horizontally. Account protection is under **Security settings → Account sign-in**. Two-factor authentication requires explicit enrollment; before enabling it, separately back up `account-mfa.key` as described in the [account security guide](docs/account-security.md). Ordinary panel database downloads do not contain that key.
