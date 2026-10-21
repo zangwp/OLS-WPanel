@@ -2,8 +2,6 @@ package executor
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -140,69 +138,22 @@ func removeUnusedThemes(webRoot string) {
 	}
 }
 
-func installLiteSpeedCachePlugin(webRoot, systemUser string) error {
-	const packageURL = "https://downloads.wordpress.org/plugin/litespeed-cache.7.9.1.zip"
-	const packageSHA256 = "03ee3e4904dda9b8326fbedb89297fbd03a6c3a3bc77af4e0a94fad03e7a7556"
-	destDir := filepath.Join(webRoot, "wp-content", "plugins")
-	tmp, err := os.CreateTemp("", "ols-wpanel-litespeed-cache-*.zip")
-	if err != nil {
-		return fmt.Errorf("创建 LiteSpeed Cache 插件临时文件失败: %w", err)
-	}
-	zipPath := tmp.Name()
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(zipPath)
-		return fmt.Errorf("关闭 LiteSpeed Cache 插件临时文件失败: %w", err)
-	}
-	defer os.Remove(zipPath)
-
-	if _, err := executeCommand("wget", "--no-config", "-q", "--https-only", "--no-hsts", "-T", "30", "-O", zipPath, packageURL); err != nil {
-		return fmt.Errorf("下载 LiteSpeed Cache 插件失败: %w", err)
-	}
-	info, err := os.Stat(zipPath)
-	if err != nil || info.Size() <= 0 || info.Size() > 8*1024*1024 {
-		return fmt.Errorf("LiteSpeed Cache 插件包大小异常")
-	}
-	pkg, err := os.ReadFile(zipPath)
-	if err != nil {
-		return fmt.Errorf("读取 LiteSpeed Cache 插件包失败: %w", err)
-	}
-	digest := sha256.Sum256(pkg)
-	if hex.EncodeToString(digest[:]) != packageSHA256 {
-		return fmt.Errorf("LiteSpeed Cache 插件包 SHA-256 校验失败")
-	}
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("创建 WordPress 插件目录失败: %w", err)
-	}
-	if _, err := executeCommand("unzip", "-q", "-o", zipPath, "-d", destDir); err != nil {
-		return fmt.Errorf("解压 LiteSpeed Cache 插件失败: %w", err)
-	}
-	pluginDir := filepath.Join(destDir, "litespeed-cache")
-	if _, err := executeCommand("chown", "-R", siteOwner(systemUser), pluginDir); err != nil {
-		return fmt.Errorf("设置 LiteSpeed Cache 插件权限失败: %w", err)
-	}
-	return writeLiteSpeedCacheActivator(webRoot, systemUser)
+func installLiteSpeedCachePlugin(ctx context.Context, webRoot, systemUser, phpVersion string) error {
+	_, err := EnsureLiteSpeedCachePlugin(ctx, webRoot, systemUser, phpVersion)
+	return err
 }
 
 // EnsureLiteSpeedCachePlugin installs the official WordPress plugin only when
 // it is missing. Existing installations are never overwritten; an activation
 // helper is refreshed so the next WordPress bootstrap can safely activate it.
-func EnsureLiteSpeedCachePlugin(webRoot, systemUser string) (bool, error) {
-	mainFile := filepath.Join(webRoot, "wp-content", "plugins", "litespeed-cache", "litespeed-cache.php")
-	info, err := os.Lstat(mainFile)
-	switch {
-	case err == nil:
-		if !info.Mode().IsRegular() {
-			return false, fmt.Errorf("LiteSpeed Cache 插件入口不是普通文件")
-		}
-		return false, writeLiteSpeedCacheActivator(webRoot, systemUser)
-	case !os.IsNotExist(err):
-		return false, fmt.Errorf("检查 LiteSpeed Cache 插件失败: %w", err)
-	default:
-		if err := installLiteSpeedCachePlugin(webRoot, systemUser); err != nil {
-			return false, err
-		}
-		return true, nil
+func EnsureLiteSpeedCachePlugin(ctx context.Context, webRoot, systemUser, phpVersion string) (bool, error) {
+	service := liteSpeedCacheInstallService{
+		versions: readLiteSpeedCacheSiteVersions,
+		acquire:  acquireLiteSpeedCachePackage,
+		publish:  publishLiteSpeedCachePackage,
+		activate: writeLiteSpeedCacheActivator,
 	}
+	return service.ensure(ctx, webRoot, systemUser, phpVersion)
 }
 
 func writeLiteSpeedCacheActivator(webRoot, systemUser string) error {
@@ -223,7 +174,7 @@ func writeLiteSpeedCacheActivator(webRoot, systemUser string) error {
 
 func liteSpeedCacheActivator() string {
 	return `<?php
-/** OLS WPanel: activate the pinned LiteSpeed Cache plugin after WordPress setup. */
+/** OLS WPanel: activate the verified LiteSpeed Cache plugin after WordPress setup. */
 add_action('init', static function () {
     if (!function_exists('is_blog_installed') || !is_blog_installed()) {
         return;

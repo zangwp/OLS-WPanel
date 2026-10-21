@@ -3,6 +3,14 @@
 Repository maintenance changes are recorded in Git. Documentation, comments and
 repository metadata updates do not require a new application version.
 
+## v2.2.3 — 2026-10-21
+
+- Resolve the current stable LiteSpeed Cache release from WordPress.org when provisioning a new site or installing the missing plugin. Check its minimum WordPress and PHP requirements against the site's actual versions, validate the exact plugin identity and version, and verify every archive file against WordPress.org's SHA-256 checksums before installation.
+- Fall back to the pinned, SHA-256-verified LiteSpeed Cache 7.9.2 package when the current release cannot be selected or verified. The fallback must also satisfy the site's WordPress and PHP requirements and remain available for download; installation fails when neither package qualifies.
+- Preserve existing LiteSpeed Cache installations and their settings. Keep explicit WordPress update controls and the supported LSPHP and MariaDB version branches unchanged.
+
+Upgrade notes: the new selection policy applies when LiteSpeed Cache is missing. Updating the panel preserves plugins already installed on websites. Both the current release and the pinned fallback require an available download; this change adds no offline plugin cache, background updater, dependency or database migration.
+
 ## v2.2.2 — 2026-10-20
 
 - Distinguish an inactive saved panel login suffix from external plugin ownership when WordPress reports its exact native login URL without plugin or login-hook evidence. Keep passwordless sign-in unavailable until the route is repaired.
