@@ -9,13 +9,19 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
 	"github.com/zangwp/OLS-WPanel/internal/i18n"
 )
 
 func softwareReadFixture(t *testing.T, run softwareProbeRunner) *gin.Engine {
+	return softwareReadFixtureWithConfig(t, run, nil)
+}
+
+func softwareReadFixtureWithConfig(t *testing.T, run softwareProbeRunner, cfg *config.Config) *gin.Engine {
 	t.Helper()
 	previousCache, previousGuard, previousAction := softwareReadCache, softwareGuardSnapshot, softwareSetServiceState
 	softwareReadCache = newSoftwareProbeCache(run)
@@ -27,11 +33,34 @@ func softwareReadFixture(t *testing.T, run softwareProbeRunner) *gin.Engine {
 	})
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := &SoftwareHandler{}
+	handler := &SoftwareHandler{Config: cfg}
 	router.GET("/software", handler.List)
 	router.GET("/software/guard", handler.GetGuardStatus)
 	router.POST("/software/guard/action", handler.GuardAction)
 	return router
+}
+
+func TestSoftwareListAndGuardShareFiveMinuteServiceVersions(t *testing.T) {
+	var redisCalls atomic.Int32
+	router := softwareReadFixture(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "redis-server" {
+			redisCalls.Add(1)
+		}
+		return softwareVersionFixture(ctx, name, args...)
+	})
+	advance := softwareProbeClock(softwareReadCache)
+	softwareReadRequest[[]softwareItem](t, router, "/software")
+	advance(31 * time.Second)
+	softwareReadRequest[[]guardResponse](t, router, "/software/guard")
+	softwareReadRequest[[]softwareItem](t, router, "/software")
+	if redisCalls.Load() != 1 {
+		t.Fatalf("list/guard re-executed the same version command after 30s: %d", redisCalls.Load())
+	}
+	softwareReadRequest[[]guardResponse](t, router, "/software/guard?fresh=1")
+	softwareReadRequest[[]softwareItem](t, router, "/software")
+	if redisCalls.Load() != 2 {
+		t.Fatalf("fresh guard version did not update the shared list cache: %d", redisCalls.Load())
+	}
 }
 
 func softwareVersionFixture(_ context.Context, name string, args ...string) ([]byte, error) {

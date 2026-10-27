@@ -3,6 +3,14 @@
 Repository maintenance changes are recorded in Git. Documentation, comments and
 repository metadata updates do not require a new application version.
 
+## v2.2.6 — 2026-10-27
+
+- Poll live service status every 30 seconds only while Software management's runtime section and the browser tab are visible. Pause hidden views, resume with one current read and one polling chain, and discard late responses after leaving the view.
+- Keep background refreshes silent and preserve each service's own action progress, so a routine status read does not briefly disable every service control. Retain explicit loading, unavailable-status and retry handling where a current observation is required.
+- Cache service version strings for five minutes while continuing to read the live service snapshot. Explicit refresh bypasses that cache, and software mutations invalidate it so subsequent reads can observe changed versions.
+
+Upgrade notes: run `o update` and reopen Software management. The change adjusts status polling, control responsiveness and version-read caching; opening the page does not install packages or restart services.
+
 ## v2.2.5 — 2026-10-27
 
 - Reject mismatched PHP-bundled LSPHP package versions, checking both installed packages and proposed additions before extension installation. Require the executable and bundled binary modules to share the same package version; allow the architecture-independent `common` package a different Debian revision only when its upstream PHP patch matches. Keep independently versioned PECL extensions distinct.

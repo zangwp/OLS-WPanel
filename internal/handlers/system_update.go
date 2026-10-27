@@ -94,6 +94,7 @@ func (h *SystemUpdateHandler) Update(c *gin.Context) {
 
 func (h *SystemUpdateHandler) Status(c *gin.Context) {
 	status := executor.ReconcileSystemPackageUpdateStatus(h.Config)
+	invalidateSoftwareProbesForSystemUpdate(status)
 	if status.Status == "success" {
 		sysPkgCache.invalidateFor(status.ID + ":" + status.UpdatedAt)
 		executor.ClearSystemUpdateAlertCache()
