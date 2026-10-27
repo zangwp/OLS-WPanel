@@ -334,6 +334,61 @@ for (const kind of ['runtime', 'tool']) {
     });
 }
 
+test('failed tool installation refreshes observed state and clears only its own progress', async () => {
+    const calls = [];
+    const { context } = setup({ api: async url => {
+        calls.push(url);
+        if (url.endsWith('/install')) throw Error('connection interrupted after publication');
+        return { success: true, data: [{ id: 'wp-cli', state: 'installed' }, { id: 'nodejs', state: 'missing' }] };
+    } });
+    const manager = context.softwareManager();
+    const wp = { id: 'wp-cli', name: 'WP-CLI', state: 'missing' };
+    manager.developmentTools = [wp, { id: 'nodejs', state: 'missing', _installing: true }];
+    await manager.installDevelopmentTool(wp);
+    assert.deepEqual(calls, ['/software/development-tools/install', '/software/development-tools']);
+    assert.equal(manager.developmentTools[0].state, 'installed');
+    assert.equal(manager.developmentTools[0]._installing, false);
+    assert.equal(manager.developmentTools[1]._installing, true);
+});
+
+test('failed runtime repair refreshes the extension catalog and health before clearing progress', async () => {
+    const calls = [];
+    const { context } = setup({ api: async url => {
+        calls.push(url);
+        if (url.endsWith('/install')) throw Error('connection interrupted after package installation');
+        if (url.endsWith('/php-runtimes')) return { success: true, data: [{ version: '8.3', installed: true }] };
+        return { success: true, data: {} };
+    } });
+    const manager = context.softwareManager();
+    const runtime = { version: '8.3', installed: true };
+    manager.phpRuntimes = [runtime];
+    await manager.installPHPRuntime(runtime);
+    assert.deepEqual(calls, ['/software/php-runtimes/install', '/software/php-runtimes', '/software/health?fresh=1']);
+    assert.equal(manager.phpRuntimes[0].installed, true);
+    assert.equal(manager.phpRuntimes[0]._installing, false);
+    assert.equal(manager.healthFresh, true);
+});
+
+test('leaving software while tool installation finishes suppresses late notices and reads', async () => {
+    const installation = deferred(), started = deferred(), calls = [], notices = [];
+    const { context } = setup({ showToast: (...args) => notices.push(args), api: async url => {
+        calls.push(url);
+        started.resolve();
+        return installation.promise;
+    } });
+    const manager = context.softwareManager();
+    const wp = { id: 'wp-cli', name: 'WP-CLI', state: 'missing' };
+    manager.developmentTools = [wp];
+    const operation = manager.installDevelopmentTool(wp);
+    await started.promise;
+    manager.destroy();
+    installation.resolve({ success: true });
+    await operation;
+    assert.deepEqual(calls, ['/software/development-tools/install']);
+    assert.equal(notices.length, 0);
+    assert.equal(wp._installing, false);
+});
+
 test('software refresh retains unsaved tuning values', async () => {
     const { context } = setup({ api: async url => ({ success: true, data: url.startsWith('/software?') ? [
         { name: 'PHP', configs: [{ key: 'memory_limit', value: '256M' }] }

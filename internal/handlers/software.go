@@ -26,6 +26,9 @@ type SoftwareHandler struct{}
 var softwareGuardSnapshot = executor.GetGuardStatus
 var softwareSetServiceState = executor.SetServiceState
 var softwareClearOPcache = executor.ClearOPcache
+var softwareInstallPHPRuntime = executor.InstallLSPHPRuntime
+var softwareInstallDevelopmentTool = executor.InstallDevelopmentTool
+var softwareRecordInstallOperation = recordHandlerOperationLog
 
 var runSoftwareShellCommand = func(command string) ([]byte, error) {
 	return exec.Command("bash", "-c", command).CombinedOutput()
@@ -104,7 +107,9 @@ func (h *SoftwareHandler) List(c *gin.Context) {
 }
 
 func (h *SoftwareHandler) DevelopmentTools(c *gin.Context) {
-	c.JSON(http.StatusOK, models.SuccessResponse(executor.DevelopmentToolsStatus(c.Request.Context())))
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	c.JSON(http.StatusOK, models.SuccessResponse(executor.DevelopmentToolsStatus(ctx)))
 }
 
 func (h *SoftwareHandler) PHPRuntimes(c *gin.Context) {
@@ -122,14 +127,24 @@ func (h *SoftwareHandler) InstallPHPRuntime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "common.invalid_params")))
 		return
 	}
+	req.Version = strings.TrimSpace(req.Version)
+	if req.Version == "" {
+		req.Version = executor.DefaultLSPHPVersion
+	}
+	if req.Version != "8.3" && req.Version != "8.4" && req.Version != "8.5" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "common.invalid_params")))
+		return
+	}
 	// Package installation must not be aborted halfway through dpkg work merely
 	// because the browser navigates away. The handler still waits for a bounded
 	// result, while the server-owned context lets apt finish consistently.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	runtime, err := executor.InstallLSPHPRuntime(ctx, req.Version)
+	runtime, err := softwareInstallPHPRuntime(ctx, req.Version)
 	if err != nil {
-		log.Printf("安装 LSPHP 失败 version=%s: %v", req.Version, err)
+		detail := executor.SoftwareInstallErrorDetail(err)
+		log.Printf("安装 LSPHP 失败 version=%s: %s", req.Version, detail)
+		softwareRecordInstallOperation("php_runtime_install", "LSPHP "+req.Version, "failed", detail)
 		key := "software.php_runtime_install_failed"
 		if errors.Is(err, executor.ErrLSPHPRuntimeNotReady) {
 			key = "software.php_runtime_not_ready"
@@ -142,6 +157,7 @@ func (h *SoftwareHandler) InstallPHPRuntime(c *gin.Context) {
 		return
 	}
 	softwareReadCache.invalidate()
+	softwareRecordInstallOperation("php_runtime_install", "LSPHP "+runtime.Version, "success", "PHP runtime and extensions verified")
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"runtime": runtime,
 		"message": i18n.T(lang, "software.php_runtime_installed", i18n.P{"version": runtime.Version}),
@@ -157,8 +173,14 @@ func (h *SoftwareHandler) InstallDevelopmentTool(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse(i18n.T(lang, "common.invalid_params")))
 		return
 	}
-	if err := executor.InstallDevelopmentTool(c.Request.Context(), req.ID); err != nil {
-		log.Printf("安装开发工具失败 tool=%s: %v", req.ID, err)
+	// A browser closing must not interrupt a Node.js package transaction.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := softwareInstallDevelopmentTool(ctx, req.ID); err != nil {
+		softwareReadCache.invalidate()
+		detail := executor.SoftwareInstallErrorDetail(err)
+		log.Printf("安装开发工具失败 tool=%s: %s", req.ID, detail)
+		softwareRecordInstallOperation("development_tool_install", req.ID, "failed", detail)
 		if errors.Is(err, executor.ErrWPCLIProxyDownloadFailed) {
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, "software.wp_cli_proxy_download_failed")))
 			return
@@ -167,6 +189,7 @@ func (h *SoftwareHandler) InstallDevelopmentTool(c *gin.Context) {
 		return
 	}
 	softwareReadCache.invalidate()
+	softwareRecordInstallOperation("development_tool_install", req.ID, "success", "Development tool installed and verified")
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"message": i18n.T(lang, "software.development_tool_installed")}))
 }
 

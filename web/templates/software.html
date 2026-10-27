@@ -642,9 +642,12 @@ function softwareManager() {
             runtime._installing = true;
             try {
                 const r = await api('/software/php-runtimes/install', { method: 'POST', body: { version: runtime.version }, timeout: 1800000 });
-                showToast(r.data?.message || t('software.php_runtime_installed', { version: runtime.version }), 'success');
+                if (!this.disposed) showToast(r.data?.message || t('software.php_runtime_installed', { version: runtime.version }), 'success');
                 await this.refreshAll();
-            } catch(e) { showToast(e.message, 'error'); await this.fetchHealth(true); }
+            } catch(e) {
+                if (!this.disposed) showToast(e.message, 'error');
+                await Promise.allSettled([this.fetchPHPRuntimes(true), this.fetchHealth(true)]);
+            }
             finally { runtime._installing = false; const current = this.phpRuntimes.find(item => item.version === runtime.version); if (current) current._installing = false; }
         },
         async fetchDevelopmentTools(fresh = false) {
@@ -668,10 +671,14 @@ function softwareManager() {
             tool._installing = true;
             try {
                 const r = await api('/software/development-tools/install', { method: 'POST', body: { id: tool.id }, timeout: 600000 });
-                showToast(r.data?.message || t('software.development_tool_installed'), 'success');
-                await this.fetchDevelopmentTools();
-            } catch(e) { showToast(e.message, 'error'); }
-            finally { tool._installing = false; const current = this.developmentTools.find(item => item.id === tool.id); if (current) current._installing = false; }
+                if (!this.disposed) showToast(r.data?.message || t('software.development_tool_installed'), 'success');
+            } catch(e) { if (!this.disposed) showToast(e.message, 'error'); }
+            finally {
+                await this.fetchDevelopmentTools(true);
+                tool._installing = false;
+                const current = this.developmentTools.find(item => item.id === tool.id);
+                if (current) current._installing = false;
+            }
         },
         async viewLog(name) {
             if (this.disposed) return;

@@ -208,6 +208,7 @@ func lsphpRuntimePackages(version string) ([]string, error) {
 		prefix + "-mysql",
 		prefix + "-curl",
 		prefix + "-intl",
+		prefix + "-igbinary",
 		prefix + "-redis",
 	}
 	// LiteSpeed does not publish lsphp85-opcache in its Noble or Trixie

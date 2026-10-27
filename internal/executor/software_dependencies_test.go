@@ -240,9 +240,12 @@ func TestInstallBackupDependenciesSkipsAPTForNativeOnlyDatabaseCommands(t *testi
 func backupDependencyInstallTestHooks(t *testing.T) {
 	t.Helper()
 	oldLookup, oldSettings, oldAPT, oldRead := backupDependencyLookPath, backupDependencyLoadSettings, backupDependencyAPT, backupDependencyReadCommand
+	oldPreferences := backupDependencyPreferencesRead
 	t.Cleanup(func() {
 		backupDependencyLookPath, backupDependencyLoadSettings, backupDependencyAPT, backupDependencyReadCommand = oldLookup, oldSettings, oldAPT, oldRead
+		backupDependencyPreferencesRead = oldPreferences
 	})
+	backupDependencyPreferencesRead = func(context.Context) (string, error) { return "", nil }
 	backupDependencyLoadSettings = func(context.Context) (backupDependencySettings, error) {
 		return backupDependencySettings{remoteEnabled: true, authType: "key"}, nil
 	}
