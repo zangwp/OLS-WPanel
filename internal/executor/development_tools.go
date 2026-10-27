@@ -39,7 +39,7 @@ type DevelopmentToolStatus struct {
 }
 
 func DevelopmentToolsStatus(ctx context.Context) []DevelopmentToolStatus {
-	wpVersion, wpState := inspectDevelopmentCommand(ctx, wpCLIInstallPath, "--allow-root", "--version")
+	wpVersion, wpState := defaultWPCLIProbe().version(ctx, wpCLIInstallPath)
 	nodeVersion, nodeState := inspectDevelopmentCommand(ctx, "node", "--version")
 	_, npmState := inspectDevelopmentCommand(ctx, "npm", "--version")
 	combined := combinedDevelopmentState(nodeState, npmState)
@@ -50,7 +50,8 @@ func DevelopmentToolsStatus(ctx context.Context) []DevelopmentToolStatus {
 }
 
 func wpCLICommandVersion(ctx context.Context, binary string) (string, bool) {
-	return commandVersion(ctx, binary, "--allow-root", "--version")
+	version, state := defaultWPCLIProbe().version(ctx, binary)
+	return version, state == "installed"
 }
 
 func commandVersion(ctx context.Context, binary string, args ...string) (string, bool) {
@@ -81,10 +82,17 @@ func InstallDevelopmentTool(ctx context.Context, id string) error {
 }
 
 func installWPCLI(ctx context.Context) error {
-	if _, ok := wpCLICommandVersion(ctx, wpCLIInstallPath); ok {
+	return installWPCLIAt(ctx, wpCLIInstallPath, defaultWPCLIProbe(), func(ctx context.Context, dst *os.File) error {
+		proxy := strings.TrimSpace(readSecuritySetting("github_proxy"))
+		return downloadWPCLIWithFallback(ctx, dst, wpCLIURL, proxy, wpCLISHA512)
+	})
+}
+
+func installWPCLIAt(ctx context.Context, path string, probe wpCLIVersionProbe, download func(context.Context, *os.File) error) error {
+	if _, state := probe.version(ctx, path); state == "installed" {
 		return nil
 	}
-	if info, err := os.Lstat(wpCLIInstallPath); err == nil {
+	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return errors.New("existing /usr/local/bin/wp is not a regular WP-CLI file")
 		}
@@ -92,14 +100,16 @@ func installWPCLI(ctx context.Context) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(wpCLIInstallPath), ".wp-cli-*")
+	if _, err := probe.runtime(); err != nil {
+		return fmt.Errorf("WP-CLI requires the configured LSPHP CLI: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".wp-cli-*")
 	if err != nil {
 		return err
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
-	proxy := strings.TrimSpace(readSecuritySetting("github_proxy"))
-	if err := downloadWPCLIWithFallback(ctx, tmp, wpCLIURL, proxy, wpCLISHA512); err != nil {
+	if err := download(ctx, tmp); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -110,10 +120,15 @@ func installWPCLI(ctx context.Context) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if out, err := exec.CommandContext(ctx, LSPHPBinaryPath(), tmpPath, "--allow-root", "--version").CombinedOutput(); err != nil || !strings.Contains(string(out), "WP-CLI "+wpCLIVersion) {
+	if version, state := probe.version(ctx, tmpPath); state != "installed" || version != "WP-CLI "+wpCLIVersion {
 		return errors.New("downloaded WP-CLI failed version verification")
 	}
-	return os.Rename(tmpPath, wpCLIInstallPath)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The temporary file shares this directory. Linking publishes the complete,
+	// verified PHAR atomically without replacing a file created during download.
+	return os.Link(tmpPath, path)
 }
 
 func downloadWPCLIWithFallback(ctx context.Context, dst *os.File, directURL, proxy, expectedSHA512 string) error {

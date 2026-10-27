@@ -247,30 +247,42 @@ func installMissingAPTPackages(ctx context.Context, packages []string) error {
 	if err := backupDependencyAPT(ctx, append(append([]string{}, aptOptions...), "update")...); err != nil {
 		return err
 	}
-	simulateArgs := append([]string{}, aptOptions...)
-	simulateArgs = append(simulateArgs, "--simulate", "--no-remove", "--no-upgrade", "--no-install-recommends", "install")
-	simulateArgs = append(simulateArgs, missing...)
-	simulation, err := backupDependencyReadCommand(ctx, "apt-get", simulateArgs...)
-	if err != nil {
-		return fmt.Errorf("%w: package plan could not be checked", ErrPackagePlanChangesInstalled)
-	}
-	planned, err := parseBackupDependencyPackagePlan(simulation, installed, missing)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPackagePlanChangesInstalled, err)
-	}
 	prefsDir, err := os.MkdirTemp("", "ols-backup-dependencies-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(prefsDir)
 	prefsPath := filepath.Join(prefsDir, "preferences")
+	// Freeze installed versions before solving dependencies, not only before
+	// execution. Otherwise APT may prefer an unnecessary newer PHP common
+	// package even when the missing extensions work with the installed one.
+	originalPreferences, err := backupDependencyPreferencesRead(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPackagePlanChangesInstalled, err)
+	}
+	if err := os.WriteFile(prefsPath, []byte(backupDependencyPlanningPreferences(installed)+originalPreferences), 0600); err != nil {
+		return err
+	}
+	pinOptions := []string{"-o", "Dir::Etc::preferences=" + prefsPath, "-o", "Dir::Etc::preferencesparts=/dev/null", "-o", "APT::Get::allow-downgrades=false"}
+	simulateArgs := append([]string{}, aptOptions...)
+	simulateArgs = append(simulateArgs, pinOptions...)
+	simulateArgs = append(simulateArgs, "--simulate", "--no-remove", "--no-upgrade", "--no-install-recommends", "install")
+	simulateArgs = append(simulateArgs, missing...)
+	simulation, err := backupDependencyReadCommand(ctx, "apt-get", simulateArgs...)
+	if err != nil {
+		return fmt.Errorf("%w: package plan could not be checked: %v", ErrPackagePlanChangesInstalled, err)
+	}
+	planned, err := parseBackupDependencyPackagePlan(simulation, installed, missing)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPackagePlanChangesInstalled, err)
+	}
 	if err := os.WriteFile(prefsPath, []byte(backupDependencyVersionPreferences(installed, planned)), 0600); err != nil {
 		return err
 	}
 	args := append([]string{}, aptOptions...)
-	args = append(args, "-y", "--no-remove", "--no-upgrade", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold",
-		"-o", "Dir::Etc::preferences="+prefsPath, "-o", "Dir::Etc::preferencesparts=/dev/null",
-		"-o", "APT::Default-Release=", "-o", "APT::Get::allow-downgrades=false", "install")
+	args = append(args, pinOptions...)
+	args = append(args, "-o", "APT::Default-Release=")
+	args = append(args, "-y", "--no-remove", "--no-upgrade", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", "install")
 	for _, packageName := range backupDependencySortedPackages(planned) {
 		args = append(args, packageName+"="+planned[packageName])
 	}
@@ -373,26 +385,50 @@ func backupDependencyPackageIsInstalled(installed map[string]string, name string
 }
 
 func parseBackupDependencyPackagePlan(output []byte, installed map[string]string, requested []string) (map[string]string, error) {
+	reject := func(reason string) (map[string]string, error) {
+		return nil, errors.New(reason)
+	}
 	fail := func() (map[string]string, error) {
-		return nil, errors.New("backup dependency installation would modify existing packages or has an unrecognized package plan")
+		return reject("package plan contains unrecognized output or is incomplete")
 	}
 	if len(output) == 0 || output[len(output)-1] != '\n' {
 		return fail()
 	}
 	planned, configured := map[string]string{}, map[string]string{}
 	summarySeen, expectedNew, listAllowed := false, 0, false
+	autoremoveSeen, autoremoveList, autoremoveCount := false, false, 0
+	autoremoveSingular := false
 	for _, line := range strings.Split(strings.TrimSuffix(string(output), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "Remv ") || strings.HasPrefix(line, "Purg ") {
+		// This is advice, not a requested removal. Accept only the complete
+		// apt-get stanza; actual Remv/Purg actions remain forbidden below.
+		if autoremoveList {
+			if strings.HasPrefix(line, "  ") {
+				for _, name := range strings.Fields(line) {
+					if !backupDependencyPackageNameRE.MatchString(name) {
+						return fail()
+					}
+					autoremoveCount++
+				}
+				continue
+			}
+			if (autoremoveSingular && autoremoveCount == 1 && line == "Use 'apt autoremove' to remove it.") ||
+				(!autoremoveSingular && autoremoveCount > 1 && line == "Use 'apt autoremove' to remove them.") {
+				autoremoveList = false
+				continue
+			}
 			return fail()
+		}
+		if strings.HasPrefix(line, "Remv ") || strings.HasPrefix(line, "Purg ") {
+			return reject("package plan would remove installed software")
 		}
 		if action := backupDependencyPlanActionRE.FindStringSubmatch(line); action != nil {
 			listAllowed = false
 			name, previous, version := action[2], action[3], action[4]
 			if previous != "" || backupDependencyPackageIsInstalled(installed, name) {
-				return fail()
+				return reject("package plan would modify installed software: " + name)
 			}
 			destination := planned
 			if action[1] == "Conf" {
@@ -405,14 +441,24 @@ func parseBackupDependencyPackagePlan(output []byte, installed map[string]string
 			continue
 		}
 		if summary := backupDependencyPlanSummaryRE.FindStringSubmatch(line); summary != nil {
-			if summarySeen || summary[1] != "0" || summary[3] != "0" {
+			if summarySeen {
 				return fail()
+			}
+			if summary[1] != "0" || summary[3] != "0" {
+				return reject("package plan includes upgrades or removals")
 			}
 			expectedNew, _ = strconv.Atoi(summary[2])
 			summarySeen, listAllowed = true, false
 			continue
 		}
 		switch line {
+		case "The following packages were automatically installed and are no longer required:", "The following package was automatically installed and is no longer required:":
+			if autoremoveSeen || summarySeen {
+				return fail()
+			}
+			autoremoveSeen, autoremoveList, listAllowed = true, true, false
+			autoremoveSingular = line == "The following package was automatically installed and is no longer required:"
+			continue
 		case "Reading package lists...", "Building dependency tree...", "Reading state information...":
 			listAllowed = false
 			continue
@@ -430,7 +476,7 @@ func parseBackupDependencyPackagePlan(output []byte, installed map[string]string
 		}
 		return fail()
 	}
-	if !summarySeen || expectedNew == 0 || expectedNew != len(planned) || len(configured) != len(planned) {
+	if autoremoveList || !summarySeen || expectedNew == 0 || expectedNew != len(planned) || len(configured) != len(planned) {
 		return fail()
 	}
 	for name, version := range planned {
@@ -470,6 +516,14 @@ func backupDependencyVersionPreferences(installed, planned map[string]string) st
 	return preferences.String()
 }
 
+func backupDependencyPlanningPreferences(installed map[string]string) string {
+	// Freeze installed packages without changing policy for new dependencies.
+	// The administrator's main/fragment preferences are appended in their
+	// original order, and the simulation retains APT::Default-Release.
+	preferences := backupDependencyVersionPreferences(installed, nil)
+	return strings.TrimSuffix(preferences, "Package: *\nPin: release *\nPin-Priority: -1\n")
+}
+
 func runBackupDependencyReadCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "DEBIAN_FRONTEND=noninteractive")
@@ -478,12 +532,28 @@ func runBackupDependencyReadCommand(ctx context.Context, name string, args ...st
 	var stderr backupDependencyOutput
 	cmd.Stdout, cmd.Stderr = &output, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("package preflight failed: %w", err)
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("package preflight interrupted: %w", ctx.Err())
+		}
+		return nil, backupDependencyPreflightError(err, output.String(), stderr.String(), output.truncated || stderr.truncated)
 	}
 	if output.truncated || stderr.truncated || strings.TrimSpace(stderr.String()) != "" {
-		return nil, errors.New("package preflight output is incomplete or contains diagnostics")
+		return nil, backupDependencyPreflightError(nil, output.String(), stderr.String(), output.truncated || stderr.truncated)
 	}
 	return output.Bytes(), nil
+}
+
+func backupDependencyPreflightError(cause error, stdout, stderr string, truncated bool) error {
+	// Keep APT's dependency-conflict diagnostics useful in operation logs while
+	// bounding output and redacting credentials in private repository URLs.
+	detail := systemPackageUpdateErrorDetail(errors.New(strings.TrimSpace(stderr + "\n" + stdout)))
+	if truncated {
+		return fmt.Errorf("package preflight output is incomplete: %s", detail)
+	}
+	if cause != nil {
+		return fmt.Errorf("package preflight failed: %w: %s", cause, detail)
+	}
+	return fmt.Errorf("package preflight contains diagnostics: %s", detail)
 }
 
 func runBackupDependencyAPT(ctx context.Context, args ...string) error {

@@ -3,6 +3,14 @@
 Repository maintenance changes are recorded in Git. Documentation, comments and
 repository metadata updates do not require a new application version.
 
+## v2.2.4 — 2026-10-27
+
+- Repair missing LSPHP extensions without treating APT's unused-package advisory as a package change. Preserve administrator preferences and the target release while planning, and apply installed-version constraints during both the preview and installation so compatible missing packages can be selected while installed packages remain unchanged.
+- Inspect the managed WP-CLI PHAR with the installed LSPHP command-line runtime instead of relying on a system `php` interpreter. Preserve existing command files, download checksums and the refusal to overwrite an unrecognized installation.
+- Refresh software observations after attempted repairs and report the result through the panel's operation log. Retain bounded commands, package-plan validation and independent per-action progress.
+
+Upgrade notes: run `o update`, reopen Software management and refresh the runtime and tool status. Retry extension repair if extensions are still missing. This release does not switch website PHP versions, upgrade existing system packages automatically or require a system `php` package.
+
 ## v2.2.3 — 2026-10-21
 
 - Resolve the current stable LiteSpeed Cache release from WordPress.org when provisioning a new site or installing the missing plugin. Check its minimum WordPress and PHP requirements against the site's actual versions, validate the exact plugin identity and version, and verify every archive file against WordPress.org's SHA-256 checksums before installation.
