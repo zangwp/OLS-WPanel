@@ -246,6 +246,8 @@ var i18nKeys = []string{
 	"software.health_static",
 	"software.php_configuration_unknown",
 	"software.php_probe_unknown",
+	"software.php_extension_abi_mismatch",
+	"software.php_extension_abi_detail",
 	"software.php_runtime_untrusted",
 	"backups.download_site_bundle",
 	"backups.site_bundle_help",

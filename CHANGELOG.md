@@ -3,6 +3,14 @@
 Repository maintenance changes are recorded in Git. Documentation, comments and
 repository metadata updates do not require a new application version.
 
+## v2.2.5 — 2026-10-27
+
+- Reject mismatched PHP-bundled LSPHP package versions, checking both installed packages and proposed additions before extension installation. Require the executable and bundled binary modules to share the same package version; allow the architecture-independent `common` package a different Debian revision only when its upstream PHP patch matches. Keep independently versioned PECL extensions distinct.
+- Recognize OPcache binary compatibility failures as an explicit runtime error with bounded, sanitized diagnostic details. Keep extension availability unknown when startup fails instead of reporting missing modules or a healthy runtime.
+- Preserve installed PHP versions, administrator APT policy and other runtime branches. Retain the refusal to upgrade existing packages implicitly, disable OPcache to hide failures or switch websites to another PHP branch.
+
+Upgrade notes: `o update` installs the panel's compatibility guard and clearer diagnostics; it does not align an already mismatched PHP installation. An affected branch needs its installed package versions checked and a branch-only APT repair plan reviewed before execution. Healthy runtime branches and their websites do not require a PHP switch or blanket system update.
+
 ## v2.2.4 — 2026-10-27
 
 - Repair missing LSPHP extensions without treating APT's unused-package advisory as a package change. Preserve administrator preferences and the target release while planning, and apply installed-version constraints during both the preview and installation so compatible missing packages can be selected while installed packages remain unchanged.

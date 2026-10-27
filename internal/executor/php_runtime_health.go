@@ -40,6 +40,7 @@ type LSPHPRuntimeHealth struct {
 	Version            string                 `json:"version"`
 	State              string                 `json:"state"`
 	Reason             string                 `json:"reason,omitempty"`
+	Diagnostic         *LSPHPHealthDiagnostic `json:"diagnostic,omitempty"`
 	Extensions         []LSPHPExtensionHealth `json:"extensions"`
 	MissingRequired    int                    `json:"missing_required"`
 	MissingRecommended int                    `json:"missing_recommended"`
@@ -136,6 +137,9 @@ func readLSPHPRuntimeHealth(ctx context.Context, runtime LSPHPRuntime, probe fun
 			err = ctx.Err()
 		}
 		health.Reason = lsphpHealthProbeErrorReason(err)
+		if health.Reason == "probe_failed" {
+			health = withLSPHPHealthDiagnostic(health, lsphpHealthDiagnosticFromError(err))
+		}
 		return health
 	}
 	return parseLSPHPHealthOutput(runtime.Version, iniPath, scanDir, output)
@@ -235,6 +239,9 @@ func parseLSPHPHealthOutput(version, iniPath, scanDir string, output []byte) LSP
 	health.Reason = "invalid_output"
 	if len(output) == 0 || len(output) > lsphpHealthOutputLimit || bytes.IndexByte(output, 0) >= 0 {
 		return health
+	}
+	if diagnostic := lsphpStartupDiagnostic(output); diagnostic != nil {
+		return withLSPHPHealthDiagnostic(health, diagnostic)
 	}
 	text := strings.ReplaceAll(string(output), "\r\n", "\n")
 	if !strings.HasPrefix(strings.TrimSpace(text), "phpinfo()\n") || !strings.Contains(text, "\nPHP License\n") {
@@ -358,12 +365,14 @@ func lsphpHealthProbeErrorReason(err error) string {
 }
 
 type lsphpHealthBoundedWriter struct {
-	buffer bytes.Buffer
-	limit  int
+	buffer   bytes.Buffer
+	limit    int
+	exceeded bool
 }
 
 func (writer *lsphpHealthBoundedWriter) Write(data []byte) (int, error) {
 	if len(data) > writer.limit-writer.buffer.Len() {
+		writer.exceeded = true
 		return 0, errors.New("PHP health probe output limit exceeded")
 	}
 	return writer.buffer.Write(data)
@@ -378,17 +387,18 @@ func boundedLSPHPHealthRead(ctx context.Context, name string, args ...string) ([
 	stdout := &lsphpHealthBoundedWriter{limit: lsphpHealthOutputLimit}
 	stderr := &lsphpHealthBoundedWriter{limit: 16 * 1024}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, err
-	}
+	err := cmd.Run()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+	if stdout.exceeded || stderr.exceeded {
+		return nil, errors.New("PHP health probe output limit exceeded")
+	}
+	if err != nil {
+		return nil, WrapLSPHPHealthProbeError(err, stderr.buffer.Bytes())
+	}
 	if len(bytes.TrimSpace(stderr.buffer.Bytes())) != 0 {
-		return nil, errors.New("PHP health probe startup diagnostic")
+		return nil, WrapLSPHPHealthProbeError(errors.New("PHP health probe startup diagnostic"), stderr.buffer.Bytes())
 	}
 	return append([]byte(nil), stdout.buffer.Bytes()...), nil
 }
