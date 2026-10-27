@@ -144,7 +144,7 @@ func TestMissingAPTPlanSkipsInstalledPHPAndRejectsDependencyUpgrade(t *testing.T
 		if strings.Contains(joined, " install lsphp83 ") || strings.Contains(joined, "lsphp83-common") {
 			t.Fatalf("existing packages included: %s", joined)
 		}
-		return backupDependencyTestSimulation([]string{"lsphp83-curl"}), nil
+		return lsphpAPTTestSimulation(map[string]string{"lsphp83-curl": "8.3.0"}), nil
 	}
 	if err := installMissingAPTPackages(context.Background(), []string{"lsphp83", "lsphp83-common"}); err != nil || updates+installs != 0 {
 		t.Fatalf("no-op altered APT: %v", err)

@@ -231,6 +231,9 @@ func installMissingAPTPackages(ctx context.Context, packages []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateLSPHPPackageVersions(installed, nil, packages); err != nil {
+		return err
+	}
 	missing := []string{}
 	for _, name := range packages {
 		if !backupDependencyPackageNameRE.MatchString(name) {
@@ -275,6 +278,9 @@ func installMissingAPTPackages(ctx context.Context, packages []string) error {
 	planned, err := parseBackupDependencyPackagePlan(simulation, installed, missing)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrPackagePlanChangesInstalled, err)
+	}
+	if err := validateLSPHPPackageVersions(installed, planned, packages); err != nil {
+		return err
 	}
 	if err := os.WriteFile(prefsPath, []byte(backupDependencyVersionPreferences(installed, planned)), 0600); err != nil {
 		return err

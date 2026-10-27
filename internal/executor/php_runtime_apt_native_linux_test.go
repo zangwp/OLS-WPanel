@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -59,11 +60,12 @@ func TestMissingAPTNativeSolverPreservesInstalledRuntime(t *testing.T) {
 		if dependency != "" {
 			dependencyField = "Depends: " + dependency + "\n"
 		}
-		return fmt.Sprintf("Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Fixture <fixture@example.invalid>\n%sFilename: pool/%s_%s_%s.deb\nSize: 1\nSHA256: %s\nDescription: private APT test fixture\n\n", name, version, arch, dependencyField, name, version, arch, strings.Repeat("0", 64))
+		return fmt.Sprintf("Package: %s\nSource: php8.3\nVersion: %s\nArchitecture: %s\nMaintainer: Fixture <fixture@example.invalid>\n%sFilename: pool/%s_%s_%s.deb\nSize: 1\nSHA256: %s\nDescription: private APT test fixture\n\n", name, version, arch, dependencyField, name, version, arch, strings.Repeat("0", 64))
 	}
 	write("repo/Packages", packageRecord("lsphp83-common", oldVersion, "")+
 		packageRecord("lsphp83-common", newVersion, "")+
-		packageRecord("lsphp83-curl", newVersion, "lsphp83-common (>= "+oldVersion+")")+
+		packageRecord("lsphp83-curl", oldVersion, "lsphp83-common (>= "+oldVersion+")")+
+		packageRecord("lsphp83-opcache", newVersion, "lsphp83-common")+
 		packageRecord("lsphp83-intl", newVersion, "lsphp83-common (>= "+newVersion+")"))
 	repositoryURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, "repo")}).String()
 	write("etc/sources.list", "deb [trusted=yes] "+repositoryURL+" ./\n")
@@ -134,8 +136,11 @@ func TestMissingAPTNativeSolverPreservesInstalledRuntime(t *testing.T) {
 		t.Fatalf("compatible extension simulation: %v\n%s\n%s", err, stdout, stderr)
 	}
 	planned, err := parseBackupDependencyPackagePlan(stdout, installed, []string{"lsphp83-curl"})
-	if err != nil || len(planned) != 1 || planned["lsphp83-curl"] != newVersion {
+	if err != nil || len(planned) != 1 || planned["lsphp83-curl"] != oldVersion {
 		t.Fatalf("real new-only extension plan rejected: %v, %v\n%s", planned, err, stdout)
+	}
+	if err := validateLSPHPPackageVersions(installed, planned, []string{"lsphp83-curl"}); err != nil {
+		t.Fatalf("coherent extension/runtime build rejected: %v", err)
 	}
 	if !bytes.Contains(stdout, []byte("automatically installed and are no longer required")) &&
 		!bytes.Contains(stdout, []byte("automatically installed and is no longer required")) {
@@ -144,7 +149,7 @@ func TestMissingAPTNativeSolverPreservesInstalledRuntime(t *testing.T) {
 	// The final, stricter preferences must still solve exactly the validated
 	// package, with the existing PHP packages excluded from the transaction.
 	write("cache/preview.preferences", backupDependencyVersionPreferences(installed, planned))
-	arguments[len(arguments)-1] = "lsphp83-curl=" + newVersion
+	arguments[len(arguments)-1] = "lsphp83-curl=" + oldVersion
 	stdout, stderr, err = run(arguments...)
 	if err != nil || len(bytes.TrimSpace(stderr)) != 0 {
 		t.Fatalf("frozen execution plan no longer solves: %v\n%s\n%s", err, stdout, stderr)
@@ -153,6 +158,21 @@ func TestMissingAPTNativeSolverPreservesInstalledRuntime(t *testing.T) {
 		t.Fatalf("frozen execution changed installed software: %v\n%s", err, stdout)
 	}
 	write("cache/preview.preferences", backupDependencyPlanningPreferences(installed)+fixturePreferences())
+	// Reproduce the real vendor metadata gap: unversioned common lets APT
+	// accept new OPcache with the old engine, although the module requires a
+	// Zend symbol introduced by the newer PHP patch. The panel must reject it.
+	arguments[len(arguments)-1] = "lsphp83-opcache"
+	stdout, stderr, err = run(arguments...)
+	if err != nil || len(bytes.TrimSpace(stderr)) != 0 {
+		t.Fatalf("fixture did not reproduce the loose vendor dependency: %v\n%s\n%s", err, stdout, stderr)
+	}
+	unsafePlan, err := parseBackupDependencyPackagePlan(stdout, installed, []string{"lsphp83-opcache"})
+	if err != nil || unsafePlan["lsphp83-opcache"] != newVersion {
+		t.Fatalf("expected new-only OPcache plan was not produced: %v, %v\n%s", unsafePlan, err, stdout)
+	}
+	if err := validateLSPHPPackageVersions(installed, unsafePlan, []string{"lsphp83-opcache"}); !errors.Is(err, ErrLSPHPPackageVersionMismatch) {
+		t.Fatalf("real APT plan bypassed the PHP patch compatibility guard: %v", err)
+	}
 	arguments[len(arguments)-1] = "lsphp83-intl"
 	if stdout, stderr, err := run(arguments...); err == nil {
 		t.Fatalf("extension requiring an installed-runtime upgrade was accepted:\n%s\n%s", stdout, stderr)

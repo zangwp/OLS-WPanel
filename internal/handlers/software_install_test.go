@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
+	"github.com/zangwp/OLS-WPanel/internal/i18n"
 )
 
 func TestSoftwareInstallationsRecordOutcomesAndOutliveBrowserCancellation(t *testing.T) {
@@ -134,5 +135,40 @@ func TestPHPInstallVersionIsValidatedBeforeInstallationAndLogging(t *testing.T) 
 				t.Fatalf("response=%d installed=%d logged=%d", response.Code, installed, logged)
 			}
 		})
+	}
+}
+
+func TestPHPInstallReportsPackageVersionMismatchAndKeepsVersionDetailsInLog(t *testing.T) {
+	oldPHP, oldRecord := softwareInstallPHPRuntime, softwareRecordInstallOperation
+	t.Cleanup(func() {
+		softwareInstallPHPRuntime, softwareRecordInstallOperation = oldPHP, oldRecord
+	})
+	gin.SetMode(gin.TestMode)
+	softwareInstallPHPRuntime = func(context.Context, string) (executor.LSPHPRuntime, error) {
+		return executor.LSPHPRuntime{}, &executor.LSPHPPackageVersionMismatchError{
+			Branch: "8.3", Package: "lsphp83-opcache", RuntimeVersion: "8.3.35-1+trixie", PackageVersion: "8.3.36-1+trixie",
+		}
+	}
+	var recorded []string
+	softwareRecordInstallOperation = func(operation, target, status, message string) {
+		recorded = []string{operation, target, status, message}
+	}
+	router := gin.New()
+	router.POST("/php", (&SoftwareHandler{}).InstallPHPRuntime)
+	request := httptest.NewRequest(http.MethodPost, "/php", strings.NewReader(`{"version":"8.3"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	wantMessage := i18n.T(i18n.LangFromRequest(request), "software.php_runtime_package_version_mismatch")
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), wantMessage) {
+		t.Fatalf("mismatch did not select its actionable response: %d %s", response.Code, response.Body.String())
+	}
+	if len(recorded) != 4 || recorded[0] != "php_runtime_install" || recorded[1] != "LSPHP 8.3" || recorded[2] != "failed" {
+		t.Fatalf("missing failure operation: %v", recorded)
+	}
+	for _, detail := range []string{"lsphp83-opcache", "8.3.35-1+trixie", "8.3.36-1+trixie"} {
+		if !strings.Contains(recorded[3], detail) {
+			t.Fatalf("operation log lost version evidence %q: %v", detail, recorded)
+		}
 	}
 }

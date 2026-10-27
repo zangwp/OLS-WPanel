@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zangwp/OLS-WPanel/internal/executor"
 )
 
 const softwareProbeOutputLimit = 512 * 1024
@@ -15,9 +17,12 @@ const softwareProbeOutputLimit = 512 * 1024
 var errSoftwareProbeOutputLimit = errors.New("software probe output exceeds limit")
 
 type softwareProbeOutput struct {
-	bytes.Buffer
+	buffer   bytes.Buffer
 	exceeded bool
 }
+
+func (output *softwareProbeOutput) Len() int      { return output.buffer.Len() }
+func (output *softwareProbeOutput) Bytes() []byte { return output.buffer.Bytes() }
 
 func (output *softwareProbeOutput) Write(data []byte) (int, error) {
 	written := len(data)
@@ -26,7 +31,7 @@ func (output *softwareProbeOutput) Write(data []byte) (int, error) {
 		output.exceeded = true
 		data = data[:remaining]
 	}
-	_, _ = output.Buffer.Write(data)
+	_, _ = output.buffer.Write(data)
 	// Drain excess output until the short command deadline. Returning an error
 	// here can strand the producer on a full pipe before exec.Wait completes.
 	return written, nil
@@ -79,11 +84,13 @@ func boundedSoftwareRead(ctx context.Context, name string, args ...string) ([]by
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if err != nil {
-		return nil, err // Partial stderr/stdout is never an installed version.
-	}
 	if output.exceeded {
 		return nil, errSoftwareProbeOutputLimit
+	}
+	if err != nil {
+		// Retain only a recognized startup diagnostic in a typed error. Partial
+		// stderr/stdout must never become an installed version or raw API data.
+		return nil, executor.WrapLSPHPHealthProbeError(err, output.Bytes())
 	}
 	return output.Bytes(), nil
 }

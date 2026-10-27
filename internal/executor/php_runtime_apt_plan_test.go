@@ -99,7 +99,7 @@ func TestMissingAPTPinsInstalledRuntimeDuringPlanningAndExecution(t *testing.T) 
 		if !strings.Contains(joined, "--no-remove --no-upgrade --no-install-recommends install lsphp83-curl lsphp83-igbinary") {
 			t.Fatalf("repair included installed runtime or lost package safeguards: %s", joined)
 		}
-		plan := string(backupDependencyTestSimulation([]string{"lsphp83-curl", "lsphp83-igbinary"}))
+		plan := string(lsphpAPTTestSimulation(map[string]string{"lsphp83-curl": "8.3.35-1+trixie", "lsphp83-igbinary": "1.2-1"}))
 		return []byte(strings.Replace(plan, "Reading state information...\n", "Reading state information...\n"+aptAutoremoveAdvice, 1)), nil
 	}
 	backupDependencyAPT = func(_ context.Context, args ...string) error {
@@ -110,11 +110,11 @@ func TestMissingAPTPinsInstalledRuntimeDuringPlanningAndExecution(t *testing.T) 
 		installs++
 		preferences := readPreferences(args)
 		if !strings.HasSuffix(preferences, "Package: *\nPin: release *\nPin-Priority: -1\n") ||
-			!strings.Contains(preferences, "Package: lsphp83-curl\nPin: version 1.2-1\nPin-Priority: 999") {
+			!strings.Contains(preferences, "Package: lsphp83-curl\nPin: version 8.3.35-1+trixie\nPin-Priority: 999") {
 			t.Fatalf("execution did not freeze the new package versions: %s", preferences)
 		}
 		joined := strings.Join(args, " ")
-		if !strings.HasSuffix(joined, " install lsphp83-curl=1.2-1 lsphp83-igbinary=1.2-1") {
+		if !strings.HasSuffix(joined, " install lsphp83-curl=8.3.35-1+trixie lsphp83-igbinary=1.2-1") {
 			t.Fatalf("execution included unexpected packages: %s", joined)
 		}
 		return nil

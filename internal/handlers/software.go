@@ -152,6 +152,9 @@ func (h *SoftwareHandler) InstallPHPRuntime(c *gin.Context) {
 		if errors.Is(err, executor.ErrPackagePlanChangesInstalled) {
 			key = "software.php_runtime_package_plan_blocked"
 		}
+		if errors.Is(err, executor.ErrLSPHPPackageVersionMismatch) {
+			key = "software.php_runtime_package_version_mismatch"
+		}
 		softwareReadCache.invalidate()
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse(i18n.T(lang, key)))
 		return

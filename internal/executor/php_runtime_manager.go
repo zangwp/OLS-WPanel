@@ -53,7 +53,11 @@ func lsphpRuntimeHealthReady(health LSPHPRuntimeHealth) bool {
 }
 
 func requireLSPHPRuntimeHealth(ctx context.Context, runtime LSPHPRuntime) error {
-	if !lsphpRuntimeHealthReady(lsphpRuntimeHealthRead(ctx, runtime)) {
+	health := lsphpRuntimeHealthRead(ctx, runtime)
+	if !lsphpRuntimeHealthReady(health) {
+		if diagnostic := lsphpHealthDiagnosticSummary(health.Diagnostic); diagnostic != "" {
+			return fmt.Errorf("%w: LSPHP %s: %s", ErrLSPHPRuntimeNotReady, runtime.Version, diagnostic)
+		}
 		return fmt.Errorf("%w: LSPHP %s", ErrLSPHPRuntimeNotReady, runtime.Version)
 	}
 	return nil

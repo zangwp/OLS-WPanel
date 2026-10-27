@@ -458,3 +458,25 @@ test('OPcache unknown metrics and disabled configuration are never reported as m
     assert.equal(manager.opcacheValue('8.5', 'memory_mb'), 'software.health_unknown');
     assert.equal(manager.healthLabel('error'), 'software.health_failed');
 });
+
+test('an OPcache ABI failure explains the error without treating extensions as missing or enabling repair', () => {
+    const translations = [];
+    const { context } = setup({ t: (key, values) => { translations.push({ key, values }); return key; } });
+    const manager = context.softwareManager();
+    manager.healthFresh = true;
+    manager.health = { php: [{ version: '8.3', state: 'error', reason: 'extension_abi_mismatch',
+        diagnostic: { code: 'extension_abi_mismatch', extension: 'opcache', symbol: 'zend_handle_delayed_oom' },
+        extensions: [{ name: 'opcache', importance: 'recommended', state: 'unknown' }],
+        opcache: { configuration_state: 'unknown', enabled: null },
+    }] };
+    assert.equal(manager.phpHealthReason(manager.runtimeHealth('8.3').reason), 'software.php_extension_abi_mismatch');
+    assert.equal(manager.phpHealthDiagnostic('8.3'), 'software.php_extension_abi_detail');
+    assert.equal(translations.at(-1).values.extension, 'opcache');
+    assert.equal(translations.at(-1).values.symbol, 'zend_handle_delayed_oom');
+    assert.equal(manager.runtimeHealthKnown('8.3'), false);
+    assert.equal(manager.canRepairPHPRuntime({ version: '8.3', installed: true }), false);
+    assert.equal(manager.extensionSummary('8.3', 'recommended'), 'software.health_unknown');
+    assert.equal(manager.healthLabel(manager.runtimeHealth('8.3').state), 'software.health_failed');
+    assert.equal(manager.opcacheValue('8.3', 'enabled'), 'software.health_unknown');
+    assert.equal(manager.phpHealthDiagnostic('8.5'), '');
+});

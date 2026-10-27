@@ -71,6 +71,7 @@
                             <span>{{t .Lang "software.php_extension_details"}}</span>
                         </summary>
                         <p x-show="!runtimeHealthKnown(runtime.version)" class="software-health-help" x-text="phpHealthReason(runtimeHealth(runtime.version).reason)"></p>
+                        <p x-show="runtimeHealth(runtime.version).diagnostic?.code === 'extension_abi_mismatch'" class="text-xs text-gray-400 mt-1" x-text="phpHealthDiagnostic(runtime.version)"></p>
                         <div class="software-extension-groups">
                             <template x-for="importance in ['required', 'recommended']" :key="importance">
                                 <div class="software-extension-group">
@@ -517,8 +518,14 @@ function softwareManager() {
         },
         phpHealthReason(reason) {
             const keys = { configuration_unavailable: 'software.php_configuration_unknown', configuration_mismatch: 'software.php_configuration_unknown',
-                untrusted_runtime: 'software.php_runtime_untrusted', runtime_mismatch: 'software.php_runtime_mismatch', probe_timeout: 'software.php_probe_timeout' };
+                untrusted_runtime: 'software.php_runtime_untrusted', runtime_mismatch: 'software.php_runtime_mismatch', probe_timeout: 'software.php_probe_timeout',
+                extension_abi_mismatch: 'software.php_extension_abi_mismatch' };
             return t(keys[reason] || 'software.php_probe_unknown');
+        },
+        phpHealthDiagnostic(version) {
+            const diagnostic = this.runtimeHealth(version).diagnostic;
+            if (diagnostic?.code !== 'extension_abi_mismatch' || !diagnostic.extension || !diagnostic.symbol) return '';
+            return t('software.php_extension_abi_detail', { extension: diagnostic.extension, symbol: diagnostic.symbol });
         },
         opcacheValue(version, key) {
             const value = this.runtimeHealth(version).opcache?.[key];
