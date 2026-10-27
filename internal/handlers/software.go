@@ -21,7 +21,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type SoftwareHandler struct{}
+type SoftwareHandler struct {
+	Config *config.Config
+}
 
 var softwareGuardSnapshot = executor.GetGuardStatus
 var softwareSetServiceState = executor.SetServiceState
@@ -75,6 +77,7 @@ func softwareLang(c *gin.Context) string {
 }
 
 func (h *SoftwareHandler) List(c *gin.Context) {
+	h.invalidateCompletedSystemUpdate()
 	lang := softwareLang(c)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
@@ -288,6 +291,7 @@ func (h *SoftwareHandler) ClearLog(c *gin.Context) {
 }
 
 func (h *SoftwareHandler) GetGuardStatus(c *gin.Context) {
+	h.invalidateCompletedSystemUpdate()
 	svcs := softwareGuardSnapshot()
 	result := make([]guardResponse, len(svcs))
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)

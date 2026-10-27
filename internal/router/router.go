@@ -2877,7 +2877,7 @@ func SetupRouterWithCleanup(cfg *config.Config, tmplFS embed.FS, staticFS embed.
 		c.HTML(http.StatusOK, "help.html", pageData(suffix, "help", "help_content", c, messageCatalog))
 	})
 
-	softwareHandler := &handlers.SoftwareHandler{}
+	softwareHandler := &handlers.SoftwareHandler{Config: cfg}
 	protected.GET("/software", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "software.html", pageData(suffix, "software", "software_content", c, messageCatalog))
 	})

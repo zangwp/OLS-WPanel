@@ -109,7 +109,7 @@
         <p class="text-xs text-yellow-300 mt-4">{{t .Lang "software.php_runtime_install_notice"}}</p>
     </div>
 
-    <div x-data="processGuard()" x-init="deferTask(() => fetchStatus(), 700)" class="card mb-6">
+    <div x-data="processGuard()" class="card mb-6">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
             <h3 class="text-lg font-semibold text-white">{{t .Lang "software.service_status"}}</h3>
             <div class="flex items-center gap-3">
@@ -152,9 +152,9 @@
                                 <span x-show="!s.running && !s.paused" class="badge-danger text-xs">{{t .Lang "software.stopped"}}</span>
                             </td>
                             <td class="py-2.5 text-right whitespace-nowrap">
-                                <button x-show="s.running && !s.paused" @click="action(s.service, 'stop')" :disabled="s._acting || statusLoading || !!statusError" class="btn-secondary text-xs py-1 px-2.5">{{t .Lang "software.stop"}}</button>
-                                <button x-show="!s.running || s.paused" @click="action(s.service, 'start')" :disabled="s._acting || statusLoading || !!statusError" class="btn-primary text-xs py-1 px-2.5">{{t .Lang "software.start"}}</button>
-                                <button @click="action(s.service, 'restart')" :disabled="s._acting || statusLoading || !!statusError" class="btn-secondary text-xs py-1 px-2.5 ml-1.5">{{t .Lang "software.restart"}}</button>
+                                <button x-show="s.running && !s.paused" @click="action(s.service, 'stop')" :disabled="s._acting || !statusLoaded || !!statusError" class="btn-secondary text-xs py-1 px-2.5">{{t .Lang "software.stop"}}</button>
+                                <button x-show="!s.running || s.paused" @click="action(s.service, 'start')" :disabled="s._acting || !statusLoaded || !!statusError" class="btn-primary text-xs py-1 px-2.5">{{t .Lang "software.start"}}</button>
+                                <button @click="action(s.service, 'restart')" :disabled="s._acting || !statusLoaded || !!statusError" class="btn-secondary text-xs py-1 px-2.5 ml-1.5">{{t .Lang "software.restart"}}</button>
                             </td>
                         </tr>
                     </template>
@@ -383,57 +383,136 @@
 <script>
 function processGuard() {
     return {
-        services: [], statusLoading: false, statusLoaded: false, statusError: '',
+        services: [], statusLoading: false, statusFetching: false, statusLoaded: false, statusError: '',
         actingServices: {},
-        pollTimer: null,
-        statusRequestID: 0,
-        disposed: false,
-        destroy() {
-            this.disposed = true;
-            this.statusRequestID++;
+        pollTimer: null, statusController: null, statusRequestID: 0,
+        statusPending: false, needsFreshStatus: false,
+        disposed: false, initialized: false, runtimeVisible: true, pollingActive: false, pageHidden: false,
+        visibilityHandler: null, pageHideHandler: null, pageShowHandler: null, stopSectionWatch: null,
+        init() {
+            if (this.initialized || this.disposed) return;
+            this.initialized = true;
+            this.runtimeVisible = this.activeSection === 'runtime';
+            this.visibilityHandler = () => this.syncPolling();
+            this.pageHideHandler = () => { this.pageHidden = true; this.syncPolling(); };
+            this.pageShowHandler = () => { this.pageHidden = false; this.syncPolling(); };
+            document.addEventListener('visibilitychange', this.visibilityHandler);
+            window.addEventListener('pagehide', this.pageHideHandler);
+            window.addEventListener('pageshow', this.pageShowHandler);
+            this.stopSectionWatch = Alpine.watch(() => this.activeSection, section => {
+                this.runtimeVisible = section === 'runtime';
+                this.syncPolling();
+            });
+            this.pollingActive = this.canPoll();
+            this.schedulePoll(700);
+        },
+        canPoll() {
+            return !this.disposed && !this.pageHidden && !document.hidden && this.runtimeVisible &&
+                (!this.initialized || this.activeSection === 'runtime');
+        },
+        hasServiceActions() {
+            return Object.keys(this.actingServices).length > 0;
+        },
+        clearPollTimer() {
             if (this.pollTimer !== null) clearTimeout(this.pollTimer);
             this.pollTimer = null;
         },
+        cancelStatus() {
+            this.clearPollTimer();
+            this.statusRequestID++;
+            this.statusController?.abort();
+            this.statusController = null;
+            this.statusFetching = false;
+            this.statusLoading = false;
+        },
+        schedulePoll(delay = 30000) {
+            this.clearPollTimer();
+            if (!this.canPoll() || this.statusController || this.hasServiceActions()) return;
+            this.pollTimer = setTimeout(() => {
+                this.pollTimer = null;
+                this.fetchStatus();
+            }, delay);
+        },
+        syncPolling() {
+            if (!this.canPoll()) {
+                this.pollingActive = false;
+                this.cancelStatus();
+                return;
+            }
+            if (this.pollingActive) return;
+            this.pollingActive = true;
+            this.fetchStatus();
+        },
+        destroy() {
+            this.disposed = true;
+            this.pollingActive = false;
+            this.cancelStatus();
+            if (this.visibilityHandler) document.removeEventListener('visibilitychange', this.visibilityHandler);
+            if (this.pageHideHandler) window.removeEventListener('pagehide', this.pageHideHandler);
+            if (this.pageShowHandler) window.removeEventListener('pageshow', this.pageShowHandler);
+            if (this.stopSectionWatch) this.stopSectionWatch();
+            this.visibilityHandler = null; this.pageHideHandler = null; this.pageShowHandler = null;
+            this.stopSectionWatch = null;
+        },
         async fetchStatus(fresh = false) {
             if (this.disposed) return;
-            if (this.pollTimer !== null) clearTimeout(this.pollTimer);
-            this.pollTimer = null;
-            const requestID = ++this.statusRequestID;
-            this.statusLoading = true; this.statusError = '';
+            this.needsFreshStatus = this.needsFreshStatus || fresh;
+            if (!this.canPoll()) return;
+            this.clearPollTimer();
+            if (this.hasServiceActions()) { this.statusPending = true; return; }
+            this.cancelStatus();
+            const requestID = this.statusRequestID, controller = new AbortController();
+            const refreshVersion = this.needsFreshStatus;
+            this.statusController = controller;
+            this.statusPending = false;
+            this.statusFetching = true;
+            this.statusLoading = !this.statusLoaded || fresh;
+            const current = () => this.canPoll() && !controller.signal.aborted && requestID === this.statusRequestID;
             try {
-                const r = await api('/software/guard' + (fresh ? '?fresh=1' : ''), { silent: true });
-                if (this.disposed || requestID !== this.statusRequestID) return;
+                const r = await api('/software/guard' + (refreshVersion ? '?fresh=1' : ''), { silent: true, timeout: 15000, signal: controller.signal });
+                if (!current()) return;
                 if (!r.success || !Array.isArray(r.data)) throw Error(r.message || t('common.request_failed'));
                 r.data.forEach(s => s._acting = !!this.actingServices[s.service]);
-                this.services = r.data; this.statusLoaded = true;
+                this.services = r.data; this.statusLoaded = true; this.statusError = '';
+                if (refreshVersion) this.needsFreshStatus = false;
             } catch(e) {
-                if (!this.disposed && requestID === this.statusRequestID) this.statusError = e.message || t('common.request_failed');
+                if (current()) this.statusError = e.message || t('common.request_failed');
             } finally {
                 if (!this.disposed && requestID === this.statusRequestID) {
+                    this.statusController = null;
+                    this.statusFetching = false;
                     this.statusLoading = false;
-                    this.pollTimer = setTimeout(() => this.fetchStatus(), 30000);
+                    this.schedulePoll();
                 }
             }
         },
         async action(service, act) {
             const s = this.services.find(s => s.service === service);
-            if (!s || this.actingServices[service] || this.disposed || this.statusLoading || this.statusError) return;
-            if (act === 'stop' && !await confirmModal(t('software.confirm_stop_service', { service: s.name }))) return;
-            if (act === 'restart' && !await confirmModal(t('software.confirm_restart_service', { service: s.name }))) return;
-            if (this.actingServices[service] || this.disposed || this.statusLoading || this.statusError) return;
+            if (!s || this.actingServices[service] || !this.canPoll() || !this.statusLoaded || this.statusError) return;
             this.actingServices[service] = true;
             s._acting = true;
             try {
+                if (act === 'stop' && !await confirmModal(t('software.confirm_stop_service', { service: s.name }))) return;
+                if (act === 'restart' && !await confirmModal(t('software.confirm_restart_service', { service: s.name }))) return;
+                if (!this.canPoll() || this.statusError) return;
+                // A snapshot requested before a mutation must never replace its result.
+                this.cancelStatus();
+                this.statusPending = true;
+                this.needsFreshStatus = true;
                 const r = await api('/software/guard/action', { method: 'POST', body: { service, action: act } });
-                showToast(r.data?.message || t('software.action_success', { service, action: act }), 'success');
-                await this.fetchStatus();
+                if (!r.success) throw Error(r.message || t('common.request_failed'));
+                if (!this.disposed) showToast(r.data?.message || t('software.action_success', { service, action: act }), 'success');
             } catch(e) {
-                showToast(e.message, 'error');
+                if (!this.disposed) showToast(e.message, 'error');
             } finally {
                 delete this.actingServices[service];
                 s._acting = false;
                 const current = this.services.find(item => item.service === service);
                 if (current) current._acting = false;
+                if (!this.disposed && !this.hasServiceActions()) {
+                    if (this.statusPending) await this.fetchStatus();
+                    else if (!this.statusController) this.schedulePoll();
+                }
             }
         }
     }

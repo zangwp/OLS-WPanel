@@ -4,27 +4,66 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 
-const source = fs.readFileSync(path.join(__dirname, '../../web/templates/software.html'), 'utf8')
-    .match(/<script>([\s\S]*?)<\/script>/)[1].replace(/{{[\s\S]*?}}/g, 'translated');
+const template = fs.readFileSync(path.join(__dirname, '../../web/templates/software.html'), 'utf8');
+const source = template.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/{{[\s\S]*?}}/g, 'translated');
 const deferred = () => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
     return { promise, resolve, reject };
 };
 function setup(overrides = {}) {
-    const timers = new Map();
+    const timers = new Map(), delays = new Map(), watches = new Set();
+    const eventTarget = (properties = {}) => {
+        const listeners = new Map();
+        return {
+            ...properties, listeners,
+            addEventListener(type, handler) {
+                if (!listeners.has(type)) listeners.set(type, new Set());
+                listeners.get(type).add(handler);
+            },
+            removeEventListener(type, handler) { listeners.get(type)?.delete(handler); },
+            dispatch(type) { for (const listener of [...(listeners.get(type) || [])]) listener(); },
+        };
+    };
     let nextTimer = 0;
     const context = {
         AbortController,
+        document: eventTarget({ hidden: false }), window: eventTarget(),
+        Alpine: { watch(getter, callback) {
+            const watcher = { getter, callback, value: getter() };
+            watches.add(watcher);
+            return () => watches.delete(watcher);
+        } },
         t: key => key, showToast() {}, confirmModal: async () => true,
-        setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; },
-        clearTimeout: id => timers.delete(id),
+        setTimeout: (callback, delay) => { timers.set(++nextTimer, callback); delays.set(nextTimer, delay); return nextTimer; },
+        clearTimeout: id => { timers.delete(id); delays.delete(id); },
         api: async () => ({ success: true, data: [{ service: 'lsws', name: 'OpenLiteSpeed' }] }),
         ...overrides,
     };
     vm.createContext(context);
     vm.runInContext(source, context);
-    return { context, timers };
+    return {
+        context, timers, delays, watches,
+        initGuard(section = 'runtime') {
+            const guard = context.processGuard();
+            guard.activeSection = section;
+            guard.init();
+            return guard;
+        },
+        setSection(guard, section) {
+            guard.activeSection = section;
+            for (const watcher of [...watches]) {
+                const value = watcher.getter();
+                if (value !== watcher.value) { watcher.value = value; watcher.callback(value); }
+            }
+        },
+        async runTimer(id = timers.keys().next().value) {
+            const callback = timers.get(id);
+            timers.delete(id); delays.delete(id);
+            if (callback) await callback();
+            await new Promise(resolve => setImmediate(resolve));
+        },
+    };
 }
 
 for (const name of ['PHP', 'MariaDB']) {
@@ -125,6 +164,296 @@ test('background status refresh preserves an in-flight service action', async ()
     action.resolve({ success: true });
     await running;
     assert.equal(guard.services[0]._acting, false);
+    guard.destroy();
+});
+
+test('guard polls only the visible runtime section and resumes once after repeated visibility events', async () => {
+    const calls = [];
+    const harness = setup({ api: async url => { calls.push(url); return { success: true, data: [] }; } });
+    const { context, timers, watches, initGuard, setSection } = harness;
+    const guard = initGuard('tuning');
+    guard.init();
+    assert.equal(watches.size, 1, 'component initialization must not add duplicate watchers');
+    assert.equal(timers.size, 0);
+    context.document.dispatch('visibilitychange');
+    assert.equal(calls.length, 0);
+    setSection(guard, 'runtime');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['/software/guard']);
+    assert.equal(timers.size, 1);
+    context.document.dispatch('visibilitychange');
+    context.document.dispatch('visibilitychange');
+    assert.equal(calls.length, 1);
+    assert.equal(timers.size, 1);
+    setSection(guard, 'tuning');
+    assert.equal(timers.size, 0);
+    await guard.fetchStatus();
+    assert.equal(calls.length, 1, 'a hidden runtime section cannot issue even an explicit status read');
+    setSection(guard, 'runtime');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, 2);
+    assert.equal(timers.size, 1);
+    guard.destroy();
+    assert.equal(watches.size, 0);
+});
+
+test('initial guard checks are staggered and each completed poll schedules one thirty-second refresh', async () => {
+    const calls = [];
+    const { initGuard, timers, delays, runTimer } = setup({ api: async url => {
+        calls.push(url); return { success: true, data: [] };
+    } });
+    const guard = initGuard();
+    assert.equal(calls.length, 0);
+    assert.deepEqual([...delays.values()], [700]);
+    await runTimer();
+    assert.deepEqual(calls, ['/software/guard']);
+    assert.equal(timers.size, 1);
+    assert.deepEqual([...delays.values()], [30000]);
+    await runTimer();
+    assert.deepEqual(calls, ['/software/guard', '/software/guard']);
+    assert.equal(timers.size, 1);
+    guard.destroy();
+    assert.equal(timers.size, 0);
+});
+
+test('a page initialized in a hidden browser tab waits until it becomes visible', async () => {
+    const calls = [];
+    const { context, timers, initGuard } = setup({ api: async url => {
+        calls.push(url); return { success: true, data: [] };
+    } });
+    context.document.hidden = true;
+    const guard = initGuard();
+    assert.equal(timers.size, 0);
+    assert.equal(calls.length, 0);
+    context.document.hidden = false;
+    context.document.dispatch('visibilitychange');
+    context.document.dispatch('visibilitychange');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, 1);
+    assert.equal(timers.size, 1);
+    guard.destroy();
+});
+
+test('hiding the browser aborts status reads and late results cannot replace the resumed snapshot', async () => {
+    const old = deferred(), latest = deferred(), calls = [];
+    const { context, timers, initGuard, runTimer } = setup({ api: (url, options) => {
+        calls.push({ url, options }); return calls.length === 1 ? old.promise : latest.promise;
+    } });
+    const guard = initGuard();
+    await runTimer();
+    assert.equal(guard.statusLoading, true);
+    context.document.hidden = true;
+    context.document.dispatch('visibilitychange');
+    assert.equal(calls[0].options.signal.aborted, true);
+    assert.equal(guard.statusLoading, false);
+    assert.equal(guard.statusFetching, false);
+    assert.equal(guard.statusError, '');
+    assert.equal(timers.size, 0);
+    await guard.fetchStatus(true);
+    assert.equal(calls.length, 1);
+    context.document.hidden = false;
+    context.document.dispatch('visibilitychange');
+    context.document.dispatch('visibilitychange');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, '/software/guard?fresh=1');
+    latest.resolve({ success: true, data: [{ service: 'lsws', running: true }] });
+    await new Promise(resolve => setImmediate(resolve));
+    old.resolve({ success: true, data: [{ service: 'lsws', running: false }] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(guard.services[0].running, true);
+    assert.equal(guard.statusError, '');
+    assert.equal(timers.size, 1);
+    guard.destroy();
+});
+
+test('tuning navigation aborts the pending guard read and destroy removes every event listener', async () => {
+    const pending = deferred(), calls = [];
+    const { context, timers, watches, initGuard, setSection, runTimer } = setup({ api: (url, options) => {
+        calls.push({ url, options }); return pending.promise;
+    } });
+    const guard = initGuard();
+    await runTimer();
+    setSection(guard, 'tuning');
+    assert.equal(calls[0].options.signal.aborted, true);
+    assert.equal(timers.size, 0);
+    setSection(guard, 'runtime');
+    assert.equal(calls.length, 2);
+    guard.destroy();
+    assert.equal(calls[1].options.signal.aborted, true);
+    assert.equal(watches.size, 0);
+    assert.equal(context.document.listeners.get('visibilitychange').size, 0);
+    assert.equal(context.window.listeners.get('pagehide').size, 0);
+    assert.equal(context.window.listeners.get('pageshow').size, 0);
+    context.document.dispatch('visibilitychange');
+    context.window.dispatch('pageshow');
+    setSection(guard, 'tuning');
+    setSection(guard, 'runtime');
+    pending.reject(Error('cancelled old request'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, 2);
+    assert.equal(guard.statusError, '');
+    assert.equal(timers.size, 0);
+});
+
+test('guard pauses for pagehide and refreshes once when a cached page is shown again', async () => {
+    const calls = [];
+    const { context, timers, initGuard, runTimer } = setup({ api: async url => {
+        calls.push(url); return { success: true, data: [] };
+    } });
+    const guard = initGuard();
+    await runTimer();
+    context.window.dispatch('pagehide');
+    context.document.dispatch('visibilitychange');
+    assert.equal(timers.size, 0);
+    assert.equal(calls.length, 1);
+    context.window.dispatch('pageshow');
+    context.window.dispatch('pageshow');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, 2);
+    assert.equal(timers.size, 1);
+    guard.destroy();
+});
+
+test('background status reads preserve service controls while explicit refresh shows its own loading state', async () => {
+    const first = deferred(), background = deferred(), manual = deferred(), calls = [];
+    const responses = [first, background, manual];
+    const { context } = setup({ api: (url, options) => {
+        calls.push({ url, options }); return responses[calls.length - 1].promise;
+    } });
+    const guard = context.processGuard();
+    const initial = guard.fetchStatus();
+    assert.equal(guard.statusLoading, true);
+    first.resolve({ success: true, data: [{ service: 'lsws', running: true }, { service: 'mariadb', running: true }] });
+    await initial;
+    const polling = guard.fetchStatus();
+    assert.equal(guard.statusFetching, true);
+    assert.equal(guard.statusLoading, false);
+    assert.equal(guard.services[0].running, true);
+    const disabled = template.match(/@click="action\(s.service, 'restart'\)" :disabled="([^"]+)"/)[1];
+    const disabledFor = service => vm.runInNewContext(disabled, { ...guard, s: guard.services.find(row => row.service === service) });
+    assert.equal(disabledFor('lsws'), false);
+    assert.equal(disabledFor('mariadb'), false);
+    const explicit = guard.fetchStatus(true);
+    assert.equal(calls[1].options.signal.aborted, true);
+    assert.equal(guard.statusLoading, true);
+    assert.equal(disabledFor('mariadb'), false, 'refreshing the snapshot must not disable every service action');
+    background.reject(Error('superseded background failure'));
+    await polling;
+    assert.equal(guard.statusLoading, true);
+    assert.equal(guard.statusError, '');
+    manual.resolve({ success: true, data: guard.services });
+    await explicit;
+    assert.equal(calls[2].url, '/software/guard?fresh=1');
+    assert.equal(guard.statusLoading, false);
+    guard.destroy();
+});
+
+test('service actions invalidate older reads and only their own rows stay busy until every mutation finishes', async () => {
+    const old = deferred(), lsws = deferred(), database = deferred(), calls = [];
+    const { context, timers } = setup({ api: (url, options) => {
+        calls.push({ url, options });
+        if (url.endsWith('/action')) return options.body.service === 'lsws' ? lsws.promise : database.promise;
+        return calls.length === 1 ? old.promise : Promise.resolve({ success: true, data: [
+            { service: 'lsws', running: false }, { service: 'mariadb', running: false },
+        ] });
+    } });
+    const guard = context.processGuard();
+    guard.statusLoaded = true;
+    guard.services = [{ service: 'lsws', running: true }, { service: 'mariadb', running: true }];
+    const reading = guard.fetchStatus();
+    const stoppingWeb = guard.action('lsws', 'start');
+    assert.equal(calls[0].options.signal.aborted, true);
+    assert.equal(guard.services[0]._acting, true);
+    assert.equal(guard.services[1]._acting, undefined);
+    const stoppingDatabase = guard.action('mariadb', 'start');
+    await guard.action('lsws', 'start');
+    await guard.fetchStatus(true);
+    assert.equal(calls.length, 3, 'status reads and duplicate mutations must wait for pending service actions');
+    old.resolve({ success: true, data: [{ service: 'lsws', running: true }] });
+    await reading;
+    assert.equal(guard.services.length, 2);
+    assert.equal(guard.services[0]._acting, true);
+    lsws.resolve({ success: true });
+    await stoppingWeb;
+    assert.equal(guard.services[0]._acting, false);
+    assert.equal(guard.services[1]._acting, true);
+    assert.equal(calls.length, 3);
+    database.resolve({ success: true });
+    await stoppingDatabase;
+    assert.equal(calls.length, 4);
+    assert.equal(calls[3].url, '/software/guard?fresh=1');
+    assert.equal(guard.services[0].running, false);
+    assert.equal(guard.services[1]._acting, false);
+    assert.equal(timers.size, 1);
+    guard.destroy();
+});
+
+test('a service mutation completed while hidden refreshes versions on resume without cancelling the POST', async () => {
+    const mutation = deferred(), calls = [];
+    const { context, timers, initGuard, runTimer } = setup({ api: (url, options) => {
+        calls.push({ url, options });
+        return url.endsWith('/action') ? mutation.promise : Promise.resolve({ success: true, data: [{ service: 'lsws' }] });
+    } });
+    const guard = initGuard();
+    await runTimer();
+    const operation = guard.action('lsws', 'start');
+    context.document.hidden = true;
+    context.document.dispatch('visibilitychange');
+    mutation.resolve({ success: true });
+    await operation;
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].options.method, 'POST');
+    assert.equal(calls[1].options.signal, undefined, 'hiding a view cannot cancel an authorized service mutation');
+    assert.equal(timers.size, 0);
+    context.document.hidden = false;
+    context.document.dispatch('visibilitychange');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls[2].url, '/software/guard?fresh=1');
+    assert.equal(timers.size, 1);
+    guard.destroy();
+});
+
+test('failed service mutations recheck the observed state and leaving suppresses late notices or reads', async () => {
+    const mutation = deferred(), calls = [], notices = [];
+    const { context, timers } = setup({ showToast: (...args) => notices.push(args), api: async (url, options) => {
+        calls.push({ url, options });
+        if (url.endsWith('/action')) return mutation.promise;
+        return { success: true, data: [{ service: 'lsws' }] };
+    } });
+    const guard = context.processGuard();
+    await guard.fetchStatus();
+    const operation = guard.action('lsws', 'start');
+    mutation.reject(Error('connection lost during service restart'));
+    await operation;
+    assert.equal(calls[2].url, '/software/guard?fresh=1');
+    assert.equal(notices.length, 1);
+    const later = deferred();
+    context.api = async (url, options) => { calls.push({ url, options }); return later.promise; };
+    const leaving = guard.action('lsws', 'start');
+    guard.destroy();
+    later.resolve({ success: true });
+    await leaving;
+    assert.equal(calls.length, 4);
+    assert.equal(notices.length, 1);
+    assert.equal(timers.size, 0);
+});
+
+test('a confirmation awaiting user input cannot mutate a service after its section becomes hidden', async () => {
+    const confirmation = deferred(), calls = [];
+    const { context, timers, initGuard, setSection, runTimer } = setup({ confirmModal: () => confirmation.promise, api: async url => {
+        calls.push(url); return { success: true, data: [{ service: 'lsws', running: true }] };
+    } });
+    const guard = initGuard();
+    await runTimer();
+    const stopping = guard.action('lsws', 'stop');
+    await guard.action('lsws', 'stop');
+    assert.equal(guard.services[0]._acting, true);
+    setSection(guard, 'tuning');
+    confirmation.resolve(true);
+    await stopping;
+    assert.deepEqual(calls, ['/software/guard']);
+    assert.equal(guard.services[0]._acting, false);
+    assert.equal(timers.size, 0);
     guard.destroy();
 });
 
