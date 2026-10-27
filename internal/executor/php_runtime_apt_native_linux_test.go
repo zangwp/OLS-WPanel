@@ -137,7 +137,8 @@ func TestMissingAPTNativeSolverPreservesInstalledRuntime(t *testing.T) {
 	if err != nil || len(planned) != 1 || planned["lsphp83-curl"] != newVersion {
 		t.Fatalf("real new-only extension plan rejected: %v, %v\n%s", planned, err, stdout)
 	}
-	if !bytes.Contains(stdout, []byte("automatically installed and are no longer required")) {
+	if !bytes.Contains(stdout, []byte("automatically installed and are no longer required")) &&
+		!bytes.Contains(stdout, []byte("automatically installed and is no longer required")) {
 		t.Fatalf("native fixture did not reproduce the autoremove advice: %s", stdout)
 	}
 	// The final, stricter preferences must still solve exactly the validated

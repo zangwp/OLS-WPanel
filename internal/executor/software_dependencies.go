@@ -397,6 +397,7 @@ func parseBackupDependencyPackagePlan(output []byte, installed map[string]string
 	planned, configured := map[string]string{}, map[string]string{}
 	summarySeen, expectedNew, listAllowed := false, 0, false
 	autoremoveSeen, autoremoveList, autoremoveCount := false, false, 0
+	autoremoveSingular := false
 	for _, line := range strings.Split(strings.TrimSuffix(string(output), "\n"), "\n") {
 		if line == "" {
 			continue
@@ -413,7 +414,8 @@ func parseBackupDependencyPackagePlan(output []byte, installed map[string]string
 				}
 				continue
 			}
-			if line == "Use 'apt autoremove' to remove them." && autoremoveCount > 0 {
+			if (autoremoveSingular && autoremoveCount == 1 && line == "Use 'apt autoremove' to remove it.") ||
+				(!autoremoveSingular && autoremoveCount > 1 && line == "Use 'apt autoremove' to remove them.") {
 				autoremoveList = false
 				continue
 			}
@@ -450,11 +452,12 @@ func parseBackupDependencyPackagePlan(output []byte, installed map[string]string
 			continue
 		}
 		switch line {
-		case "The following packages were automatically installed and are no longer required:":
+		case "The following packages were automatically installed and are no longer required:", "The following package was automatically installed and is no longer required:":
 			if autoremoveSeen || summarySeen {
 				return fail()
 			}
 			autoremoveSeen, autoremoveList, listAllowed = true, true, false
+			autoremoveSingular = line == "The following package was automatically installed and is no longer required:"
 			continue
 		case "Reading package lists...", "Building dependency tree...", "Reading state information...":
 			listAllowed = false

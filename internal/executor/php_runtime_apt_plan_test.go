@@ -34,6 +34,30 @@ func TestMissingAPTPlanAcceptsAutoremoveAdviceWithoutAuthorizingRemoval(t *testi
 	}
 }
 
+func TestMissingAPTPlanAcceptsNativeSingularAutoremoveAdvice(t *testing.T) {
+	const singularAdvice = "The following package was automatically installed and is no longer required:\n  lsphp83-oldhelper\nUse 'apt autoremove' to remove it.\n"
+	installed := map[string]string{"lsphp83-common": "8.3.35-1+fixture", "lsphp83-oldhelper": "1.0-1"}
+	clean := string(backupDependencyTestSimulation([]string{"lsphp83-curl"}))
+	withAdvice := func(advice string) string {
+		return strings.Replace(clean, "Reading state information...\n", "Reading state information...\n"+advice, 1)
+	}
+	if planned, err := parseBackupDependencyPackagePlan([]byte(withAdvice(singularAdvice)), installed, []string{"lsphp83-curl"}); err != nil || len(planned) != 1 {
+		t.Fatalf("native one-package autoremove advice rejected: %v, %v", planned, err)
+	}
+	for _, advice := range []string{
+		strings.Replace(singularAdvice, "remove it.", "remove them.", 1),
+		strings.Replace(singularAdvice, "lsphp83-oldhelper\n", "lsphp83-oldhelper another-helper\n", 1),
+		strings.Replace(singularAdvice, "  lsphp83-oldhelper\n", "", 1),
+		strings.Replace(singularAdvice, "Use 'apt autoremove' to remove it.\n", "", 1),
+		strings.Replace(aptAutoremoveAdvice, "remove them.", "remove it.", 1),
+		strings.Replace(aptAutoremoveAdvice, "linux-image-6.12.48+deb13-amd64 libmagickcore-7.q16-10-extra", "lsphp83-oldhelper", 1),
+	} {
+		if _, err := parseBackupDependencyPackagePlan([]byte(withAdvice(advice)), installed, []string{"lsphp83-curl"}); err == nil {
+			t.Fatalf("mismatched or incomplete autoremove advice accepted: %s", advice)
+		}
+	}
+}
+
 func TestMissingAPTPinsInstalledRuntimeDuringPlanningAndExecution(t *testing.T) {
 	backupDependencyInstallTestHooks(t)
 	backupDependencyLookPath = backupDependencyTestLookup()
