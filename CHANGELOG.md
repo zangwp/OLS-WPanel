@@ -3,6 +3,14 @@
 Repository maintenance changes are recorded in Git. Documentation, comments and
 repository metadata updates do not require a new application version.
 
+## v2.2.7 — 2026-11-09
+
+- Validate WordPress passwordless login freshness against server-provided time and the full request duration measured with a monotonic browser clock. Avoid rejecting valid sixty-second tickets when the computer clock differs from the server.
+- Preserve server-side expiry, one-time consumption, session/site/administrator binding, HTTPS destination validation and revocation on failed or cancelled authorization.
+- Distinguish expired tickets, mismatched destinations and malformed responses with English and Simplified Chinese recovery messages.
+
+Upgrade notes: run `o update`, reload the panel page and request a new sign-in ticket. No system clock, WordPress password or PHP change is required.
+
 ## v2.2.6 — 2026-10-27
 
 - Poll live service status every 30 seconds only while Software management's runtime section and the browser tab are visible. Pause hidden views, resume with one current read and one polling chain, and discard late responses after leaving the view.

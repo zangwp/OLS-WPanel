@@ -291,7 +291,11 @@ func (h *WPPanelAccessHandler) Login(c *gin.Context) {
 	// This is always the core index, never the manual override or plugin URL.
 	actionURL := "https://" + site.Domain + status.InstallationPath + "/index.php"
 	recordHandlerOperationLog("wp_panel_access_login", site.Domain, "success", fmt.Sprintf("stage=authorized; panel_user=%s; administrator_id=%d; expires_in=60", session.Username, administrator.ID))
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"action_url": actionURL, "token": token, "generation": settings.Generation, "expires_at": expires, "expires_in": 60}))
+	c.JSON(http.StatusOK, models.SuccessResponse(wpPanelAccessLoginResponse(actionURL, token, settings.Generation, expires, time.Now())))
+}
+
+func wpPanelAccessLoginResponse(actionURL, token, generation string, expires, serverTime time.Time) gin.H {
+	return gin.H{"action_url": actionURL, "token": token, "generation": generation, "server_time": serverTime.UTC(), "expires_at": expires, "expires_in": int(executor.WPPanelAccessLifetime / time.Second)}
 }
 
 func (h *WPPanelAccessHandler) Revoke(c *gin.Context) {
