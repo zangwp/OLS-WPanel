@@ -8,7 +8,7 @@ const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 // Isolate the template component with mocked API, popup and DOM boundaries.
 function setup() {
     const calls=[],forms=[],fields=[],watchers=new Map(),popup={opener:{},closed:false,close(){this.closed=true;}};
-    const context={URL,Date,AbortController,crypto:require('node:crypto').webcrypto,t:key=>key,showToast(){},confirmModal:async()=>true,navigator:{clipboard:{async writeText(){}}},window:{open:()=>popup},document:{body:{append:form=>forms.push(form)},createElement:type=>type==='form'?{style:{},append:field=>fields.push(field),submit(){this.submitted=true;},remove(){this.removed=true;}}:{}}};
+    const context={URL,Date,performance:{now:()=>0},AbortController,crypto:require('node:crypto').webcrypto,t:key=>key,showToast(){},confirmModal:async()=>true,navigator:{clipboard:{async writeText(){}}},window:{open:()=>popup},document:{body:{append:form=>forms.push(form)},createElement:type=>type==='form'?{style:{},append:field=>fields.push(field),submit(){this.submitted=true;},remove(){this.removed=true;}}:{}}};
     popup.document=context.document;popup.document.head={append(){}};
     context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:{}};};
     vm.createContext(context);vm.runInContext(source,context);
@@ -20,6 +20,7 @@ function setup() {
 }
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const settle=async()=>{for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));};
+const validTicket=(extra={})=>{const now=Date.now();return {action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),server_time:new Date(now).toISOString(),expires_at:new Date(now+60000).toISOString(),expires_in:60,...extra};};
 const readStatus=(extra={})=>({success:true,data:{installed:true,sso_enabled:true,sso_available:true,administrators:[{id:7}],manual_login_url:'https://site.example/private/',login_suffix:'private',installation_path:'/',...extra}});
 test('login links reject cross-origin schemes, credentials and fragments',()=>{
     const {component}=setup();
@@ -28,7 +29,7 @@ test('login links reject cross-origin schemes, credentials and fragments',()=>{
 });
 test('successful authorization uses the panel session and submits a ticket only in a removed POST form',async()=>{
     const {component,context,calls,forms,fields,popup}=setup();
-    context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:{action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString()}};};
+    context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:validTicket()};};
     await component.login();
     assert.equal(calls.length,1);assert.equal(calls[0].options.method,'POST');assert.equal(Object.hasOwn(calls[0].options,'allowAuthFailure'),false);
     assert.deepEqual({...calls[0].options.body},{administrator_id:7,confirm:true});
@@ -39,7 +40,7 @@ test('successful authorization uses the panel session and submits a ticket only 
 test('expired, foreign or malformed authorization responses close the popup and revoke tickets',async()=>{
     for(const change of [{action_url:'https://other.example/index.php'},{expires_at:new Date(Date.now()-1000).toISOString()},{generation:'invalid'},{token:'short'}]){
         const {component,context,calls,forms,popup}=setup();
-        context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:{action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString(),...change}};};
+        context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:validTicket(change)};};
         await component.login();assert.equal(forms.length,0);assert(popup.closed);assert(calls.at(-1).url.endsWith('/revoke'));assert(component.error);
     }
 });
@@ -118,7 +119,7 @@ test('multiple administrators open an account picker without requests and author
     await component.toggleAuthorization();assert.equal(component.loginOpen,true);assert.equal(component.settingsOpen,false);assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');assert.equal(calls.length,0);assert.equal(opened,0);
     await component.login();assert.equal(calls.length,0);assert.equal(opened,0);
     component.administratorID='99';await component.login();assert.equal(calls.length,0);assert.equal(opened,0);
-    component.administratorID='8';context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:{action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString()}};};
+    component.administratorID='8';context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:validTicket()};};
     await component.login();assert.equal(opened,1);assert.deepEqual({...calls[0].options.body},{administrator_id:8,confirm:true});assert.equal(forms.length,1);assert.equal(component.loginOpen,false);
     await component.toggleAuthorization();await component.toggleAuthorization();assert.equal(component.loginOpen,false);assert.equal(calls.length,1);
 });
@@ -127,7 +128,7 @@ test('a pending one-click authorization rejects duplicate clicks and uses only o
     const {component,context,calls,popup}=setup();const pending=deferred();let opened=0;
     context.window.open=()=>{opened++;return popup;};context.api=(url,options)=>{calls.push({url,options});return pending.promise;};
     const first=component.toggleAuthorization();assert.equal(opened,1);assert.equal(calls.length,1);await component.toggleAuthorization();await component.login();assert.equal(opened,1);assert.equal(calls.length,1);
-    pending.resolve({success:true,data:{action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString()}});await first;assert.equal(component.busy,false);
+    pending.resolve({success:true,data:validTicket()});await first;assert.equal(component.busy,false);
 });
 
 test('an expired panel session closes the pending popup and does not suppress the shared authentication redirect',async()=>{
@@ -286,7 +287,7 @@ test('leaving overview or destroying the page closes pending authorization and r
         const login=component.login();assert.equal(component.busy,true);
         if (action==='navigate') { component.detailTab='logs';watchers.get('detailTab')('logs'); } else component.destroy();
         assert.equal(popup.closed,true);assert.equal(component.loginOpen,false);
-        pending.resolve({success:true,data:{action_url:'https://site.example/index.php',token:'A'.repeat(43),generation:'b'.repeat(32),expires_at:new Date(Date.now()+60000).toISOString()}});await login;
+        pending.resolve({success:true,data:validTicket()});await login;
         assert.equal(forms.length,0);assert.equal(calls.at(-1).url,'/websites/1/wp-panel-access/revoke');assert.equal(component.error,'');assert.equal(component.busy,false);
     }
 });
@@ -312,4 +313,50 @@ test('destroy aborts an in-flight read, clears all secrets and refuses late capa
     context.api=(url,options)=>{calls.push({url,options});return pending.promise;};const first=component.load();component.destroy();
     assert.equal(calls[0].options.signal.aborted,true);assert.equal(component.settingsPassword,'');assert.equal(component.settingsCode,'');
     pending.resolve(readStatus());await first;assert.equal(component.status,null);assert.equal(component.loading,false);assert.equal(component.readController,null);
+});
+
+
+test('valid tickets ignore browser wall-clock skew and changes',async()=>{
+    for(const offset of [-86400000,-6000,0,6000,86400000]){
+        const {component,context,forms}=setup();
+        class BrowserDate extends Date {static now(){return Date.now()+offset;}}
+        context.Date=BrowserDate;
+        context.api=async()=>({success:true,data:validTicket()});
+        await component.login();assert.equal(forms.length,1);assert(forms[0].submitted);assert.equal(component.error,'');
+    }
+    const {component,context,forms}=setup();
+    class NoWallClock extends Date {static now(){throw Error('browser wall clock must not authorize tickets');}}
+    context.Date=NoWallClock;context.api=async()=>({success:true,data:validTicket()});
+    await component.login();assert.equal(forms.length,1);assert(forms[0].submitted);
+});
+
+test('request delay is charged against server lifetime using the monotonic clock',async()=>{
+    for(const elapsed of [0,30000,59999,60000,90000]){
+        const {component,context,calls,forms,popup}=setup();let monotonic=100;
+        context.performance={now:()=>monotonic};
+        context.api=async(url,options)=>{calls.push({url,options});monotonic=100+elapsed;return {success:true,data:validTicket()};};
+        await component.login();
+        if(elapsed<60000){assert.equal(forms.length,1);assert(forms[0].submitted);}
+        else {assert.equal(forms.length,0);assert(popup.closed);assert.equal(component.error,'wp_access.error_ticket_expired');assert(calls.at(-1).url.endsWith('/revoke'));}
+    }
+});
+
+test('invalid server timing fails closed and cannot extend the sixty-second ticket',async()=>{
+    const now=Date.now();
+    for(const change of [{server_time:undefined},{server_time:'invalid'},{expires_at:undefined},{expires_in:undefined},{expires_in:0},{expires_in:61},{expires_in:'60'},{expires_in:1.5},{server_time:new Date(now).toISOString(),expires_at:new Date(now+60001).toISOString()},{token:['A'.repeat(43)]},{generation:['b'.repeat(32)]}]){
+        const {component,context,calls,forms,popup}=setup();
+        context.api=async(url,options)=>{calls.push({url,options});return {success:true,data:validTicket(change)};};
+        await component.login();assert.equal(forms.length,0);assert(popup.closed);assert.equal(component.error,'wp_access.error_ticket_response');assert(calls.at(-1).url.endsWith('/revoke'));
+    }
+    for(const elapsed of [NaN,Infinity,-1]){
+        const {component,context,forms}=setup();let count=0;context.performance={now:()=>++count===1?0:elapsed};context.api=async()=>({success:true,data:validTicket()});
+        await component.login();assert.equal(forms.length,0);assert.equal(component.error,'wp_access.error_ticket_response');
+    }
+});
+
+test('expired tickets and unsafe destinations have distinct recovery messages',async()=>{
+    for(const [change,code] of [[{expires_at:new Date(Date.now()-1).toISOString()},'ticket_expired'],[{action_url:'https://other.example/index.php'},'ticket_address'],[{action_url:'https://site.example/index.php?token=unsafe'},'ticket_address'],[{action_url:'https://site.example/wp-login.php'},'ticket_address'],[{action_url:'http://site.example/index.php'},'ticket_address']]){
+        const {component,context,forms}=setup();context.api=async()=>({success:true,data:validTicket(change)});await component.login();assert.equal(forms.length,0);assert.equal(component.error,'wp_access.error_'+code);
+    }
+    const {component,context,forms}=setup();component.status.installation_path='/wp';context.api=async()=>({success:true,data:validTicket({action_url:'https://site.example/wp/index.php'})});await component.login();assert.equal(forms.length,1);assert(forms[0].submitted);
 });

@@ -141,6 +141,24 @@ function wordpressPanelAccess() {
             catch (error) { this.error = this.errorText(error); }
             finally { this.busy = false; this.busyAction = ''; }
         },
+        ticketError(code) { return Object.assign(new Error(t('wp_access.error_' + code)), {code:'wp_access_' + code}); },
+        ticketAction(ticket, elapsed) {
+            if (!ticket || typeof ticket !== 'object' || Array.isArray(ticket)) throw this.ticketError('ticket_response');
+            const action = this.safeAddress(ticket.action_url);
+            const expectedPath = (this.status.installation_path || '/').replace(/\/$/, '') + '/index.php';
+            if (!action || new URL(action).protocol !== 'https:' || new URL(action).pathname !== expectedPath || new URL(action).search) throw this.ticketError('ticket_address');
+            if (typeof ticket.token !== 'string' || typeof ticket.generation !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(ticket.token) || !/^[a-f0-9]{32}$/.test(ticket.generation)) throw this.ticketError('ticket_response');
+            const serverTime = typeof ticket.server_time === 'string' ? Date.parse(ticket.server_time) : NaN;
+            const expires = typeof ticket.expires_at === 'string' ? Date.parse(ticket.expires_at) : NaN;
+            if (!Number.isFinite(serverTime) || !Number.isFinite(expires) || !Number.isInteger(ticket.expires_in) || ticket.expires_in <= 0 || ticket.expires_in > 60 || !Number.isFinite(elapsed) || elapsed < 0) throw this.ticketError('ticket_response');
+            const remaining = expires - serverTime;
+            if (remaining <= 0) throw this.ticketError('ticket_expired');
+            if (remaining > ticket.expires_in * 1000) throw this.ticketError('ticket_response');
+            // Count the entire round trip conservatively with a monotonic clock.
+            // The broker still enforces the actual expiry and one-time use.
+            if (elapsed >= remaining) throw this.ticketError('ticket_expired');
+            return action;
+        },
         async login() {
             if (this.busy || this.loading || this.destroyed || this.detailTab !== 'overview' || !this.canAuthorize() || !(this.status.administrators || []).some(admin => Number.isSafeInteger(admin.id) && admin.id > 0 && String(admin.id) === this.administratorID)) return;
             const generation = ++this.loginGeneration, siteID = this.site.id;
@@ -151,11 +169,11 @@ function wordpressPanelAccess() {
             this.loginPopup = popup;
             this.busy = true; this.busyAction = 'login'; this.error = '';
             try {
+                const requestedAt = performance.now();
                 const response = await api('/websites/' + siteID + '/wp-panel-access/login', {method:'POST',body:{administrator_id:Number(this.administratorID),confirm:true},silent:true,timeout:30000});
                 if (!current()) throw new Error('authorization_cancelled');
-                const ticket = response.data, action = this.safeAddress(ticket?.action_url), expires = Date.parse(ticket?.expires_at);
-                const expectedPath = (this.status.installation_path || '/').replace(/\/$/, '') + '/index.php';
-                if (!response.success || !action || new URL(action).protocol !== 'https:' || new URL(action).pathname !== expectedPath || new URL(action).search || !/^[A-Za-z0-9_-]{43}$/.test(ticket?.token || '') || !/^[a-f0-9]{32}$/.test(ticket?.generation || '') || !Number.isFinite(expires) || expires <= Date.now() || expires > Date.now() + 65000) throw new Error(t('wp_access.invalid_ticket'));
+                if (!response.success) throw this.ticketError('ticket_response');
+                const ticket = response.data, action = this.ticketAction(ticket, performance.now() - requestedAt);
                 const popupDocument = popup.document, referrer = popupDocument.createElement('meta'); referrer.name = 'referrer'; referrer.content = 'no-referrer'; popupDocument.head.append(referrer);
                 const form = popupDocument.createElement('form'); form.method = 'POST'; form.action = action; form.target = '_self'; form.style.display = 'none'; form.rel = 'noopener noreferrer';
                 for (const [name,value] of Object.entries({ols_wpanel_access_token:ticket.token,ols_wpanel_access_generation:ticket.generation})) { const field = popupDocument.createElement('input'); field.type = 'hidden'; field.name = name; field.value = value; form.append(field); }
