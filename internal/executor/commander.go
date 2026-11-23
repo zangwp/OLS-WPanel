@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -52,6 +54,9 @@ func IsCommandAllowed(binary string, args []string) bool {
 	if hasUnsafeArgs(binary, args) {
 		return false
 	}
+	if binary == "chown" && isLiteSpeedCacheStageChown(args) {
+		return true
+	}
 	if binary == "curl" && isOfficialIPRangeCurl(args) {
 		return true
 	}
@@ -83,6 +88,29 @@ func IsCommandAllowed(binary string, args []string) bool {
 		}
 	}
 	return true
+}
+
+// Allow the no-dereference flags only for the panel's held plugin staging directory.
+func isLiteSpeedCacheStageChown(args []string) bool {
+	if len(args) != 5 || args[0] != "-h" || args[1] != "-R" || args[2] != "--" {
+		return false
+	}
+	owner, group, ok := strings.Cut(args[3], ":")
+	if !ok || owner != group || !wpInventoryUserPattern.MatchString(owner) {
+		return false
+	}
+	prefix := fmt.Sprintf("/proc/%d/fd/", os.Getpid())
+	const suffix = "/litespeed-cache"
+	fd, ok := strings.CutPrefix(args[4], prefix)
+	if !ok {
+		return false
+	}
+	fd, ok = strings.CutSuffix(fd, suffix)
+	if !ok {
+		return false
+	}
+	number, err := strconv.Atoi(fd)
+	return err == nil && number > 2 && strconv.Itoa(number) == fd
 }
 
 // Keep HTTPS-only redirects and both timeouts available to the fixed official

@@ -44,6 +44,9 @@ func stubLiteSpeedCachePublishChown(t *testing.T, hook func(string) error) *atom
 			!strings.HasPrefix(args[4], fmt.Sprintf("/proc/%d/fd/", os.Getpid())) || !strings.HasSuffix(args[4], "/litespeed-cache") {
 			return "", fmt.Errorf("unexpected publication command: %s %v", binary, args)
 		}
+		if !IsCommandAllowed(binary, args) {
+			return "", fmt.Errorf("production command policy rejected plugin ownership command: %s %v", binary, args)
+		}
 		calls.Add(1)
 		if hook != nil {
 			return "", hook(args[4])

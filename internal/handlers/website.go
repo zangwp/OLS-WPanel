@@ -251,6 +251,10 @@ func uniqueRequestDomains(domain string, aliases []string) []string {
 }
 
 func runSSLPreflight(ctx context.Context, domain string, aliases []string) (sslPreflightResult, error) {
+	return checkSSLPreflight(ctx, domain, aliases, localInterfaceIPs(), config.ConfiguredPublicIPv4(), net.DefaultResolver.LookupIPAddr)
+}
+
+func checkSSLPreflight(ctx context.Context, domain string, aliases []string, localIPs map[string]bool, publicIPv4 string, lookup func(context.Context, string) ([]net.IPAddr, error)) (sslPreflightResult, error) {
 	domains := uniqueRequestDomains(domain, aliases)
 	if len(domains) == 0 {
 		return sslPreflightResult{}, fmt.Errorf("域名不能为空")
@@ -261,10 +265,9 @@ func runSSLPreflight(ctx context.Context, domain string, aliases []string) (sslP
 		}
 	}
 
-	localIPs := localInterfaceIPs()
 	result := sslPreflightResult{}
 	for _, domain := range domains {
-		records, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
+		records, err := lookup(ctx, domain)
 		if err != nil || len(records) == 0 {
 			msg := domain + " 未解析到 A/AAAA 记录，Let's Encrypt 无法访问验证文件。"
 			if ctx.Err() != nil {
@@ -283,7 +286,7 @@ func runSSLPreflight(ctx context.Context, domain string, aliases []string) (sslP
 			if ip.To4() == nil {
 				item.HasIPv6 = true
 			}
-			if localIPs[ipText] {
+			if localIPs[ipText] || ipText == publicIPv4 {
 				item.Matched = true
 				if ip.To4() == nil {
 					item.MatchedIPv6 = true
@@ -291,10 +294,9 @@ func runSSLPreflight(ctx context.Context, domain string, aliases []string) (sslP
 			}
 		}
 		if !item.Matched {
-			result.Warnings = append(result.Warnings, domain+" 没有解析到当前服务器网卡 IP。如果使用 CDN，请确认 CDN 已正确回源到当前服务器，并且未缓存、重写或拦截 /.well-known/acme-challenge/。")
-		}
-		if item.HasIPv6 && !item.MatchedIPv6 {
-			result.Warnings = append(result.Warnings, domain+" 存在 AAAA 记录，但未匹配到当前服务器 IPv6。Let's Encrypt 可能访问 IPv6 并导致验证 404，请删除错误 AAAA 记录或配置正确 IPv6。")
+			result.Warnings = append(result.Warnings, fmt.Sprintf("无法确认 %s 是否指向本机（DNS 解析：%s）。请核对云平台公网 IP 或 CDN 回源，并确认 80/TCP 和 /.well-known/acme-challenge/ 可访问。", domain, strings.Join(item.Addresses, ", ")))
+		} else if item.HasIPv6 && !item.MatchedIPv6 {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s 的 AAAA 记录未与本机 IPv6 匹配（DNS 解析：%s）。请确认 IPv6 或 CDN 能在 80/TCP 提供 HTTP 验证。", domain, strings.Join(item.Addresses, ", ")))
 		}
 		result.Domains = append(result.Domains, item)
 	}

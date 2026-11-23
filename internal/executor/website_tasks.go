@@ -151,8 +151,11 @@ func ensureCreateSiteResourcesAvailable(systemUser, webRoot, logDir, dbName, dbU
 		}
 	}
 
-	if _, err := executeCommand("id", "-u", systemUser); err == nil {
+	var unknownUser user.UnknownUserError
+	if _, err := user.Lookup(systemUser); err == nil {
 		return fmt.Errorf("system user already exists: %s", systemUser)
+	} else if !errors.As(err, &unknownUser) {
+		return fmt.Errorf("check existing system user: %w", err)
 	}
 
 	for label, path := range map[string]string{
@@ -190,21 +193,21 @@ func createSiteDirectories(webRoot, logDir string) ([]rollbackStep, error) {
 	return rollbacks, nil
 }
 
-func executeCreateSite(task *Task) TaskResult {
+func executeCreateSite(task *Task) (result TaskResult) {
 	payload, ok := task.Payload.(*CreateSitePayload)
 	if !ok {
 		return TaskResult{Success: false, Message: "任务参数类型错误"}
 	}
 
 	var rollbacks []rollbackStep
-	rollback := func() {
-		for i := len(rollbacks) - 1; i >= 0; i-- {
-			step := rollbacks[i]
-			if err := step.fn(); err != nil {
-				fmt.Fprintf(os.Stderr, "回滚失败 [%s]: %v\n", step.desc, err)
-			}
+	defer func() {
+		if result.Success {
+			return
 		}
-	}
+		if failures := runRollbackSteps(rollbacks); len(failures) > 0 {
+			result.Message += "。建站回滚未完成，请检查面板日志后再重试。"
+		}
+	}()
 
 	cfg := config.AppConfig
 	domain := strings.ToLower(strings.TrimSpace(payload.Domain))
@@ -283,14 +286,12 @@ func executeCreateSite(task *Task) TaskResult {
 	directoryRollbacks, err := createSiteDirectories(webRoot, logDir)
 	rollbacks = append(rollbacks, directoryRollbacks...)
 	if err != nil {
-		rollback()
 		log.Printf("创建目录失败: %v", err)
 		return TaskResult{Success: false, Message: "创建目录失败"}
 	}
 	ensureSiteLogFiles(logDir)
 	documentRoot, err := EnsureEffectiveDocumentRoot(webRoot, payload.SiteType, documentRootSubdir, systemUser)
 	if err != nil {
-		rollback()
 		log.Printf("准备Web入口目录失败: %v", err)
 		return taskFailure("准备Web入口目录失败", err)
 	}
@@ -299,7 +300,6 @@ func executeCreateSite(task *Task) TaskResult {
 	if payload.SiteType != "php" {
 		tmpDir := "/tmp/wp_deploy_" + siteName + "_" + generatePassword(8)
 		if err := deployNewWordPress(context.Background(), cfg, webRoot, tmpDir); err != nil {
-			rollback()
 			log.Printf("WordPress 部署失败: %v", err)
 			return TaskResult{Success: false, Message: "WordPress 部署失败"}
 		}
@@ -307,14 +307,12 @@ func executeCreateSite(task *Task) TaskResult {
 
 	// Step 4: Chown
 	if _, err := executeCommand("chown", "-R", siteOwner(systemUser), webRoot); err != nil {
-		rollback()
 		log.Printf("设置目录权限失败: %v", err)
 		return TaskResult{Success: false, Message: "设置目录权限失败"}
 	}
 
 	// Step 5: Create database
 	if err := createMariaDBDatabase(dbName, dbUser, dbPassword, cfg); err != nil {
-		rollback()
 		log.Printf("创建数据库失败: %v", err)
 		return TaskResult{Success: false, Message: "创建数据库失败"}
 	}
@@ -325,19 +323,23 @@ func executeCreateSite(task *Task) TaskResult {
 	// Step 6: Generate wp-config.php (wordpress only)
 	if payload.SiteType != "php" {
 		if err := generateWPConfig(webRoot, domain, dbName, dbUser, dbPassword); err != nil {
-			rollback()
 			log.Printf("生成 wp-config.php 失败: %v", err)
 			return TaskResult{Success: false, Message: "生成 wp-config.php 失败"}
 		}
 		if err := ConfigureWPLoginFailureLogging(webRoot, logDir, systemUser); err != nil {
-			rollback()
 			return taskFailure("配置 WordPress 登录防爆破审计失败", err)
 		}
 	}
 	if err := HardenSiteSensitivePermissions(domain, webRoot, systemUser); err != nil {
-		rollback()
 		log.Printf("设置站点安全权限失败: %v", err)
 		return TaskResult{Success: false, Message: "设置站点安全权限失败"}
+	}
+	if payload.SiteType != "php" {
+		if err := installLiteSpeedCachePlugin(context.Background(), webRoot, systemUser, phpRuntime.Version); err != nil {
+			log.Printf("准备 LiteSpeed Cache 失败 site=%s: %v", domain, err)
+			return taskFailure("准备 LiteSpeed Cache 失败", err)
+		}
+		log.Printf("已准备 LiteSpeed Cache site=%s", domain)
 	}
 
 	// Step 7: Generate the OpenLiteSpeed vhost. The vhost owns the per-site
@@ -369,21 +371,23 @@ func executeCreateSite(task *Task) TaskResult {
 
 	olsVHostConfig, err := engine.RenderOLSVHostConfig(olsVHostData)
 	if err != nil {
-		rollback()
 		log.Printf("渲染 OpenLiteSpeed 配置失败: %v", err)
 		return taskFailure("渲染 OpenLiteSpeed 配置失败", err)
 	}
 
 	if err := engine.ApplyOLSVHostConfig(olsVHostConfig, olsVHostConfigPath, olsVHostEnabledPath); err != nil {
-		rollback()
 		log.Printf("应用 OpenLiteSpeed 配置失败: %v", err)
 		return taskFailure("应用 OpenLiteSpeed 配置失败", err)
 	}
 	rollbacks = append(rollbacks, rollbackStep{"删除OpenLiteSpeed配置 " + olsVHostConfigPath, func() error {
-		os.Remove(olsVHostEnabledPath)
-		os.Remove(olsVHostConfigPath)
+		var removalErrs []error
+		for _, path := range []string{olsVHostEnabledPath, olsVHostConfigPath} {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				removalErrs = append(removalErrs, err)
+			}
+		}
 		_, reloadErr := reloadOLSManagedRegistry(cfg.Paths.OLSVHostsEnabled)
-		return reloadErr
+		return errors.Join(append(removalErrs, reloadErr)...)
 	}})
 
 	maskedPassword := maskPassword(dbPassword)
@@ -397,7 +401,6 @@ func executeCreateSite(task *Task) TaskResult {
 	sslWarning := ""
 	if payload.SSLEnabled {
 		if sslErr := os.MkdirAll(certDir, 0700); sslErr != nil {
-			rollback()
 			log.Printf("创建SSL证书目录失败: %v", sslErr)
 			return TaskResult{Success: false, Message: "创建SSL证书目录失败"}
 		}
@@ -435,7 +438,6 @@ func executeCreateSite(task *Task) TaskResult {
 				log.Printf("应用 HTTPS 配置失败: %v", sslErr)
 				os.RemoveAll(certDir)
 				if restoreErr := engine.ApplyOLSVHostConfig(olsVHostConfig, olsVHostConfigPath, olsVHostEnabledPath); restoreErr != nil {
-					rollback()
 					log.Printf("恢复 HTTP 配置失败: %v", restoreErr)
 					return taskFailure("应用 HTTPS 配置失败，且恢复 HTTP 配置失败", restoreErr)
 				}
@@ -444,20 +446,10 @@ func executeCreateSite(task *Task) TaskResult {
 				sslEnabled = 1
 				sslExpiry = &expiry
 				rollbacks = append(rollbacks, rollbackStep{"删除SSL证书目录 " + certDir, func() error {
-					os.RemoveAll(certDir)
-					return nil
+					return os.RemoveAll(certDir)
 				}})
 			}
 		}
-	}
-
-	if payload.SiteType != "php" {
-		if err := installLiteSpeedCachePlugin(context.Background(), webRoot, systemUser, phpRuntime.Version); err != nil {
-			rollback()
-			log.Printf("准备 LiteSpeed Cache + Redis Object Cache 失败 site=%s: %v", domain, err)
-			return taskFailure("准备 LiteSpeed Cache + Redis Object Cache 失败", err)
-		}
-		log.Printf("已准备 LiteSpeed Cache + Redis Object Cache site=%s", domain)
 	}
 
 	sslCertSource := ""
@@ -472,7 +464,6 @@ func executeCreateSite(task *Task) TaskResult {
 		certPath, keyPath, sslExpiry, sslWarning, sslCertSource, defaultSiteLogRetentionDays, maxChildren, nilIfEmpty(payload.ExpiresAt),
 	)
 	if err != nil {
-		rollback()
 		log.Printf("写入数据库失败: %v", err)
 		return TaskResult{Success: false, Message: "写入数据库失败"}
 	}

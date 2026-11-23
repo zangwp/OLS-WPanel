@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os"
 )
 
@@ -20,6 +21,15 @@ type PanelConfig struct {
 	DataDir      string `json:"data_dir"`
 	BackupDir    string `json:"backup_dir"`
 	LogDir       string `json:"log_dir"`
+	PublicIPv4   string `json:"public_ipv4,omitempty"`
+}
+
+// ConfiguredPublicIPv4 is supplied by the administrator for NAT or cloud mappings.
+func ConfiguredPublicIPv4() string {
+	if AppConfig == nil {
+		return ""
+	}
+	return AppConfig.Panel.PublicIPv4
 }
 
 type SQLiteConfig struct {
@@ -111,6 +121,12 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) Validate() error {
+	if c.Panel.PublicIPv4 != "" {
+		ip, err := netip.ParseAddr(c.Panel.PublicIPv4)
+		if err != nil || !ip.Is4() || !ip.IsGlobalUnicast() || ip.IsPrivate() || netip.MustParsePrefix("100.64.0.0/10").Contains(ip) {
+			return fmt.Errorf("panel.public_ipv4 must be a public IPv4 address")
+		}
+	}
 	if c.Panel.Port <= 0 || c.Panel.Port > 65535 {
 		return fmt.Errorf("invalid panel port: %d", c.Panel.Port)
 	}

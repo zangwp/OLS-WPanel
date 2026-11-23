@@ -781,8 +781,15 @@ download_file() {
     local output="$2"
     local total_timeout="${3:-120}"
     local max_bytes="${4:-0}"
+    local family="${5:-}"
+    local -a family_flag=()
     local connect_timeout=15
 
+    case "$family" in
+        4|6) family_flag=("-$family") ;;
+        '') ;;
+        *) return 1 ;;
+    esac
     [[ "$max_bytes" =~ ^[1-9][0-9]*$ ]] || return 1
     if [[ "$total_timeout" -lt "$connect_timeout" ]]; then
         connect_timeout="$total_timeout"
@@ -790,7 +797,7 @@ download_file() {
 
     rm -f "$output"
     if command -v curl &>/dev/null; then
-        if timeout "${total_timeout}s" curl -q -fsSL \
+        if timeout "${total_timeout}s" curl -q -fsSL "${family_flag[@]}" \
             --proto '=https' \
             --proto-redir '=https' \
             --connect-timeout "$connect_timeout" \
@@ -807,7 +814,7 @@ download_file() {
         rm -f "$output"
     fi
     if command -v wget &>/dev/null; then
-        if timeout "${total_timeout}s" wget --no-config -q --https-only --no-hsts \
+        if timeout "${total_timeout}s" wget --no-config -q --https-only --no-hsts "${family_flag[@]}" \
             --connect-timeout="$connect_timeout" \
             --read-timeout=30 \
             --tries=3 \
@@ -3880,27 +3887,35 @@ if $REPAIR_MODE; then
     REPAIR_COMMITTED=true
 fi
 
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[[ -z "$LOCAL_IP" ]] && LOCAL_IP="<未知>"
+probe_install_egress_ip() {
+    local family="$1" file="$INSTALL_WORKDIR/egress-ipv$1.txt" url address
+    for url in https://ip.sb https://ifconfig.me/ip; do
+        if download_file "$url" "$file" 5 "$PUBLIC_IP_MAX_BYTES" "$family" &&
+            address=$(python3 -c 'import ipaddress, sys
+ip = ipaddress.ip_address(sys.stdin.read().strip())
+if ip.version != int(sys.argv[1]) or not ip.is_global or ip.is_multicast or getattr(ip, "scope_id", None):
+    sys.exit(1)
+print(ip)' "$family" < "$file" 2>/dev/null); then
+            printf '%s\n' "$address"
+            return 0
+        fi
+    done
+    return 0
+}
 
-PUBLIC_IP_FILE="$INSTALL_WORKDIR/public-ip.txt"
-if download_file "https://ip.sb" "$PUBLIC_IP_FILE" 15 "$PUBLIC_IP_MAX_BYTES" || \
-   download_file "https://ifconfig.me/ip" "$PUBLIC_IP_FILE" 15 "$PUBLIC_IP_MAX_BYTES"; then
-    PUBLIC_IP=$(tr -d '\r\n' < "$PUBLIC_IP_FILE")
-else
-    PUBLIC_IP=""
+PUBLIC_IPV4="" PUBLIC_IPV6="" LOCAL_IPV4="" LOCAL_IPV6=""
+if ! $REPAIR_MODE; then
+    LOCAL_IPV4=$(ip -o -4 addr show scope global 2>/dev/null | awk 'NR==1 {split($4, a, "/"); print a[1]}') || LOCAL_IPV4=""
+    LOCAL_IPV6=$(ip -o -6 addr show scope global 2>/dev/null | awk 'NR==1 {split($4, a, "/"); print a[1]}') || LOCAL_IPV6=""
+    probe_install_egress_ip 4 > "$INSTALL_WORKDIR/login-ipv4.txt" &
+    ipv4_probe_pid=$!
+    probe_install_egress_ip 6 > "$INSTALL_WORKDIR/login-ipv6.txt" &
+    ipv6_probe_pid=$!
+    wait "$ipv4_probe_pid"
+    wait "$ipv6_probe_pid"
+    PUBLIC_IPV4=$(<"$INSTALL_WORKDIR/login-ipv4.txt")
+    PUBLIC_IPV6=$(<"$INSTALL_WORKDIR/login-ipv6.txt")
 fi
-if [[ ${#PUBLIC_IP} -gt 45 ]] || [[ ! "$PUBLIC_IP" =~ ^[0-9A-Fa-f:.]+$ ]]; then
-    PUBLIC_IP=""
-fi
-[[ -z "$PUBLIC_IP" ]] && PUBLIC_IP="<未知>"
-
-# Address labels describe discovery, not private/public reachability.
-# Interface addresses may themselves be public; bracket IPv6 for valid URLs.
-PUBLIC_HOST="$PUBLIC_IP"
-LOCAL_HOST="$LOCAL_IP"
-[[ "$PUBLIC_HOST" == *:* ]] && PUBLIC_HOST="[$PUBLIC_HOST]"
-[[ "$LOCAL_HOST" == *:* ]] && LOCAL_HOST="[$LOCAL_HOST]"
 
 # Keep each credential separate and print values as data, never printf escapes.
 log_install_stage ""
@@ -3922,28 +3937,23 @@ print_install_summary() {
         printf '%s\n' "更新 / 修复完成，登录地址与账号密码保持不变。" "输入 o 查看当前登录地址。"
     else
         printf '%b%s%b\n' "$heading" "面板登录地址" "$reset"
-        if [[ "$PUBLIC_IP" != "<未知>" ]]; then
-            if [[ "$PUBLIC_IP" == *:* ]]; then
-                printf '%s\n' '  IPv6 / 外部地址'
-            else
-                printf '%s\n' '  IPv4 / 外部地址'
-            fi
-            printf '  https://%s:%s/%s/\n' "$PUBLIC_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
-            if [[ "$LOCAL_IP" != "<未知>" && "$LOCAL_IP" != "$PUBLIC_IP" ]]; then
-                if [[ "$LOCAL_IP" == *:* ]]; then
-                    printf '\n%s\n' '  IPv6 / 网卡地址'
-                else
-                    printf '\n%s\n' '  IPv4 / 网卡地址'
-                fi
-                printf '  https://%s:%s/%s/\n' "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
-            fi
-        elif [[ "$LOCAL_IP" != "<未知>" ]]; then
-            printf '%s\n' '  网卡地址'
-            printf '  https://%s:%s/%s/\n' "$LOCAL_HOST" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
-        else
+        local label address host
+        for label in 'IPv4 / 出站探测' 'IPv6 / 出站探测' 'IPv4 / 网卡地址' 'IPv6 / 网卡地址'; do
+            case "$label" in
+                'IPv4 / 出站探测') address="$PUBLIC_IPV4" ;;
+                'IPv6 / 出站探测') address="$PUBLIC_IPV6" ;;
+                'IPv4 / 网卡地址') address="$LOCAL_IPV4"; [[ "$address" != "$PUBLIC_IPV4" ]] || continue ;;
+                'IPv6 / 网卡地址') address="$LOCAL_IPV6"; [[ "$address" != "$PUBLIC_IPV6" ]] || continue ;;
+            esac
+            [[ -n "$address" ]] || continue
+            host="$address"
+            [[ "$host" != *:* ]] || host="[$host]"
+            printf '  %s\n  https://%s:%s/%s/\n\n' "$label" "$host" "$VALIDATED_TLS_PORT" "$PANEL_SUFFIX"
+        done
+        if [[ -z "$PUBLIC_IPV4$PUBLIC_IPV6$LOCAL_IPV4$LOCAL_IPV6" ]]; then
             printf '%s\n' '  暂未识别到地址；输入 o 查看面板信息。'
         fi
-        printf '\n%s\n' '地址是否可达取决于 VPS 网络与防火墙设置。'
+        printf '%s\n' '公网登录请以云平台分配的地址为准。出站探测地址可能经过 NAT，入站还需放行面板端口。'
         printf '\n%s\n' "$rule"
         printf '%b%s%b\n' "$heading" "登录凭据 / 仅显示一次，请立即保存" "$reset"
         local value_width=20 value="" table_rule=""

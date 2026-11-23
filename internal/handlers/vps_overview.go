@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zangwp/OLS-WPanel/internal/config"
 	"github.com/zangwp/OLS-WPanel/internal/executor"
 	"github.com/zangwp/OLS-WPanel/internal/i18n"
 	"github.com/zangwp/OLS-WPanel/internal/models"
@@ -18,6 +19,7 @@ type VPSHandler struct{}
 
 type VPSIdentity struct {
 	Addresses      []string `json:"addresses"`
+	PublicIPv4     string   `json:"public_ipv4,omitempty"`
 	Uptime         string   `json:"uptime"`
 	Hostname       string   `json:"hostname"`
 	OS             string   `json:"os"`
@@ -65,6 +67,7 @@ func (h *VPSHandler) Overview(c *gin.Context) {
 		return
 	}
 	status.IPPriority = executor.GetIPPriorityStatus()
+	status.Identity.PublicIPv4 = config.ConfiguredPublicIPv4()
 	c.JSON(http.StatusOK, models.SuccessResponse(status))
 }
 

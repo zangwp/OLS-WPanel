@@ -3,6 +3,14 @@
 Repository maintenance changes are recorded in Git. Documentation, comments and
 repository metadata updates do not require a new application version.
 
+## v2.2.8 — 2026-11-23
+
+- Allow the LiteSpeed Cache installer to set ownership in its private staging directory. Exercise the production command policy in the plugin installation test.
+- Prepare LiteSpeed Cache before requesting a certificate. Report incomplete site-creation rollback and record command-policy rejections in the panel log.
+- Probe IPv4 and IPv6 separately in the installation summary. Distinguish interface addresses from administrator-configured public IPv4 and include that address in SSL preflight. Show DNS answers when the preflight cannot confirm the destination.
+
+Upgrade notes: run `o update` and retry site creation. On OCI or another NAT-based host, optionally set `panel.public_ipv4` as described in the verified installation guide.
+
 ## v2.2.7 — 2026-11-09
 
 - Validate WordPress passwordless login freshness against server-provided time and the full request duration measured with a monotonic browser clock. Avoid rejecting valid sixty-second tickets when the computer clock differs from the server.

@@ -721,6 +721,8 @@ var shellExec = func(binary string, args ...string) (string, error) {
 	if err != nil {
 		if result != nil && result.Stderr != "" {
 			log.Printf("命令 %s stderr: %s", binary, result.Stderr)
+		} else {
+			log.Printf("命令 %s 失败: %v", binary, err)
 		}
 		return "", fmt.Errorf("命令 %s 执行失败", binary)
 	}

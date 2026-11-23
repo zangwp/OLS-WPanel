@@ -8,7 +8,7 @@ import (
 func TestInstallerSummaryKeepsSeparateCopyableLoginSteps(t *testing.T) {
 	script := readUninstallSafetyScript(t)
 	summary := extractUninstallSafetyFunction(t, script, "print_install_summary", "print_install_summary\n")
-	for _, required := range []string{"1. 浏览器身份验证", "2. 面板账户登录", `│ 用户名 │ %-*s │`, `│ 密码   │ %-*s │`, `NO_COLOR`, `PUBLIC_HOST`, `LOCAL_HOST`} {
+	for _, required := range []string{"1. 浏览器身份验证", "2. 面板账户登录", `│ 用户名 │ %-*s │`, `│ 密码   │ %-*s │`, `NO_COLOR`, `PUBLIC_IPV4`, `LOCAL_IPV4`} {
 		if !strings.Contains(summary, required) {
 			t.Fatalf("installation summary is missing %q", required)
 		}
@@ -20,7 +20,7 @@ func TestInstallerSummaryPreservesCredentialsAcrossLayoutsAndRepair(t *testing.T
 	summary := extractUninstallSafetyFunction(t, script, "print_install_summary", "print_install_summary\n")
 	vars := `BOLD='' YELLOW='' NC='' TERM=dumb NO_COLOR=1
 INSTALLER_RELEASE_VERSION=v1.18.0 STATUS=running REPAIR_MODE=false PORT_OK=true REPAIR_INACTIVE_HEALTH_VERIFIED=false INSTALL_STARTED_SECONDS=0
-PUBLIC_IP=192.0.2.24 PUBLIC_HOST=192.0.2.24 LOCAL_IP=10.0.0.24 LOCAL_HOST=10.0.0.24 VALIDATED_TLS_PORT=8443 PANEL_SUFFIX=example-only
+PUBLIC_IPV4=192.0.2.24 PUBLIC_IPV6='' LOCAL_IPV4=10.0.0.24 LOCAL_IPV6='' VALIDATED_TLS_PORT=8443 PANEL_SUFFIX=example-only
 BASIC_USER=browser-admin BASIC_PASS='synthetic%pass\literal' WEB_USER=panel-admin WEB_PASS=synthetic-panel-password CERT_FILE=/example/cert.pem
 `
 	for _, tc := range []struct {
@@ -73,9 +73,9 @@ VALIDATED_TLS_PORT=8443 PANEL_SUFFIX=example-only BASIC_USER=browser-admin BASIC
 		name, addresses string
 		want            []string
 	}{
-		{"both families", `PUBLIC_IP=2001:db8::24 PUBLIC_HOST='[2001:db8::24]' LOCAL_IP=192.0.2.24 LOCAL_HOST=192.0.2.24`, []string{"IPv6 / 外部地址", "https://[2001:db8::24]:8443/example-only/", "IPv4 / 网卡地址", "https://192.0.2.24:8443/example-only/"}},
-		{"interface fallback", `PUBLIC_IP='<未知>' PUBLIC_HOST='<未知>' LOCAL_IP=192.0.2.24 LOCAL_HOST=192.0.2.24`, []string{"网卡地址", "https://192.0.2.24:8443/example-only/"}},
-		{"unknown", `PUBLIC_IP='<未知>' PUBLIC_HOST='<未知>' LOCAL_IP='<未知>' LOCAL_HOST='<未知>'`, []string{"暂未识别到地址"}},
+		{"dual stack cloud", `PUBLIC_IPV4=192.0.2.24 PUBLIC_IPV6=2001:db8::24 LOCAL_IPV4=10.0.0.24 LOCAL_IPV6=2001:db8::24`, []string{"IPv4 / 出站探测", "https://192.0.2.24:8443/example-only/", "IPv6 / 出站探测", "https://[2001:db8::24]:8443/example-only/", "IPv4 / 网卡地址", "https://10.0.0.24:8443/example-only/"}},
+		{"interface fallback", `PUBLIC_IPV4='' PUBLIC_IPV6='' LOCAL_IPV4=192.0.2.24 LOCAL_IPV6=''`, []string{"网卡地址", "https://192.0.2.24:8443/example-only/"}},
+		{"unknown", `PUBLIC_IPV4='' PUBLIC_IPV6='' LOCAL_IPV4='' LOCAL_IPV6=''`, []string{"暂未识别到地址"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := lifecycleBash(t, vars+tc.addresses+"\n"+summary+"\nprint_install_summary\n")
@@ -87,7 +87,7 @@ VALIDATED_TLS_PORT=8443 PANEL_SUFFIX=example-only BASIC_USER=browser-admin BASIC
 					t.Fatalf("summary omitted %q", want)
 				}
 			}
-			if strings.Contains(string(out), "https://<未知>") {
+			if strings.Contains(string(out), "https://:") {
 				t.Fatal("unknown addresses must not become a clickable URL")
 			}
 		})
@@ -99,7 +99,7 @@ func TestInstallerSummaryTableRetainsLongCredentialsAndAlignedBorders(t *testing
 	summary := extractUninstallSafetyFunction(t, script, "print_install_summary", "print_install_summary\n")
 	vars := `BOLD='' YELLOW='' NC='' TERM=dumb NO_COLOR=1
 INSTALLER_RELEASE_VERSION=v2.0.2 STATUS=running REPAIR_MODE=false PORT_OK=true REPAIR_INACTIVE_HEALTH_VERIFIED=false INSTALL_STARTED_SECONDS=0
-PUBLIC_IP=192.0.2.24 PUBLIC_HOST=192.0.2.24 LOCAL_IP=192.0.2.24 LOCAL_HOST=192.0.2.24 VALIDATED_TLS_PORT=8443 PANEL_SUFFIX=example-only CERT_FILE=/example/cert.pem
+PUBLIC_IPV4=192.0.2.24 PUBLIC_IPV6='' LOCAL_IPV4=192.0.2.24 LOCAL_IPV6='' VALIDATED_TLS_PORT=8443 PANEL_SUFFIX=example-only CERT_FILE=/example/cert.pem
 BASIC_USER=admin WEB_USER=wpadmin BASIC_PASS=example-basic-password
 `
 	for _, password := range []string{"Ab12Cd34Ef56Gh78", "long-example-password-percent%literal\\backslash-0123456789"} {
